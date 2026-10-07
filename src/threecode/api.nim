@@ -2246,7 +2246,9 @@ proc stripInternalFields*(messages: JsonNode;
   ## is attached to empty assistant turns so the turn loop can branch on it
   ## but is not a wire field. `interrupted` marks user-cancelled turns.
   ## `agentSent` marks harness-autosend prompts (empty-reply steer, flail
-  ## notes) so replay renders them as `»` items; it never reaches a provider.
+  ## notes) so replay renders them as `»` items; `flailNote` carries the
+  ## warning a repeated call's result was prefixed with; neither reaches a
+  ## provider.
   ## Empty assistant `content` is filled with a placeholder: OpenAI-style
   ## validators (xAI, OpenAI, Moonshot) 400 on `role: assistant` with an
   ## empty content string, which is how a thinking-only / length-starved
@@ -2260,12 +2262,12 @@ proc stripInternalFields*(messages: JsonNode;
     var node = m
     if m.kind == JObject and
        ("usage" in m or "interrupted" in m or "finish_reason" in m or
-        "agentSent" in m or
+        "agentSent" in m or "flailNote" in m or
         ("reasoning_blocks" in m and not keepThinkingFields)):
       var clean = newJObject()
       for k, v in m.pairs:
         if k != "usage" and k != "interrupted" and k != "finish_reason" and
-           k != "agentSent" and
+           k != "agentSent" and k != "flailNote" and
            (k != "reasoning_blocks" or keepThinkingFields):
           clean[k] = v
       node = clean

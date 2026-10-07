@@ -258,8 +258,9 @@ suite "session: renderSession → loadSessionFile round-trip":
 
   test "round-trips agentSent flags on user and tool messages":
     # Harness-autosend markers (`agentSent`) must survive the .3log so a
-    # resumed replay renders `»` items for the empty-reply steer and the
-    # flail notes instead of a user echo / tool banner.
+    # resumed replay renders `»` items for the empty-reply steer and an
+    # abort batch's unexecuted remainder instead of a user echo / tool
+    # banner.
     let sess = Session(created: "20250101T120000", profileName: "test",
                        cwd: "/tmp")
     let msgs = %*[
@@ -281,6 +282,35 @@ suite "session: renderSession → loadSessionFile round-trip":
     check lm[3]["content"].getStr == "Loop detected."
     check lm[4]{"agentSent"}.getBool(false)       # steer keeps the mark
     check lm[4]["role"].getStr == "user"          # wire role unchanged
+
+  test "round-trips flailNote and strips it from the rebuilt toolLog":
+    # A flail-noted call executed: the wire content carries the note on
+    # top of the real result (byte-for-byte on resume), `flailNote` rides
+    # the `flail` record + `+flail` flag so replay renders the `»` item,
+    # and the rebuilt toolLog keeps only the bare result so the tool
+    # banner never shows the warning as output.
+    let sess = Session(created: "20250101T120000", profileName: "test",
+                       cwd: "/tmp")
+    let note = "Loop detected: you are repeating tool calls."
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "",
+       "tool_calls": [{"id": "call_f", "type": "function",
+                        "function": {"name": "bash",
+                                     "arguments": "{\"command\": \"ls\"}"}}]},
+      {"role": "tool", "tool_call_id": "call_f",
+       "content": note & "\n\nfile.txt\n", "flailNote": note}
+    ]
+    let text = renderSession(sess, msgs)
+    check "flail call_f" in text
+    check "tool_result call_f exit=0 +flail" in text
+    writeFile(tmp, text)
+    let (ls, lm) = loadSessionFile(tmp)
+    check lm[3]{"flailNote"}.getStr == note
+    check lm[3]["content"].getStr == note & "\n\nfile.txt\n"
+    check ls.toolLog.len == 1
+    check ls.toolLog[0].output == "file.txt\n"
 
   test "round-trips write action":
     let sess = Session(created: "20250101T120000", profileName: "test",

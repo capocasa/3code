@@ -379,16 +379,16 @@ when not defined(windows):
       check EmptyReplyMsg notin rendered   # the skipped empty turn leaves no fallback
       check "↑50" notin rendered          # ...and no receipt for it either
 
-    test "flail escalation note replays as a » item, not a tool banner":
-      # A flail-escalated tool_call never executes; live commits only the
-      # `»` agent-prompt item for the note. Replay must skip the tool item
-      # (no `$` banner, no output rows) and render the same `»` item.
+    test "flail-noted call replays as its tool item plus the » note":
+      # A flail-escalated call executes: replay renders the real tool item
+      # (banner + output) AND the `»` note item from `flailNote`, never the
+      # note buried inside the output rows.
       let note = "Loop detected: you are repeating tool calls."
       let toolLog = @[
         ToolRecord(banner: "printf hi", output: "hi\n", code: 0,
           kind: akBash),
-        ToolRecord(banner: "! bash (flailing)", output: note, code: -1,
-          kind: akError)]
+        ToolRecord(banner: "printf hi", output: "hi\n", code: 0,
+          kind: akBash)]
       let msgs = %*[
         {"role": "assistant", "content": "",
          "usage": {"promptTokens": 50, "completionTokens": 0,
@@ -401,23 +401,23 @@ when not defined(windows):
             "function": {"name": "bash",
               "arguments": "{\"command\": \"printf hi\"}"}}]},
         {"role": "tool", "tool_call_id": "c1", "content": "hi\n"},
-        {"role": "tool", "tool_call_id": "c2", "content": note,
-         "agentSent": true},
+        {"role": "tool", "tool_call_id": "c2",
+         "content": note & "\n\nhi\n", "flailNote": note},
         {"role": "assistant", "content": "Recovered.",
          "usage": {"promptTokens": 60, "completionTokens": 5,
                    "totalTokens": 65, "cachedTokens": 0}}]
       let rendered = captureReplay(msgs, toolLog, window = 1000)
       check MagentaFg & "» " & note in rendered
-      check "$ printf hi" in rendered   # the executed first call still shows
-      check rendered.count("Loop detected") == 1
-
+      check rendered.count("$ printf hi") == 2  # both calls executed
+      check rendered.count(note) == 1           # note once, as the » item
     test "flail abort batch collapses duplicate notes into one » item":
-      # fvAbort pairs the abort note onto the flagged call AND every
-      # remaining call of the batch, but live commits one `»` item; replay
-      # must collapse the consecutive duplicates the same way.
+      # fvAbort executes the flagged call (tool item + flailNote) and pairs
+      # the abort note onto every remaining call of the batch; live commits
+      # one `»` item, so replay must collapse the consecutive duplicates
+      # the same way.
       let note = "Turn aborted: the model is stuck in a loop."
-      let toolLog = @[ToolRecord(banner: "! bash (flail abort)",
-        output: note, code: -1, kind: akError)]
+      let toolLog = @[ToolRecord(banner: "make", output: "made\n",
+        code: 0, kind: akBash)]
       let msgs = %*[
         {"role": "assistant", "content": "",
          "usage": {"promptTokens": 50, "completionTokens": 0,
@@ -432,12 +432,13 @@ when not defined(windows):
            {"id": "c3", "type": "function",
             "function": {"name": "bash",
               "arguments": "{\"command\": \"make\"}"}}]},
-        {"role": "tool", "tool_call_id": "c1", "content": note,
-         "agentSent": true},
+        {"role": "tool", "tool_call_id": "c1",
+         "content": note & "\n\nmade\n", "flailNote": note},
         {"role": "tool", "tool_call_id": "c2", "content": note,
          "agentSent": true},
         {"role": "tool", "tool_call_id": "c3", "content": note,
          "agentSent": true}]
       let rendered = captureReplay(msgs, toolLog, window = 1000)
       check rendered.count("» " & note) == 1
-      check "$ make" notin rendered   # no executed tool, so no tool banner
+      check "$ make" in rendered     # the aborting call executed and shows
+      check "made" in rendered

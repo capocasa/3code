@@ -27,9 +27,10 @@ const
 
 type
   FlailVerdict* = enum
-    fvOk        ## not a loop; run the tool
-    fvEscalate  ## loop: inject an escalation message, skip the tool
-    fvAbort     ## still looping after all escalations: abort the turn
+    fvOk        ## not a loop; plain run
+    fvEscalate  ## loop: run the tool anyway, note rides on the result
+    fvAbort     ## still looping after all escalations: run this call,
+                ## then abort the turn
 
   FlailDetector* = object
     ## Detects agentic doom loops cheaply, in the harness, spending zero
@@ -421,7 +422,9 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   fvAbort
 
 proc flailEscalationMessage*(step: int): string =
-  ## The tool-role message injected in place of the repeated tool result.
+  ## The tool-role note prepended to the repeated call's result. The call
+  ## still executes, so the model gets both the warning and the real
+  ## output and can judge its own response.
   ## Three graduated recovery attempts before the abort: step 1 names the
   ## loop and demands a strategy change; step 2 forces the only recovery
   ## known to work on GLM 5.x emission-stuck loops (reply in prose first,
@@ -1122,49 +1125,31 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
         let argsStr =
           if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
+        # Loop verdicts never skip execution: the result is real data for
+        # the model to judge, and the scrollback shows exactly what was
+        # tried. The note rides on top of the tool result content, shows
+        # as a `»` agent-prompt item, and `flailNote` on the tool message
+        # lets the resumed replay render both the tool banner and the
+        # note instead of burying the note in the output.
+        var flailNote = ""
         case flailDet.observeCall(name, argsStr)
         of fvOk: discard
         of fvEscalate:
-          # The model re-emitted the exact same call it just made. Skip
-          # execution, pair the tool_call with the escalation notice (so
-          # the request/response pairing stays intact), and show the exact
-          # note sent to the model as a `»` agent-prompt item. `agentSent`
-          # on the tool message makes the resumed replay render the same
-          # item instead of a tool banner.
-          let note = flailEscalationMessage(flailDet.escalations)
-          debugOut &"flail: identical repeat of {name}, escalation {flailDet.escalations}/{FlailMaxEscalations}"
-          session.toolLog.add ToolRecord(
-            banner: "! " & name & " (flailing)",
-            output: note, code: -1, kind: akError)
-          messages.add %*{"role": "tool", "tool_call_id": id,
-                          "content": note, "agentSent": true}
-          commitTranscriptBytes(
-            formatItem(agentPromptItem(note,
-              "auto: skipped a repeated tool call")), true)
-          continue
+          flailNote = flailEscalationMessage(flailDet.escalations)
+          debugOut &"flail: repeat of {name}, escalation " &
+            "{flailDet.escalations}/{FlailMaxEscalations}; executing anyway"
         of fvAbort:
-          # Still looping after all recovery attempts. Pair the tool_call,
-          # then stop the turn and hand control back to the user with a
-          # visible warning.
-          debugOut &"flail: repeat of {name} after {FlailMaxEscalations} escalations; aborting turn"
-          let note =
+          # Still looping after all recovery attempts. This call executes
+          # too; once its result is paired the turn stops and control
+          # returns to the user. The abort note's live rendering is the
+          # turn-end notice, not a per-call `»` item.
+          debugOut &"flail: repeat of {name} after " &
+            "{FlailMaxEscalations} escalations; aborting turn"
+          flailAbortNote =
             "Turn aborted: the same tool call was repeated after three " &
             "warnings; you did not change course."
-          flailAbortNote = note
-          session.toolLog.add ToolRecord(
-            banner: "! " & name & " (flail abort)",
-            output: note, code: -1, kind: akError)
-          messages.add %*{"role": "tool", "tool_call_id": id,
-                          "content": note, "agentSent": true}
-          # Pair any remaining tool_calls in this batch too: the
-          # assistant message carries them all and an unpaired id breaks
-          # strict providers on the next request.
-          for j in i + 1 ..< toolCalls.len:
-            messages.add %*{"role": "tool",
-              "tool_call_id": toolCalls[j]{"id"}.getStr,
-              "content": note, "agentSent": true}
+          flailNote = flailAbortNote
           flailAbort = true
-          break
         let (args, argsMalformed, parseErr) =
           block:
             var a: JsonNode
@@ -1244,7 +1229,24 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         if isReceiptCap:
           deferredReceipt = ""
           emitFatPromptEvent clearPendingHintEvent()
-        messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
+        if flailNote.len > 0 and not flailAbort:
+          commitTranscriptBytes(
+            formatItem(agentPromptItem(flailNote,
+              "auto: repeated tool call executed, warning sent")), true)
+        var toolMsg = %*{"role": "tool", "tool_call_id": id, "content": r}
+        if flailNote.len > 0:
+          toolMsg["content"] = %(flailNote & "\n\n" & r)
+          toolMsg["flailNote"] = %flailNote
+        messages.add toolMsg
+        if flailAbort:
+          # Pair any remaining tool_calls in this batch too: the
+          # assistant message carries them all and an unpaired id breaks
+          # strict providers on the next request.
+          for j in i + 1 ..< toolCalls.len:
+            messages.add %*{"role": "tool",
+              "tool_call_id": toolCalls[j]{"id"}.getStr,
+              "content": flailAbortNote, "agentSent": true}
+          break
         if hasQueuedAutosend():
           # Let the current assistant tool batch finish so the tool-call
           # pairing stays faithful to what the model requested, then return
