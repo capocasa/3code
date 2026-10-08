@@ -1,5 +1,5 @@
 import std/[json, options, os, osproc, strutils, unittest]
-import threecode/[api, config, modelname, prompts, types]
+import threecode/[api, config, modelname, prompts, types, util]
 import stub_helpers
 
 # Subprocess probes compile a small `probe.nim` and exec it. On Windows the
@@ -1804,7 +1804,8 @@ echo "OK"
       checkpoint runOut
     # The steer renders as its `»` item alone; the grey "auto:" context
     # row is gone.
-    check "» Your last reply was cut because your reasoning" in runOut
+    check BoldOn & "» " & Reset &
+        "Your last reply was cut because your reasoning" in runOut
     check "auto: reasoning repeated itself" notin runOut
 
   test "runTurns gives up after two loop steers, ending the turn cleanly":
@@ -2020,7 +2021,8 @@ echo "OK"
     # prompt text sent as the user-role steer); the `»` item alone carries
     # it, no grey "auto:" context row above.
     check "auto: empty reply, re-prompting" notin runOut
-    check "» Your last reply came back empty." in runOut
+    check BoldOn & "» " & Reset &
+        "Your last reply came back empty." in runOut
     # The old dead-end string must NOT appear when recovery succeeds.
     check "empty reply - no content, no tool calls" notin runOut
 

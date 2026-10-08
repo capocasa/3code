@@ -435,7 +435,7 @@ proc flailEscalationMessage*(step: int): string =
   ## No fake role prefix ("SYSTEM:") on the wire: the tool-result slot is
   ## already where every provider expects harness-authored text, and no API
   ## defines an in-content role label. The same text is what the user sees
-  ## under the magenta `»` marker, so it stays plain imperative prose.
+  ## under the bold `»` marker, so it stays plain imperative prose.
   ##
   ## Steps 1-2 never invite the model to stop and ask the user: these
   ## messages persist in context for the rest of the session, and GLM
