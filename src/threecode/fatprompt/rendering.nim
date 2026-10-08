@@ -727,25 +727,24 @@ proc formatUserPromptItem*(line: string): string =
   ## included; the controller/transcript emitter owns inter-item spacing.
   result.addUserEcho(line, trailingNewline = false)
 
-proc formatAgentPromptItem*(line: string; note = ""): string =
-  ## Format a harness-autosent prompt (empty-reply steer, flail prod) as a
-  ## scrollback item body: the `»` marker and body in the magenta
-  ## intervention tier (never the token cyan), wrapped like the user echo
-  ## with continuation rows indented under the marker. `note` is the grey
-  ## context row above (why 3code intervened); it is live-only context and
-  ## never persists, so replay renders without it.
-  if note.len > 0:
-    result.add GreyFg & note & Reset & "\r\n"
+proc formatAgentPromptItem*(line: string): string =
+  ## Format a harness-autosent prompt (empty-reply steer, flail prod, and
+  ## future matter-of-course harness turns) as a scrollback item body: a
+  ## bold `»` marker with a default-fg body, the harness-voice tier, peer
+  ## of the plain user echo. Monochrome on purpose: the color tiers stay
+  ## exclusive (cyan = token bookkeeping, magenta = errors), it is
+  ## palette-proof in light mode, and routine autosends must not read as
+  ## alarms. Wrapped like the user echo with continuation rows indented
+  ## under the marker.
   let termW = try: terminalWidth() except CatchableError: 0
   let lines = line.splitLines
   for idx, l in lines:
     let chunks =
       if termW <= 0: @[l]
       else: wrapPlain(l, max(1, termW - 2))
-    result.add MagentaFg & (if idx == 0: "» " else: "  ") & chunks[0]
+    result.add (if idx == 0: BoldOn & "» " & Reset else: "") & chunks[0]
     for chunk in chunks[1 ..< chunks.len]:
-      result.add "\r\n" & MagentaFg & "  " & chunk
-    result.add Reset
+      result.add "\r\n  " & chunk
     if idx < lines.high:
       result.add "\r\n"
 

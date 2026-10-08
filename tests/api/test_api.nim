@@ -1,5 +1,5 @@
 import std/[json, options, os, osproc, strutils, unittest]
-import threecode/[api, config, modelname, prompts, types]
+import threecode/[api, config, modelname, prompts, types, util]
 import stub_helpers
 
 # Subprocess probes compile a small `probe.nim` and exec it. On Windows the
@@ -1806,7 +1806,11 @@ echo "OK"
     check runCode == 0
     if runCode != 0:
       checkpoint runOut
-    check "reasoning repeated itself" in runOut
+    # The steer renders as its `»` item alone; the grey "auto:" context
+    # row is gone.
+    check BoldOn & "» " & Reset &
+        "Your last reply was cut because your reasoning" in runOut
+    check "auto: reasoning repeated itself" notin runOut
 
   test "runTurns gives up after two loop steers, ending the turn cleanly":
     # A model that re-wedges after every steer cannot be talked out of the
@@ -2018,10 +2022,11 @@ echo "OK"
     # the backoff delay: "empty reply: <reason>. retrying N/12 in Xs".
     check "empty reply: no content, no tool calls. retrying 1/12 in 2s" in runOut
     # The steer autosend renders as a `»` agent-prompt item (the actual
-    # prompt text sent as the user-role steer), with the grey context row
-    # above it.
-    check "auto: empty reply, re-prompting for a final answer in" in runOut
-    check "» Your last reply came back empty." in runOut
+    # prompt text sent as the user-role steer); the `»` item alone carries
+    # it, no grey "auto:" context row above.
+    check "auto: empty reply, re-prompting" notin runOut
+    check BoldOn & "» " & Reset &
+        "Your last reply came back empty." in runOut
     # The old dead-end string must NOT appear when recovery succeeds.
     check "empty reply - no content, no tool calls" notin runOut
 

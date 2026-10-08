@@ -372,7 +372,8 @@ when not defined(windows):
                    "totalTokens": 65, "cachedTokens": 0}}]
       let rendered = captureReplay(msgs, @[], window = 1000)
       check "» " in rendered
-      check MagentaFg & "» Your last reply came back empty." in rendered
+      check BoldOn & "» " & Reset & "Your last reply came back empty." in rendered
+      check MagentaFg & "» " notin rendered  # harness voice, not the error tier
       check "❯ Your last reply came back empty." notin rendered
       check "❯ go" in rendered
       check "Here it is." in rendered
@@ -407,7 +408,7 @@ when not defined(windows):
          "usage": {"promptTokens": 60, "completionTokens": 5,
                    "totalTokens": 65, "cachedTokens": 0}}]
       let rendered = captureReplay(msgs, toolLog, window = 1000)
-      check MagentaFg & "» " & note in rendered
+      check BoldOn & "» " & Reset & note in rendered
       check rendered.count("$ printf hi") == 2  # both calls executed
       check rendered.count(note) == 1           # note once, as the » item
     test "flail abort batch collapses duplicate notes into one » item":
@@ -439,6 +440,6 @@ when not defined(windows):
         {"role": "tool", "tool_call_id": "c3", "content": note,
          "agentSent": true}]
       let rendered = captureReplay(msgs, toolLog, window = 1000)
-      check rendered.count("» " & note) == 1
+      check rendered.count(BoldOn & "» " & Reset & note) == 1
       check "$ make" in rendered     # the aborting call executed and shows
       check "made" in rendered

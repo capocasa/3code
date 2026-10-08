@@ -21,9 +21,6 @@ type
     kind*: TranscriptKind
     marker*: string
     body*: string
-    ## Grey context row rendered above an agent-prompt body (why 3code
-    ## intervened). Live-only; never persisted, so replay renders without it.
-    note*: string
     attachSeparator*: bool
 
 proc trimTranscriptTail*(bytes: var string) =
@@ -57,8 +54,8 @@ proc userPromptItem*(line: string): TranscriptItem =
   TranscriptItem(kind: tiUserPrompt, marker: "❯", body: line,
                  attachSeparator: false)
 
-proc agentPromptItem*(line: string; note = ""): TranscriptItem =
-  TranscriptItem(kind: tiAgentPrompt, marker: "»", body: line, note: note,
+proc agentPromptItem*(line: string): TranscriptItem =
+  TranscriptItem(kind: tiAgentPrompt, marker: "»", body: line,
                  attachSeparator: false)
 
 proc assistantItem*(content: string): TranscriptItem =
@@ -86,7 +83,7 @@ proc formatItem*(item: TranscriptItem): string =
   of tiUserPrompt:
     result = formatUserPromptItem(item.body)
   of tiAgentPrompt:
-    result = formatAgentPromptItem(item.body, item.note)
+    result = formatAgentPromptItem(item.body)
   of tiAssistant:
     if item.body.strip.len == 0:
       result = emptyAssistantBytes(false)
