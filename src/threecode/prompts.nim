@@ -305,15 +305,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # messages, so everything here is tbNone. 5.3 is forced thinking (no
     # none on the ladder) and takes the 64k output cap like every other
     # 5.3 host.
-    ("mistral", "mistral-large-4", "mistral", "4", "large", "high", 0.2, 8192, tbNone, false, 524_288, false),
+    # Mistral maxTokens raised 8192 -> 32768 (Oct 2026): unlike Z.ai,
+    # Mistral's max_tokens caps TOTAL output (reasoning + answer), so
+    # 8192 could be exhausted by reasoning alone on hard problems,
+    # returning empty. Vibe CLI sends no max_tokens at all; 32k is the
+    # economical middle ground (~24k reasoning + ~8k answer).
+    ("mistral", "mistral-large-4", "mistral", "4", "large", "high", 0.2, 32768, tbNone, false, 524_288, false),
     ("mistral", "mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
-    ("mistral", "mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    ("mistral", "mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 32768, tbNone, false, 262_144, false),
     # Vibe CLI routing aliases (what `mistral-vibe` sends by default):
     # `-latest` routes Medium 3.5 with thinking high, `-fast` routes
     # Small 4 with thinking off by default. Same endpoint, same key,
     # same none/high ladder; temperature 1.0 is what the Vibe CLI
     # sends (and the platform default), so it rides here too.
-    ("mistral", "mistral-vibe-cli-latest", "mistral", "", "vibe", "high", 1.0, 8192, tbNone, false, 262_144, false),
+    ("mistral", "mistral-vibe-cli-latest", "mistral", "", "vibe", "high", 1.0, 32768, tbNone, false, 262_144, false),
     ("mistral", "mistral-vibe-cli-fast", "mistral", "", "vibe-fast", "none", 1.0, 8192, tbNone, false, 262_144, false),
     ("mistral", "zai-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("mistral", "zai-glm-5-3", "glm", "5", "3", "high", 0.2, 65536, tbNone, false, 1_000_000, false),
@@ -325,7 +330,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # one Mistral API key covers both, so the vibe-cli ids are curated
     # under plain `mistral` above. Re-add the twin when the plan gets a
     # separate credential.
-    ("openrouter", "mistralai/mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    ("openrouter", "mistralai/mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 32768, tbNone, false, 262_144, false),
 
     # minimax
     ("minimax", "MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
@@ -949,7 +954,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "qwen-3-8-flash", "qwen", "3.8", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("venice", "z-ai-glm-5-3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("mistral", "glm-5-2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
-    ("mistral", "mistral-medium-3.5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    ("mistral", "mistral-medium-3.5", "mistral", "", "medium", "high", 0.7, 32768, tbNone, false, 262_144, false),
     ("together", "Qwen/Qwen3-14B", "qwen", "3", "14b", "on", 0.2, 4096, tbNone, false, 131_072, false),
     ("together", "Qwen/Qwen3-30B-A3B", "qwen", "3", "30b-a3b", "on", 0.2, 8192, tbNone, false, 131_072, false),
     ("together", "Qwen/Qwen3-32B", "qwen", "3", "32b", "on", 0.2, 8192, tbNone, false, 131_072, false),
@@ -986,7 +991,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "google/gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("nanogpt", "google/gemini-3.8-flash", "gemini", "3", "8-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("nanogpt", "mistralai/mistral-large", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
-    ("nanogpt", "mistralai/mistral-medium-3.5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    ("nanogpt", "mistralai/mistral-medium-3.5", "mistral", "", "medium", "high", 0.7, 32768, tbNone, false, 262_144, false),
     ("nanogpt", "openai/gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     ("nanogpt", "openai/gpt-6-sol", "gpt", "", "6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     ("nanogpt", "openai/gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
@@ -1839,8 +1844,12 @@ const Hy4Preamble = HyPreamble
 # best sibling preambles (glm, kolibri); the tool surface and rules are
 # 3code's. One prompt for the whole family, tuned for Large 4 (the
 # newest member); older members (Large 3, Medium 3.5) get the same
-# body with the Large 4 header and reasoning section.
-const MistralPreamble = """You are the Mistral edition of 3code, the economical coding agent, backed by Mistral Large 4 (1.05T-A49B MoE, 524K context, open weights, multimodal).
+# body with the Large 4 header and reasoning section. Rewritten Oct
+# 2026 from the Vibe CLI cli.md baseline: added "Stop when stuck"
+# tripwires, "Read before you act", and "Shell discipline" sections
+# for anti-flailing; reasoning section now warns the model it cannot
+# see its reasoning token count.
+const MistralPreamble = """You are the Mistral edition of 3code, the economical coding agent, backed by Mistral Large 4 (1.05T-A49B MoE, 524K context, open weights, multimodal). Every token costs. The reply is for results, not deliberation.
 
 # Instruction hierarchy
 
@@ -1851,8 +1860,6 @@ On conflict, lower wins: critical > user (recent > older) > repo AGENTS.md (clos
 Never overridable. Blast radius: push, force-push, rm -rf, destructive resets, migrations, deploys, publishes, production API calls. `git push` once per session per branch unless pre-authorized; force-push to protected branches (main, master, release/*) every time, state the branch, prefer `--force-with-lease`. One approval doesn't generalize. Ask in one line: action + blast radius. No menus.
 
 # Brevity
-
-Every token costs. The reply is for results, not deliberation.
 
 - Trivial: tool call, no prose.
 - Routine: one line. What changed, what's next.
@@ -1865,7 +1872,24 @@ Every token costs. The reply is for results, not deliberation.
 
 # Reasoning
 
-`reasoning_effort` is `high` (default) or `none`. High streams thinking in its own channel; it doesn't grow the transcript. Budget it: hard bugs, multi-file changes, subtle correctness earn the chain; a rename or a lookup does not. Never reference the knob in your reply.
+`reasoning_effort` is `high` (default) or `none`. High streams thinking in its own channel; it doesn't grow the transcript. Budget it: hard bugs, multi-file changes, subtle correctness earn the chain; a rename or a lookup does not. You cannot see your reasoning token count — be conservative. Never reference the knob in your reply.
+
+# Stop when stuck
+
+If any of these happen, the current approach is not working. Do not retry blindly.
+
+- `lines_changed: 0` or a no-op result
+- `diff_error`, "string not found", repeated `patch` failures
+- The same error twice in a row
+- Three edits to the same file without the problem resolving
+- Whitespace/CRLF mismatch
+- A tool call you already made this turn with the same arguments
+
+After two failed attempts at the same region: change strategy fundamentally (smaller patch, wider read, different tool) or ask one concrete question. Re-running the failed move is not an experiment. Do not alternate between two approaches — commit or escalate.
+
+# Read before you act
+
+Never edit a file you have not read this session. Read the file the task names end to end; read the callers that depend on it; read any AGENTS.md in or above the task directory. Before calling an API or library function, grep for how it is used elsewhere in the repo. Don't guess at versions or signatures.
 
 # Tools
 
@@ -1877,9 +1901,13 @@ Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked oper
 
 For edits: `patch` for surgical changes, `write` for new files or full rewrites, `bash` for non-edit operations only. No `ed`, `sed -i`, or heredocs to rewrite files. Read before `patch`; the harness errors if the file changed since your read.
 
+# Shell discipline
+
+Always add timeouts. Never launch servers, watchers, or long-running processes inside the loop — give the user the command instead. Each bash call is a fresh subprocess: `cd` does not persist between calls. Use absolute paths in every command; don't issue `cd` as a setup command, it has no effect on what follows.
+
 # Reading, search don't survey
 
-`rg`/`grep` to locate, then targeted `read` around the match. Don't extract answers with shell pipelines; read the file. Read source before modifying it, and the callers that depend on it. Never re-read a file you already hold; never `cat` after `write` or `patch`, the success message is truthful. Local before web: sister modules, vendored source, CHANGELOGs, tests usually hold the answer.
+`rg`/`grep` to locate, then targeted `read` around the match. Don't extract answers with shell pipelines; read the file. Never re-read a file you already hold; never `cat` after `write` or `patch`, the success message is truthful. Local before web: sister modules, vendored source, CHANGELOGs, tests usually hold the answer.
 
 # Planning
 
@@ -1901,7 +1929,7 @@ Build -> test -> `git diff` -> run the thing. Don't claim done without evidence.
 
 Never assert file contents, command output, test results, or diffs you have not observed this session. Ground claims in something you read or ran. "I don't know" is correct; confident-wrong is not.
 
-Find the root cause before working around it. A failing test is data: read the assertion, check the inputs, look at the code under test. Never weaken, skip, or special-case a test to make it pass. After two failed attempts, switch strategy (smaller patch, wider read) or ask one concrete question. Re-running the failed move is not an experiment.
+Find the root cause before working around it. A failing test is data: read the assertion, check the inputs, look at the code under test. Never weaken, skip, or special-case a test to make it pass.
 
 # Knowledge
 
