@@ -767,13 +767,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
     nextCheckpoint = 0             # id of the marker on the next assistant message
     summarizedOn400 = false       # opaque-400 recovery fired this turn (one-shot)
-  # The flail ladder is armed only for glm-family profiles: every true
-  # doom loop in the recorded history (identical-call loops, emission-stuck
-  # streaks, three warnings ignored) was a GLM session, while every firing
-  # on another family (stefani, astropy, mistral sessions) was a false
-  # positive that needed recalibration. Other models do not repeat calls,
-  # so for them the detector is pure false-positive risk and stays disarmed.
-  let flailArmed = p.family == "glm"
   # dmail is offered only when the active profile's tool schema includes
   # it (kimi family); the marker tagging below keys off the same flag.
   var dmailEnabled = false
@@ -1139,25 +1132,24 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # lets the resumed replay render both the tool banner and the
         # note instead of burying the note in the output.
         var flailNote = ""
-        if flailArmed:
-          case flailDet.observeCall(name, argsStr)
-          of fvOk: discard
-          of fvEscalate:
-            flailNote = flailEscalationMessage(flailDet.escalations)
-            debugOut &"flail: repeat of {name}, escalation " &
-              "{flailDet.escalations}/{FlailMaxEscalations}; executing anyway"
-          of fvAbort:
-            # Still looping after all recovery attempts. This call executes
-            # too; once its result is paired the turn stops and control
-            # returns to the user. The abort note's live rendering is the
-            # turn-end notice, not a per-call `»` item.
-            debugOut &"flail: repeat of {name} after " &
-              "{FlailMaxEscalations} escalations; aborting turn"
-            flailAbortNote =
-              "Turn aborted: the same tool call was repeated after three " &
-              "warnings; you did not change course."
-            flailNote = flailAbortNote
-            flailAbort = true
+        case flailDet.observeCall(name, argsStr)
+        of fvOk: discard
+        of fvEscalate:
+          flailNote = flailEscalationMessage(flailDet.escalations)
+          debugOut &"flail: repeat of {name}, escalation " &
+            "{flailDet.escalations}/{FlailMaxEscalations}; executing anyway"
+        of fvAbort:
+          # Still looping after all recovery attempts. This call executes
+          # too; once its result is paired the turn stops and control
+          # returns to the user. The abort note's live rendering is the
+          # turn-end notice, not a per-call `»` item.
+          debugOut &"flail: repeat of {name} after " &
+            "{FlailMaxEscalations} escalations; aborting turn"
+          flailAbortNote =
+            "Turn aborted: the same tool call was repeated after three " &
+            "warnings; you did not change course."
+          flailNote = flailAbortNote
+          flailAbort = true
         let (args, argsMalformed, parseErr) =
           block:
             var a: JsonNode
@@ -1221,8 +1213,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # counts heaviest. Successful calls never arm the signal, so
         # legitimate polling is untouched. Uses the tool's own exit
         # verdict, so it costs nothing extra at runtime.
-        if flailArmed:
-          flailDet.noteResult(name, argsStr, madeChange = code == 0, output = r)
+        flailDet.noteResult(name, argsStr, madeChange = code == 0, output = r)
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
           code: code, kind: act.kind, plan: act.plan)

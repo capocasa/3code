@@ -1282,14 +1282,13 @@ max-tokens = "8192"
         tty.expectInHistory "❯ flail please"
         tty.expectInHistory "❯ doom loop"
 
-      # --- non-glm family: the same doom-loop shape stays disarmed ---
-      # The ladder is glm-only (true doom loops are a GLM phenomenon; every
-      # firing on another family in the record was a false positive), so a
-      # mistral profile repeating the identical call five times just runs
-      # all five: no `»` prods, no abort, and the model's own final reply
-      # ends the turn.
-      block disarmed:
-        let root = newFixture("agent_autosend_no_flail")
+      # --- non-glm family: the ladder fires there too ---
+      # The detector is family-agnostic: the Nov 2026 mistral session
+      # doom-looped `cat > /tmp/new_mistral_preamble<N>.txt` ninety-plus
+      # times with nobody watching. The same five-batch doom shape that
+      # escalates and aborts on glm does the same on mistral.
+      block everyFamily:
+        let root = newFixture("agent_autosend_flail_mistral")
         createDir(root / "xdg" / "3code")
         writeFile(root / "xdg" / "3code" / "config", """
 [settings]
@@ -1306,41 +1305,36 @@ models = "stub-model"
 provider = "stub"
 max-tokens = "8192"
 """)
-        let disarmedReplies = %*[]
+        let replies = %*[]
         for n in 1 .. 5:
-          disarmedReplies.add %*{"role": "assistant", "content": "",
+          replies.add %*{"role": "assistant", "content": "",
            "tool_calls": [toolCall("nf_" & $n, "bash",
              %*{"command": "printf 'noflail-loop\\n'"})],
            "usage": {"promptTokens": 50, "completionTokens": 5,
                      "totalTokens": 55, "cachedTokens": 0}}
-        disarmedReplies.add %*{"role": "assistant",
-         "content": "NO-FLAIL-RECOVERED",
-         "contentChunks": ["NO-FLAIL-RECOVERED"],
-         "usage": {"promptTokens": 60, "completionTokens": 6,
-                   "totalTokens": 66, "cachedTokens": 0}}
-        writeStubResponses(root, disarmedReplies)
+        writeStubResponses(root, replies)
 
         let tty = startStub(root, rows = 40)
         defer:
-          tty.writeFrameArtifact(root / "noflail_frames.txt")
+          tty.writeFrameArtifact(root / "mistral_flail_frames.txt")
           tty.close()
         tty.expect "❯"
         tty.send "doom loop too\n"
-        # Five identical calls: on glm this exact shape escalates three
-        # times and aborts (the fixture above); here all five just run.
-        for n in 1 .. 5:
-          tty.expectInHistory "$ printf 'noflail-loop"
-          tty.expectInHistory "noflail-loop"
-        tty.expectNeverInHistory "» Loop detected"
-        tty.expectNeverInHistory "auto: repeated tool call executed"
-        tty.expectNeverInHistory "Turn aborted"
-        tty.expectInHistory "NO-FLAIL-RECOVERED"
+        tty.expectInHistory "$ printf 'noflail-loop"
+        tty.expectInHistory "noflail-loop"
+        tty.expectInHistory "» Loop detected"
+        tty.expectInHistory "» Final warning"
+        tty.expectInHistory "auto: turn aborted - rephrase, give a hint, or take over"
+        tty.expectInHistory "» Turn aborted"
         tty.expect "❯"
+        tty.expectIdleCaret()
         tty.expectAlive()
         tty.drain(300)
         let log = sessionLogText(root)
-        check "+flail" notin log
-        check "Loop detected" notin log
+        check "flail nf_5" in log
+        check "tool_result nf_5 exit=0 +flail" in log
+        check "Loop detected" in log
+        check "Turn aborted" in log
 
   test "api retry notice is a live notice row, never scrollback noise":
     # Contract: the token bar is for token information only, and a retry
