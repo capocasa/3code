@@ -901,12 +901,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add %*{"role": "user", "content": ReasoningLoopSteerMsg,
                         "agentSent": true}
         saveSession(session, messages)
-        let kb = (msg{"reasoning_content"}.getStr.len + 1023) div 1024
-        let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(
-          formatItem(agentPromptItem(ReasoningLoopSteerMsg,
-            "auto: reasoning repeated itself (" & $kb & "k chars), " &
-            "re-prompting in " & $backoff & "s")), true)
+          formatItem(agentPromptItem(ReasoningLoopSteerMsg)), true)
         incEmptyRetryLevel()
         if emptyReplyWait():
           saveSession(session, messages)
@@ -985,11 +981,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add %*{"role": "user", "content": EmptyReplySteerMsg,
                         "agentSent": true}
         saveSession(session, messages)
-        let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(
-          formatItem(agentPromptItem(EmptyReplySteerMsg,
-            "auto: empty reply, re-prompting for a final answer in " &
-            $backoff & "s")), true)
+          formatItem(agentPromptItem(EmptyReplySteerMsg)), true)
         incEmptyRetryLevel()
         if emptyReplyWait():
           saveSession(session, messages)
@@ -1230,9 +1223,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           deferredReceipt = ""
           emitFatPromptEvent clearPendingHintEvent()
         if flailNote.len > 0 and not flailAbort:
-          commitTranscriptBytes(
-            formatItem(agentPromptItem(flailNote,
-              "auto: repeated tool call executed, warning sent")), true)
+          commitTranscriptBytes(formatItem(agentPromptItem(flailNote)), true)
         var toolMsg = %*{"role": "tool", "tool_call_id": id, "content": r}
         if flailNote.len > 0:
           toolMsg["content"] = %(flailNote & "\n\n" & r)
@@ -1335,9 +1326,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         continue
       if flailAbort:
         saveSession(session, messages)
-        commitTurnEndNotice(
-          formatItem(agentPromptItem(flailAbortNote,
-            "auto: turn aborted - rephrase, give a hint, or take over")))
+        commitTurnEndNotice(formatItem(agentPromptItem(flailAbortNote)))
         endTurnAfterTranscriptAppend()
         turnEnded = true
         return false
