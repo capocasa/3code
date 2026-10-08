@@ -33,7 +33,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
                   auth_xai, auth_openai, auth_google, auth_anthropic,
-                  streamexec, cli, search]
+                  streamexec, cli, search, plugins]
 when not defined(android):
   import tinotify
 else:
@@ -751,6 +751,7 @@ proc main() =
     if prof.name == "":
       editor.prefillText = queued
       return false
+    pluginOnPrompt(queued, session.savePath, prof.name, prof.model)
     messages.add %*{"role": "user",
                     "content": buildUserMessage(messages, queued)}
     refreshSystemPrompt(messages, prof, session.promptState)
@@ -804,7 +805,9 @@ proc main() =
   # editor, clear the draft, run the turn, and fire the turn-finished
   # notification under the same condition as a typed turn. Returns true
   # if a buffered quit/interrupt event should end the session.
-  proc runInitialPrompt(text: string): bool =
+  proc runInitialPrompt(textIn: string): bool =
+    var text = textIn
+    pluginOnPrompt(text, session.savePath, prof.name, prof.model)
     messages.add %*{"role": "user", "content": buildUserMessage(messages, text)}
     refreshSystemPrompt(messages, prof, session.promptState)
     # Persist before the turn starts: a kill during the first model call
@@ -854,6 +857,13 @@ proc main() =
         paintInitialPrompt(prof)
     else:
       paintInitialPrompt(prof)
+    # Plugins load after config (they read [plugins]) and before the
+    # first prompt; the session event fires with the final profile and
+    # session path. Messages > 1 means a resumed session, not a fresh
+    # system-only one.
+    pluginsDiscoverAndLoad()
+    pluginOnSessionStart(session.savePath, session.cwd, prof.name,
+                         prof.model, messages.len > 1, messages.len)
     # The startup paint is a render boundary the tty harness synchronizes
     # on: without the frame event the first captured frame can predate the
     # chrome (or miss it entirely when the PTY burst is coalesced).
@@ -932,6 +942,7 @@ proc main() =
           errLnS("no provider configured. use :provider add"), true)
         releaseIdleSubmittedInput()
         continue
+      pluginOnPrompt(line, session.savePath, prof.name, prof.model)
       messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
       refreshSystemPrompt(messages, prof, session.promptState)
       # Same mid-turn-kill window as runInitialPrompt: the draft sidecar
@@ -949,6 +960,7 @@ proc main() =
       # clean exit doesn't restore text the user already sent.
       clearDraft(session)
       if runTurnWithSafetyNet(): break
+    pluginsShutdown()
 
   except IOError as e:
     stderr.writeLine "3code: output stream broken (" & e.msg &

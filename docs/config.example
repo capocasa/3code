@@ -156,3 +156,19 @@ models = "openai/gpt-oss-120b"
 ; key = "ollama"
 ; family = "glm"
 ; models = "glm-4.6"
+
+# [plugins] — out-of-tree plugin libraries (.so/.dll) discovered in
+# ~/.local/share/3code/lib (plus /usr/local/lib/3code). Plugins are
+# native code with your full user rights: only install libs you trust.
+# The default sandbox already fences the model from writing there.
+#
+# [plugins]
+# disable = "slowplugin, otherplugin"   # skip by lib file stem
+# tools = "on"                          # advertise plugin-registered
+#                                       # tools to the model (each
+#                                       # schema rides every request,
+#                                       # so this is a standing token
+#                                       # cost — opt in)
+# debug = "on"                          # trace every plugin call with
+#                                       # verdicts and mutation diffs
+# lib = "/path/to/extra/lib/dir"        # extra search dir (tests)

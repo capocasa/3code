@@ -9,7 +9,7 @@
 import std/[algorithm, json, os, sets, strformat, strutils, tables, terminal, times]
 when defined(posix):
   import std/posix except Time
-import types, util, prompts, session, compact, config, actions, api,
+import types, util, prompts, session, compact, config, actions, api, plugins,
   display, fatprompt, streamexec, toolstream, transcript
 import engine as termengine
 
@@ -643,6 +643,25 @@ proc revertHistory*(messages: var JsonNode, checkpoint: int): bool =
   messages.elems.setLen(cut)
   true
 
+var pluginTurnCount = 0
+
+func pluginToolBanner*(name, argsJson: string): string =
+  ## Banner text for a plugin-registered tool: the tool name plus a
+  ## squeezed one-line preview of its JSON arguments.
+  var flat = argsJson.replace("{", "").replace("}", "")
+    .replace("\"", "").replace("\n", " ")
+  var outp: string
+  var prevSpace = false
+  for ch in flat:
+    if ch in {' ', '\t', '\n'}:
+      if not prevSpace and outp.len > 0: outp.add ' '
+      prevSpace = true
+    else:
+      outp.add ch
+      prevSpace = false
+  if outp.len > 48: outp = outp[0 ..< 48] & "…"
+  name & (if outp.len > 0: " " & outp else: "")
+
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   ## Returns true if the turn was interrupted by the user (Ctrl-C / ESC).
   ## Callers use this to skip end-of-turn side effects like desktop
@@ -662,6 +681,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   # `pendingHint` and is painted in place of the previous bar at
   # user-submit time by `emitUserSubmit`.
   beginTurn()
+  inc pluginTurnCount
+  pluginOnTurnStart(pluginTurnCount, session.lastPromptTokens)
+  var turnT0 = epochTime()
+  defer:
+    pluginOnTurnEnd(pluginTurnCount, session.lastPromptTokens,
+      session.usage.completionTokens, session.usage.reasoningTokens,
+      ((epochTime() - turnT0) * 1000).int, isInterrupted(),
+      session.savePath)
   var turnEnded = false
   template finishTurn() =
     if not turnEnded:
@@ -987,8 +1014,24 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           continue
         let fn = tc{"function"}
         let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
-        let argsStr =
+        var argsStr =
           if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
+        # Plugin pre-gate BEFORE the flail fingerprint: a rewrite is
+        # fingerprinted in its rewritten form (no free flail evasion), a
+        # veto skips execution with the pairing intact, a takeover
+        # supplies the whole result, a wrap sandwiches the original run.
+        let pre = pluginOnToolPre(name, argsStr, id, p.family)
+        argsStr = pre.args
+        if pre.kind == tpkVeto:
+          session.toolLog.add ToolRecord(
+            banner: "! " & name & " (vetoed)",
+            output: pre.note, code: -1, kind: akError)
+          messages.add %*{"role": "tool", "tool_call_id": id,
+                          "content": pre.note, "agentSent": true}
+          commitTranscriptBytes(
+            formatItem(agentPromptItem(pre.note,
+              "auto: plugin vetoed a tool call")), true)
+          continue
         case flailDet.observeCall(name, argsStr)
         of fvOk: discard
         of fvEscalate:
@@ -1057,7 +1100,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             "content": "ERROR: tool arguments arrived truncated or malformed: " &
               parseErr & ". Re-emit this tool call."}
           continue
-        let act = toolCallToAction(p.family, name, args)
+        let act =
+          if pluginsHaveTool(name):
+            Action(kind: akPlugin, path: name, body: pluginToolBanner(name, argsStr))
+          else:
+            toolCallToAction(p.family, name, args)
         let silent = isSkillRead(act)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
@@ -1072,7 +1119,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         withBarTick(currentBarLabel):
           try:
             (r, code, diff) =
-              if act.kind == akBash:
+              if pre.kind == tpkTakeover:
+                (pre.note, pre.code, "")
+              elif act.kind == akPlugin:
+                let pr = pluginToolExec(name, argsStr)
+                (pr.output, pr.code, "")
+              elif act.kind == akBash:
                 runBashWithViewport(
                   act, session.readCache, toolStub, idx, addr streamedOutputShown)
               else:
@@ -1084,10 +1136,15 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             r = "ERROR: tool execution failed: " & e.msg
             code = -1
             diff = ""
+        if pre.kind == tpkWrap:
+          r = pre.note & "\n" & r &
+              (if pre.post.len > 0: "\n" & pre.post else: "")
         if act.kind == akPlan and code == 0:
           session.plan = act.plan
         let toolElapsed = epochTime() - toolT0
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
+        pluginOnToolResult(name, argsStr, r, code,
+                           (toolElapsed * 1000).int, diff)
 
         # Feed the no-progress signal: a failed call (code != 0) is
         # recorded per fingerprint, so a spaced re-try of that exact call

@@ -17,7 +17,7 @@
 ## `patch` can reject stale edits when the file changed since last read.
 
 import std/[json, os, sequtils, strformat, strutils, tables, times, uri]
-import types, util, shell, web, config, streamexec, sandbox, browse
+import types, util, shell, web, config, streamexec, sandbox, browse, plugins
 
 # ---------------------------------------------------------------------------
 # Tool dispatch: strictly per-model.
@@ -200,6 +200,8 @@ proc bannerFor*(act: Action): string =
     "context cleared"
   of akDMail:
     "dmail to " & act.path
+  of akPlugin:
+    act.body
   of akError:
     "unknown tool '" & act.path & "'"
 
@@ -425,6 +427,11 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
 
 proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code: int, diff: string] =
   case act.kind
+  of akPlugin:
+    # Plugin tools never reach the action layer: the turn loop routes
+    # them to their owning plugin (pluginToolExec) before dispatch. A
+    # direct call is a wiring bug; answer structurally, not by crashing.
+    ("error: plugin tools execute in the turn loop, not runAction", 1, "")
   of akBash:
     # Bash execution (native timeout, process-group kill, output clipping,
     # cache + diff) lives in the streaming executor and is shared by both
@@ -507,6 +514,7 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
       writeFile(path, act.body)
       if cache != nil:
         cache.state[path] = fileSig(path)
+      pluginOnFileWrite(act.path, act.body.len, 0)
       return (&"wrote {path} ({act.body.len} bytes)", 0, act.body)
     except CatchableError as e:
       return (&"error: write {path}: {e.msg}", 1, "")
@@ -547,6 +555,7 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
       writeFile(path, content)
       if cache != nil:
         cache.state[path] = fileSig(path)
+      pluginOnFileWrite(act.path, content.len, 1)
       let diff = computeDiff(before, content, path)
       var summary = if diff.len > 0: diff else: &"patched {path} (no textual change)"
       if fuzzyNotes.len > 0:
@@ -582,6 +591,7 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
           let before = if fileExists(path): readFile(path) else: ""
           writeFile(path, op.body)
           if cache != nil: cache.state[path] = fileSig(path)
+          pluginOnFileWrite(op.path, op.body.len, 2)
           msgs.add &"added {path} ({op.body.len} bytes)"
           let d = computeDiff(before, op.body, path)
           if d.len > 0: diffs.add d
@@ -620,6 +630,7 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
           if hunkOk:
             writeFile(path, content)
             if cache != nil: cache.state[path] = fileSig(path)
+            pluginOnFileWrite(op.path, content.len, 2)
             discard applied
             let d = computeDiff(before, content, path)
             if d.len > 0: diffs.add d
@@ -633,6 +644,7 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
             let before = readFile(path)
             removeFile(path)
             if cache != nil: cache.state.del(path)
+            pluginOnFileWrite(op.path, 0, 2)
             msgs.add &"deleted {path}"
             let d = computeDiff(before, "", path)
             if d.len > 0: diffs.add d

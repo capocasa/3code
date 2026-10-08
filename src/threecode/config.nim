@@ -12,6 +12,7 @@
 ## the user entered is the default and cycling follows config order.
 
 import std/[options, os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
+import plugins
 when defined(posix):
   import std/posix except SocketHandle
 import types, prompts, util, auth_openai, modelname, minline
@@ -332,7 +333,7 @@ type
 
 const
   PermittedSections = ["settings", "search", "colors", "provider",
-                       "params", "shortcuts"]
+                       "params", "shortcuts", "plugins"]
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
@@ -350,6 +351,7 @@ const
                         "context-window", "context_window",
                         "allow-private", "allow_private"]
   ParamsScopeKeys = ["provider", "model"]
+  PluginKeys = ["disable", "tools", "debug", "lib"]
   ThinkBackValues = ["none", "turn", "all"]
   SearchEngines = ["exa", "parallel", "brave"]
   # `light` is the canonical light-background value; `bright` is the
@@ -367,6 +369,7 @@ proc permittedKey(section, key: string): bool =
     base in ColorKeys
   of "provider": key in ProviderKeys
   of "params": key in ProviderParamsKeys or key in ParamsScopeKeys
+  of "plugins": key in PluginKeys
   of "shortcuts": key in minline.ShortcutNames
   else: false
 
@@ -398,6 +401,11 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin SearchEngines:
         return &"{path}:{ent.line}: unknown search engine '{ent.value}' " &
                "(expected one of: exa, parallel, brave)"
+    of "plugins":
+      if ent.key in ["tools", "debug"] and
+          ent.value.strip.toLowerAscii notin BoolValues:
+        return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
+               "(expected on/off/true/false/yes/no/1/0)"
     of "settings":
       if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled",
                       "patient_retry", "patient-retry",
@@ -528,6 +536,26 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
       case section
       of "colors":
         colors[e.key] = v
+      of "plugins":
+        case e.key
+        of "disable":
+          pluginsDisabledNames = @[]
+          for part in v.split(','):
+            let n = part.strip
+            if n.len > 0: pluginsDisabledNames.add n
+        of "tools":
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": pluginsToolsEnabled = true
+          of "off", "false", "no", "0": pluginsToolsEnabled = false
+          else: discard
+        of "debug":
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": pluginTraceOn = true
+          of "off", "false", "no", "0": pluginTraceOn = false
+          else: discard
+        of "lib":
+          pluginsLibOverride = v
+        else: discard
       of "settings":
         case e.key
         of "current": current = v

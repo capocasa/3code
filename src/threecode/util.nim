@@ -454,6 +454,16 @@ proc debugOut*(msg, tag: string) =
     stderr.writeLine BlueFg & "[dbg " & t & "] " & BoldOn & tag &
       Reset & BlueFg & " " & msg & Reset
 
+proc debugOutForced*(msg, tag: string) =
+  ## Same sinks as `debugOut` but not gated on `-D`: the plugin trace
+  ## channel uses it so `:plugin debug` / `[plugins] debug` can print
+  ## plugin lines (and only plugin lines) in a running session.
+  let t = epochTime().formatFloat(ffDecimal, 3)
+  debugLogLine("[dbg " & t & "] " & tag & " " & msg)
+  if debugToStderr(""):
+    stderr.writeLine BlueFg & "[dbg " & t & "] " & BoldOn & tag &
+      Reset & BlueFg & " " & msg & Reset
+
 proc bundledCaFile*(): string =
   ## Path to the `cacert.pem` we ship alongside the binary on macOS /
   ## Windows (see `release.yml`). Returns "" when not present (Linux
