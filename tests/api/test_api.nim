@@ -2221,6 +2221,35 @@ block scenario_c:
     "C: no synthetic recap: " & messages[1]{"content"}.getStr
   echo "SCENARIO_C_OK"
 
+block scenario_d:
+  # Proactive message-count guard: a tesseracted Kolibri profile whose
+  # history crosses MaxMessagesVllm (72) must collapse at end of turn
+  # with a real recap and no 400 at all — the Kolibri-1 vLLM stack caps
+  # `messages` at 80 entries regardless of token count (the 2026-10-08
+  # session died at 82 messages, 12% of the window).
+  server.rejectSummarizer = false
+  server.envelope = 2_000_000
+  let kolibriProfile = Profile(name: "tesseracted.Aleph-Alpha/Kolibri-1",
+    url: "http://127.0.0.1:" & $server.port,
+    key: "k", family: "kolibri", model: "Aleph-Alpha/Kolibri-1")
+  var messages = %*[{"role": "system", "content": "sys"}]
+  for i in 1..70:
+    messages.add %*{"role": "user", "content": "turn " & $i}
+  doAssert messages.len == 71
+  var session: Session
+  session.savePath = ""
+  session.readCache = newReadCache()
+  discard runTurnsInteractive(kolibriProfile, messages, session)
+  let last = messages[^1]
+  doAssert last{"role"}.getStr == "assistant",
+    "D: last role " & last{"role"}.getStr
+  doAssert "RECOVERED_AFTER_SUMMARY" in last{"content"}.getStr,
+    "D: content " & last{"content"}.getStr
+  doAssert messages.len == 10, "D: " & $messages.len & " messages"
+  doAssert SummaryPrefix in messages[1]{"content"}.getStr,
+    "D: no synthetic recap: " & messages[1]{"content"}.getStr
+  echo "SCENARIO_D_OK"
+
 server.running = false
 server.sock.close()
 joinThread(serveThread)
@@ -2250,3 +2279,8 @@ joinThread(serveThread)
     check "collapsed 12 messages into a recap" in runOut
     check "collapsed 12 messages without a recap" in runOut
     check "gateway byte guard" in runOut
+    # Scenario D: message-count guard collapses on the count axis; the
+    # hint must report the pre-collapse count (72), not the post-collapse
+    # length (10).
+    check "SCENARIO_D_OK" in runOut
+    check "(72 messages; vLLM message-count guard)" in runOut

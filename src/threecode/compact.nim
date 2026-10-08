@@ -73,6 +73,19 @@ const
     ## route would still accept the request. Other providers are not
     ## guarded: several accept multi-MB bodies and would get pointless
     ## lossy summarization.
+  MaxMessagesVllm* = 72
+    ## Proactive message-count ceiling for providers serving Kolibri-1
+    ## on a vLLM stack (tesseracted, self-hosted kolibri). The tesseracted
+    ## gateway rejects a chat/completions request whose `messages` array
+    ## holds more than 80 entries with an opaque 400, "Provide between 1
+    ## and 80 messages" — observed 2026-10-08 on a session killed at 82
+    ## messages while the token count sat at 12% of the window, so the
+    ## token threshold cannot predict it (message count and token count
+    ## are different axes). The guard sits 8 under the cap: it fires
+    ## after a reply is appended, and the tool results of that reply land
+    ## after the check, so one parallel batch can still push the next
+    ## request past 80 — the reactive one-shot 400 recovery catches that
+    ## burst; everything else collapses before the route can 400 it.
   OverflowFallbackSummary* = "Earlier turns were dropped without a recap " &
     "because the provider rejected the conversation as too large and the " &
     "summarizer call failed as well; the recent messages below are " &
