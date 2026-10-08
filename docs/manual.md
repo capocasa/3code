@@ -990,9 +990,10 @@ To override one, put a file with the same name in a directory higher up
 the list. To add your own, drop a `.md` file in any of those directories
 with an instructive name: the filename is the trigger, so
 `release-notes.md` loads when the task smells like release notes.
-There is deliberately no MCP-style plugin protocol: a skill file plus
-command-line tools covers the same ground at a fraction of the context
-cost.
+For heavier machinery than a skill there is a native plugin tier
+(C-ABI hooks and model-facing tools, running host-side); see
+[plugins](plugins.html). A skill file plus command-line tools still
+covers most of the same ground at a fraction of the context cost.
 
 ## Cybernetic mode
 

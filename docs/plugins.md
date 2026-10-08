@@ -1,39 +1,139 @@
-# Plugins
+.. title:: 3code - plugins
 
-3code loads out-of-tree plugin libraries at startup: `.so` on Linux,
-`.dylib` on macOS, `.dll` on Windows, discovered in:
+## Introduction
+
+A plugin is a native dynamic library (`.so` on Linux, `.dylib` on macOS,
+`.dll` on Windows) that 3code loads at startup and calls at fixed points
+in its lifecycle: prompts, tool calls, turns, sessions. There is no
+manifest, no registration call, no RPC protocol. The library exports C
+functions; the host probes for them; whichever hooks exist get called.
+Each `dynlib` carries its own runtime, so a plugin can be written in
+anything that speaks the C ABI, and the reference SDK makes Nim
+one-file simple.
+
+Reach for a plugin when you want machinery on the *host* side of the
+agent: policy (veto writes to frozen paths, redact secrets from tool
+output), instrumentation (usage counters, audit logs, custom
+notifications), or a model-facing tool backed by your own code. For
+teaching the *model* something, a skill file is still the right tool:
+it costs nothing until used, while every plugin-registered tool schema
+rides along on every model request. Most plugins want both halves: a
+host-side hook implementation plus a small skill that tells the model
+how to drive it.
+
+Plugins are native code running in-process with your full user rights.
+Install only libraries you trust, from sources you trust. The default
+sandbox already fences the model out of the lib directories, so an
+agent cannot install one for you.
+
+## The model in one page
+
+Discovery and load:
 
 1. `$XDG_DATA_HOME/3code/lib` (`~/.local/share/3code/lib` on Linux)
 2. `/usr/local/lib/3code`, `/usr/lib/3code` (Linux; `%ProgramFiles%\3code\lib` on Windows)
 
-First match wins on name collision. A plugin is any native library
-speaking the 3code C ABI. A hook fires only for libraries that export
-it — there is no manifest, no registration call.
+An optional `[plugins] lib = path` dir is scanned first. Files are
+sorted by name within each directory; on a stem collision the first
+match wins. A candidate that does not export `tc_abi_version`, or whose
+version differs from the host's, is skipped and noted in `:plugins`.
+Load order is the resulting sorted order, and load order is hook call
+order.
 
-Plugins are native code running in-process with your full user rights.
-Install only libraries you trust. The default sandbox already fences
-the model out of the lib directory, so an agent cannot install one for
-you.
+Everything else follows from one design decision: **all plugin code runs
+on a single dedicated host thread, one call at a time, in load order**.
+Never on the turn, net, or input threads; a plugin never needs locks of
+its own to be safe against the host. Sync hooks (prompt, system
+prompt, tool pre/result/exec, init/register/shutdown) round-trip with a
+deadline, so a slow plugin cannot stall a turn forever. Async hooks
+(turn, session, compact, file-write events) are fire-and-forget copies
+into a bounded queue.
 
-## Writing a plugin in Nim
+Multiple plugins chain: mutations waterfall in load order (plugin two
+sees plugin one's edit), a veto or takeover short-circuits the chain
+and names the plugin in the tool result.
 
-One module. Types first, your hooks in the middle, the SDK included
-last:
+## Writing a plugin: the short manual
+
+### The shape of a module
+
+One Nim file. The ABI types first, your hook procs in the middle, the
+SDK include last. The SDK include is what turns your `onPrompt` into
+the exported `tc_on_prompt` the host probes for, and it registers the
+host's plugin thread with your library's garbage collector before your
+first allocation:
 
 ```nim
-include threecode/pluginabi   # types + helpers (from the 3code repo's src/)
-import std/json
+include threecode/pluginabi   # types + helpers (FIRST)
+import std/[json, os]         # your imports
 
 proc onPrompt*(ev: var TcPromptEvent) =
   if "deploy" in tcView(ev.prompt):
     tcAssignStr(ev.prompt, tcView(ev.prompt) & "\n[checked by myplugin]")
 
+include threecode/plugin_sdk   # exports the tc_* hooks (LAST)
+```
+
+Define any subset of the optional procs; only defined ones are exported
+and thus subscribed by the host. Hook filtering (say, only some tools)
+is your job, not the host's: a cheap `if tcView(ev.name) != "write":
+return` guard at the top is the intended idiom.
+
+Build and install (the ABI modules come from the 3code source tree;
+`-p:` it in, or use an installed package):
+
+    nim c --app:lib --mm:orc --threads:on -p:~/p/3code/src -o:myplugin.so myplugin.nim
+    cp myplugin.so ~/.local/share/3code/lib/
+
+`--threads:on` is not optional: the host calls you from its own thread,
+and without the SDK's foreign-thread registration your first allocation
+there is undefined behavior. Run `:plugins` to confirm the load (it
+lists subscribed hooks and call counts), then `:plugin debug on` to
+watch it live.
+
+### Editing data in place
+
+Read a field with `tcView`, replace it with `tcAssignStr`. The buffer
+you may grow is capped (see [strings and
+buffers](#strings-and-buffers)); an edit that does not fit is dropped
+and the host logs it. Do not write past `len`, do not free anything,
+do not retain a pointer after your proc returns: every pointer the host
+hands you is valid only for the duration of the call.
+
+### Steering tool calls
+
+`onToolPre` sees every tool call before execution and returns a
+verdict:
+
+```nim
 proc onToolPre*(ev: var TcToolPreEvent): cint =
   if tcView(ev.name) == "write" and "migrations" in tcView(ev.args):
     tcAssignStr(ev.message, "myplugin: migrations are frozen today")
     return tcVeto
   tcAllow
+```
 
+- `tcAllow` (0): proceed unchanged.
+- `tcVeto` (1): skip the call; `message` becomes the tool result the
+  model sees.
+- `tcRewrite` (2): you edited `args` (JSON text); proceed with the new
+  ones.
+- `tcTakeover` (3): skip execution; `message` and `code` are the whole
+  result. You did the work yourself, which runs *outside* the sandbox,
+  with your full rights. That is the point, and the risk.
+- `tcWrap` (4): run the original, sandboxed, with `message` prepended
+  and `post` appended to its output. Multiple wraps compose in load
+  order.
+
+`onToolResult` fires after a call lands and can edit the output before
+the model reads it (redaction is the classic use) and even the exit
+code.
+
+### Registering a model-facing tool
+
+Two procs cooperate: one registers, one executes.
+
+```nim
 proc registerTools*(s: ptr TcState) =
   discard s.registerTool("weather", "current conditions",
     """{"type":"function","function":{"name":"weather",
@@ -43,93 +143,180 @@ proc registerTools*(s: ptr TcState) =
 proc onToolExec*(ev: var TcToolExecEvent): int32 =
   tcAssignStr(ev.output, "sunny")
   0
-
-include threecode/plugin_sdk   # exports the tc_* hooks (LAST)
 ```
 
-Build and install:
+`registerTool` is legal only inside `registerTools`. The schema is an
+OpenAI function-tool definition; the name must not collide with a
+builtin tool (`bash`, `read`, `write`, ... check `:plugins` for
+rejections) or an already-registered one. The optional last argument is
+a per-call timeout in milliseconds; 0 means the host default (120 s).
 
-    nim c --app:lib --mm:orc --threads:on -o:myplugin.so myplugin.nim
-    cp myplugin.so ~/.local/share/3code/lib/
+Tools are advertised to the model only when `[plugins] tools = "on"`,
+which is deliberately off by default: the tool array is stateless and
+rides every model request, so every registered schema is billed on
+every call whether used or not, roughly 300-900 tokens for a small
+curated one. The gate makes mounting a deliberate choice. Executions
+run unsandboxed in the plugin, like any plugin code. Drop a skill in
+`~/.config/3code/skills/myplugin.md` teaching the model when and how
+to call the tool; that is the whole install convention.
 
-If the plugin wants to teach the model something, drop a skill in
-`~/.config/3code/skills/myplugin.md` — that is the whole install
-convention.
+### Long work and interruption
 
+A sync hook that runs long gets its default outcome applied without it
+(see [failure handling](#failure-handling)). Poll
+`tcCancelled(tcCurrentState)` in any loop that might outlive its
+budget, including tool execs (Esc during a turn sets the flag):
+
+```nim
+while moreWork() and not tcCancelled(tcCurrentState):
+  doChunk()
+```
+
+### Beyond Nim
+
+The ABI is plain C. A plugin in C, Rust (`extern "C"`), Zig, or
+anything else just exports the `tc_*` symbols itself, honors
+`abi`/`structSize` (treat a larger host struct as trailing unknown
+bytes; refuse nothing except a `structSize` smaller than yours), and
+keeps the memory rules above. The fixture in
 `tests/testdata/plugin_fixture.nim` in the 3code repo is the canonical
-worked example (every hook, heavily commented). Build plugins with
-`--threads:on`: the host calls you from its own thread, and the SDK
-must register that thread with your runtime's GC before your first
-allocation.
+worked example of every hook, heavily commented.
 
-## Hooks
+## Hook reference
 
-All hooks run on one dedicated host thread, one call at a time, in
-plugin load order. `TcStr` fields are read-only; `TcMutStr` fields you
-may edit in place (`tcAssignStr`). Every pointer is valid only during
-the call.
+| export | Nim proc | budget | fires |
+| --- | --- | --- | --- |
+| `tc_abi_version()` | - | - | probed at load; must equal the host version exactly |
+| `tc_init(s)` | `init(s): cint` | 2 s | once after load, before any hook; return 0 |
+| `tc_register_tools(s)` | `registerTools(s)` | 2 s | once after init |
+| `tc_shutdown(s)` | `shutdown(s)` | - | at process exit, before unload |
+| `tc_on_prompt(s, ev)` | `onPrompt(ev: var TcPromptEvent)` | 2 s | user submits a prompt |
+| `tc_on_system_prompt(s, ev)` | `onSystemPrompt(ev: var TcSysPromptEvent)` | 2 s | once per provider/model/family (memoized), then cached |
+| `tc_on_tool_pre(s, ev)` | `onToolPre(ev: var TcToolPreEvent): cint` | 2 s | before each tool call |
+| `tc_on_tool_result(s, ev)` | `onToolResult(ev: var TcToolResultEvent)` | 2 s | after each tool call |
+| `tc_tool_exec(s, ev)` | `onToolExec(ev: var TcToolExecEvent): int32` | declared, default 120 s | the model calls a registered tool |
+| `tc_on_turn_start(s, ev)` | `onTurnStart(ev: var TcTurnEvent)` | async | a turn begins |
+| `tc_on_turn_end(s, ev)` | `onTurnEnd(ev: var TcTurnEndEvent)` | async | a turn ends (usage, elapsed) |
+| `tc_on_model_retry(s, ev)` | `onModelRetry(ev: var TcRetryEvent)` | async | provider error enters backoff |
+| `tc_on_session_start(s, ev)` | `onSessionStart(ev: var TcSessionEvent)` | async | a session loads |
+| `tc_on_compact(s, ev)` | `onCompact(ev: var TcCompactEvent)` | async | history gets summarized |
+| `tc_on_file_write(s, ev)` | `onFileWrite(ev: var TcFileWriteEvent)` | async | write/patch/apply_patch landed |
 
-| export | when | can change |
-|---|---|---|
-| `tc_on_prompt` | user submits a prompt | the prompt |
-| `tc_on_system_prompt` | once per provider/model/family | the system prompt |
-| `tc_on_tool_pre` | before each tool call runs | args; verdict: allow / veto / rewrite / takeover / wrap |
-| `tc_on_tool_result` | after a tool call | the output, the exit code |
-| `tc_on_turn_start` / `tc_on_turn_end` | turn lifecycle (usage, elapsed) | — |
-| `tc_on_model_retry` | provider error with backoff | — |
-| `tc_on_session_start` | session load | — |
-| `tc_on_compact` | history summarization | — |
-| `tc_on_file_write` | write/patch/apply_patch landed | — |
-| `tc_register_tools` + `tc_tool_exec` | register model-facing tools | — |
+Async means fire-and-forget: the host copies a small POD event into a
+bounded queue (256 entries, oldest dropped under pressure) and moves
+on. Do not mutate async events as if the host were waiting; it is not.
 
-Multiple plugins chain: mutations waterfall in load order, a veto
-short-circuits and names the plugin in the tool result.
+Event structs. `TcStr` fields are read-only views; `TcMutStr` fields
+may be edited in place. Every struct also carries `abi` and
+`structSize` first.
 
-`tc_on_tool_pre` verdicts:
+**TcPromptEvent**: `prompt` (mut, 1 MiB), `cwd`, `sessionPath`,
+`provider`, `model`.
 
-- `tcAllow` (0) — proceed.
-- `tcVeto` (1) — skip the call; `message` becomes the tool result.
-- `tcRewrite` (2) — you edited `args`; proceed with the new ones.
-- `tcTakeover` (3) — skip execution; `message`/`code` are the whole
-  result. The plugin did the work itself — that runs outside the
-  sandbox, full trust.
-- `tcWrap` (4) — run the original (sandboxed) between `message` (pre)
-  and `post`.
+**TcSysPromptEvent**: `prompt` (mut, 512 KiB), `provider`, `model`,
+`family`. The result is cached per (provider, model, family) for the
+process lifetime.
 
-## Registered tools and the token cost
+**TcToolPreEvent**: `name`, `callId`, `family`; `args` (mut, 256 KiB,
+JSON text of the tool arguments); out fields `verdict`, `message` (4
+KiB), `post` (4 KiB), `code`. Set the verdict by returning it.
 
-`[plugins] tools = "on"` (default off) advertises plugin-registered
-tools to the model. Be aware of what you are opting into: the tool
-array is sent with every model request, so every registered schema is
-billed on every call whether used or not — roughly 300-900 tokens per
-call for a small curated schema. The gate exists so mounting is a
-deliberate choice. The cheaper alternative is usually a skill plus a
-CLI the model drives through bash.
+**TcToolResultEvent**: `name`, `args`, `elapsedMs`, `diff` (the
+bash-style diff when a tool produced one); `output` (mut, 1 MiB) and
+`code` (pointer, editable) shape what the model sees.
 
-## Debug output
+**TcToolExecEvent**: `name`, `args`; out fields `output` (mut, 1 MiB)
+and `code`. Your whole job: fill `output`, return the exit code as
+`ev.code` (the proc's return value).
 
-`:plugin debug on` (or `[plugins] debug = "on"`) traces every plugin
-call to `THREECODE_DEBUG_LOG` (or stderr): the hook, the plugin,
-elapsed time, verdicts, and a line diff of anything a plugin mutated.
-`:plugins` lists loaded libraries, their subscribed hooks, call
-counts, registered tools, and any load-time skips (wrong ABI version,
-failed load, disabled by name).
+**TcTurnEvent**: `turn`, `promptTokens`, `cwd`.
 
-## Config reference
+**TcTurnEndEvent**: `turn`, `promptTokens`, `completionTokens`,
+`reasoningTokens`, `elapsedMs`, `interrupted`, `sessionPath`.
 
-    [plugins]
-    disable = "slowplugin, other"  # skip by lib file stem
-    tools = "on"                   # advertise registered tools (opt-in)
-    debug = "on"                   # per-call trace with mutation diffs
-    lib = "/extra/search/dir"      # additional discovery dir
+**TcRetryEvent**: `provider`, `model`, `status` (HTTP status or 0),
+`category`, `backoffS`, `attempt`.
 
-## Timeouts and failure handling
+**TcSessionEvent**: `sessionPath`, `cwd`, `provider`, `model`,
+`resumed`, `messages`.
 
-Sync hooks (prompt, system prompt, tool pre/result/exec) have a 2 s
-budget (120 s for tool exec, plugin-declared via `registerTool`'s
-`timeoutMs`). A timeout applies the default outcome, logs a strike,
-and flags `cancelled` so well-behaved plugins wind down (poll
-`tcCancelled(tcCurrentState)` in long loops). Three strikes demotes a
-plugin's sync hooks for the session. A plugin exception is caught and
-traced; a plugin crash takes the process down — no process isolation
-exists in the in-process tier.
+**TcCompactEvent**: `before`, `after` (message counts), `summary`.
+
+**TcFileWriteEvent**: `path` (project-relative when possible), `bytes`,
+`kind` (0 write, 1 patch, 2 apply_patch).
+
+## Strings and buffers
+
+`TcStr` is a read-only `data`+`len` view into host memory, not
+NUL-terminated. `TcMutStr` is a host-allocated buffer with `len <= cap`
+at all times. `tcView` copies a view into a Nim string (the only
+allocating conversion; call it when you need the bytes),
+`tcAssignStr` copies your bytes back, silently doing nothing when they
+do not fit `cap` (the host logs the drop).
+
+The host sizes each editable buffer at twice the payload, floored at
+16 KiB, capped per field: prompt 1 MiB, system prompt 512 KiB, tool
+args 256 KiB, tool result and tool-exec output 1 MiB, tool-pre
+message/post 4 KiB. A payload already over its cap skips the hook
+entirely rather than truncating silently; the debug trace shows the
+skip. Ordinary edits always fit.
+
+## State, services, cancellation
+
+`TcState` is the per-plugin context the host passes as the first
+argument everywhere. It is stable for the process lifetime, so a
+pointer stashed in `userData` survives between calls. Fields: `abi`,
+`structSize`, `pluginName`, `userData`, `cancelled` (set to 1 by the
+host when the user interrupts while your call is in flight), and
+`services`.
+
+`TcServices` are host callables:
+
+- `log(msg)`: append to the debug trace, tagged with your plugin name.
+  Safe from any hook.
+- `registerTool(name, description, schemaJson, timeoutMs)`: legal only
+  inside `registerTools`. Returns 0 on success, 1 outside registration,
+  2 for an empty name, 3 for a builtin tool name, 4 for a duplicate.
+  The Nim-side `s.registerTool(...)` wrapper returns a bool.
+
+The SDK keeps the current call's state pointer in the threadvar
+`tcCurrentState`; `tcCancelled(tcCurrentState)` is the polite way to
+poll for interruption.
+
+## Failure handling
+
+A sync hook has a deadline (2 s, or the tool-exec budget; the env vars
+`THREECODE_PLUGIN_SYNC_MS` and `THREECODE_PLUGIN_TOOL_MS` retune them).
+On timeout the default outcome applies without you: allow for verdicts,
+the original text for prompts and outputs, an error result for a
+plugin tool. The plugin takes a strike, the host flags `cancelled` so
+a well-behaved hook winds down, and three strikes demote the plugin:
+its sync hooks are skipped for the rest of the session (`:plugins`
+shows DEMOTED). A Nim exception in a hook is caught and traced; a
+segfault takes the process down. There is no process isolation in this
+tier, which is why the lib directories are yours, not the model's.
+
+## Config and debug
+
+| key | effect |
+| --- | --- |
+| `disable = "slow, other"` | skip plugins by lib file stem |
+| `tools = "on"` | advertise registered tools to the model (opt-in) |
+| `debug = "on"` | per-call trace with mutation diffs |
+| `lib = "/path"` | extra discovery dir, scanned first |
+
+`:plugins` (or `:plugin list`) reports loaded libraries, subscribed
+hooks, call counts, strikes, registered tools, and every load-time
+skip with its reason. `:plugin debug on` traces every call to
+`THREECODE_DEBUG_LOG` (or stderr): the hook, the plugin, elapsed
+milliseconds, verdicts, and a line diff of anything a plugin mutated,
+which is the fastest way to see your plugin actually doing something.
+
+## ABI stability
+
+The ABI version is 1 and must match exactly; a mismatched library is
+skipped, never shimmed. Additive changes (trailing struct fields) bump
+nothing: `structSize` negotiation absorbs them, and both sides treat a
+larger counterpart struct as unknown trailing bytes. Any incompatible
+layout or signature change bumps `TcAbiVersion`, and old plugins are
+refused loudly at load rather than corrupting memory quietly.

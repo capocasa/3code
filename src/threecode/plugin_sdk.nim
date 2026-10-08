@@ -38,7 +38,7 @@
 ##
 ## Optional procs (define any subset; only defined ones are exported
 ## and thus subscribed by the host):
-##   init(s: ptr TcState)                 0 = ok, nonzero = refuse to load
+##   init(s: ptr TcState)                 return 0 (value reserved)
 ##   shutdown(s: ptr TcState)
 ##   registerTools(s: ptr TcState)        call s.registerTool N times
 ##   onPrompt(ev: var TcPromptEvent)

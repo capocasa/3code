@@ -405,7 +405,7 @@ Task: add test coverage to the parser module.</pre></p>
 <li><tt class="docutils literal"><span class="pre">~/.config/3code/skills/</span></tt> (your overrides)</li>
 <li><tt class="docutils literal"><span class="pre">~/.local/share/3code/skills/</span></tt> (built-ins, extracted by 3code itself)</li>
 </ol>
-<p>The built-ins shipped today are the role skills (conversational, sysadmin, thinking partner, writing), task-debug-systematic, and cybernetic-plan. To override one, put a file with the same name in a directory higher up the list. To add your own, drop a <tt class="docutils literal"><span class="pre">.md</span></tt> file in any of those directories with an instructive name: the filename is the trigger, so <tt class="docutils literal"><span class="pre">release-notes.md</span></tt> loads when the task smells like release notes. There is deliberately no MCP-style plugin protocol: a skill file plus command-line tools covers the same ground at a fraction of the context cost.</p>
+<p>The built-ins shipped today are the role skills (conversational, sysadmin, thinking partner, writing), task-debug-systematic, and cybernetic-plan. To override one, put a file with the same name in a directory higher up the list. To add your own, drop a <tt class="docutils literal"><span class="pre">.md</span></tt> file in any of those directories with an instructive name: the filename is the trigger, so <tt class="docutils literal"><span class="pre">release-notes.md</span></tt> loads when the task smells like release notes. For heavier machinery than a skill there is a native plugin tier (C-ABI hooks and model-facing tools, running host-side); see <a class="reference external" href="plugins.html">plugins</a>. A skill file plus command-line tools still covers most of the same ground at a fraction of the context cost.</p>
 
 <h2 id="cybernetic-mode">Cybernetic mode</h2><p>Cybernetic mode is the sturdier option for a long coding task. Give the model a worktree and ask it to use the built-in cybernetic planning skill.</p>
 <p>The skill:</p>
@@ -573,7 +573,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-02 10:27:06 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-08 20:09:04 UTC</small>
       </div>
     </div>
   </div>

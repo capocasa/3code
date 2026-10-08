@@ -91,6 +91,8 @@
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox readonly P</span></tt></td><td>add a read-only rule</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox deny T</span></tt></td><td>add a deny rule</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox edit</span></tt></td><td>open the policy file in <tt class="docutils literal"><span class="pre">$VISUAL</span></tt>/<tt class="docutils literal"><span class="pre">$EDITOR</span></tt>, reload on quit</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:plugins</span></tt></td><td>list loaded plugin libraries, hooks, call counts, registered tools</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:plugin debug on/off</span></tt></td><td>trace every plugin call to <tt class="docutils literal"><span class="pre">THREECODE_DEBUG_LOG</span></tt> (or stderr)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:! CMD</span></tt></td><td>run a shell command yourself, output to scrollback only</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:quit</span></tt> / <tt class="docutils literal"><span class="pre">:q</span></tt> / <tt class="docutils literal"><span class="pre">:exit</span></tt></td><td>leave</td></tr>
 </table>
@@ -158,11 +160,20 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 
 <h3 id="shortcuts">shortcuts</h3><p><tt class="docutils literal"><span class="pre">[shortcuts]</span></tt> handles key rebinding for every editor command; see <a class="reference external" href="manual.html#rebinding-keys">rebinding keys</a> in the manual for the key-name grammar and the full command list. Values merge onto the defaults; an empty value unbinds a command.</p>
 
+<h3 id="plugins">plugins</h3><p>The <tt class="docutils literal"><span class="pre">[plugins]</span></tt> section controls the native plugin tier (hooks and tools in dynamically loaded libraries); the keys are covered in detail in <a class="reference external" href="plugins.html">plugins</a>.</p>
+<table border="1" class="docutils"><tr><th>key</th><th>effect</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">disable</span></tt></td><td>comma-separated plugin names (lib file stems) to skip at load</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">tools</span></tt></td><td><tt class="docutils literal"><span class="pre">&quot;on&quot;</span></tt> advertises plugin-registered tools to the model (opt-in)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">debug</span></tt></td><td><tt class="docutils literal"><span class="pre">&quot;on&quot;</span></tt> traces every plugin call with mutation diffs</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">lib</span></tt></td><td>extra plugin discovery directory, scanned before the defaults</td></tr>
+</table>
 <h2 id="environment-variables">Environment variables</h2><table border="1" class="docutils"><tr><th>variable</th><th>effect</th></tr>
 <tr><td><tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt></td><td>relocates the config root: config file, user skills, global prompts</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">XDG_DATA_HOME</span></tt></td><td>relocates the data root: sessions, history, auth tokens, builtin skills</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">THREECODE_MAX_TIMEOUT</span></tt></td><td>bash timeout ceiling for this run; wins over <tt class="docutils literal"><span class="pre">max_timeout</span></tt></td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">THREECODE_ALLOW_ROOT</span></tt></td><td>set to 1 to allow running as root (POSIX; refused otherwise)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_PLUGIN_SYNC_MS</span></tt></td><td>sync-hook deadline override in ms (default 2000)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_PLUGIN_TOOL_MS</span></tt></td><td>plugin tool-exec default timeout in ms (default 120000)</td></tr>
 </table><p>Both XDG variables work on every platform, including Windows, and expect absolute paths. They exist so tests and isolated setups can redirect all of 3code's state; the platform defaults apply when they are unset.</p>
 <p>Diagnostics, useful when reporting a bug:</p>
 <table border="1" class="docutils"><tr><th>variable</th><th>effect</th></tr>
@@ -177,7 +188,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-02 10:27:06 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-08 20:09:04 UTC</small>
       </div>
     </div>
   </div>
