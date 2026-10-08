@@ -1193,7 +1193,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. If the task has more than ~2 moving parts, read cybernetic-plan.md first and follow it. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
 
 # Output
 
@@ -1350,7 +1350,7 @@ No command injection, XSS, SQL injection, path traversal, or unescaped shell-out
 
 # Skills
 
-Load on demand when a skill fits the task; don't preload the catalog. If the task has more than ~2 moving parts, read cybernetic-plan.md first and follow it. {{skills}}
+Load on demand when a skill fits the task; don't preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
 
 # Output
 
@@ -1452,7 +1452,7 @@ Calibrated to refuse rather than guess. If the answer cannot be supported by the
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. If the task has more than ~2 moving parts, read cybernetic-plan.md first and follow it. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
 
 # Attribution
 
@@ -1691,7 +1691,7 @@ No command injection, XSS, SQL injection, path traversal, or unescaped shell-out
 
 # Skills
 
-Load on demand when a skill fits the task; don't preload the catalog. If the task has more than ~2 moving parts, read cybernetic-plan.md first and follow it. {{skills}}
+Load on demand when a skill fits the task; don't preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
 
 # Output
 
@@ -2689,7 +2689,7 @@ No command injection, XSS, SQL injection, path traversal, or unescaped shell-out
 
 # Skills
 
-Load on demand when a skill fits; never preload the catalog. More than ~2 moving parts: read cybernetic-plan.md first and follow it. {{skills}}
+Load on demand when a skill fits; never preload the catalog. More than ~2 moving parts: write goal.md first (goal statement, steps, verification) and work until it is met. {{skills}}
 
 # Output
 
@@ -3409,6 +3409,19 @@ proc withoutShellTools(tools: JsonNode): JsonNode =
     if t["function"]["name"].getStr in ["bash", "shell"]: continue
     result.add t
 
+proc verifierTools*(): JsonNode =
+  ## The goal-mode side-call verifier's roster: read and bash (search rides
+  ## bash), nothing that can mutate the repo from the tool surface. The
+  ## roster is the lock — a preamble-only "do not write" would be a fake
+  ## one. Filtered from the canonical glm/qwen schema so descriptions
+  ## live in one place, and shaped by `bashToolDisabled` like the agent
+  ## surface.
+  result = newJArray()
+  for t in glmAndQwenTools:
+    let n = t{"function"}{"name"}.getStr
+    if n == "read" or (n == "bash" and not bashToolDisabled):
+      result.add t
+
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## (prompt, tools) for the active family. Unknown family dies — every
   ## entry in `KnownGoodCombos` and every experimental override must
@@ -3997,13 +4010,18 @@ proc buildCredit*(p: Profile): string =
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
 
-const BuiltinSkills*: array[6, (string, string)] = [
+const RetiredBuiltinSkills* = ["cybernetic-plan.md"]
+  ## Skills 3code no longer ships. The materializer deletes these from the
+  ## data dir so a retired built-in cannot linger in the skills catalog;
+  ## an explicit list (not "anything unknown") so user-placed files in that
+  ## dir are never touched.
+
+const BuiltinSkills*: array[5, (string, string)] = [
   ("role-conversational.md",   staticRead("skills/role-conversational.md")),
   ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
   ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
   ("role-writing.md",          staticRead("skills/role-writing.md")),
   ("task-debug-systematic.md", staticRead("skills/task-debug-systematic.md")),
-  ("cybernetic-plan.md",       staticRead("skills/cybernetic-plan.md")),
 ]
   ## Universal skills compiled into the binary. Materialized to
   ## `~/.local/share/3code/skills/` on startup; re-extracted whenever
@@ -4041,6 +4059,10 @@ proc materializeBuiltinSkills*() =
     createDir(dir)
     for (name, body) in BuiltinSkills:
       writeFile(dir / name, body)
+    # A retired built-in would otherwise linger in the materialized dir
+    # (and the skills catalog) forever.
+    for name in RetiredBuiltinSkills:
+      try: removeFile(dir / name) except CatchableError: discard
     writeFile(stamp, want)
   except CatchableError: discard
 

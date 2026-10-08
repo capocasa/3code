@@ -30,7 +30,7 @@ That's why I made 3code. It's a free and open source AI-assisted coding agent th
 - is tiny and uses very little resources: compiled single binary
 - goes where you go: cross platform
 - is convenient but powerful: prompt and it will just keep going
-- has unique token-saving features: chunked mode and cybernetic mode split tasks serially, keeping context low
+- has unique token-saving features: chunked mode and goal files split tasks serially, keeping context low
 
 As a heavy command-line and no-chrome tiling window manager user, everything else feels like a noisy token burner that's going to run away with my data at any time.
 

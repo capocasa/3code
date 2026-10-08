@@ -176,6 +176,8 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <tr><td>hetzner</td><td>Germany</td><td>free experiment, <strong>quantized</strong> (fp8/fp4 ids)</td></tr>
 <tr><td>together-eu</td><td>EU</td><td>Together's EU endpoint</td></tr>
 <tr><td>★ platte</td><td>Germany</td><td>EU sovereign host; url embeds your username, wizard asks for it</td></tr>
+<tr><td>★ kolibri</td><td>your own hardware</td><td>Aleph Alpha's Kolibri-1 (open weights, Apache 2.0, German/English): serve it yourself with vLLM + the aleph-alpha-inference plugin, then <tt class="docutils literal"><span class="pre">:provider add kolibri</span></tt> (url <tt class="docutils literal"><span class="pre">http://localhost:8000/v1</span></tt>)</td></tr>
+<tr><td>★ tesseracted</td><td>Germany</td><td>Tesseracted Labs' hosted Kolibri-1 (same weights, their GPUs): <tt class="docutils literal"><span class="pre">:provider add tesseracted</span></tt> (url <tt class="docutils literal"><span class="pre">https://api.tesseracted.com/v1</span></tt>); still in preview, so model access is granted manually: email modelaccess@tesseracted.com describing your use case and they send a key (<tt class="docutils literal"><span class="pre">tl_live_...</span></tt>)</td></tr>
 <tr><td>aki</td><td>EU</td><td></td></tr>
 <tr><td>lyceum</td><td>EU</td><td></td></tr>
 </table>
@@ -407,20 +409,13 @@ Task: add test coverage to the parser module.</pre></p>
 <li><tt class="docutils literal"><span class="pre">~/.config/3code/skills/</span></tt> (your overrides)</li>
 <li><tt class="docutils literal"><span class="pre">~/.local/share/3code/skills/</span></tt> (built-ins, extracted by 3code itself)</li>
 </ol>
-<p>The built-ins shipped today are the role skills (conversational, sysadmin, thinking partner, writing), task-debug-systematic, and cybernetic-plan. To override one, put a file with the same name in a directory higher up the list. To add your own, drop a <tt class="docutils literal"><span class="pre">.md</span></tt> file in any of those directories with an instructive name: the filename is the trigger, so <tt class="docutils literal"><span class="pre">release-notes.md</span></tt> loads when the task smells like release notes. There is deliberately no MCP-style plugin protocol: a skill file plus command-line tools covers the same ground at a fraction of the context cost.</p>
+<p>The built-ins shipped today are the role skills (conversational, sysadmin, thinking partner, writing) and task-debug-systematic. To override one, put a file with the same name in a directory higher up the list. To add your own, drop a <tt class="docutils literal"><span class="pre">.md</span></tt> file in any of those directories with an instructive name: the filename is the trigger, so <tt class="docutils literal"><span class="pre">release-notes.md</span></tt> loads when the task smells like release notes. There is deliberately no MCP-style plugin protocol: a skill file plus command-line tools covers the same ground at a fraction of the context cost.</p>
 
-<h2 id="cybernetic-mode">Cybernetic mode</h2><p>Cybernetic mode is the sturdier option for a long coding task. Give the model a worktree and ask it to use the built-in cybernetic planning skill.</p>
-<p>The skill:</p>
-<ol class="simple"><li>writes a plan file with concrete tasks</li>
-<li>implements one task</li>
-<li>updates the plan with results and new information</li>
-<li>clears context and tells the next session to load the plan</li>
-<li>repeats until all tasks are complete</li>
-<li>reviews the completed work</li>
-</ol>
-<p>The current task keeps its detailed context while the plan file keeps the durable state. This loses less information than repeatedly summarizing all the old work.</p>
+<h2 id="goal-mode">Goal mode</h2><p>Goal mode is the sturdier option for a long coding task. Drop a <tt class="docutils literal"><span class="pre">goal.md</span></tt> into the project root stating the goal: what must be true when the work is done, how to verify it. Anyone can write the file — you directly, or the model when you ask for multi-part work.</p>
+<p>While <tt class="docutils literal"><span class="pre">goal.md</span></tt> exists, every turn end runs a satisfaction check: a fresh side conversation with the same model, given the goal text and a summary of what the turn actually did (files, patches, commands — never the agent's own claims), verifies the repository itself and answers with a verdict. Not satisfied, the agent is sent back in with the verifier's feedback. Satisfied, the harness renames the file to <tt class="docutils literal"><span class="pre">goal-completed.md</span></tt> (the record of the run) and idles.</p>
+<p>The file is the whole interface. Edit <tt class="docutils literal"><span class="pre">goal.md</span></tt> mid-run to steer (the next check reads it fresh), delete it to end goal mode silently, interrupt to pause. <tt class="docutils literal"><span class="pre">goal-completed.md</span></tt> accumulation is harmless; delete or archive it whenever.</p>
 
-<h2 id="no-subminusagents">No sub-agents</h2><p>3code does not provide sub-agents. They use plenty of tokens, and I have not seen enough benefit to justify the little management consultancy they form. For parallel or long-running work, use worktrees with cybernetic mode.</p>
+<h2 id="no-subminusagents">No sub-agents</h2><p>3code does not provide sub-agents. They use plenty of tokens, and I have not seen enough benefit to justify the little management consultancy they form. For parallel or long-running work, use worktrees with goal mode.</p>
 
 <h2 id="sandbox">Sandbox</h2><p>The model is useful, but it does not need the run of your entire computer. 3code applies a filesystem policy to every tool call. Bash commands also enter an OS sandbox, and host rules can fence their network access.</p>
 <p>The sandbox is questionless: it never interrupts the turn to ask whether a command may run. That is a deliberate trade. An agent that asks is an agent that costs a round trip and a context refresh every time it touches a new directory, which in practice means either an agent that nags or an agent whose guardrails get switched off. Instead the boundary is enforced by the kernel (Landlock, Seatbelt, Windows restricted tokens), decided by a policy you wrote before the turn started, and a denial is simply a failed command the model can read and route around. The tradeoff is that the policy needs setting up first: a couple of minutes once per project, and after that it does not stop on trivialities.</p>
@@ -522,7 +517,7 @@ tone = &quot;light&quot;</pre></p>
 
 <h3 id="kernel-enforcement-no-questions">Kernel enforcement, no questions</h3><p>The sandbox asks nothing and enforces at the kernel (Landlock, Seatbelt, Windows restricted tokens). The alternative architectures were worse. A judge model re-reading every command is unacceptable: it burns tokens on guesswork, adds latency to every tool call, and is security by vibes, a second model approving what the first one wrote. Approval prompts are security by interruption, and in practice train users to mash yes. A static kernel policy uses zero tokens, adds microseconds, and fails closed; the cost is the one-time setup described in <a class="reference external" href="#sandbox">the sandbox section</a>. And the honest calibration: most coding agent sessions run effectively unfenced anyway (yolo mode, <tt class="docutils literal"><span class="pre">--dangerously- skip-permissions</span></tt> and friends), so a fence that is cheap to set up and never interrupts is a real improvement over both the nagging gate and the absent one, even before it stops anything.</p>
 
-<h3 id="one-model-small-tool-set">One model, small tool set</h3><p>No sub-agents, no trees of delegated prompts. A single conversation with bash, file tools, plan, and web access, plus skills loaded on demand, keeps the token budget on the work instead of on orchestration. When a task outgrows one context, chunked and cybernetic modes split it along files and worktrees instead of spawning agents.</p>
+<h3 id="one-model-small-tool-set">One model, small tool set</h3><p>No sub-agents, no trees of delegated prompts. A single conversation with bash, file tools, plan, and web access, plus skills loaded on demand, keeps the token budget on the work instead of on orchestration. When a task outgrows one context, chunked mode and goal files split it along worktrees instead of spawning agents.</p>
 
 <h2 id="scripting">Scripting</h2><p>The REPL is optional. A prompt given as a command-line argument runs one turn and exits (oneshot mode), and <tt class="docutils literal"><span class="pre">-r</span></tt> continues the directory's latest session in another oneshot, so a shell script or cron job can hold an ongoing conversation:</p>
 <p><pre class="listing">3code &quot;list the failing tests in this repo&quot;   # starts a session
@@ -575,7 +570,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-05 16:26:24 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-08 18:03:57 UTC</small>
       </div>
     </div>
   </div>

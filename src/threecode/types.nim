@@ -215,6 +215,9 @@ type
     cwd*: string
     plan*: seq[PlanItem]
     readCache*: ReadCache
+    goalNotified*: bool  ## goal-mode activation receipt already shown (the
+                         ## flag is per session: a resumed session announces
+                         ## again at its first end-call boundary)
   ApiError* = object of CatchableError
     ## Base for all model/API failures. `callModel`'s retry loop and the
     ## turn loop catch this so every failure mode is handled uniformly.
