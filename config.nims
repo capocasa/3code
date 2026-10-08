@@ -34,14 +34,31 @@ proc hasUnstagedChanges(): bool =
       return true
   return false
 
+proc versionBranchPart(): string =
+  # `-<branch>` on a branch build; empty on a tag. The leading dash lives
+  # in the part so the template stays a plain concatenation.
+  if onTag(): ""
+  else: "-" & gorge("git branch --show-current").strip()
+
+proc versionCommitPart(): string =
+  # `-<short8>`; empty on a tag.
+  if onTag(): ""
+  else: "-" & gorge("git rev-parse --short=8 HEAD").strip()
+
+proc versionStagePart(): string =
+  if hasUnstagedChanges(): "-unstaged" else: ""
+
+# The actual version is this template, expanded at compile time. Keep the
+# variable names in lockstep with the runtime User-Agent variables in
+# prompts.nim (modelUserAgent).
+const VersionTemplate = "$version$branch$commit$stage"
+
 proc getVersionString(): string =
-  if onTag():
-    getNimbleVersion()
-  else:
-    getNimbleVersion() & "-" &
-      gorge("git branch --show-current").strip() &
-      "-" & gorge("git rev-parse --short=8 HEAD").strip() &
-      (if hasUnstagedChanges(): "-unstaged" else: "")
+  VersionTemplate.multiReplace(
+    ("$version", getNimbleVersion()),
+    ("$branch", versionBranchPart()),
+    ("$commit", versionCommitPart()),
+    ("$stage", versionStagePart()))
 
 switch("path", "src")
 switch("path", "tests")  # test helpers (tty_expect, stub_helpers, minline_testutils)
@@ -62,6 +79,11 @@ when defined(android):
   switch("passL", "-Wl,-rpath,/data/data/com.termux/files/usr/lib")
 
 switch("d", "version=" & getVersionString())
+# The version parts, separately, so the runtime User-Agent template can
+# expose $branch/$commit/$stage as standalone variables.
+switch("d", "versionBranch=" & versionBranchPart())
+switch("d", "versionCommit=" & versionCommitPart())
+switch("d", "versionStage=" & versionStagePart())
 
 when withDir(thisDir(), system.fileExists("config.local.nims")):
   include "config.local.nims"

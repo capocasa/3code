@@ -140,6 +140,7 @@ Keys under `[settings]`:
 | `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted, and `THREECODE_MAX_TIMEOUT` (below) wins for one run |
 | `browserfetch` | `on`/`off` (default off) | when a plain `web_fetch` returns a JS shell (almost no text survives tag stripping), redo the fetch in a shared headless Chrome (one browser per machine on 127.0.0.1:9223, one tab per fetch) and return the rendered text |
 | `auto_update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit |
+| `user_agent` | template (default `3code $version`) | User-Agent header sent on every model request. Variables: `$version` (the full build version, e.g. `0.9.2-main-a1b2c3d4a`), `$branch` (`-main`), `$commit` / `$hash` (`-a1b2c3d4`), `$stage` (`-unstaged` when the build's sources differed from HEAD; each empty when not applicable), `$os`, `$arch`, and `$$` for a literal `$`. Unknown `$names` pass through verbatim; `user-agent` spelling accepted |
 
 ### provider
 

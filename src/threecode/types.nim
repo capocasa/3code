@@ -78,6 +78,10 @@ var sandboxWallWarn*: bool = true
   ## setup (`3code setup`) prints a one-time warning that
   ## bash runs unfenced. Default on; `[settings] sandbox_wall_warn =
   ## off` silences it.
+var userAgentTemplate* = ""
+  ## `[settings] user_agent`: the User-Agent template sent on every model
+  ## request. Empty keeps the compiled default; see `modelUserAgent`
+  ## (prompts.nim) for the variables and their values.
 
 type
   ColorMode* = enum

@@ -866,7 +866,7 @@ proc requestHeaders(p: Profile, key: string;
                ("anthropic-beta", betas),
                ("Content-Type", "application/json"),
                ("Accept", accept),
-               ("User-Agent", ModelUserAgent)]
+               ("User-Agent", modelUserAgent())]
   elif anthropicProfile(p):
     # Anthropic-protocol endpoints take `x-api-key` + the pinned
     # version header. drop_block thinking replay (see anthropic.nim)
@@ -878,14 +878,14 @@ proc requestHeaders(p: Profile, key: string;
                ("anthropic-version", AnthropicVersionHeader),
                ("Content-Type", "application/json"),
                ("Accept", accept),
-               ("User-Agent", ModelUserAgent)]
+               ("User-Agent", modelUserAgent())]
     if betas.len > 0:
       result.insert(("anthropic-beta", betas), 2)
   else:
     result = @[("Authorization", "Bearer " & key),
                ("Content-Type", "application/json"),
                ("Accept", accept),
-               ("User-Agent", ModelUserAgent)]
+               ("User-Agent", modelUserAgent())]
   if providerOf(p) in ["opencode", "opencodego"]:
     # Zen/Go route and shard by this header; requests without it are
     # rejected as of 2026-09-06. Stable across the conversation's turns
@@ -3611,7 +3611,7 @@ proc fetchModels*(url, key: string): (seq[string], string) =
     return (codexModelsHook(url), "")
   try:
     let client = newHttpClient(timeout = 20_000,
-                               userAgent = ModelUserAgent,
+                               userAgent = modelUserAgent(),
                                sslContext = bundledSslContext())
     defer: client.close()
     if url.startsWith("https://api.anthropic.com"):
