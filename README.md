@@ -162,12 +162,6 @@ An earlier round on GLM-5.2 against opencode alone: 3code used 75% fewer tokens,
 
 The programming manual, with examples and API details, lives in the [docs](https://3code.capocasa.dev/docs). The dry inventory of every config key, CLI switch, and `:` command is the [reference](https://3code.capocasa.dev/reference.html).
 
-## 3code enterprise
-
-3code makes a subscription last five times longer. That saving compounds across a team. I can make it happen in your company: central providers, model control, spending limits. Same agent your engineers already want to use, rolled out as a team tool.
-
-→ [Schedule a call](https://3code.capocasa.dev/schedule-call.html)
-
 ## Contributing
 
 Patches welcome! Open an issue, send a PR, or just try the bleeding edge and report back:
