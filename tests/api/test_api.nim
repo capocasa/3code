@@ -296,6 +296,10 @@ suite "api request shaping":
       check "Every token costs" in prompt
       check "thinking in its own channel" in prompt
       check "red -> green" in prompt
+      check "read(path, offset?, limit?)" in prompt
+      check "# Knowledge" in prompt
+      check "# Long context" in prompt
+      check "524K window" in prompt
       check "{{skills}}" in prompt  # spliced at build time
       check "{{header}}" notin prompt  # no header splice anymore
       check "{{reasoning}}" notin prompt  # no reasoning splice anymore
