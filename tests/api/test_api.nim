@@ -2223,10 +2223,10 @@ block scenario_c:
 
 block scenario_d:
   # Proactive message-count guard: a tesseracted Kolibri profile whose
-  # history crosses MaxMessagesVllm (72) must collapse at end of turn
-  # with a real recap and no 400 at all — the Kolibri-1 vLLM stack caps
-  # `messages` at 80 entries regardless of token count (the 2026-10-08
-  # session died at 82 messages, 12% of the window).
+  # history crosses MaxMessagesTesseracted (72) must collapse at end of
+  # turn with a real recap and no 400 at all — the tesseracted gateway
+  # caps `messages` at 80 entries regardless of token count (the
+  # 2026-10-08 session died at 82 messages, 12% of the window).
   server.rejectSummarizer = false
   server.envelope = 2_000_000
   let kolibriProfile = Profile(name: "tesseracted.Aleph-Alpha/Kolibri-1",
@@ -2283,4 +2283,4 @@ joinThread(serveThread)
     # hint must report the pre-collapse count (72), not the post-collapse
     # length (10).
     check "SCENARIO_D_OK" in runOut
-    check "(72 messages; vLLM message-count guard)" in runOut
+    check "(72 messages; tesseracted message-count guard)" in runOut

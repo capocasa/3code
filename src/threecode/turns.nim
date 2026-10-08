@@ -1038,15 +1038,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         lastRequestBodyBytes >= SummarizeByteGuardBytes:
       action = caSummarize
       byteGuard = true
-    # Kolibri-stack message-count guard: the tesseracted gateway (vLLM
-    # serving Kolibri-1) rejects a request with more than 80 `messages`
-    # entries with an opaque 400, far under the token window, so like
-    # the byte guard this fires the same collapse on the axis the route
-    # actually validates. See MaxMessagesVllm for the cap and headroom.
+    # Tesseracted message-count guard: the gateway (hosted Kolibri-1)
+    # rejects a request with more than 80 `messages` entries with an
+    # opaque 400, far under the token window, so like the byte guard
+    # this fires the same collapse on the axis the route actually
+    # validates. Self-hosted kolibri carries no such cap and stays
+    # unguarded. See MaxMessagesTesseracted for the cap and headroom.
     var msgGuard = false
     var msgGuardCount = 0
-    if action == caNone and providerOf(p) in ["kolibri", "tesseracted"] and
-        messages.len >= MaxMessagesVllm:
+    if action == caNone and providerOf(p) == "tesseracted" and
+        messages.len >= MaxMessagesTesseracted:
       action = caSummarize
       msgGuard = true
       msgGuardCount = messages.len
@@ -1060,7 +1061,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             (if byteGuard:
                &" (request body {humanBytes(lastRequestBodyBytes)}; gateway byte guard)"
              elif msgGuard:
-               &" ({msgGuardCount} messages; vLLM message-count guard)"
+               &" ({msgGuardCount} messages; tesseracted message-count guard)"
              else:
                &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)")), true)
         saveSession(session, messages)
