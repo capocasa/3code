@@ -345,7 +345,7 @@ suite "prompts: setup — mistral":
     check "write" in names
     check "patch" in names
 
-  test "mistral prompt is terse (under 6KB with splices)":
+  test "mistral prompt is terse (under 7KB with splices)":
     let p = Profile(name: "mistral.mistral-large-4", url: "x", key: "k",
                     model: "mistral-large-4", family: "mistral",
                     version: "4")
@@ -353,7 +353,12 @@ suite "prompts: setup — mistral":
     let full = s.prompt
       .replace("{{credit}}", buildCredit(p))
       .replace("{{skills}}", "(none installed)")
-    check full.len < 6000
+    check full.len < 7000
+    check "read(path, offset?, limit?)" in s.prompt
+    check "# Knowledge" in s.prompt
+    check "# Long context" in s.prompt
+    check "524K window" in s.prompt
+    check "renamed `foo.nim` to `bar.nim`" in s.prompt
 
 suite "prompts: buildCredit":
   test "builds attribution for valid profile":
@@ -398,6 +403,14 @@ suite "compact: contextWindowFor":
 
   test "llama returns 128000":
     check contextWindowFor("llama-3.1") == 128_000
+
+  test "mistral-large-4 returns 524288":
+    check contextWindowFor("mistral-large-4") == 524_288
+
+  test "mistral fallback returns 262144":
+    check contextWindowFor("mistral-large-2512") == 262_144
+    check contextWindowFor("mistral-medium-3-5") == 262_144
+    check contextWindowFor("mixtral-8x7b") == 262_144
 
   test "unknown returns 128000 (default)":
     check contextWindowFor("unknown-model") == 128_000
