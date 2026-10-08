@@ -18,7 +18,7 @@ when defined(posix):
   from std/posix import Timeval, Time, Suseconds, SockLen, SOL_SOCKET,
                            SO_RCVTIMEO, setsockopt
 
-import threecode/[api, types]
+import threecode/[api, prompts, types]
 
 {.push checks: off.}
 
@@ -874,7 +874,7 @@ suite "request headers (OpenCode Zen/Go contract)":
   # (routing/session affinity; headerless requests rejected from 2026-09-06)
   # and asked for an identifying User-Agent. These drive the REAL transport
   # and assert on the header lines the server actually received.
-  test "every request carries User-Agent 3code/<version>":
+  test "every request carries User-Agent 3code <version>":
     let server = newSseServer("")
     var thr: Thread[SseServer]
     createThread(thr, serveCaptureHeaders, server)
@@ -885,7 +885,8 @@ suite "request headers (OpenCode Zen/Go contract)":
     joinThread(thr)
     server.socket.close()
     check server.capturedHeaders.filterIt(it.startsWith("user-agent:")).len == 1
-    check "user-agent: 3code/" in server.capturedHeaders[0..^1].join("\n")
+    check ("user-agent: " & modelUserAgent().toLowerAscii()) in
+      server.capturedHeaders[0..^1].join("\n")
     # Request line: the profile url is a bare /v1 endpoint and the transport
     # appends /chat/completions exactly once (no doubled path).
     check server.capturedHeaders.len > 0
