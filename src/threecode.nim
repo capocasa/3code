@@ -33,7 +33,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
                   auth_xai, auth_openai, auth_google, auth_anthropic,
-                  streamexec, cli, search]
+                  streamexec, cli, search, tabtitle]
 when not defined(android):
   import tinotify
 else:
@@ -857,6 +857,8 @@ proc main() =
     # The startup paint is a render boundary the tty harness synchronizes
     # on: without the frame event the first captured frame can predate the
     # chrome (or miss it entirely when the PTY burst is coalesced).
+    tabtitle.setTabTitleLabel(getCurrentDir())
+    tabtitle.paintTabTitleIdle()
     emitTestFrameEvent()
     startupTrace("first-prompt-painted")
     if prompt != "" and runInitialPrompt(prompt):

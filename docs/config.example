@@ -21,6 +21,7 @@ current = "ollama.qwen3-coder:480b"
 ; brave-key = "..."
 ; browserfetch = on ; web_fetch again in a shared headless Chrome when the plain fetch returns a JS shell (default off; keeps a machine-wide headless Chrome on 127.0.0.1:9223)
 ; notify = off ; turn off the desktop notification that fires when a turn ends (on by default)
+; tab-title = off ; keep 3code out of the terminal tab title (on by default: "3" brand + spinner glyph while a turn runs)
 ; sandbox = off ; disable filesystem sandbox enforcement (on by default: .sandbox in the project, else ~/.config/3code/sandbox)
 ; patient_retry = off ; disable patient retry of 429/5xx/network errors (on by default: ~36h hold so a long-running session rides out a usage limit or network dropout without dropping to the prompt)
 ; max_timeout = 1800 ; raise the bash timeout ceiling in seconds (default 600; model-requested timeouts are clamped to it; THREECODE_MAX_TIMEOUT env var wins per run)
