@@ -11,6 +11,7 @@ when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api,
   display, fatprompt, streamexec, toolstream, transcript
+import tabtitle
 import engine as termengine
 
 const
@@ -497,6 +498,7 @@ proc onTurnInterrupted*() =
   stopTurnInputForFinalRender()
   stopSpinner(clearLiveFooter = false)
   discard stopBarTick()
+  tabtitle.settleTabTitle(false)
   commitTurnEndNotice(errLnS(InterruptedByUserMsg))
   emitTestFrameEvent()
   clearInterrupted()
@@ -852,7 +854,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # rewriting the prompt.
       saveSession(session, messages)
       commitTurnEndNotice(errLnS(e.msg))
-      endTurnAfterTranscriptAppend()
+      endTurnAfterTranscriptAppend(failed = true)
       turnEnded = true
       return false
     session.usage.promptTokens += usage.promptTokens
@@ -920,7 +922,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         commitTurnEndNotice(
           errLnS("reasoning loop - giving up after " & $MaxLoopSteers &
             " re-prompts"))
-        endTurnAfterTranscriptAppend()
+        endTurnAfterTranscriptAppend(failed = true)
         turnEnded = true
         break
       let budgetStarved =
@@ -1019,7 +1021,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       commitTurnEndNotice(
         errLnS("empty reply - giving up after " & $MaxEmptyRetries &
           " retries"))
-      endTurnAfterTranscriptAppend()
+      endTurnAfterTranscriptAppend(failed = true)
       turnEnded = true
       break
     if dmailEnabled:
@@ -1327,7 +1329,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if flailAbort:
         saveSession(session, messages)
         commitTurnEndNotice(formatItem(agentPromptItem(flailAbortNote)))
-        endTurnAfterTranscriptAppend()
+        endTurnAfterTranscriptAppend(failed = true)
         turnEnded = true
         return false
       saveSession(session, messages)

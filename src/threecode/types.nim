@@ -27,6 +27,11 @@ var notifyEnabled*: bool = true
   ## When true, a native desktop notification fires when a turn ends.
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
   ## `[settings]`; an explicit `off` opts out.
+var tabTitleEnabled*: bool = true
+  ## When true, the terminal tab title carries the `3` brand plus a live
+  ## spinner glyph while a turn runs (OSC 0). Default on. Toggled at
+  ## runtime via `:tab-title on/off`, persisted in `[settings]`; an
+  ## explicit `off` opts out.
 var sandboxEnabled*: bool = true
   ## When true, every tool call is confined to the filesystem sandbox
   ## (the single active policy: repo `.sandbox`, else

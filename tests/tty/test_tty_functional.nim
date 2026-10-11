@@ -739,6 +739,28 @@ suite "terminal visual contract":
     tty.expectFinalFrameArtifact(
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
+    # Tab title (issue #50): the OSC 0 sequence in the raw capture. The
+    # idle brand title goes up at startup, every streamed chunk repaints
+    # the spinner and with it a working title, and the turn settles on
+    # the checkmark last (stopSpinner joins the GUI thread before
+    # endTurn settles, so no working title can follow it). Each working
+    # glyph must be one the footer actually showed: title and bar are
+    # painted from the same glyph in the same GUI tick.
+    block:
+      let titles = tty.raw.findAll(re"\x1b\]0;[^\x07]*\x07")
+      doAssert titles.len >= 3, "tab title never animated: " & $titles
+      doAssert titles[0] == "\x1b]0;3 run\x07",
+        "idle tab title wrong: " & titles[0]
+      doAssert titles[^1] == "\x1b]0;3 ✓ run\x07",
+        "settled tab title wrong: " & titles[^1]
+      var working = 0
+      let framesTxt = tty.framesText()
+      for t in titles:
+        if t.startsWith("\x1b]0;3 ") and t != titles[0] and t != titles[^1]:
+          inc working
+          check t[6 ..< ^5] in framesTxt
+      doAssert working >= 1,
+        "tab title: no working frame between idle and settle: " & $titles
 
   test "initial prompt with -i stays in the interactive REPL":
     # `-i` runs an initial prompt then drops into the REPL, just like a

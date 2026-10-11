@@ -93,6 +93,11 @@ suite "config validation: schema (in-process)":
     let m = validateConfig(P, entries)
     check "bad value 'sometimes' for 'sandbox'" in m
 
+  test "bad boolean value for tab-title is reported":
+    let entries = @[("settings", "tab-title", "maybe", 3)]
+    let m = validateConfig(P, entries)
+    check "bad value 'maybe' for 'tab-title'" in m
+
   test "bad boolean value for patient_retry is reported":
     let entries = @[("settings", "patient_retry", "maybe", 3)]
     let m = validateConfig(P, entries)

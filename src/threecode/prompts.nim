@@ -3615,6 +3615,8 @@ commands:
   :streaming on|off   toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :notify             show notify mode (on = desktop notification when a turn ends)
   :notify on|off      toggle turn-end desktop notification
+  :tab-title          show tab-title mode (on = 3 brand + spinner glyph in the tab)
+  :tab-title on|off   toggle the terminal tab title
   :retry              show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :private            show private mode (off by default; on = allow-private only)

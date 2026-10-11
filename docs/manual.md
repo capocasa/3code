@@ -961,6 +961,11 @@ switched to a browser while a long turn grinds. It is on by default where
 supported; toggle it with `:notify on|off` or the `notify` setting. On
 Termux there is no notification service, so the setting does nothing.
 
+The terminal tab title also reports state: a `3` brand plus a spinner
+glyph while a turn runs, then a checkmark (or an ✗ when you cancelled)
+when it ends. The project directory rides along for wide tabs. Toggle it
+with `:tab-title on|off` or the `tab-title` setting.
+
 Prebuilt binaries self-update in the background: a detached worker checks
 GitHub releases at most every four hours, downloads the matching tarball,
 and atomically swaps the binary for the next launch. One dim line on the

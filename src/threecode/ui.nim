@@ -11,12 +11,12 @@
 
 import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
-  fatprompt, streamexec, sandbox, actions, engine as termengine, auth_xai,
-  auth_anthropic, auth_openai, auth_google, oauth
+  fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
+  auth_xai, auth_anthropic, auth_openai, auth_google, oauth
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
-                      ":reasoning", ":streaming", ":notify", ":prompt", ":show",
-                      ":log", ":sessions", ":session", ":summarize", ":version",
+                      ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
+                      ":show", ":log", ":sessions", ":session", ":summarize", ":version",
                       ":sandbox", ":sb", ":retry", ":private",
                       ":q", ":quit", ":exit"]
 
@@ -70,7 +70,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
-  of ":streaming", ":notify", ":retry", ":private":
+  of ":streaming", ":notify", ":retry", ":private", ":tab-title":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
   of ":provider":
@@ -192,6 +192,10 @@ proc completionFor*(line: string): seq[string] =
     result.add "off"
     return
   if words[0] == ":notify" and words.len == 2:
+    result.add "on"
+    result.add "off"
+    return
+  if words[0] == ":tab-title" and words.len == 2:
     result.add "on"
     result.add "off"
     return
@@ -1287,6 +1291,37 @@ proc cmdNotify(arg: string): string =
   else:
     return errLnS("usage: :notify [on|off]")
 
+proc cmdTabTitleList(): string =
+  let mark = if tabTitleEnabled: "on" else: "off"
+  hintLnS("tab title: " & mark &
+    "  (on = brand + spinner glyph in the terminal tab, off = leave it alone)")
+
+proc cmdTabTitleSelect(target: string): string =
+  case target.toLowerAscii
+  of "on":
+    tabTitleEnabled = true
+    # Commands are idle-only, so the idle title can go up right away;
+    # otherwise the toggle looks dead until the next turn ends.
+    tabtitle.paintTabTitleIdle()
+  of "off":
+    tabTitleEnabled = false
+  else:
+    return errLnS(&"unknown value: {target} (choose on or off)")
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  cmdTabTitleList()
+
+proc cmdTabTitle(arg: string): string =
+  let parts = arg.splitWhitespace()
+  case parts.len
+  of 0:
+    return cmdTabTitleList()
+  of 1:
+    if parts[0] == "list":
+      return cmdTabTitleList()
+    return cmdTabTitleSelect(parts[0])
+  else:
+    return errLnS("usage: :tab-title [on|off]")
+
 proc cmdRetryList(): string =
   let mark = if patientRetryEnabled: "on" else: "off"
   hintLnS("patient retry: " & mark &
@@ -1779,6 +1814,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       body.add cmdStreaming(arg)
     of ":notify":
       body.add cmdNotify(arg)
+    of ":tab-title":
+      body.add cmdTabTitle(arg)
     of ":retry":
       body.add cmdRetry(arg)
     of ":private":

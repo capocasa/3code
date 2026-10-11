@@ -27,6 +27,7 @@ when defined(windows):
   proc conioKbhit(): cint {.header: "<conio.h>", importc: "_kbhit".}
 import ../types, ../util, ../compact, ../display, ../minline,
   ../signals, ../terminal as termui, ../session
+import ../tabtitle
 import ../engine as termengine
 import rendering
 from ../toolstream import StreamMaxLines, initStreamingView, addLine,
@@ -977,6 +978,9 @@ proc guiLoop(unused: string) {.thread.} =
           termengine.renderFooter(frame,
                                   inputThreadRunning, inputEditor,
                                   currentTermW())
+        # Same tick, same glyph: the tab title mirrors the footer's spinner
+        # so a backgrounded or cramped tab still reads as working.
+        tabtitle.paintTabTitleWorking(glyph)
         spinnerFramePainted.store(true, moRelaxed)
       of amBarTick:
         let secs = (epochTime() - barTickStart).int
@@ -1015,6 +1019,10 @@ proc guiLoop(unused: string) {.thread.} =
         else:
           termengine.renderFooter(frame, inputThreadRunning, inputEditor,
                                   currentTermW())
+        # A running tool is still work: keep the tab spinning (the currency
+        # ticker lives only on the viewport row; braille reads better in a
+        # tab).
+        tabtitle.paintTabTitleWorking(frames[i mod frames.len])
         paintedViewport = true
       of amIdle:
         discard  # nothing to animate; the controller paints idle frames
@@ -2940,12 +2948,15 @@ proc endTurn*(repaintPrompt = true) =
       emitFatPromptEvent clearBarEvent()
   if repaintPrompt:
     emitFatPromptEvent setPromptModeEvent(pmIdle)
+  tabtitle.settleTabTitle(true)
 
-proc endTurnAfterTranscriptAppend*() =
+proc endTurnAfterTranscriptAppend*(failed = false) =
   ## Complete a turn after the controller has already appended the final
   ## assistant transcript item and repainted the live footer. Do not walk
   ## upward or repaint prompt chrome here; this proc only finalizes terminal
   ## mode/state so no transient prompt-only or duplicate-token frame appears.
+  ## `failed = true` marks a turn that ended on an error notice, so the tab
+  ## title settles on ✗ instead of ✓.
   discard stopBarTick()
   stopSpinner()
   # The turn is over, so the input thread must route keys as idle again.
@@ -2962,6 +2973,7 @@ proc endTurnAfterTranscriptAppend*() =
   if label.len > 0:
     emitFatPromptEvent setBarEvent(label, hasGap = true)
   emitFatPromptEvent setPromptModeEvent(pmIdle)
+  tabtitle.settleTabTitle(not failed)
 
 proc emitUserSubmit*(line: string) =
   ## Append the submitted prompt as transcript and clear the volatile editor

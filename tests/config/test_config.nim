@@ -149,6 +149,38 @@ suite "config: notify toggle":
     let raw2 = readFile(tmp)
     check raw2.find("notify") < 0  # on is the default — clean config
 
+suite "config: tab-title toggle":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-tab-title.ini"
+    tabTitleEnabled = true  # reset to default between tests
+
+  teardown:
+    removeFile(tmp)
+    tabTitleEnabled = true
+
+  test "tabTitleEnabled defaults on":
+    check tabTitleEnabled == true
+
+  test "tabTitleEnabled stays on when [settings] omits the key":
+    writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
+    discard parseConfigFile(tmp)
+    check tabTitleEnabled == true
+
+  test "parseConfigFile sets tab-title off when [settings] tab-title = off":
+    writeFile(tmp, "[settings]\ntab-title = \"off\"\n")
+    discard parseConfigFile(tmp)
+    check tabTitleEnabled == false
+
+  test "writeConfigFile persists tab-title off and not when on":
+    tabTitleEnabled = false
+    writeConfigFile(tmp, "p.m", @[])
+    check readFile(tmp).find("tab-title = \"off\"") >= 0
+    tabTitleEnabled = true
+    writeConfigFile(tmp, "p.m", @[])
+    check readFile(tmp).find("tab-title") < 0  # on is the default
+
 suite "config: sandbox toggle":
   var tmp = ""
 

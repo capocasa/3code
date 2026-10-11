@@ -338,7 +338,7 @@ const
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
                   "browserfetch",
                   "tone", "mode", "bash_path", "bash-path",
-                  "bash", "auto-update"]
+                  "bash", "auto-update", "tab-title"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -401,7 +401,7 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
     of "settings":
       if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled",
                       "patient_retry", "patient-retry",
-          "sandbox_wall_warn", "auto-update"] and
+          "sandbox_wall_warn", "auto-update", "tab-title"] and
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
@@ -535,6 +535,13 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           case v.toLowerAscii
           of "on", "true", "yes", "1": notifyEnabled = true
           of "off", "false", "no", "0": notifyEnabled = false
+          else: discard
+        of "tab-title":
+          # Same boolean dialect as `notify`. Default on; an explicit `off`
+          # keeps 3code off the terminal tab title entirely.
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": tabTitleEnabled = true
+          of "off", "false", "no", "0": tabTitleEnabled = false
           else: discard
         of "streaming":
           # Same boolean dialect as `notify`. Default is on (set in types.nim);
@@ -711,10 +718,10 @@ proc mergeForeignEdits(path: string; current: var string,
   # right before the buffer serializes it.
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
        savedWallWarn, savedMaxTimeout, savedColorMode, savedBash,
-       savedBashSrc) =
+       savedBashSrc, savedTabTitle) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
      sandboxWallWarn, maxTimeoutSetting, colorModePref, bashPathOverride,
-     bashSourcePref)
+     bashSourcePref, tabTitleEnabled)
   let savedParams = activeParams
   let (diskCurrent, diskProviders, _, _, _, _) =
     try: parseConfigFile(path)
@@ -732,6 +739,7 @@ proc mergeForeignEdits(path: string; current: var string,
   colorModePref = savedColorMode
   bashPathOverride = savedBash
   bashSourcePref = savedBashSrc
+  tabTitleEnabled = savedTabTitle
   activeParams = savedParams
   # Same baseline-diff for the `current` line: an instance that never
   # switched in-session still holds the startup value, so a different
@@ -820,6 +828,8 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "streaming = \"off\"\n"
   if not notifyEnabled:
     buf.add "notify = \"off\"\n"
+  if not tabTitleEnabled:
+    buf.add "tab-title = \"off\"\n"
   if not sandboxEnabled:
     buf.add "sandbox = \"off\"\n"
   if not patientRetryEnabled:
