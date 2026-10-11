@@ -66,19 +66,29 @@ jobs:
           nimble install -y --depsOnly
 
       - name: Compute build flags
+        # POSIX sh: runners and containers differ in the default step
+        # shell; [[ ]] fails the condition silently under `sh -e` and
+        # releases build without -d:autoUpdate (issue #49).
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            # releases: release build + autoupdate
-            echo "BUILD_FLAGS=-d:release -d:autoUpdate" >> "$GITHUB_ENV"
-          else
-            # branch builds exist for testing: same fast debug config as
-            # the local Windows repro loop (AGENTS.md), so what CI ships
-            # for probing is what was probed locally
-            echo "BUILD_FLAGS=--opt:none --debugger:native" >> "$GITHUB_ENV"
-          fi
+          case "${GITHUB_REF}" in
+            refs/tags/*)
+              # releases: release build + autoupdate
+              echo "BUILD_FLAGS=-d:release -d:autoUpdate" >> "$GITHUB_ENV" ;;
+            *)
+              # branch builds exist for testing: same fast debug config as
+              # the local Windows repro loop (AGENTS.md), so what CI ships
+              # for probing is what was probed locally
+              echo "BUILD_FLAGS=--opt:none --debugger:native" >> "$GITHUB_ENV" ;;
+          esac
 
       - name: Build
-        run: nimble build -y ${{ env.BUILD_FLAGS }}
+        run: |
+          # Both Compute branches set BUILD_FLAGS; empty here means the
+          # Compute step silently failed and the release would ship
+          # without auto-update (issue #49).
+          [ -n "${BUILD_FLAGS:-}" ] || {
+            echo "BUILD_FLAGS empty" >&2; exit 1; }
+          nimble build -y ${{ env.BUILD_FLAGS }}
 
       - name: Generate nimble.paths for direct nim invocations
         # nim disables its pkgs2 package scan whenever a nimble.lock is
@@ -120,28 +130,6 @@ jobs:
           Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem .
           Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem build/
           echo "SSL_CERT_FILE=$PWD/cacert.pem" >> "$GITHUB_ENV"
-
-      - name: Build stub binary for tty tests
-        # The tty tests spawn the 3code stub binary (built -d:providerStub)
-        # as their child. Build it once here so every test reuses the same
-        # binary instead of each test triggering a full rebuild.
-        run: |
-          nim c -d:ssl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim
-
-      - name: Run tests
-        # Run the tty category via tests/tools/ci_tests.sh: log file instead of a
-        # pipe so a hung test cannot mask the rest, watchdog bounds the run
-        # and names the hung binary, exit code propagated. Tests that hang
-        # or fail under ConPTY are disabled with `disabled: "win"` in their
-        # discard blocks (see test_tty_functional, test_spinner_race_stress,
-        # test_429_typing_during_backoff, test_interrupt_prestream_freeze,
-        # test_interrupt_network_connect, test_resize_ticker,
-        # test_broken_stdout_exit). The remaining tests pass on Windows.
-        run: |
-          # Smoke-check: the built 3code binary loads its DLLs standalone.
-          ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
-          sh tests/tools/ci_tests.sh 900 tty
-        timeout-minutes: 20
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
         # Stock Windows ships no OpenSSL. Nim's std/net dlopens libssl /
@@ -205,6 +193,31 @@ jobs:
           pack
           h2=$(sha256sum 3code-windows-amd64.zip | cut -d' ' -f1)
           [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
+
+      - name: Build stub binary for tty tests
+        # The tty tests spawn the 3code stub binary (built -d:providerStub)
+        # as their child. Build it once here so every test reuses the same
+        # binary instead of each test triggering a full rebuild.
+        run: |
+          nim c -d:ssl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim
+
+      - name: Run tests
+        # Runs AFTER Package on purpose: ci_tests.sh rebuilds the workspace
+        # 3code.exe without BUILD_FLAGS, and Package used to copy that
+        # rebuild, shipping releases with auto-update dead (issue #49).
+        # Run the tty category via tests/tools/ci_tests.sh: log file instead of a
+        # pipe so a hung test cannot mask the rest, watchdog bounds the run
+        # and names the hung binary, exit code propagated. Tests that hang
+        # or fail under ConPTY are disabled with `disabled: "win"` in their
+        # discard blocks (see test_tty_functional, test_spinner_race_stress,
+        # test_429_typing_during_backoff, test_interrupt_prestream_freeze,
+        # test_interrupt_network_connect, test_resize_ticker,
+        # test_broken_stdout_exit). The remaining tests pass on Windows.
+        run: |
+          # Smoke-check: the built 3code binary loads its DLLs standalone.
+          ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
+          sh tests/tools/ci_tests.sh 900 tty
+        timeout-minutes: 20
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4

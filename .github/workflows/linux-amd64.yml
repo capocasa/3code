@@ -71,14 +71,24 @@ jobs:
           nimble install -y --depsOnly
 
       - name: Compute build flags
+        # POSIX sh: this job runs in a container whose default step shell
+        # is `sh -e`, where [[ ]] is a not-found command that fails the if
+        # condition silently. That shipped releases with BUILD_FLAGS empty
+        # and auto-update dead in the binary (issue #49).
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            # autoupdate on releases only
-            echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
-          fi
+          case "${GITHUB_REF}" in
+            refs/tags/*)
+              # autoupdate on releases only
+              echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV" ;;
+          esac
 
       - name: Build
-        run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
+        run: |
+          case "${GITHUB_REF}" in
+            refs/tags/*) [ -n "${BUILD_FLAGS:-}" ] || {
+              echo "BUILD_FLAGS empty on a tag build" >&2; exit 1; } ;;
+          esac
+          nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
       - name: Reproducibility check (rebuild from scratch)
         # A clean recompile+relink of the same tree must be byte-identical.

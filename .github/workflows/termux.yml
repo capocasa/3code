@@ -62,14 +62,22 @@ jobs:
           echo "NDK_CLANG=$PWD/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" >> "$GITHUB_ENV"
 
       - name: Compute build flags
+        # POSIX sh: containers and future runner moves change the default
+        # step shell; [[ ]] fails the condition silently under `sh -e` and
+        # releases build without -d:autoUpdate (issue #49).
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            # autoupdate on releases only, like the other platform builds
-            echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
-          fi
+          case "${GITHUB_REF}" in
+            refs/tags/*)
+              # autoupdate on releases only, like the other platform builds
+              echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV" ;;
+          esac
 
       - name: Build (cross, --os:android --cpu:arm64)
         run: |
+          case "${GITHUB_REF}" in
+            refs/tags/*) [ -n "${BUILD_FLAGS:-}" ] || {
+              echo "BUILD_FLAGS empty on a tag build" >&2; exit 1; } ;;
+          esac
           nim c -d:release --os:android --cpu:arm64 -d:ssl -d:testPlainHttp ${{ env.BUILD_FLAGS }} \
             --clang.exe:"$NDK_CLANG" --clang.linkerexe:"$NDK_CLANG" \
             -o:3code-android src/threecode.nim
