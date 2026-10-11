@@ -7,7 +7,7 @@
 [settings]
 current = "ollama.qwen3-coder:480b"
 ; current = "openrouter.openai/gpt-oss-120b"
-; auto_update = "true"    ; on for prebuilt binaries, off for source builds
+; auto-update = "true"    ; on for prebuilt binaries, off for source builds
 ; [search] configures the `web_search` tool. Engine is one of:
 ;   exa       (default) keyless MCP endpoint; exa-key for a paid tier
 ;   parallel  keyless MCP endpoint

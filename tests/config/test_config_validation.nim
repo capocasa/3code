@@ -122,13 +122,14 @@ suite "config validation: schema (in-process)":
     let m = validateConfig(P, entries)
     check m == P & ":3: unknown section [foo]"
 
-  test "auto_update is a permitted settings key":
-    let entries = @[("settings", "auto_update", "true", 3)]
-    check validateConfig(P, entries) == ""
-
   test "auto-update is a permitted settings key":
     let entries = @[("settings", "auto-update", "true", 3)]
     check validateConfig(P, entries) == ""
+
+  test "auto_update is rejected as an unknown key":
+    let entries = @[("settings", "auto_update", "true", 3)]
+    check validateConfig(P, entries) ==
+        P & ":3: unknown key 'auto_update' in [settings]"
 
   test "sandbox_enabled is a permitted settings key":
     let entries = @[("settings", "sandbox_enabled", "off", 3)]

@@ -338,7 +338,7 @@ const
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
                   "browserfetch",
                   "tone", "mode", "bash_path", "bash-path",
-                  "bash", "auto-update", "auto_update"]
+                  "bash", "auto-update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -401,7 +401,7 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
     of "settings":
       if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled",
                       "patient_retry", "patient-retry",
-          "sandbox_wall_warn", "auto-update", "auto_update"] and
+          "sandbox_wall_warn", "auto-update"] and
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
