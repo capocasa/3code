@@ -139,7 +139,7 @@ Keys under `[settings]`:
 | `bash` | `auto` or full path (default auto) | any OS: a full path overrides all detection; `auto` keeps the normal order |
 | `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted, and `THREECODE_MAX_TIMEOUT` (below) wins for one run |
 | `browserfetch` | `on`/`off` (default off) | when a plain `web_fetch` returns a JS shell (almost no text survives tag stripping), redo the fetch in a shared headless Chrome (one browser per machine on 127.0.0.1:9223, one tab per fetch) and return the rendered text |
-| `auto_update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit |
+| `auto-update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit. `auto_update` spelling accepted |
 
 ### provider
 

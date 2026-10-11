@@ -126,6 +126,10 @@ suite "config validation: schema (in-process)":
     let entries = @[("settings", "auto_update", "true", 3)]
     check validateConfig(P, entries) == ""
 
+  test "auto-update is a permitted settings key":
+    let entries = @[("settings", "auto-update", "true", 3)]
+    check validateConfig(P, entries) == ""
+
   test "sandbox_enabled is a permitted settings key":
     let entries = @[("settings", "sandbox_enabled", "off", 3)]
     check validateConfig(P, entries) == ""

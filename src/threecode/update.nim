@@ -10,9 +10,9 @@
 ## The build-time default is **off** — source-installed binaries
 ## (`nimble install`) shouldn't quietly self-replace what the user just
 ## built. CI passes `-d:autoUpdate` for prebuilt release binaries, which
-## flips the default on. Either way, an explicit `auto_update =
+## flips the default on. Either way, an explicit `auto-update =
 ## "true"`/`"false"` under `[settings]` in `~/.config/3code/config`
-## wins.
+## wins (`auto_update` spelling accepted).
 
 import std/[httpclient, json, os, parsecfg, parseutils, strutils, times]
 import config, prompts, util
@@ -46,11 +46,16 @@ proc autoUpdateEnabled*(): bool =
   ## build-time default. Read `parsecfg` directly so the update path
   ## doesn't drag in the rest of the config machinery. `configPath()` is
   ## as far as the shared state goes, so `-c/--config` applies here too.
+  ## `auto-update` is the documented spelling; the underscore form is
+  ## accepted like every other multi-word settings key. Hyphen wins when
+  ## both are present.
   let path = configPath()
   if fileExists(path):
     try:
       let cfg = loadConfig(path)
-      let v = cfg.getSectionValue("settings", "auto_update").strip.toLowerAscii
+      var v = cfg.getSectionValue("settings", "auto-update").strip.toLowerAscii
+      if v.len == 0:
+        v = cfg.getSectionValue("settings", "auto_update").strip.toLowerAscii
       if v in ["true", "yes", "on", "1"]: return true
       if v in ["false", "no", "off", "0"]: return false
     except CatchableError: discard

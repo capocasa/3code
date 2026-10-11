@@ -104,6 +104,21 @@ suite "update: config gate":
                 "[settings]\nauto_update = \"" & v & "\"\n")
       check not autoUpdateEnabled()
 
+  test "hyphen spelling true":
+    writeFile(tmpHome / ".config" / "3code" / "config",
+              "[settings]\nauto-update = \"true\"\n")
+    check autoUpdateEnabled()
+
+  test "hyphen spelling false":
+    writeFile(tmpHome / ".config" / "3code" / "config",
+              "[settings]\nauto-update = \"false\"\n")
+    check not autoUpdateEnabled()
+
+  test "hyphen wins when both spellings present":
+    writeFile(tmpHome / ".config" / "3code" / "config",
+              "[settings]\nauto_update = \"true\"\nauto-update = \"false\"\n")
+    check not autoUpdateEnabled()
+
 when defined(live):
   suite "update: live e2e (hits real GitHub)":
     test "fetches latest release, swaps target binary, target runs":

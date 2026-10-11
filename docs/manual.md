@@ -966,7 +966,7 @@ GitHub releases at most every four hours, downloads the matching tarball,
 and atomically swaps the binary for the next launch. One dim line on the
 first launch after a swap is the whole visible footprint. Source builds do
 not self-update by default (what you built should not quietly replace
-itself); the `auto_update` setting overrides the default either way. Both
+itself); the `auto-update` setting overrides the default either way (`auto_update` spelling accepted). Both
 settings are covered in [settings in the reference](reference.html#settings).
 
 ## Context management
