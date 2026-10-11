@@ -109,6 +109,8 @@ The forum is open at [community.3code.capocasa.dev](https://community.3code.capo
 
 The spirit of the place, straight from the welcome thread: create software in the best possible way, with common sense and without fear or doubt. Tokens are what it takes to write code now, so use as few as you can. The docs are an ever growing list of how to get things done, and tips land on the forum now and then. Two rules only: stay on topic (making good use of 3code, and its development) and be nice. Self promotion is fine, show us what you made.
 
+If you build something out of 3code, a fork, an alternate frontend, a repackaged install, give it a name of its own. Descriptive use is welcome ("a TUI for 3code", "a third-party build"), and a line saying it's unofficial saves everyone wondering whose issue tracker a bug belongs in. Anything shipped in this repo or under capocasa is official and carries the name.
+
 ## Data to back it up
 
 Testing token performance properly is really hard and expensive. I'm running preliminary tests that involve a 10-task subset of SWE-bench. While this is far from perfect, it does show an interesting ballpark comparison of different coding agents. 3code is doing pretty good!
