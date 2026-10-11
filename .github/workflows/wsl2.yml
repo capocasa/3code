@@ -1,0 +1,131 @@
+name: WSL2 sandbox probe
+
+# Answers "does the filesystem sandbox hold in WSL2" (forum report:
+# 3code in WSL2 editing files with nothing stopping it) on the real
+# Microsoft WSL2 kernel, not a stock Linux one. Not wired into push:
+# an environment probe, not a commit gate. Manual trigger only.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Stock runner, not linux-amd64's frozen container: no artifact
+    # byte-reproducibility needed here, just a glibc linux binary of
+    # the branch under test.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.2.12
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
+
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+
+      - name: Build
+        run: nimble build -y -d:release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: 3code
+          retention-days: 7
+          if-no-files-found: error
+
+  wsl2:
+    needs: build
+    # windows-2025 is the first hosted image with WSL2 pre-enabled
+    # (actions/runner-images#11242), but no distro ships on it, so the
+    # job imports one and unregisters it at the end: a fresh WSL2 per
+    # run, nothing cached.
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        # git-bash, like windows.yml: pwsh swallows native-exe exit
+        # codes, and every probe here is an exit-code assertion.
+        shell: bash
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: bin
+
+      - name: Import one-off WSL2 distro
+        env:
+          # Point-release URL is immutable; sha256 pinned like
+          # mingw64.7z in windows.yml so drift is a conscious bump.
+          # ubuntu-base is the minimal glibc rootfs (30MB). The binary
+          # needs no libssl in it: Nim dlopens openssl only when TLS
+          # first starts, and these probes never do.
+          ROOTFS_SHA256: 6bc2cde3930ad088b3bb46fa45279e96d25bc3810f209850ecbe4722711874f9
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/rootfs.tar.gz" \
+            https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.3-base-amd64.tar.gz
+          echo "${ROOTFS_SHA256}  $RUNNER_TEMP/rootfs.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/wsl3code"
+          wsl.exe --version | tr -d '\0'
+          wsl.exe --import 3code-probe "$RUNNER_TEMP/wsl3code" "$RUNNER_TEMP/rootfs.tar.gz" --version 2
+
+      - name: Kernel and LSM evidence
+        # What the forum reply needs beside the pass/fail: the WSL2
+        # kernel version and whether landlock is on the LSM list.
+        # securityfs is often not mounted in WSL, so a miss here is
+        # evidence, not a failure; the probes below are the assertion.
+        run: |
+          wsl.exe -d 3code-probe -e sh -c 'uname -a; cat /proc/version'
+          wsl.exe -d 3code-probe -e sh -c 'cat /sys/kernel/security/lsm 2>/dev/null || echo "securityfs not mounted (not a failure)"'
+
+      - name: Stage binary and policy
+        run: |
+          export MSYS_NO_PATHCONV=1
+          # The windows artifact download drops the exec bit; tar-pipe
+          # the binary into the distro and chmod it back.
+          tar -C bin -cf - 3code | wsl.exe -d 3code-probe -e tar -xf - -C /usr/local/bin
+          wsl.exe -d 3code-probe -e sh -c 'chmod +x /usr/local/bin/3code; 3code --version; mkdir -p /root/proj'
+          # The shipped default-policy shape: project and /tmp
+          # writable, everything else denied.
+          printf 'deny /\nallow ./\nallow /tmp\n' | wsl.exe -d 3code-probe -e sh -c 'cat > /root/proj/.sandbox'
+
+      - name: Probe sandbox enforcement
+        # Same matrix shape as the osx.yml verify step, filesystem
+        # only: the question is whether deny / holds on the WSL2
+        # kernel, not whether the wall proxy runs there.
+        run: |
+          set -e
+          export MSYS_NO_PATHCONV=1
+          fail() { echo "WSL2 SANDBOX FAIL: $1" >&2; exit 1; }
+          w() { wsl.exe -d 3code-probe -e "$@"; }
+
+          # 1. project write allowed
+          w sh -c 'cd /root/proj && 3code sandbox --policy .sandbox restrict -- sh -c "echo hi > ok.txt"' \
+            || fail "write to the project root was denied"
+          [ "$(w sh -c 'cat /root/proj/ok.txt')" = hi ] || fail "project write produced wrong content"
+
+          # 2. home write denied (deny / covers /root; imported distros
+          #    run as root, which does not lift landlock restrictions)
+          if w sh -c 'cd /root/proj && 3code sandbox --policy .sandbox restrict -- sh -c "echo bad > /root/bad.txt"' 2>/dev/null; then
+            fail "write to /root was allowed"
+          fi
+          w sh -c 'test ! -e /root/bad.txt' || fail "/root/bad.txt exists despite the deny"
+
+          # 3. system dir write denied
+          if w sh -c 'cd /root/proj && 3code sandbox --policy .sandbox restrict -- sh -c "echo bad > /var/bad.txt"' 2>/dev/null; then
+            fail "write to /var was allowed"
+          fi
+
+          # 4. /tmp write allowed
+          w sh -c 'cd /root/proj && 3code sandbox --policy .sandbox restrict -- sh -c "echo t > /tmp/t.txt"' \
+            || fail "write to /tmp was denied"
+
+          echo "WSL2 SANDBOX PROBES PASS"
+
+      - name: Unregister the one-off distro
+        if: always()
+        run: wsl.exe --unregister 3code-probe || true
