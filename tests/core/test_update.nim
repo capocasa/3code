@@ -84,24 +84,24 @@ suite "update: config gate":
 
   test "config true wins":
     writeFile(tmpHome / ".config" / "3code" / "config",
-              "[settings]\nauto_update = \"true\"\n")
+              "[settings]\nauto-update = \"true\"\n")
     check autoUpdateEnabled()
 
   test "config false wins":
     writeFile(tmpHome / ".config" / "3code" / "config",
-              "[settings]\nauto_update = \"false\"\n")
+              "[settings]\nauto-update = \"false\"\n")
     check not autoUpdateEnabled()
 
   test "alt truthy spellings":
     for v in ["yes", "on", "1"]:
       writeFile(tmpHome / ".config" / "3code" / "config",
-                "[settings]\nauto_update = \"" & v & "\"\n")
+                "[settings]\nauto-update = \"" & v & "\"\n")
       check autoUpdateEnabled()
 
   test "alt falsy spellings":
     for v in ["no", "off", "0"]:
       writeFile(tmpHome / ".config" / "3code" / "config",
-                "[settings]\nauto_update = \"" & v & "\"\n")
+                "[settings]\nauto-update = \"" & v & "\"\n")
       check not autoUpdateEnabled()
 
 when defined(live):

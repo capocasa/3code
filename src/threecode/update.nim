@@ -10,7 +10,7 @@
 ## The build-time default is **off** — source-installed binaries
 ## (`nimble install`) shouldn't quietly self-replace what the user just
 ## built. CI passes `-d:autoUpdate` for prebuilt release binaries, which
-## flips the default on. Either way, an explicit `auto_update =
+## flips the default on. Either way, an explicit `auto-update =
 ## "true"`/`"false"` under `[settings]` in `~/.config/3code/config`
 ## wins.
 
@@ -46,11 +46,12 @@ proc autoUpdateEnabled*(): bool =
   ## build-time default. Read `parsecfg` directly so the update path
   ## doesn't drag in the rest of the config machinery. `configPath()` is
   ## as far as the shared state goes, so `-c/--config` applies here too.
+  ## `auto-update` is the setting's only spelling.
   let path = configPath()
   if fileExists(path):
     try:
       let cfg = loadConfig(path)
-      let v = cfg.getSectionValue("settings", "auto_update").strip.toLowerAscii
+      let v = cfg.getSectionValue("settings", "auto-update").strip.toLowerAscii
       if v in ["true", "yes", "on", "1"]: return true
       if v in ["false", "no", "off", "0"]: return false
     except CatchableError: discard
