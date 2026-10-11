@@ -464,6 +464,11 @@ proc resolveRawPath(p: string): string =
   var dir = result
   var tail = ""
   while dir.len > 0:
+    when defined(windows):
+      # A bare drive prefix is the cwd ON that drive, not an ancestor:
+      # resolving it would map a nonexistent C:\foo onto the project
+      # dir and let the gate treat it as ./foo.
+      if dir.len in 2..3 and dir[1] == ':': break
     try:
       let r = expandFilename(dir)
       if r.len > 0:
