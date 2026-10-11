@@ -123,8 +123,8 @@ suite "single active policy file":
       setCurrentDir(oldCwd)
     # The repo file starts from the user's baseline, then the new rule.
     let text = readFile(repoFile)
-    check text.contains("allow " & opt)
-    check text.contains("readonly " & varDir)
+    check text.contains("allow " & opt.replace(DirSep, '/'))
+    check text.contains("readonly " & varDir.replace(DirSep, '/'))
     # The user file is untouched by the repo edit.
     check readFile(userFile) == "deny /\nallow " & opt & "\n"
 
@@ -153,7 +153,7 @@ suite "single active policy file":
     check text.contains("allow ./src/foo.nim\n")
     check text.contains("allow ./build/out\n")
     check text.contains("deny ~/dl\n")
-    check text.contains("readonly " & varDir & "\n")
+    check text.contains("readonly " & varDir.replace(DirSep, '/') & "\n")
     check projDir notin text.splitLines[^4..^1].join("\n")
 
   test "renderSandbox contracts project and home paths":
@@ -162,7 +162,7 @@ suite "single active policy file":
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
     writeFile(repoPolicyPath(projDir),
-      "allow\ndeny ./.git\nreadonly " & getHomeDir() / "x" & "\n" &
+      "deny /\nallow\ndeny ./.git\nreadonly " & getHomeDir() / "x" & "\n" &
       "allow " & varDir & "\n")
     let oldCwd = getCurrentDir()
     setCurrentDir(projDir)
@@ -171,7 +171,16 @@ suite "single active policy file":
       check s.contains("./.git")
       check not s.contains(projDir)
       check s.contains("~/x")
-      check s.contains(varDir)
+      check s.contains(varDir.replace(DirSep, '/'))
+      # The project-dir rule renders with its explicit `./` target: the
+      # bare verb parses to the same rule but reads in the dump as if
+      # the directory the session started in fell out of the policy
+      # (Windows report, issue 21). The root rule keeps the portable
+      # `/` spelling it was written with, on every OS.
+      check "allow     ./\n" in s
+      check "deny      /\n" in s
+      when defined(windows):
+        check "deny \\\n" notin s
     finally:
       setCurrentDir(oldCwd)
 
