@@ -33,7 +33,10 @@ jobs:
 
           for workflow in linux-amd64.yml linux-arm64.yml osx.yml windows.yml termux.yml; do
             echo "--- $workflow ---"
-            for i in $(seq 1 90); do
+            # 180 x 20s = 60min: linux-amd64 legit takes ~33min (build +
+            # 2400s testament budget); the old 30min cap aborted the release
+            # while the tag job was still green-in-progress (Oct 6, 0.8.2).
+            for i in $(seq 1 180); do
               # Fail fast: if this workflow already failed for this tag+commit,
               # stop immediately instead of waiting for the timeout.
               failed=$(gh run list --workflow "$workflow" \
@@ -58,11 +61,11 @@ jobs:
                 gh run download "$run_id" --dir dl
                 break
               fi
-              echo "  attempt $i/90, sleeping 20s..."
+              echo "  attempt $i/180, sleeping 20s..."
               sleep 20
             done
             if [ -z "$run_id" ]; then
-              echo "  ERROR: $workflow did not complete for tag $tag (sha $sha) after 30min" >&2
+              echo "  ERROR: $workflow did not complete for tag $tag (sha $sha) after 60min" >&2
               exit 1
             fi
           done

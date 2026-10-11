@@ -180,11 +180,13 @@ jobs:
         # runner, pass explicit categories to serialize them.
         # Dispatch-only bypass: tty timing tests are marginal on the 3-core
         # macos-15 runner; run-tests=false validates build+packaging alone.
-        # 1800s, not 1500: ci_tests.sh now runs the tty category alone after the
-        # parallel categories, which stretches the tail of the run.
+        # 2400s, not 1800: the tty category runs alone after the parallel
+        # categories, and green runs measured 1763s of the old 1800s cap
+        # (Oct 6); a slow runner tips it over and the timeout, not a test,
+        # fails the job.
         if: github.event_name != 'workflow_dispatch' || inputs.run-tests
-        run: sh tests/tools/ci_tests.sh 1800
-        timeout-minutes: 35
+        run: sh tests/tools/ci_tests.sh 2400
+        timeout-minutes: 45
 
       - name: Package
         # Deterministic archive: entry order from a sorted list, mtimes
