@@ -4,12 +4,8 @@ name: WSL2 sandbox probe
 # 3code in WSL2 editing files with nothing stopping it) on the real
 # Microsoft WSL2 kernel, not a stock Linux one. Not wired into push:
 # an environment probe, not a commit gate. Manual trigger only.
-# The bare pull_request trigger exists only so the probe can run
-# before the file reaches main (workflow_dispatch registers on the
-# default branch); drop it when merging.
 on:
   workflow_dispatch:
-  pull_request:
 
 jobs:
   build:
