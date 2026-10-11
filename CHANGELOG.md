@@ -1,5 +1,28 @@
 Changelog
 
+Unreleased
+
+- **Release binaries shipped with auto-update dead.** Every linux and
+  windows release since 0.8.0 was built without `-d:autoUpdate`, so the
+  background self-update worker never ran; macOS and Termux were
+  unaffected. Two CI faults stacked: the linux jobs moved into
+  containers whose default step shell is POSIX `sh`, where the `[[ ]]`
+  test in the compute-build-flags step fails silently and the flag never
+  reaches the compiler, and the windows job packaged the test-phase
+  rebuild, which compiles without the flag, instead of the release
+  build. The flag steps are now POSIX `sh`, a tag build with empty build
+  flags fails loudly, and windows packages before the test phase.
+  Verified with real release assets on a real Mac and a real Windows
+  box: a flagged build fetches the latest release and swaps itself in.
+  Existing installs cannot self-heal, their worker is dead; update
+  manually once.
+
+- **The setting is `auto-update`, hyphen only.** The underscore spelling
+  `auto_update` is no longer accepted and now fails config validation;
+  it was the only multi-word settings key without its hyphen spelling.
+  A config that still carries `auto_update` must drop or respell the
+  line before it will load.
+
 0.8.2  mistral large 4 known-good, mistral-vibe-cli model aliases,
        mistral system prompt mined from the vibe cli
 
