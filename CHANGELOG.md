@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **`patch` now folds other harnesses' field spellings.** Models
+  trained on Claude-Code-style tools emit `old_string`/`new_string`/
+  `file_path` (and `old_str`, `oldText`, ...) instead of 3code's
+  `search`/`replace`/`path`, and the patch action silently produced
+  empty edits. Exact synonyms are now accepted, with the canonical
+  spelling winning any conflict so a mixed pair is never a coin flip.
+
+- **CI toolchain downloads die on transient connect failures.** The
+  pinned-download curls had no retry, and plain `--retry` doesn't cover
+  curl exit 7 (couldn't connect) anyway, so one network blip failed
+  the whole job (linux-amd64, Oct 12). All sha256-pinned downloads now
+  use `--retry 5 --retry-all-errors`.
+
 - **Green CI runs were dropping whole categories' failures.** The test
   harness's exit code came from the last testament dispatch only (the
   tty category, run alone at the end); any failure in the parallel
