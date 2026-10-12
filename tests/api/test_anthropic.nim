@@ -449,3 +449,31 @@ suite "claudecode (Claude subscription) wire":
         @["off", "low", "medium", "high", "xhigh", "max"]
     check maxOutputTokensFor(Profile(name: "anthropic.claude-sonnet-5-5",
       model: "claude-sonnet-5-5")) == 131_072
+
+  test "claude-haiku-5-5 is known-good for anthropic and claudecode":
+    # First Haiku with the adaptive effort knob (Models API live:
+    # low..max, default medium) and plain `disabled` for off, so no
+    # between_tools mapping and no drop_block binding.
+    for prov in ["anthropic", "claudecode"]:
+      check isKnownGood(Profile(name: prov & ".claude-haiku-5-5",
+                               model: "claude-haiku-5-5"))
+      check knownGoodContextWindow(prov, "claude-haiku-5-5") == 1_000_000
+      check knownGoodReasonings(prov, "claude-haiku-5-5") ==
+        @["off", "low", "medium", "high", "xhigh", "max"]
+    check knownGoodReasoning("anthropic", "claude-haiku-5-5") == "medium"
+    let haiku = Profile(name: "anthropic.claude-haiku-5-5",
+                        model: "claude-haiku-5-5", family: "claude")
+    let on = %*{"model": "claude-haiku-5-5",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 65536, "reasoning_effort": "medium"}
+    let j = parseJson(anthropicBody(haiku, on))
+    check j{"thinking"}{"type"}.getStr == "adaptive"
+    check "block_binding" notin j{"thinking"}
+    check j{"output_config"}{"effort"}.getStr == "medium"
+    let off = %*{"model": "claude-haiku-5-5",
+                 "messages": [{"role": "user", "content": "hi"}],
+                 "max_tokens": 65536, "reasoning_effort": "off"}
+    let jo = parseJson(anthropicBody(haiku, off))
+    check jo{"thinking"}{"type"}.getStr == "disabled"
+    check maxOutputTokensFor(Profile(name: "anthropic.claude-haiku-5-5",
+      model: "claude-haiku-5-5")) == 131_072

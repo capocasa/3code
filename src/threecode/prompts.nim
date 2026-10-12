@@ -287,8 +287,18 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # blocks are prefix-checked by default on accounts created after
     # 2026-08-31, so it rides drop_block like Opus 5.5+.
     ("anthropic", "claude-sonnet-5-5", "claude", "sonnet", "5-5", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
+    # Haiku 5.5 (Oct 7): first Haiku with the adaptive effort knob
+    # (low..max, API default medium; Models API live: effort low..max
+    # supported, thinking adaptive + plain `disabled`). 1M ctx, 128k
+    # out; tiered pricing at the 100k prompt boundary.
+    ("anthropic", "claude-haiku-5-5", "claude", "haiku", "5-5", "medium", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
     ("anthropic", "claude-fable-5-1", "claude", "fable", "5-1", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
     ("anthropic", "claude-haiku-4-5", "claude", "haiku", "4-5", "low", -1.0, 32768, tbAllTurns, false, 200_000, false),
+    # Unlike Sonnet 5.5, Haiku 5.5 needs no between_tools mapping:
+    # plain `disabled` is accepted (Models API, live). Block binding
+    # is unverified (no capability field, and the local key is out of
+    # credit), so it rides without the drop_block net like the earlier
+    # Haikus and Sonnet 5.
 
     # Command Code provider gateway open models (api.commandcode.ai/
     # provider/v1, OpenAI chat completions; same plan/API key as their
@@ -3955,8 +3965,9 @@ proc maxOutputTokensFor*(p: Profile): int =
   # prompts -> compact cycle).
   let m = p.model.toLowerAscii
   if "claude" in m:
-    # 5.x / Fable / 4.6+ Opus and Sonnet: 128k output; Haiku and the
-    # 4.5 generation cap at 64k.
+    # 5.x / Fable / 4.6+ Opus and Sonnet, and Haiku 5.5: 128k output;
+    # older Haikus and the 4.5 generation cap at 64k.
+    if "haiku-5-5" in m or "haiku-5.5" in m: return 131_072
     if "haiku" in m or "4-5" in m or "4.5" in m: return 65_536
     return 131_072
   if "glm-5.3" in m: return 131_072
