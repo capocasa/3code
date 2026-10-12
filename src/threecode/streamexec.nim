@@ -807,6 +807,28 @@ export DEBIAN_FRONTEND=noninteractive
       # never writes history there. Do not rewrite USERPROFILE: Nim
       # getHomeDir / collapseHome must keep pointing at the real user.
       putenv("HOME", tmp)
+      # The sandbox account cannot read the invoking user's profile,
+      # and HOME now points at the per-run tmp, so git would see no
+      # global config at all: every commit dies for want of user.email
+      # and the user's autocrlf and aliases vanish. Seed the tmp HOME
+      # with a copy of the real global config, parent-side where it is
+      # readable (POSIX instead ships `readonly ~/.gitconfig` in the
+      # default policy). tmp is ACE-stamped writable by restrict before
+      # the child starts, so the copy is visible there like cmd.sh.
+      try:
+        let gc = getHomeDir() / ".gitconfig"
+        if fileExists(gc): copyFile(gc, tmp / ".gitconfig")
+        # The child runs as the separate sandbox user, so every project
+        # repo reads as "dubious ownership" to git (a different SID owns
+        # the worktree) and every git command dies at the door. The
+        # sandbox itself is the ownership trust boundary on this path,
+        # so the seeded copy disables the check for the child only.
+        # safe.directory only takes effect from protected (global)
+        # config, and this file is exactly the child's global config.
+        var f = open(tmp / ".gitconfig", fmAppend)
+        f.write("\n[safe]\n\tdirectory = *\n")
+        f.close()
+      except CatchableError: discard
       putenv("HISTFILE", "/dev/null")
       putenv("HISTSIZE", "0")
       putenv("CHERE_INVOKING", "1")

@@ -56,6 +56,55 @@ suite "single active policy file":
       # through the wall proxy.
       check s.resolve().hosts.len == 1
 
+  test "default text keeps development working":
+    # The dev-home rules exist because the tools are fatal without
+    # them: git aborts every command when ~/.gitconfig exists but is
+    # unreadable (community report: "the sandbox blocks git"), cargo
+    # likewise on ~/.cargo/config.toml, and the mainstream builds write
+    # their dep caches under $HOME. Lock the resolved behaviour in so
+    # a default-policy trim has to notice.
+    let s = parsePolicy(defaultPolicyText(), proj)
+    let h = getHomeDir()
+    when defined(windows):
+      # HOME is the per-run tmp for the bash child, so VCS user config
+      # is seeded as a file copy instead of granted by rule.
+      check s.checkPath(h / "go") == akWritable
+      check s.checkPath(h / ".npm") == akWritable
+      check s.checkPath(h / ".cargo" / "registry") == akWritable
+      check s.checkPath(h / ".nimble") == akWritable
+      check s.checkPath(h / ".choosenim") == akReadOnly
+      check s.checkPath(h / "AppData" / "Local" / "npm-cache") == akWritable
+      check s.checkPath(h / "AppData" / "Local" / "zig") == akWritable
+      # Not defaulted: ruby and java live in the manual's recipes.
+      check s.checkPath(h / ".gem" / "ruby") == akDeny
+      check s.checkPath(h / ".m2" / "repository") == akDeny
+      check s.checkPath(h / ".cargo" / "credentials") == akDeny
+    else:
+      check s.checkPath(h / ".gitconfig") == akReadOnly
+      check s.checkPath(h / ".config" / "git") == akReadOnly
+      check s.checkPath(h / ".hgrc") == akReadOnly
+      check s.checkPath(h / "go" / "pkg" / "mod") == akWritable
+      check s.checkPath(h / ".cache" / "go-build") == akWritable
+      check s.checkPath(h / ".cache" / "zig") == akWritable
+      check s.checkPath(h / ".npm" / "_cacache") == akWritable
+      check s.checkPath(h / ".cargo" / "registry") == akWritable
+      check s.checkPath(h / ".cargo" / "bin" / "cargo") == akReadOnly
+      check s.checkPath(h / ".rustup" / "toolchains") == akReadOnly
+      check s.checkPath(h / ".nimble" / "pkgs2") == akWritable
+      check s.checkPath(h / ".choosenim" / "toolchains") == akReadOnly
+      check s.checkPath(h / ".local" / "share" / "uv" / "python") == akReadOnly
+      # Not defaulted: ruby and java live in the manual's recipes.
+      check s.checkPath(h / ".gem" / "ruby") == akDeny
+      check s.checkPath(h / ".bundle" / "cache") == akDeny
+      check s.checkPath(h / ".m2" / "repository") == akDeny
+      # Token-bearing dotfiles stay fenced.
+      check s.checkPath(h / ".ssh" / "id_ed25519") == akDeny
+      check s.checkPath(h / ".npmrc") == akDeny
+      check s.checkPath(h / ".cargo" / "credentials") == akDeny
+      check s.checkPath(h / ".git-credentials") == akDeny
+    # Project dir stays writable on every OS.
+    check s.checkPath(proj) == akWritable
+
   test "repo file wins over the user file; never both":
     let (home, projDir) = newFixture("sel")
     defer:
