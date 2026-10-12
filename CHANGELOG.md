@@ -5,12 +5,15 @@ Unreleased
 - **Green CI runs were dropping whole categories' failures.** The test
   harness's exit code came from the last testament dispatch only (the
   tty category, run alone at the end); any failure in the parallel
-  api/config/core/shell/stream batch was silently discarded. Four real
+  api/config/core/shell/stream batch was silently discarded. Five real
   failures rode under green checkmarks since mid-October: the mistral
   terse-budget test (the preamble passed 7000 bytes at 7506), a stale
-  vibe-cli max_tokens assertion (the curated row moved to 32768), and
-  two sandbox tests compiling against a September sandwall pin that
-  predated the `./` path-contraction and Seatbelt writable-rule fixes.
+  vibe-cli max_tokens assertion (the curated row moved to 32768), two
+  sandbox tests compiling against a September sandwall pin that
+  predated the `./` path-contraction and Seatbelt writable-rule fixes,
+  and the memory-leak test's mock reasoning stream (`word1 word2 ...`)
+  tripped the new repetition guard's digit folding on every turn,
+  stretching 120 turns into a watchdog kill on Linux.
   Every category dispatch now contributes to the exit code, the deps
   are re-locked (sandwall 0.5.9, ttty 0.5.4, tinotify 0.1.5, ws
   pinned), and the two test assertions match the curated rows. The
