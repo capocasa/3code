@@ -42,6 +42,7 @@ when defined(posix):
   from std/posix import kill, Pid
 import sandwall
 import sandwall/wall as sandwallWall
+import defaults
 import types
 import util
 
@@ -62,18 +63,18 @@ type Policy* = seq[Rule]
   ## of the codebase reads `Policy`.
 
 proc defaultPolicyText*(): string =
-  ## The shipped default policy, defined in sandwall (`sandwall/defaults`)
-  ## as one inspectable literal block per OS: temp dirs and the project
-  ## dir writable, the dev caches and toolchain homes the mainstream
-  ## builds need, VCS user config readable (git and cargo are *fatal*
-  ## on an unreadable config file), network open on POSIX. `deny /`
-  ## fences the rest of $HOME - token files (~/.npmrc, ~/.cargo/
-  ## credentials, ~/.git-credentials), ~/.ssh, everything else. Windows
-  ## ships no VCS config rules: streamexec seeds the bash child's
-  ## redirected HOME with a gitconfig copy instead, because the child
-  ## runs as a separate user and git's ownership check would otherwise
-  ## reject every repo.
-  sandwall.defaultPolicyText
+  ## The shipped default policy, held in `threecode/defaults` as one
+  ## inspectable literal block per OS: temp dirs and the project dir
+  ## writable, the dev caches and toolchain homes the covered builds
+  ## need, VCS user config readable (git and cargo are *fatal* on an
+  ## unreadable config file), network open on POSIX. `deny /` fences
+  ## the rest of $HOME - token files (~/.npmrc, ~/.cargo/credentials,
+  ## ~/.git-credentials), ~/.ssh, everything else. Windows ships no
+  ## VCS config rules: streamexec seeds the bash child's redirected
+  ## HOME with a gitconfig copy instead, because the child runs as a
+  ## separate user and git's ownership check would otherwise reject
+  ## every repo.
+  defaults.defaultPolicyText
 
 proc repoPolicyPath*(projectDir: string): string =
   projectDir / PolicyFile

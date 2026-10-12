@@ -71,18 +71,32 @@ suite "single active policy file":
       check s.checkPath(h / "go") == akWritable
       check s.checkPath(h / ".npm") == akWritable
       check s.checkPath(h / ".cargo" / "registry") == akWritable
-      check s.checkPath(h / ".cargo" / "credentials") == akDeny
+      check s.checkPath(h / ".nimble") == akWritable
+      check s.checkPath(h / ".choosenim") == akReadOnly
       check s.checkPath(h / "AppData" / "Local" / "npm-cache") == akWritable
+      check s.checkPath(h / "AppData" / "Local" / "zig") == akWritable
+      # Not defaulted: ruby and java live in the manual's recipes.
+      check s.checkPath(h / ".gem" / "ruby") == akDeny
+      check s.checkPath(h / ".m2" / "repository") == akDeny
+      check s.checkPath(h / ".cargo" / "credentials") == akDeny
     else:
       check s.checkPath(h / ".gitconfig") == akReadOnly
       check s.checkPath(h / ".config" / "git") == akReadOnly
       check s.checkPath(h / ".hgrc") == akReadOnly
       check s.checkPath(h / "go" / "pkg" / "mod") == akWritable
       check s.checkPath(h / ".cache" / "go-build") == akWritable
+      check s.checkPath(h / ".cache" / "zig") == akWritable
       check s.checkPath(h / ".npm" / "_cacache") == akWritable
       check s.checkPath(h / ".cargo" / "registry") == akWritable
       check s.checkPath(h / ".cargo" / "bin" / "cargo") == akReadOnly
       check s.checkPath(h / ".rustup" / "toolchains") == akReadOnly
+      check s.checkPath(h / ".nimble" / "pkgs2") == akWritable
+      check s.checkPath(h / ".choosenim" / "toolchains") == akReadOnly
+      check s.checkPath(h / ".local" / "share" / "uv" / "python") == akReadOnly
+      # Not defaulted: ruby and java live in the manual's recipes.
+      check s.checkPath(h / ".gem" / "ruby") == akDeny
+      check s.checkPath(h / ".bundle" / "cache") == akDeny
+      check s.checkPath(h / ".m2" / "repository") == akDeny
       # Token-bearing dotfiles stay fenced.
       check s.checkPath(h / ".ssh" / "id_ed25519") == akDeny
       check s.checkPath(h / ".npmrc") == akDeny
