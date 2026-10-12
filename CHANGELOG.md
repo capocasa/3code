@@ -1,6 +1,7 @@
 Changelog
 
-Unreleased
+0.8.3  auto-update restored in linux and windows releases, patch folds
+       other harnesses' field spellings, auto-update hyphen-only
 
 - **`patch` now folds other harnesses' field spellings.** Models
   trained on Claude-Code-style tools emit `old_string`/`new_string`/
