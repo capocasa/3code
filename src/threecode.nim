@@ -306,10 +306,10 @@ proc main() =
     quit(setupMain(rawParams[1 .. ^1]))
   if rawParams.len > 0 and rawParams[0] == "unsetup":
     quit(unsetupMain(rawParams[1 .. ^1]))
-  # ACP frontend: `3code acp` / `3code --acp` speaks Agent Client Protocol
-  # v1 over stdio (editors, custom clients). Early dispatch like the
-  # subcommands above: piped stdio, no terminal setup may run.
-  if rawParams.len > 0 and rawParams[0] in ["acp", "--acp"]:
+  # ACP frontend: `3code --acp` speaks Agent Client Protocol v1 over
+  # stdio (editors, custom clients). Early dispatch like the subcommands
+  # above: piped stdio, no terminal setup may run.
+  if rawParams.len > 0 and rawParams[0] == "--acp":
     minline.terminalRestoreSuppressed = true
     quit(acpMain(rawParams[1 .. ^1]))
   # -v/-h must not pay for TLS env, stale-binary walk, or sandbox

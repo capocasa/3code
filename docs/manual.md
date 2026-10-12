@@ -1451,15 +1451,15 @@ http://localhost:8501.
 
 ## Agent Client Protocol
 
-`3code acp` turns the binary into an [ACP](https://agentclientprotocol.com)
-v1 agent: newline-delimited JSON-RPC on stdin/stdout, the protocol Zed,
+`3code --acp` turns the binary into an
+[ACP](https://agentclientprotocol.com) v1 agent: newline-delimited JSON-RPC on stdin/stdout, the protocol Zed,
 JetBrains, Neovim plugins, and a growing pile of custom clients speak. Your
 editor launches 3code like any other ACP agent:
 
 ```
 # Zed: agent settings, "Add custom agent"
 Command: 3code
-Arguments: acp
+Arguments: --acp
 ```
 
 One session per process. The session id is the `.3log` id, so `session/load`
@@ -1475,8 +1475,8 @@ Not advertised (because 3code does not do them over ACP yet): MCP servers,
 client-side filesystem and terminal execution, permission requests,
 elicitation, modes, and authentication.
 
-`--acp` is an alias. Diagnostics go to stderr; stdout is protocol records
-only, so the stream stays parseable.
+Diagnostics go to stderr; stdout is protocol records only, so the stream
+stays parseable.
 
 ## Build from source
 

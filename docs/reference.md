@@ -31,12 +31,11 @@ usage: 3code [options] [prompt...]
 | `-p`, `--private` | private mode: only allow-private providers/models run (see [Private mode](manual.html#private-mode)) |
 | `--no-sandbox` | disable sandbox enforcement for this run (bash runs unconfined) |
 | `-D`, `--debug` | colored debug trace to stderr |
+| `--acp` | speak [ACP v1](manual.html#agent-client-protocol) on stdio as the agent, for editors and custom clients (takes no prompt) |
 | `-v`, `--version` | print version (release builds carry branch/commit provenance) |
 | `-h`, `--help` | the usage message, including the config path |
 
-Subcommands: `good` (same as `--good`), `acp` (speak
-[ACP](manual.html#agent-client-protocol) on stdio for editors and custom
-clients), `sandbox` / `sb` (run a command
+Subcommands: `good` (same as `--good`), `sandbox` / `sb` (run a command
 under the [filesystem policy](manual.html#what-is-sandboxed)), `setup` and
 `unsetup` (Windows sandbox/network-wall install and removal, see
 [network rules](manual.html#network-rules)).

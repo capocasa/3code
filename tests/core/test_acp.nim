@@ -69,7 +69,7 @@ proc spawnAcp(bin, root: string; responses: string): Session =
   env["TERM"] = "dumb"
   env["PATH"] = getEnv("PATH")
   env["THREECODE_STUB_RESPONSES"] = responses
-  result.p = startProcess(bin, args = ["acp"], env = env, options = {})
+  result.p = startProcess(bin, args = ["--acp"], env = env, options = {})
   result.sh = Shared()
   initLock(result.sh.gate)
   let job: ReadJob = (f: result.p.outputStream, sh: result.sh)

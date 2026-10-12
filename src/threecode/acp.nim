@@ -1,6 +1,6 @@
 ## ACP frontend: run 3code as an Agent Client Protocol v1 agent.
 ##
-## `3code acp` (or `3code --acp`) speaks ACP over stdio for editors and
+## `3code --acp` speaks ACP over stdio for editors and
 ## custom clients: newline-delimited JSON-RPC 2.0, agent role, one session
 ## per process. It is a thin translation layer over the library module, the
 ## same embedding surface a GUI or batch script would use:
@@ -317,7 +317,7 @@ proc handleLine(fe: AcpFrontend; line: string) =
       fe.respondErr(id, JrMethodNotFound, "method not found: " & meth)
 
 proc acpMain*(args: seq[string]): int =
-  ## `3code acp` entry: run the JSON-RPC loop until stdin closes.
+  ## `3code --acp` entry: run the JSON-RPC loop until stdin closes.
   var model = ""
   var debug = false
   # parseopt with an empty seq silently falls back to the process argv;
@@ -334,10 +334,10 @@ proc acpMain*(args: seq[string]): int =
         of "debug": debug = true
         of "experimental": types.experimentalEnabled = true
         else:
-          stderr.writeLine "3code acp: unknown option: " & key
+          stderr.writeLine "3code --acp: unknown option: " & key
           return 2
       of cmdArgument:
-        stderr.writeLine "3code acp: unexpected argument: " & key
+        stderr.writeLine "3code --acp: unexpected argument: " & key
         return 2
       of cmdEnd: discard
   let fe = AcpFrontend(model: model, debug: debug)
