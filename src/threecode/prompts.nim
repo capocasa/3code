@@ -3633,7 +3633,7 @@ commands:
   :provider X         switch to provider X (model defaults to first in its list)
   :provider add       add a new provider (interactive, verified)
   :provider add X     same, with X as provider name, url, or api key
-  :provider edit X    edit provider X (url, key, models)
+  :provider edit X    edit provider X (url, key, models; oauth re-login)
   :provider update X  update the models of provider X (key unchanged)
   :provider new [X]   list models X serves that its config lacks (all: no X)
   :provider pull [X [M...]]  pull those models into X's list (all: no X)

@@ -63,8 +63,7 @@ proc bearerFor*(p: Profile): string =
         let dot = p.name.find('.')
         let provider = if dot > 0: p.name[0 ..< dot] else: p.name
         raise newException(ApiError, provider & " login expired (" &
-          e.msg & "). sign in again: :provider rm " & provider &
-          ", then :provider add " & provider)
+          e.msg & "). re-login: :provider edit " & provider)
     if t != "": return t
   p.key
 

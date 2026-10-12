@@ -34,6 +34,7 @@ suite "provider wizard configuration":
     inputs: seq[string]
     prompts: seq[string]
     verifiedModels: seq[string]
+    logins: seq[string]
 
   setup:
     savedCurrent = activeCurrent
@@ -50,6 +51,7 @@ suite "provider wizard configuration":
     inputs = @[]
     prompts = @[]
     verifiedModels = @[]
+    logins = @[]
     wizardReadLineHook = proc(prompt: string, hidden, noHistory: bool): string =
       prompts.add prompt
       if inputs.len == 0:
@@ -62,12 +64,16 @@ suite "provider wizard configuration":
       (true, "")
     fetchModelsHook = proc(url, key: string): (seq[string], string) =
       (nvidiaModels(), "")
+    wizardOauthLoginHook = proc(entry: string): string =
+      logins.add entry
+      "oauth"
 
   teardown:
     wizardReadLineHook = nil
     wizardVerifyCancelHook = nil
     verifyProfileHook = nil
     fetchModelsHook = nil
+    wizardOauthLoginHook = nil
     activeCurrent = savedCurrent
     activeProviders = savedProviders
     experimentalEnabled = savedExperimental
@@ -182,8 +188,8 @@ suite "provider wizard configuration":
       else:
         (@[], "HTTP 403")
     # No api-key prompt for the oauth twin: one input per remaining
-    # field (name, url, models).
-    inputs = @["", "", "gpt-5.5"]
+    # field (name, url, re-login, models).
+    inputs = @["", "", "", "gpt-5.5"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -196,17 +202,19 @@ suite "provider wizard configuration":
     check activeProviders[0].models == @["gpt-5.5"]
     check verifiedModels == @["gpt-5.5"]
     check not prompts.anyIt("api key" in it)
+    check logins.len == 0
 
   test "edit of an oauth provider offers no api key field":
     # supergrok logs in with a token from the auth store; an api-key
     # prompt would either persist dead weight or confuse the re-login
-    # story. The edit flow must skip straight from name to models.
+    # story. The edit flow offers the optional re-login instead (kept
+    # here: enter) and must never launch a login on its own.
     activeProviders = @[
       ProviderRec(name: "supergrok", url: "https://api.x.ai/v1",
                   auth: "oauth", models: @["grok-4.6"])
     ]
     activeCurrent = "supergrok.grok-4.6"
-    inputs = @["", "grok-4.7"]
+    inputs = @["", "", "grok-4.7"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -220,6 +228,54 @@ suite "provider wizard configuration":
     check activeProviders[0].models == @["grok-4.7"]
     check activeCurrent == "supergrok.grok-4.7"
     check not prompts.anyIt("api key" in it)
+    check prompts.anyIt("re-login" in it)
+    check logins.len == 0
+
+  test "edit re-login y runs the twin's browser login":
+    # The re-login field is the oauth twin's renewal path: y runs the
+    # browser flow (the hook here), which replaces the stored token;
+    # the entry keeps auth=oauth and an empty key.
+    activeProviders = @[
+      ProviderRec(name: "supergrok", url: "https://api.x.ai/v1",
+                  auth: "oauth", models: @["grok-4.6"])
+    ]
+    activeCurrent = "supergrok.grok-4.6"
+    inputs = @["", "y", "grok-4.7"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider edit supergrok", messages, session,
+                          prof, editor)
+
+    check logins == @["supergrok"]
+    check activeProviders[0].auth == "oauth"
+    check activeProviders[0].key == ""
+    check activeProviders[0].models == @["grok-4.7"]
+
+  test "update of an oauth provider asks models only, no re-login":
+    # :provider update is the models-only corner; the re-login lives in
+    # edit. A stale token must point at :provider edit, so update must
+    # never run (or offer) a login.
+    activeProviders = @[
+      ProviderRec(name: "supergrok", url: "https://api.x.ai/v1",
+                  auth: "oauth", models: @["grok-4.6"])
+    ]
+    activeCurrent = "supergrok.grok-4.6"
+    inputs = @["grok-4.7"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider update supergrok", messages, session,
+                          prof, editor)
+
+    check activeProviders[0].models == @["grok-4.7"]
+    check activeProviders[0].auth == "oauth"
+    check not prompts.anyIt("re-login" in it)
+    check logins.len == 0
 
   test "edit still prompts for the api key on key providers":
     # The oauth skip must not leak into ordinary api-key providers.
