@@ -8,19 +8,19 @@
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": ""
+        "sha1": "1ce02ec327934128234547c648d5ee3612c21b50"
       }
     },
     "sandwall": {
-      "version": "0.5.8",
-      "vcsRevision": "90ae817cd201a36df4b7e9af3e540a4584fcf9ec",
+      "version": "0.5.9",
+      "vcsRevision": "c16470a4eb293c4befa5af4bf466ab0257f00426",
       "url": "https://github.com/capocasa/sandwall",
       "downloadMethod": "git",
       "dependencies": [
         "nim"
       ],
       "checksums": {
-        "sha1": "62f8fdfd53b8723b00221abee56b8a5900549ebc"
+        "sha1": "206e39564c972fd4104937f78f28face4acdb28b"
       }
     },
     "streamhttp": {
@@ -45,6 +45,18 @@
       ],
       "checksums": {
         "sha1": "a9dc8cfd3c0546957d1a99d2c6ace8fc5034f330"
+      }
+    },
+    "ws": {
+      "version": "0.6.0",
+      "vcsRevision": "c9c0c7b51e2e83cc9305a895a0b144a297b4bea8",
+      "url": "https://github.com/treeform/ws",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "b854365c3c985dc6be7cf36337aa0d4dce7e1f33"
       }
     },
     "zippy": {
@@ -72,8 +84,8 @@
       }
     },
     "ttty": {
-      "version": "0.5.3",
-      "vcsRevision": "bf9e550bc5040e683d89a1beef5896dc9fc66398",
+      "version": "0.5.4",
+      "vcsRevision": "455c4f67989a65bb8f36e62e5b330ee05dc51979",
       "url": "https://github.com/capocasa/ttty",
       "downloadMethod": "git",
       "dependencies": [
@@ -81,19 +93,19 @@
         "x11"
       ],
       "checksums": {
-        "sha1": "f23b461f283b456693003b91704e5f6ef8270067"
+        "sha1": "d4c0160eea16f68b6e6b341cf6a22e1ea21d032d"
       }
     },
     "tinotify": {
-      "version": "0.1.4",
-      "vcsRevision": "8faea8ec0e2f2895ad63990c151737170ec3acbf",
+      "version": "0.1.5",
+      "vcsRevision": "eea495daf0bc304698423d2022c0e33495dc22fc",
       "url": "https://github.com/capocasa/tinotify",
       "downloadMethod": "git",
       "dependencies": [
         "nim"
       ],
       "checksums": {
-        "sha1": "3f0c209786a0d35ec847bc4a607138f119ac0b46"
+        "sha1": "55d124b7910cf4ea5362502cb390457b2f292ea9"
       }
     },
     "libsha": {
