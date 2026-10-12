@@ -278,12 +278,13 @@ suite "api request shaping":
     check knownGoodReasoning("mistral", "mistral-vibe-cli-latest") == "high"
     check knownGoodReasoning("mistral", "mistral-vibe-cli-fast") == "none"
     block vibeGeneration:
-      # The Vibe CLI sends temperature 1.0 (platform default); the
-      # curated rows carry it so `:temperature`-less profiles match
-      # what mistral-vibe itself sends.
+      # The Vibe CLI sends temperature 1.0 (platform default) and
+      # 32768 output tokens; the curated rows carry both so
+      # `:temperature`-less profiles match what mistral-vibe itself
+      # sends (b59d1e6 mined the bump from the CLI).
       let g = knownGoodGeneration("mistral", "mistral-vibe-cli-latest")
       check g.temperature == 1.0
-      check g.maxTokens == 8192
+      check g.maxTokens == 32768
     block vibePreamble:
       # The Mistral preamble is the economical 3code prompt: terse
       # discipline sections, 3code tool surface, thinking-channel

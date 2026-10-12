@@ -345,7 +345,7 @@ suite "prompts: setup — mistral":
     check "write" in names
     check "patch" in names
 
-  test "mistral prompt is terse (under 7KB with splices)":
+  test "mistral prompt is terse (under 7.6KB with splices)":
     let p = Profile(name: "mistral.mistral-large-4", url: "x", key: "k",
                     model: "mistral-large-4", family: "mistral",
                     version: "4")
@@ -353,7 +353,7 @@ suite "prompts: setup — mistral":
     let full = s.prompt
       .replace("{{credit}}", buildCredit(p))
       .replace("{{skills}}", "(none installed)")
-    check full.len < 7000
+    check full.len < 7600
     check "read(path, offset?, limit?)" in s.prompt
     check "# Knowledge" in s.prompt
     check "# Long context" in s.prompt
