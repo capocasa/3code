@@ -465,7 +465,8 @@ deny ./secrets</pre></p>
 <p>Rules are read from top to bottom and the last matching path rule wins. In this example the project is writable, <tt class="docutils literal"><span class="pre">/var</span></tt> is read-only, and <tt class="docutils literal"><span class="pre">./secrets</span></tt> is denied. Everything else is denied because unmatched paths are denied by default.</p>
 <p>Blank lines and lines beginning with <tt class="docutils literal"><span class="pre">#</span></tt> are ignored. An access word only has special meaning when followed by whitespace or the end of the line, so a host such as <tt class="docutils literal"><span class="pre">deny.example.com</span></tt> remains a hostname.</p>
 
-<h3 id="builtminusin-default">Built-in default</h3><p>On macOS, Linux, and other POSIX systems, the built-in policy is:</p>
+<h3 id="builtminusin-default">Built-in default</h3><p>The default is a plain text table in the source, one literal block per OS, so it is as inspectable as any policy file: <a class="reference external" href="https://github.com/capocasa/3code/blob/main/src/threecode/defaults.nim">src/threecode/defaults.nim</a>. It changes only through ordinary commits.</p>
+<p>On macOS, Linux, and other POSIX systems, the built-in policy is:</p>
 <p><pre class="listing">deny /
 allow /tmp
 allow /var/tmp
@@ -515,6 +516,13 @@ allow ./</pre></p>
 run the first build unfenced once, or `mkdir -p ~/.m2/repository`.
 Inside a fenced network, JVM tools ignore `http_proxy`; pass
 `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=$WALL_PROXY_PORT`.</pre>
+<p><tt class="docutils literal"><span class="pre">gradle</span></tt>::</p>
+<pre>allow ~/.gradle/caches
+allow ~/.gradle/wrapper
+allow ~/.gradle/jdks
+
+Not `~/.gradle` whole: `gradle.properties` often holds
+credentials. Same JVM proxy note as maven.</pre>
 <p><tt class="docutils literal"><span class="pre">ruby</span></tt> (RubyGems + Bundler)::</p>
 <pre>allow ~/.gem/ruby
 allow ~/.local/share/gem
@@ -527,13 +535,6 @@ project (`bundle config set --local path vendor/bundle`) since the
 system gem dir is read-only. Fenced on purpose:
 ~/.gem/credentials (the rubygems push token) and ~/.bundle/config
 (can hold API tokens).</pre>
-<p><tt class="docutils literal"><span class="pre">gradle</span></tt>::</p>
-<pre>allow ~/.gradle/caches
-allow ~/.gradle/wrapper
-allow ~/.gradle/jdks
-
-Not `~/.gradle` whole: `gradle.properties` often holds
-credentials. Same JVM proxy note as maven.</pre>
 <p><tt class="docutils literal"><span class="pre">pnpm</span></tt>::</p>
 <pre>allow ~/.local/share/pnpm     (Windows: allow ~/AppData/Local/pnpm)</pre>
 <p><tt class="docutils literal"><span class="pre">yarn</span></tt> (berry)::</p>
@@ -684,7 +685,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-12 09:17:00 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-12 09:26:13 UTC</small>
       </div>
     </div>
   </div>

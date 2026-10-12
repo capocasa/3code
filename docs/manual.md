@@ -1178,6 +1178,11 @@ such as `deny.example.com` remains a hostname.
 
 ### Built-in default
 
+The default is a plain text table in the source, one literal block per
+OS, so it is as inspectable as any policy file:
+[src/threecode/defaults.nim](https://github.com/capocasa/3code/blob/main/src/threecode/defaults.nim).
+It changes only through ordinary commits.
+
 On macOS, Linux, and other POSIX systems, the built-in policy is:
 
 ```
@@ -1259,6 +1264,15 @@ line is given when the paths move.
     Inside a fenced network, JVM tools ignore `http_proxy`; pass
     `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=$WALL_PROXY_PORT`.
 
+`gradle`::
+
+    allow ~/.gradle/caches
+    allow ~/.gradle/wrapper
+    allow ~/.gradle/jdks
+
+    Not `~/.gradle` whole: `gradle.properties` often holds
+    credentials. Same JVM proxy note as maven.
+
 `ruby` (RubyGems + Bundler)::
 
     allow ~/.gem/ruby
@@ -1272,15 +1286,6 @@ line is given when the paths move.
     system gem dir is read-only. Fenced on purpose:
     ~/.gem/credentials (the rubygems push token) and ~/.bundle/config
     (can hold API tokens).
-
-`gradle`::
-
-    allow ~/.gradle/caches
-    allow ~/.gradle/wrapper
-    allow ~/.gradle/jdks
-
-    Not `~/.gradle` whole: `gradle.properties` often holds
-    credentials. Same JVM proxy note as maven.
 
 `pnpm`::
 
