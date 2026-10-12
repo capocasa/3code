@@ -62,67 +62,18 @@ type Policy* = seq[Rule]
   ## of the codebase reads `Policy`.
 
 proc defaultPolicyText*(): string =
-  ## Deny root, keep temp dirs and the project dir writable, network
-  ## open. System dirs (/usr, /bin, /etc, ...) are read-only via the
-  ## sandwall baseline; deny / fences the rest, home included. The
-  ## POSIX `allow *` passes all traffic through the wall proxy; Windows
-  ## has no host rules because there they would airgap the AppContainer
-  ## (the net fence is a separate backend), while no rules grants it
-  ## the internet capability. The project dir is spelled `allow ./`
-  ## (a bare `allow` is equivalent; the explicit target reads better).
-  ##
-  ## Beyond that, the default has to make ordinary development work:
-  ## git is *fatal* on an unreadable ~/.gitconfig (git treats EACCES
-  ## differently from ENOENT and dies on every invocation), cargo dies
-  ## the same way on ~/.cargo/config.toml, and the mainstream builds
-  ## write dependency caches and build caches under $HOME (~/go,
-  ## ~/.cargo/registry, ~/.cache, ~/.npm). Those homes are writable or
-  ## readable here by rule. What stays fenced: token-bearing files
-  ## (~/.npmrc, ~/.cargo/credentials, ~/.git-credentials), ~/.ssh,
-  ## and everything else under $HOME - add those yourself with
-  ## `:sandbox allow` when a stack needs them (maven ~/.m2/repository,
-  ## gradle ~/.gradle/caches, an npm prefix in ~/.node_modules).
-  ##
-  ## Windows adds the same cache/toolchain homes (rules are inert
-  ## until the dirs exist) but NOT the VCS config rules: the bash
-  ## child's HOME is the per-run tmp, so git never touches the real
-  ## profile; streamexec seeds that tmp HOME with a copy of the real
-  ## ~/.gitconfig plus a safe.directory entry instead (the child runs
-  ## as the separate sandbox user, and a different-SID owner is
-  ## "dubious ownership" to git).
-  when defined(windows):
-    result = "deny /\n" &
-      "allow ~/AppData/Local/Temp\n" &
-      "allow ~/AppData/Local/npm-cache\n" &
-      "allow ~/AppData/Local/pip/cache\n" &
-      "allow ~/go\n" &
-      "allow ~/.npm\n" &
-      "allow ~/.cargo/registry\n" &
-      "allow ~/.cargo/git\n" &
-      "readonly ~/.cargo/bin\n" &
-      "readonly ~/.cargo/config.toml\n" &
-      "readonly ~/.rustup\n" &
-      "allow ./\n"
-  else:
-    result = "deny /\n" &
-      "allow /tmp\n" &
-      "allow /var/tmp\n" &
-      "allow ./\n" &
-      "allow ~/go\n" &
-      "allow ~/.cache\n" &
-      "allow ~/.npm\n" &
-      "allow ~/.cargo/registry\n" &
-      "allow ~/.cargo/git\n" &
-      "readonly ~/.cargo/bin\n" &
-      "readonly ~/.cargo/config.toml\n" &
-      "readonly ~/.rustup\n" &
-      "readonly ~/.gitconfig\n" &
-      "readonly ~/.config/git\n" &
-      "readonly ~/.hgrc\n" &
-      "readonly ~/.config/hg\n"
-    when defined(macosx):
-      result.add "allow ~/Library/Caches\n"
-    result.add "allow *\n"
+  ## The shipped default policy, defined in sandwall (`sandwall/defaults`)
+  ## as one inspectable literal block per OS: temp dirs and the project
+  ## dir writable, the dev caches and toolchain homes the mainstream
+  ## builds need, VCS user config readable (git and cargo are *fatal*
+  ## on an unreadable config file), network open on POSIX. `deny /`
+  ## fences the rest of $HOME - token files (~/.npmrc, ~/.cargo/
+  ## credentials, ~/.git-credentials), ~/.ssh, everything else. Windows
+  ## ships no VCS config rules: streamexec seeds the bash child's
+  ## redirected HOME with a gitconfig copy instead, because the child
+  ## runs as a separate user and git's ownership check would otherwise
+  ## reject every repo.
+  sandwall.defaultPolicyText
 
 proc repoPolicyPath*(projectDir: string): string =
   projectDir / PolicyFile
