@@ -1089,16 +1089,14 @@ In practice:
   version control reads its user config (`readonly ~/.gitconfig`,
   `readonly ~/.config/git`, the matching mercurial paths), the Nim
   toolchain runs (`allow ~/.nimble`, `readonly ~/.choosenim`), uv venvs
-  execute (`readonly ~/.local/share/uv`), RubyGems user installs and
-  Bundler's cache are writable (`allow ~/.gem/ruby`,
-  `~/.local/share/gem`, `~/.bundle/cache`), and the dependency and
+  execute (`readonly ~/.local/share/uv`), and the dependency and
   build caches the mainstream toolchains keep under your home are
   writable (`~/go`, `~/.cache`, `~/.npm`, `~/.cargo/registry`). C and
   Zig builds ride the project dir and the read-only system baseline
   (Zig's global cache is `~/.cache/zig`; on Windows
   `~/AppData/Local/zig`). Token-bearing files stay fenced:
-  `~/.npmrc`, `~/.cargo/credentials`, `~/.git-credentials`,
-  `~/.gem/credentials`, `~/.bundle/config`, `~/.ssh`. On Windows the caches move to `~/AppData/Local/npm-cache` and
+  `~/.npmrc`, `~/.cargo/credentials`, `~/.git-credentials`, `~/.ssh`.
+  Ruby and the heavier ecosystems live one section down, as recipes. On Windows the caches move to `~/AppData/Local/npm-cache` and
   `~/AppData/Local/pip/cache`, and the bash child gets a seeded copy of
   your global git config (it runs as a separate sandbox user, so git's
   ownership check would otherwise reject every project repo).
@@ -1198,9 +1196,6 @@ readonly ~/.rustup
 allow ~/.nimble
 readonly ~/.choosenim
 readonly ~/.local/share/uv
-allow ~/.gem/ruby
-allow ~/.local/share/gem
-allow ~/.bundle/cache
 readonly ~/.gitconfig
 readonly ~/.config/git
 readonly ~/.hgrc
@@ -1232,8 +1227,6 @@ readonly ~/.cargo/config.toml
 readonly ~/.rustup
 allow ~/.nimble
 readonly ~/.choosenim
-allow ~/.gem/ruby
-allow ~/.bundle/cache
 allow ~/AppData/Local/zig
 allow ./
 ```
@@ -1248,9 +1241,8 @@ itself (`allow ./`), so a fresh project is writable out of the box.
 ### Sandbox settings collection
 
 Recipes for stacks past the basics. The default policy already covers
-git, mercurial, C, Zig, Go, Nim, Python (pip, uv, venv), Ruby
-(RubyGems user installs, Bundler with a project-local path), Rust, and
-the npm/pip caches - nothing below is needed for those. Copy the
+git, mercurial, C, Zig, Go, Nim, Python (pip, uv, venv), Rust, and the
+npm/pip caches - nothing below is needed for those. Copy the
 lines you need into `.sandbox` (via `:sandbox allow` /
 `:sandbox readonly`), or into `~/.config/3code/sandbox` to make them
 your baseline. Each entry is the tool's own documented home, narrowed
@@ -1266,6 +1258,20 @@ line is given when the paths move.
     run the first build unfenced once, or `mkdir -p ~/.m2/repository`.
     Inside a fenced network, JVM tools ignore `http_proxy`; pass
     `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=$WALL_PROXY_PORT`.
+
+`ruby` (RubyGems + Bundler)::
+
+    allow ~/.gem/ruby
+    allow ~/.local/share/gem
+    allow ~/.bundle/cache
+
+    `gem install --user-install` writes the first two (macOS uses
+    ~/.gem/ruby, Linux's RubyGems prefers the XDG dir). Bundler needs
+    ~/.bundle/cache for `bundle install`; point installs at the
+    project (`bundle config set --local path vendor/bundle`) since the
+    system gem dir is read-only. Fenced on purpose:
+    ~/.gem/credentials (the rubygems push token) and ~/.bundle/config
+    (can hold API tokens).
 
 `gradle`::
 
