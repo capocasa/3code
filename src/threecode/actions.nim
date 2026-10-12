@@ -82,10 +82,27 @@ proc writeAction(args: JsonNode): Action =
          path: args{"path"}.getStr,
          body: args{"body"}.getStr)
 
+proc editField(e: JsonNode, canonical, aliases: varargs[string]): string =
+  ## First present key among `canonical` + `aliases`. Models trained on
+  ## other harnesses emit their prior spellings (`old_string`, `oldText`,
+  ## ...); folding an exact synonym is strictly better than refusing it,
+  ## but a canonical value always wins so a conflicting pair is never a
+  ## coin flip (CodeWhale's rule, #5209 there).
+  let v = e{canonical}.getStr
+  if v.len > 0: return v
+  for a in aliases:
+    let av = e{a}.getStr
+    if av.len > 0: return av
+  ""
+
 proc patchAction(args: JsonNode): Action =
-  var act = Action(kind: akPatch, path: args{"path"}.getStr)
+  var act = Action(kind: akPatch,
+    path: editField(args, "path", "file_path", "filePath"))
   for e in args{"edits"}.getElems:
-    act.edits.add (e{"search"}.getStr, e{"replace"}.getStr)
+    act.edits.add (editField(e, "search", "old_string", "old_str",
+                             "oldText", "old_text"),
+                   editField(e, "replace", "new_string", "new_str",
+                             "newText", "new_text", "replacement"))
   act
 
 proc applyPatchAction(args: JsonNode): Action =

@@ -50,6 +50,28 @@ suite "glm/qwen dispatch":
     check a1.kind == akApplyPatch
     check a2.kind == akApplyPatch
 
+  test "patch folds old_string/new_string spellings (deepseek-harness training leak)":
+    let act = toolCallToAction("deepseek", "edit",
+      %*{"file_path": "x.nim", "edits": [
+        {"old_string": "a", "new_string": "b"}]})
+    check act.kind == akPatch
+    check act.path == "x.nim"
+    check act.edits == @[("a", "b")]
+
+  test "patch folds old_str/new_str and oldText/newText spellings":
+    let a1 = toolCallToAction("glm", "patch",
+      %*{"path": "x.nim", "edits": [
+        {"old_str": "a", "new_str": "b"},
+        {"oldText": "c", "newText": "d"}]})
+    check a1.kind == akPatch
+    check a1.edits == @[("a", "b"), ("c", "d")]
+
+  test "canonical search/replace beats an alias on conflict":
+    let act = toolCallToAction("qwen", "patch",
+      %*{"path": "x.nim", "edits": [
+        {"search": "real", "replace": "yes", "old_string": "decoy"}]})
+    check act.edits == @[("real", "yes")]
+
   test "edit aliases to akPatch on glm/qwen":
     let act = toolCallToAction("qwen", "edit",
       %*{"path": "x.nim", "edits": [{"search": "a", "replace": "b"}]})
