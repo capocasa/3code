@@ -73,6 +73,24 @@ const
     ## route would still accept the request. Other providers are not
     ## guarded: several accept multi-MB bodies and would get pointless
     ## lossy summarization.
+  MaxMessagesTesseracted* = 72
+    ## Proactive message-count ceiling for the tesseracted gateway
+    ## (hosted Kolibri-1). Tesseracted caps the conversation history at
+    ## 80 messages — a gateway envelope, not model or vLLM behavior: the
+    ## aleph-alpha-inference plugin carries no request validation, and
+    ## self-hosted vLLM serves unbounded message counts — and rejects a
+    ## longer `messages` array with an opaque 400, "Provide between 1 and
+    ## 80 messages" (observed 2026-10-08 on a session killed at 82
+    ## messages while the token count sat at 12% of the window, so the
+    ## token threshold cannot predict it; message count and token count
+    ## are different axes). The catalog (llmtr.com) also lists 60k-char
+    ## and 32k-token history caps, but the same session pushed ~150KB /
+    ## 38k-token requests through, so only the count axis is guarded. The
+    ## guard sits 8 under the cap: it fires after a reply is appended,
+    ## and the tool results of that reply land after the check, so one
+    ## parallel batch can still push the next request past 80 — the
+    ## reactive one-shot 400 recovery catches that burst; everything else
+    ## collapses before the route can 400 it.
   OverflowFallbackSummary* = "Earlier turns were dropped without a recap " &
     "because the provider rejected the conversation as too large and the " &
     "summarizer call failed as well; the recent messages below are " &
