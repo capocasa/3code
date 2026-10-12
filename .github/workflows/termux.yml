@@ -56,7 +56,8 @@ jobs:
         # OpenSSL is dlopen'ed at runtime (Termux's openssl package
         # provides libssl.so.3), so no TLS libs are linked here.
         run: |
-          curl -fsSL -o ndk.zip https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o ndk.zip \
+            https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
           echo "${NDK_SHA256}  ndk.zip" | sha256sum -c -
           unzip -q ndk.zip
           echo "NDK_CLANG=$PWD/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" >> "$GITHUB_ENV"
@@ -227,7 +228,8 @@ jobs:
 
       - name: Download Android NDK
         run: |
-          curl -fsSL -o ndk.zip https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o ndk.zip \
+            https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
           echo "${NDK_SHA256}  ndk.zip" | sha256sum -c -
           unzip -q ndk.zip
           echo "NDK_CLANG=$PWD/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" >> "$GITHUB_ENV"

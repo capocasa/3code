@@ -42,7 +42,8 @@ jobs:
         # "-unstaged".
         run: |
           MINGW64_SHA256=04a535d1e0880364ca9609713744f1a9a36835c4ced834cf435c4dc4eca2159a
-          curl -fsSL -o "$RUNNER_TEMP/mingw64.7z" https://nim-lang.org/download/mingw64.7z
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$RUNNER_TEMP/mingw64.7z" \
+            https://nim-lang.org/download/mingw64.7z
           echo "${MINGW64_SHA256}  $RUNNER_TEMP/mingw64.7z" | sha256sum -c -
           7z x -y -o"$RUNNER_TEMP/mingw" "$RUNNER_TEMP/mingw64.7z" > /dev/null
           echo "$RUNNER_TEMP/mingw/mingw64/bin" >> "$GITHUB_PATH"
@@ -148,7 +149,8 @@ jobs:
           cp 3code.exe 3code-windows-amd64/
           cp README.md LICENSE 3code-windows-amd64/
           if [ ! -f dlls/libssl-1_1-x64.dll ]; then
-            curl -fsSL -o dlls.zip https://nim-lang.org/download/dlls.zip
+            curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o dlls.zip \
+              https://nim-lang.org/download/dlls.zip
             echo "${DLLS_SHA256}  dlls.zip" | sha256sum -c -
             unzip -q dlls.zip -d dlls
           fi

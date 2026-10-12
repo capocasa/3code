@@ -66,7 +66,7 @@ jobs:
           # first starts, and these probes never do.
           ROOTFS_SHA256: 6bc2cde3930ad088b3bb46fa45279e96d25bc3810f209850ecbe4722711874f9
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/rootfs.tar.gz" \
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$RUNNER_TEMP/rootfs.tar.gz" \
             https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.3-base-amd64.tar.gz
           echo "${ROOTFS_SHA256}  $RUNNER_TEMP/rootfs.tar.gz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/wsl3code"

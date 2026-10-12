@@ -73,7 +73,8 @@ jobs:
         if: steps.cache-nim.outputs.cache-hit != 'true'
         run: |
           NIM_SRC_SHA256=2639a06a5ea7a7fcf57df1e7e1ef4d1b2bee58c7ac9bd00dbd2aa5bea1e5a56a
-          curl -fsSL -o /tmp/nim.tar.xz https://nim-lang.org/download/nim-2.2.12.tar.xz
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/nim.tar.xz \
+            https://nim-lang.org/download/nim-2.2.12.tar.xz
           echo "${NIM_SRC_SHA256}  /tmp/nim.tar.xz" | sha256sum -c -
           tar -xJf /tmp/nim.tar.xz -C /opt
           cd /opt/nim-2.2.12

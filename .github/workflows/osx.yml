@@ -218,9 +218,10 @@ jobs:
           # so the pair loads standalone.
           OPENSSL_VERSION=3.6.4
           OPENSSL_BOTTLE_SHA256=b7139450ed389be82f807daaadffa778d9c4753a3b2d8f784da1cf7383994ee2
-          TOKEN="$(curl -fsSL "https://ghcr.io/token?scope=repository:homebrew/core/openssl/3:pull&service=ghcr.io" \
+          TOKEN="$(curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            "https://ghcr.io/token?scope=repository:homebrew/core/openssl/3:pull&service=ghcr.io" \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
-          curl -fsSL -H "Authorization: Bearer ${TOKEN}" \
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${TOKEN}" \
             "https://ghcr.io/v2/homebrew/core/openssl/3/blobs/sha256:${OPENSSL_BOTTLE_SHA256}" \
             -o openssl-bottle.tar.gz
           echo "${OPENSSL_BOTTLE_SHA256}  openssl-bottle.tar.gz" | shasum -a 256 -c -
@@ -243,7 +244,8 @@ jobs:
           # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
           # refresh must be a conscious pin bump, not silent drift.
           CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
-          curl -fsSL https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
           echo "${CACERT_SHA256}  3code-macos-universal/cacert.pem" | shasum -a 256 -c -
           {
             nim --version | head -1
