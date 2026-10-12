@@ -2,6 +2,21 @@ Changelog
 
 Unreleased
 
+- **Green CI runs were dropping whole categories' failures.** The test
+  harness's exit code came from the last testament dispatch only (the
+  tty category, run alone at the end); any failure in the parallel
+  api/config/core/shell/stream batch was silently discarded. Four real
+  failures rode under green checkmarks since mid-October: the mistral
+  terse-budget test (the preamble passed 7000 bytes at 7506), a stale
+  vibe-cli max_tokens assertion (the curated row moved to 32768), and
+  two sandbox tests compiling against a September sandwall pin that
+  predated the `./` path-contraction and Seatbelt writable-rule fixes.
+  Every category dispatch now contributes to the exit code, the deps
+  are re-locked (sandwall 0.5.9, ttty 0.5.4, tinotify 0.1.5, ws
+  pinned), and the two test assertions match the curated rows. The
+  mistral terse budget rides to 7.6KB with the anti-flailing sections
+  that grew the preamble.
+
 - **Release binaries shipped with auto-update dead.** Every linux and
   windows release since 0.8.0 was built without `-d:autoUpdate`, so the
   background self-update worker never ran; macOS and Termux were
