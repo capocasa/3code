@@ -611,8 +611,7 @@ suite "api: bearerFor":
     check "supergrok" in msg
     check "login expired" in msg
     check "Invalid or unknown refresh token" in msg
-    check ":provider rm supergrok" in msg
-    check ":provider add supergrok" in msg
+    check ":provider edit supergrok" in msg
 
   test "grant-less provider name (no dot) still names itself in the error":
     let deadGrant = proc(p: Profile): string =

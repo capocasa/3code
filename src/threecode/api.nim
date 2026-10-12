@@ -63,8 +63,7 @@ proc bearerFor*(p: Profile): string =
         let dot = p.name.find('.')
         let provider = if dot > 0: p.name[0 ..< dot] else: p.name
         raise newException(ApiError, provider & " login expired (" &
-          e.msg & "). sign in again: :provider rm " & provider &
-          ", then :provider add " & provider)
+          e.msg & "). re-login: :provider edit " & provider)
     if t != "": return t
   p.key
 
@@ -1460,6 +1459,14 @@ proc responsesUsage*(u: JsonNode): Usage =
   if outDetails != nil and outDetails.kind == JObject:
     result.reasoningTokens = outDetails{"reasoning_tokens"}.getInt(0)
 
+func proModeBase*(p: Profile): string =
+  ## Same translation at profile level: only bare-slug first-party
+  ## selections need it. The Codex backend serves the pro slugs
+  ## natively (chatgpt profiles keep them) and so do the gateways
+  ## (prefixed ids keep them).
+  if chatgptProfile(p) or '/' in p.model: ""
+  else: proModeWire(p.model)
+
 proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
   ## Request body for POST /responses. Mirrors the completions body built
   ## in `callModel` (same generation defaults, same tools) with the
@@ -1469,6 +1476,10 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
     "input": responsesInput(wireMessages),
     "stream": streamingEnabled,
   }
+  # First-party /responses has no gpt-5.6/6 `-pro` model ids, so a bare
+  # pro slug ships as the base model plus `reasoning.mode: pro`.
+  let proBase = proModeBase(p)
+  if proBase != "": result["model"] = %proBase
   result["tools"] = responsesTools(setup(p).tools)
   result["tool_choice"] = %"auto"
   let d = knownGoodGeneration(p)
@@ -1480,8 +1491,12 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
   # gpt-5.x on /responses rejects any temperature but 1, so omit it.
   if p.family != "gpt" and d.temperature >= 0.0:
     result["temperature"] = %d.temperature
-  if p.reasoning.len > 0:
-    result["reasoning"] = %*{"effort": %p.reasoning}
+  if p.reasoning.len > 0 or proBase != "":
+    result["reasoning"] = %*{}
+    if p.reasoning.len > 0:
+      result["reasoning"]["effort"] = %p.reasoning
+    if proBase != "":
+      result["reasoning"]["mode"] = %"pro"
   if chatgptProfile(p):
     # The ChatGPT Codex backend (subscription OAuth) only serves this
     # exact shape: SSE-only, no server-side storage, and a top-level
@@ -3487,8 +3502,12 @@ proc verifyBody*(p: Profile): string =
       "stream": true
     }
   elif responsesApi(p):
+    # The verify ping must name a model the endpoint serves: a bare
+    # gpt-5.6/6 pro slug would 400 as an unknown id before the wizard
+    # ever placed a real request.
+    let proBase = proModeBase(p)
     %*{
-      "model": p.model,
+      "model": (if proBase != "": proBase else: p.model),
       "input": [%*{"role": "user", "content": "ping"}],
       "max_output_tokens": 1,
       "stream": true

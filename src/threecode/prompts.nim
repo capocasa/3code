@@ -169,15 +169,30 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openai", "gpt-5-mini", "gpt", "", "5-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openai", "gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false),
+    # gpt-5.3-codex (Feb 24): the last codex-tuned slug. Deprecated but
+    # still served on the API; the Codex backend 400s it on ChatGPT
+    # sign-in, so the row earns its keep on the key paths (openai,
+    # openrouter). Family gpt, not gpt-oss: the /responses wire is the
+    # same (no temperature, effort ladder low..xhigh) and the generic
+    # function-calling tools are a supported surface for it.
+    ("openai", "gpt-5.3-codex", "gpt", "", "5.3-codex", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openai", "gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openai", "gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openai", "gpt-5.4-nano", "gpt", "", "5.4-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openai", "gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openai", "gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openai", "gpt-5.6", "gpt", "", "5.6", "medium", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openai", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openai", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, tbNone, false, 400_000, false),
-    ("openai", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 400_000, false),
+    ("openai", "gpt-5.6", "gpt", "", "5.6", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
+    # 5.6 pro tiers (GA 2026-07-09): not first-party API model ids;
+    # api.nim translates a bare pro slug into the base model plus
+    # `reasoning.mode: pro` on /responses. The Codex backend and
+    # gateways serve the slugs natively, so they pass through there.
+    # Effort defaults to medium in both modes per the reasoning guide.
+    ("openai", "gpt-5.6-sol-pro", "gpt", "", "5.6-sol-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-terra-pro", "gpt", "", "5.6-terra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-luna-pro", "gpt", "", "5.6-luna-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     ("openai", "gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     # GPT-6 Sol / Luna (Sep 22) and GPT-6.1 Sol (Sep 29): same 1.05M
     # context and 128k output cap as Astra. Sol/Luna keep `none` on
@@ -272,8 +287,18 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # blocks are prefix-checked by default on accounts created after
     # 2026-08-31, so it rides drop_block like Opus 5.5+.
     ("anthropic", "claude-sonnet-5-5", "claude", "sonnet", "5-5", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
+    # Haiku 5.5 (Oct 7): first Haiku with the adaptive effort knob
+    # (low..max, API default medium; Models API live: effort low..max
+    # supported, thinking adaptive + plain `disabled`). 1M ctx, 128k
+    # out; tiered pricing at the 100k prompt boundary.
+    ("anthropic", "claude-haiku-5-5", "claude", "haiku", "5-5", "medium", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
     ("anthropic", "claude-fable-5-1", "claude", "fable", "5-1", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
     ("anthropic", "claude-haiku-4-5", "claude", "haiku", "4-5", "low", -1.0, 32768, tbAllTurns, false, 200_000, false),
+    # Unlike Sonnet 5.5, Haiku 5.5 needs no between_tools mapping:
+    # plain `disabled` is accepted (Models API, live). Block binding
+    # is unverified (no capability field, and the local key is out of
+    # credit), so it rides without the drop_block net like the earlier
+    # Haikus and Sonnet 5.
 
     # Command Code provider gateway open models (api.commandcode.ai/
     # provider/v1, OpenAI chat completions; same plan/API key as their
@@ -616,13 +641,17 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "openai/gpt-5", "gpt", "", "5", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5-mini", "gpt", "", "5-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false),
+    ("openrouter", "openai/gpt-5.3-codex", "gpt", "", "5.3-codex", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openrouter", "openai/gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 400_000, false),
-    ("openrouter", "openai/gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openrouter", "openai/gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, tbNone, false, 400_000, false),
+    ("openrouter", "openai/gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-sol-pro", "gpt", "", "5.6-sol-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-terra-pro", "gpt", "", "5.6-terra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-luna-pro", "gpt", "", "5.6-luna-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     ("openrouter", "openai/gpt-6-sol", "gpt", "", "6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     ("openrouter", "openai/gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
     ("openrouter", "openai/gpt-6.1-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
@@ -3604,7 +3633,7 @@ commands:
   :provider X         switch to provider X (model defaults to first in its list)
   :provider add       add a new provider (interactive, verified)
   :provider add X     same, with X as provider name, url, or api key
-  :provider edit X    edit provider X (url, key, models)
+  :provider edit X    edit provider X (url, key, models; oauth re-login)
   :provider update X  update the models of provider X (key unchanged)
   :provider new [X]   list models X serves that its config lacks (all: no X)
   :provider pull [X [M...]]  pull those models into X's list (all: no X)
@@ -3936,8 +3965,9 @@ proc maxOutputTokensFor*(p: Profile): int =
   # prompts -> compact cycle).
   let m = p.model.toLowerAscii
   if "claude" in m:
-    # 5.x / Fable / 4.6+ Opus and Sonnet: 128k output; Haiku and the
-    # 4.5 generation cap at 64k.
+    # 5.x / Fable / 4.6+ Opus and Sonnet, and Haiku 5.5: 128k output;
+    # older Haikus and the 4.5 generation cap at 64k.
+    if "haiku-5-5" in m or "haiku-5.5" in m: return 131_072
     if "haiku" in m or "4-5" in m or "4.5" in m: return 65_536
     return 131_072
   if "glm-5.3" in m: return 131_072
@@ -3989,6 +4019,12 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
           return @[]
         if combo.variant == "5-pro": return @["high"]
         if combo.variant == "5.5-pro": return @["medium", "high", "xhigh"]
+        if combo.variant == "5.3-codex": return @["low", "medium", "high", "xhigh"]
+        if combo.variant in ["5.6-sol-pro", "5.6-terra-pro", "5.6-luna-pro"]:
+          # The 5.6/6 pro tiers select `reasoning.mode`, not a different
+          # model; effort still applies inside pro mode (medium default),
+          # but `none` is off that ladder.
+          return @["low", "medium", "high", "xhigh", "max"]
         if combo.variant.startsWith("5.6"):
           return @["none", "low", "medium", "high", "xhigh", "max"]
         if combo.variant == "6-astra" or combo.variant == "6.1-sol":

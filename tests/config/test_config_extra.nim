@@ -230,11 +230,18 @@ name = "chatgpt"
 url = "https://api.openai.com/v1"
 key = ""
 models = "gpt-5.6-luna"
+
+[provider]
+name = "geminicli"
+url = "https://cloudcode-pa.googleapis.com"
+key = ""
+models = "gemini-3.8-flash"
 """)
     let (_, readProvs, _, _, _, _) = parseConfigFile(tmp)
-    check readProvs.len == 2
+    check readProvs.len == 3
     check readProvs[0].auth == "oauth"
     check readProvs[1].auth == "oauth"
+    check readProvs[2].auth == "oauth"
 
   test "empty key does not re-mark ordinary providers":
     writeFile(tmp, """

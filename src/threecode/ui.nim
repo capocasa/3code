@@ -23,6 +23,8 @@ const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
 type WizardReadLineHook* = proc(prompt: string, hidden,
                                 noHistory: bool): string {.closure.}
 
+type WizardOauthLoginHook* = proc(entry: string): string {.closure.}
+
 type WizardVerifyCancelHook* = proc(jobDone: proc(): bool {.closure.};
                                     cancelJob: proc() {.closure.}): bool {.closure.}
   ## Watches for Ctrl-C / ESC while the provider-verification pool runs
@@ -52,6 +54,7 @@ type
 
 var wizardReadLineHook*: WizardReadLineHook
 var wizardVerifyCancelHook*: WizardVerifyCancelHook
+var wizardOauthLoginHook*: WizardOauthLoginHook
 
 proc handleCommandResult*(cmd: string, messages: var JsonNode,
                           session: var Session, prof: var Profile,
@@ -467,6 +470,21 @@ proc claudeOauthLogin*(): string =
   runOauthLogin("  sign in with your Claude Pro / Max account",
     auth_anthropic.loginBrowser, auth_anthropic.storeTokens)
 
+proc oauthLoginFor*(name: string): string =
+  ## A subscription twin's browser login by provider name, shared by the
+  ## add and edit wizards. `wizardOauthLoginHook` substitutes the browser
+  ## flow in tests.
+  if wizardOauthLoginHook != nil:
+    return wizardOauthLoginHook(name)
+  case name.toLowerAscii
+  of "supergrok": xaiOauthLogin()
+  of "chatgpt": chatgptOauthLogin()
+  of "geminicli": geminiOauthLogin()
+  of "claudecode": claudeOauthLogin()
+  else:
+    errLn "no browser login for " & name
+    raise newException(minline.InputCancelled, "not a login twin")
+
 proc readFirstProviderField(editor: var minline.LineEditor): string =
   ## First wizard field: catalog name, URL, API key, or a subscription
   ## login (`supergrok`, `chatgpt`, `geminicli`, `claudecode`). Regular
@@ -532,11 +550,7 @@ proc promptNewProvider*(editor: var minline.LineEditor,
     # host. Named `supergrok`/`chatgpt`/`geminicli`/`claudecode` so an
     # API-key `xai`/`openai`/`google`/`anthropic` can sit beside it.
     ensureUniqueName(entryLower)
-    auth =
-      if entryLower == "supergrok": xaiOauthLogin()
-      elif entryLower == "chatgpt": chatgptOauthLogin()
-      elif entryLower == "geminicli": geminiOauthLogin()
-      else: claudeOauthLogin()
+    auth = oauthLoginFor(entryLower)
     key = ""
     name = entryLower
     url =
@@ -850,9 +864,21 @@ proc promptEditProvider*(editor: var minline.LineEditor,
         let newUrl = readOptional(editor,
           &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
         if newUrl == "": existing.url else: newUrl
-    let newKey = readOptional(editor,
-      "  api key [keep existing] : ", hidden = true)
-    let key = if newKey == "": existing.key else: newKey
+    # Subscription twins (supergrok, chatgpt, claudecode, geminicli)
+    # authenticate with a login token from the auth store, not an api
+    # key: no key field. Renewal is the optional browser re-login here;
+    # a dead grant surfaces "re-login: :provider edit <name>" on use.
+    let key =
+      if existing.auth == "oauth":
+        let relogin = readOptional(editor,
+          "  re-login [enter = keep, y = browser] : ")
+        if relogin.toLowerAscii.startsWith("y"):
+          discard oauthLoginFor(existing.name)
+        existing.key
+      else:
+        let newKey = readOptional(editor,
+          "  api key [keep existing] : ", hidden = true)
+        if newKey == "": existing.key else: newKey
     let models = promptModelsSelection(editor, name, url, key,
                                        existing.models)
     return ProviderRec(name: name, url: url, key: key,
