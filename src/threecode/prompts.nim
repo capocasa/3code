@@ -169,15 +169,30 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openai", "gpt-5-mini", "gpt", "", "5-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openai", "gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false),
+    # gpt-5.3-codex (Feb 24): the last codex-tuned slug. Deprecated but
+    # still served on the API; the Codex backend 400s it on ChatGPT
+    # sign-in, so the row earns its keep on the key paths (openai,
+    # openrouter). Family gpt, not gpt-oss: the /responses wire is the
+    # same (no temperature, effort ladder low..xhigh) and the generic
+    # function-calling tools are a supported surface for it.
+    ("openai", "gpt-5.3-codex", "gpt", "", "5.3-codex", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openai", "gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openai", "gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openai", "gpt-5.4-nano", "gpt", "", "5.4-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openai", "gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openai", "gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openai", "gpt-5.6", "gpt", "", "5.6", "medium", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openai", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openai", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, tbNone, false, 400_000, false),
-    ("openai", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 400_000, false),
+    ("openai", "gpt-5.6", "gpt", "", "5.6", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
+    # 5.6 pro tiers (GA 2026-07-09): not first-party API model ids;
+    # api.nim translates a bare pro slug into the base model plus
+    # `reasoning.mode: pro` on /responses. The Codex backend and
+    # gateways serve the slugs natively, so they pass through there.
+    # Effort defaults to medium in both modes per the reasoning guide.
+    ("openai", "gpt-5.6-sol-pro", "gpt", "", "5.6-sol-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-terra-pro", "gpt", "", "5.6-terra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openai", "gpt-5.6-luna-pro", "gpt", "", "5.6-luna-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     ("openai", "gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     # GPT-6 Sol / Luna (Sep 22) and GPT-6.1 Sol (Sep 29): same 1.05M
     # context and 128k output cap as Astra. Sol/Luna keep `none` on
@@ -616,13 +631,17 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "openai/gpt-5", "gpt", "", "5", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5-mini", "gpt", "", "5-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false),
+    ("openrouter", "openai/gpt-5.3-codex", "gpt", "", "5.3-codex", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, tbNone, false, 400_000, false),
     ("openrouter", "openai/gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openrouter", "openai/gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 400_000, false),
-    ("openrouter", "openai/gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, tbNone, false, 400_000, false),
-    ("openrouter", "openai/gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, tbNone, false, 400_000, false),
+    ("openrouter", "openai/gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-sol-pro", "gpt", "", "5.6-sol-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-terra-pro", "gpt", "", "5.6-terra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
+    ("openrouter", "openai/gpt-5.6-luna-pro", "gpt", "", "5.6-luna-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     ("openrouter", "openai/gpt-6-sol", "gpt", "", "6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
     ("openrouter", "openai/gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false),
     ("openrouter", "openai/gpt-6.1-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
@@ -3989,6 +4008,12 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
           return @[]
         if combo.variant == "5-pro": return @["high"]
         if combo.variant == "5.5-pro": return @["medium", "high", "xhigh"]
+        if combo.variant == "5.3-codex": return @["low", "medium", "high", "xhigh"]
+        if combo.variant in ["5.6-sol-pro", "5.6-terra-pro", "5.6-luna-pro"]:
+          # The 5.6/6 pro tiers select `reasoning.mode`, not a different
+          # model; effort still applies inside pro mode (medium default),
+          # but `none` is off that ladder.
+          return @["low", "medium", "high", "xhigh", "max"]
         if combo.variant.startsWith("5.6"):
           return @["none", "low", "medium", "high", "xhigh", "max"]
         if combo.variant == "6-astra" or combo.variant == "6.1-sol":

@@ -312,6 +312,17 @@ proc responsesApi*(p: Profile): bool =
   let prov = providerOf(p)
   prov == "openai" or prov == "chatgpt"
 
+func proModeWire*(model: string): string =
+  ## Base model when `model` is a GPT-5.6/6 `-pro` selection, "" when
+  ## it is not. Those pro tiers are `reasoning.mode` on first-party
+  ## /responses, not model ids; the pre-5.6 Pro ids (`gpt-5.5-pro` and
+  ## older) are real models and pass through untouched. Lives in types
+  ## (not api) for the same reason as `responsesApi`: api and compact
+  ## both translate model ids on the wire without an import cycle.
+  if model.endsWith("-pro") and
+      (model.startsWith("gpt-5.6") or model.startsWith("gpt-6")):
+    result = model[0 .. ^5]
+
 proc isInterruptedMsg*(msg: string): bool =
   ## Matches the bare `InterruptedByUserMsg` and variants that append
   ## context (e.g. "... during retry backoff"). Every raise of this class

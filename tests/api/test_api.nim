@@ -576,6 +576,16 @@ suite "api request shaping":
       @["none", "low", "medium", "high", "xhigh"]
     check knownGoodReasonings("openai", "gpt-5.5-pro") ==
       @["medium", "high", "xhigh"]
+    # gpt-5.3-codex stops at xhigh (per its model page); the 5.6 pro
+    # tiers keep the family ladder minus none (pro always reasons).
+    check knownGoodReasonings("openai", "gpt-5.3-codex") ==
+      @["low", "medium", "high", "xhigh"]
+    check knownGoodReasonings("openai", "gpt-5.6-sol-pro") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check knownGoodReasonings("openai", "gpt-5.6-terra-pro") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check knownGoodReasonings("openrouter", "openai/gpt-5.6-luna-pro") ==
+      @["low", "medium", "high", "xhigh", "max"]
     check knownGoodReasonings("openai", "gpt-5.6") ==
       @["none", "low", "medium", "high", "xhigh", "max"]
     check knownGoodReasonings("openai", "gpt-5.6-luna") ==
@@ -1342,6 +1352,68 @@ suite "xml tool_call fallback":
     check vb{"store"}.getBool == false
     check "max_output_tokens" notin vb
     check vb{"instructions"}.getStr.len > 0
+
+  test "gpt-5.6 pro slugs ride first-party /responses as reasoning.mode":
+    # The 5.6/6 pro tiers are `reasoning.mode` on the first-party API,
+    # not model ids: a bare pro slug ships as the base model plus
+    # mode: pro. The Codex backend and prefixed gateway ids serve the
+    # slugs natively and keep them. `gpt-5.5-pro` and older are real
+    # ids and never get rewritten.
+    check proModeWire("gpt-5.6-sol-pro") == "gpt-5.6-sol"
+    check proModeWire("gpt-5.5-pro") == ""
+    check proModeWire("gpt-5.6-sol") == ""
+    let msgs = %*[{"role": "user", "content": "go"}]
+    let p = Profile(name: "openai.gpt-5.6-sol-pro", family: "gpt",
+                    model: "gpt-5.6-sol-pro", reasoning: "high",
+                    url: "https://api.openai.com/v1")
+    let body = buildResponsesBody(p, msgs)
+    check body{"model"}.getStr == "gpt-5.6-sol"
+    check body{"reasoning"}{"mode"}.getStr == "pro"
+    check body{"reasoning"}{"effort"}.getStr == "high"
+    # No effort picked: mode alone still ships.
+    let bare = buildResponsesBody(Profile(name: "openai.gpt-5.6-sol-pro",
+      family: "gpt", model: "gpt-5.6-sol-pro"), msgs)
+    check bare{"model"}.getStr == "gpt-5.6-sol"
+    check bare{"reasoning"}{"mode"}.getStr == "pro"
+    check "effort" notin bare{"reasoning"}
+    # Codex backend: slug native, no mode field.
+    let cg = buildResponsesBody(Profile(name: "chatgpt.gpt-5.6-sol-pro",
+      family: "gpt", model: "gpt-5.6-sol-pro", reasoning: "high"), msgs)
+    check cg{"model"}.getStr == "gpt-5.6-sol-pro"
+    check cg{"reasoning"}{"mode"} == nil
+    check cg{"reasoning"}{"effort"}.getStr == "high"
+    # Gateway id: slug native, untouched, no reasoning object at all.
+    let orp = buildResponsesBody(Profile(name: "openrouter.openai/gpt-5.6-sol-pro",
+      family: "gpt", model: "openai/gpt-5.6-sol-pro"), msgs)
+    check orp{"model"}.getStr == "openai/gpt-5.6-sol-pro"
+    check orp{"reasoning"} == nil
+    # A real pro id is a model, not a mode: never rewritten.
+    let real = buildResponsesBody(Profile(name: "openai.gpt-5.5-pro",
+      family: "gpt", model: "gpt-5.5-pro", reasoning: "high"), msgs)
+    check real{"model"}.getStr == "gpt-5.5-pro"
+    check real{"reasoning"}{"mode"} == nil
+    # The verify ping names the servable base model too, or the wizard
+    # would reject the selection on a first-party 400.
+    let vp = Profile(name: "openai.gpt-5.6-sol-pro", family: "gpt",
+                     model: "gpt-5.6-sol-pro", url: "https://api.openai.com/v1")
+    check parseJson(verifyBody(vp)){"model"}.getStr == "gpt-5.6-sol"
+    check parseJson(verifyBody(Profile(name: "chatgpt.gpt-5.6-sol-pro",
+      family: "gpt", model: "gpt-5.6-sol-pro"))){"model"}.getStr ==
+      "gpt-5.6-sol-pro"
+
+  test "gpt-5.3-codex is known-good for openai and openrouter":
+    # Codex-tuned slug on the key paths; family gpt keeps the wire
+    # shape (no temperature, effort knob) of the rest of the lineup.
+    let msgs = %*[{"role": "user", "content": "go"}]
+    check knownGoodFamily("openai", "gpt-5.3-codex") == "gpt"
+    check knownGoodFamily("openrouter", "openai/gpt-5.3-codex") == "gpt"
+    check knownGoodFamily("openai", "gpt-5.6-terra-pro") == "gpt"
+    check knownGoodFamily("openrouter", "openai/gpt-5.6-luna-pro") == "gpt"
+    let body = buildResponsesBody(Profile(name: "openai.gpt-5.3-codex",
+      family: "gpt", model: "gpt-5.3-codex", reasoning: "xhigh"), msgs)
+    check body{"model"}.getStr == "gpt-5.3-codex"
+    check body{"reasoning"}{"effort"}.getStr == "xhigh"
+    check "temperature" notin body
 
   test "fallback flag is per-known-good entry":
     check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm-5.3",

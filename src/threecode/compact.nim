@@ -185,12 +185,19 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   clipSummarizerPayload(payload)
   var body: JsonNode
   var endpoint: string
+  # Same pro-slug translation as the main turn path (api.nim): the
+  # first-party /responses endpoint has no gpt-5.6/6 `-pro` model ids.
+  # The chatgpt twin keeps its slug (the Codex backend serves it
+  # natively); compact posts to p.url directly either way.
+  let proBase = if providerOf(p) == "openai" and '/' notin p.model:
+                  proModeWire(p.model)
+                else: ""
   if useResponses:
     # Responses API (first-party openai): same role/content messages in
     # `input` (system is accepted), `max_output_tokens` budget, summary
     # text extracted from output[] below.
     body = %*{
-      "model": p.model,
+      "model": (if proBase != "": proBase else: p.model),
       "input": payload,
       "max_output_tokens": SummarizeMaxTokens,
       "stream": false
