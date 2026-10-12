@@ -83,6 +83,20 @@ when not defined(windows):
       got += r
     result.setLen(got)
 
+  proc ideaWord(i: int): string =
+    ## `i` spelled in base-26 letters: bulk reasoning tokens that are all
+    ## DISTINCT after normLoopToken folds digits. A uniform `word1 word2
+    ## ...` stream folds to the same token repeated and is exactly the
+    ## stuck-model signature the repetition guard (8982b44) exists to
+    ## cut - the guard would end every mock turn mid-stream and the
+    ## turn loop's backoff would stretch 120 turns past the watchdog.
+    var n = i
+    result = "idea"
+    while true:
+      result.add char(ord('a') + n mod 26)
+      n = n div 26
+      if n == 0: break
+
   proc jsonReply(client: Socket; body: string) =
     let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
       "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n"
@@ -124,7 +138,7 @@ when not defined(windows):
     var sse = ""
     for i in 1 .. 400:
       sse.add "data: " & $(%*{"choices":[{"index":0,
-        "delta":{"reasoning_content": "word" & $i & " "}}],"id":"t"}) & "\n\n"
+        "delta":{"reasoning_content": ideaWord(i) & " "}}],"id":"t"}) & "\n\n"
     for i in 1 .. 200:
       sse.add "data: " & $(%*{"choices":[{"index":0,
         "delta":{"content": "content-" & $i & " "}}],"id":"t"}) & "\n\n"
