@@ -209,3 +209,63 @@ when defined(linux):
           " restrict -- bash -c " & script3 & " </dev/null", env = probeEnv,
           options = {poDaemon})
         check "403" in r3.output
+
+when defined(posix):
+  suite "default policy keeps git working":
+    test "git runs under the built-in default (gitconfig readable)":
+      # Community report: "the model says the sandbox blocks git". Root
+      # cause: git treats EACCES on an existing ~/.gitconfig as fatal
+      # ("unknown error occurred while reading the configuration files")
+      # on every invocation, and the old default fenced all of $HOME.
+      # The default now carries `readonly ~/.gitconfig`; this test runs
+      # real git under the real default policy to keep it true. HOME is
+      # redirected to a scratch dir OUTSIDE the project so both the
+      # policy's `~` and git's $HOME resolve against a .gitconfig that
+      # exists (the absent-file case never trips the bug) while staying
+      # outside every writable root - which is also what the write-back
+      # check below needs.
+      if findExe("git") == "":
+        skip()
+      else:
+        # Under getTempDir the scratch home would sit inside the
+        # default's `allow /tmp` and nothing would be fenced; the real
+        # home is the one place the default leaves closed apart from
+        # its named rules. Dot-prefixed and removed in the defer.
+        let base = getHomeDir() / (".3code-gitdef-" & $getCurrentProcessId())
+        let home = base / "home"
+        let proj = base / "proj"
+        createDir(home)
+        createDir(proj)
+        defer: removeDir(base)
+        writeFile(home / ".gitconfig", "[user]\n\tname = T\n\temail = t@t\n")
+        let pol = proj / "policy"
+        writeFile(pol, sb.defaultPolicyText())
+        discard execCmdEx("git -C " & proj.quoteShell & " init -q")
+        writeFile(proj / "f.txt", "hi")
+        var env = newStringTable()
+        for k, v in envPairs(): env[k] = v
+        env["HOME"] = home
+        # `allow *` is a host rule, so the box fences; skip where the
+        # kernel cannot (same posture as the netns e2e above).
+        let probe = startProcess(binPath(), args = ["sandbox", "--policy",
+          pol, "restrict", "--", "true"], env = env,
+          options = {poStdErrToStdOut}, workingDir = proj)
+        let probeOk = probe.waitForExit(15_000) == 0
+        probe.close()
+        if not probeOk:
+          skip()
+        else:
+          template sandboxed(args: string): tuple[output: string, exitCode: int] =
+            execCmdEx(binPath() & " sandbox --policy " & pol.quoteShell &
+              " restrict -- " & args, env = env, workingDir = proj,
+              options = {poStdErrToStdOut})
+          let r = sandboxed("git status -s")
+          check r.exitCode == 0
+          check "fatal" notin r.output
+          check "Permission denied" notin r.output
+          check "?? f.txt" in r.output
+          # The config grant is read-only: a global-config write must
+          # still be fenced (HOME is outside every writable root).
+          let w = sandboxed("git config --global probe.x y")
+          check w.exitCode != 0
+          check ("denied" in w.output or "error" in w.output)

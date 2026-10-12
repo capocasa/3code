@@ -70,16 +70,59 @@ proc defaultPolicyText*(): string =
   ## (the net fence is a separate backend), while no rules grants it
   ## the internet capability. The project dir is spelled `allow ./`
   ## (a bare `allow` is equivalent; the explicit target reads better).
+  ##
+  ## Beyond that, the default has to make ordinary development work:
+  ## git is *fatal* on an unreadable ~/.gitconfig (git treats EACCES
+  ## differently from ENOENT and dies on every invocation), cargo dies
+  ## the same way on ~/.cargo/config.toml, and the mainstream builds
+  ## write dependency caches and build caches under $HOME (~/go,
+  ## ~/.cargo/registry, ~/.cache, ~/.npm). Those homes are writable or
+  ## readable here by rule. What stays fenced: token-bearing files
+  ## (~/.npmrc, ~/.cargo/credentials, ~/.git-credentials), ~/.ssh,
+  ## and everything else under $HOME - add those yourself with
+  ## `:sandbox allow` when a stack needs them (maven ~/.m2/repository,
+  ## gradle ~/.gradle/caches, an npm prefix in ~/.node_modules).
+  ##
+  ## Windows adds the same cache/toolchain homes (rules are inert
+  ## until the dirs exist) but NOT the VCS config rules: the bash
+  ## child's HOME is the per-run tmp, so git never touches the real
+  ## profile; streamexec seeds that tmp HOME with a copy of the real
+  ## ~/.gitconfig plus a safe.directory entry instead (the child runs
+  ## as the separate sandbox user, and a different-SID owner is
+  ## "dubious ownership" to git).
   when defined(windows):
-    "deny /\n" &
-    "allow ~/AppData/Local/Temp\n" &
-    "allow ./\n"
+    result = "deny /\n" &
+      "allow ~/AppData/Local/Temp\n" &
+      "allow ~/AppData/Local/npm-cache\n" &
+      "allow ~/AppData/Local/pip/cache\n" &
+      "allow ~/go\n" &
+      "allow ~/.npm\n" &
+      "allow ~/.cargo/registry\n" &
+      "allow ~/.cargo/git\n" &
+      "readonly ~/.cargo/bin\n" &
+      "readonly ~/.cargo/config.toml\n" &
+      "readonly ~/.rustup\n" &
+      "allow ./\n"
   else:
-    "deny /\n" &
-    "allow /tmp\n" &
-    "allow /var/tmp\n" &
-    "allow ./\n" &
-    "allow *\n"
+    result = "deny /\n" &
+      "allow /tmp\n" &
+      "allow /var/tmp\n" &
+      "allow ./\n" &
+      "allow ~/go\n" &
+      "allow ~/.cache\n" &
+      "allow ~/.npm\n" &
+      "allow ~/.cargo/registry\n" &
+      "allow ~/.cargo/git\n" &
+      "readonly ~/.cargo/bin\n" &
+      "readonly ~/.cargo/config.toml\n" &
+      "readonly ~/.rustup\n" &
+      "readonly ~/.gitconfig\n" &
+      "readonly ~/.config/git\n" &
+      "readonly ~/.hgrc\n" &
+      "readonly ~/.config/hg\n"
+    when defined(macosx):
+      result.add "allow ~/Library/Caches\n"
+    result.add "allow *\n"
 
 proc repoPolicyPath*(projectDir: string): string =
   projectDir / PolicyFile

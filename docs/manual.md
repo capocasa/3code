@@ -1085,11 +1085,26 @@ In practice:
 - The project directory is writable out of the box (`allow ./` is in the
   built-in default), plus the temp directories. A fresh clone needs no
   setup at all.
+- The default also keeps ordinary development working: version control
+  reads its user config (`readonly ~/.gitconfig`, `readonly ~/.config/git`,
+  the matching mercurial paths), and the dependency and build caches the
+  mainstream toolchains keep under your home are writable (`~/go`,
+  `~/.cache`, `~/.npm`, `~/.cargo/registry`). Token-bearing files stay
+  fenced: `~/.npmrc`, `~/.cargo/credentials`, `~/.git-credentials`,
+  `~/.ssh`. On Windows the caches move to `~/AppData/Local/npm-cache` and
+  `~/AppData/Local/pip/cache`, and the bash child gets a seeded copy of
+  your global git config (it runs as a separate sandbox user, so git's
+  ownership check would otherwise reject every project repo).
+- Stacks not covered by the default add their home with one rule: maven
+  wants `:sandbox allow ~/.m2/repository`, gradle `:sandbox allow
+  ~/.gradle/caches`, an npm prefix like `~/.node_modules` becomes
+  `:sandbox readonly ~/.node_modules` (plus `:sandbox allow ~/.npm` for
+  its cache).
 - Other directories need a rule. When a task will wander (a monorepo
-  sibling, `~/go`, the directory where you keep checkouts), consider adding
-  them broadly (`:sandbox allow ~/src`) rather than playing whack-a-mole
-  one path at a time; the model reads the policy and works within it
-  without asking.
+  sibling, `~/src`, the directory where you keep checkouts), consider
+  adding them broadly (`:sandbox allow ~/src`) rather than playing
+  whack-a-mole one path at a time; the model reads the policy and works
+  within it without asking.
 - Keep backups of what the sandbox protects. The fence is there so a
   confused model cannot rewrite `~/.ssh` or dotfiles; it is not a substitute
   for version control, and `git` inside a writable project remains your
@@ -1165,12 +1180,27 @@ deny /
 allow /tmp
 allow /var/tmp
 allow ./
+allow ~/go
+allow ~/.cache
+allow ~/.npm
+allow ~/.cargo/registry
+allow ~/.cargo/git
+readonly ~/.cargo/bin
+readonly ~/.cargo/config.toml
+readonly ~/.rustup
+readonly ~/.gitconfig
+readonly ~/.config/git
+readonly ~/.hgrc
+readonly ~/.config/hg
 allow *
 ```
 
-This lets the model write in the project and temporary directories, not wander
-through other user files. System programs, libraries, configuration, and device
-files get a read-only baseline so commands can still run. `allow *` leaves the
+On macOS the same policy plus `allow ~/Library/Caches` applies. This lets the
+model write in the project and temporary directories and the development
+caches, not wander through other user files. System programs, libraries,
+configuration, and device files get a read-only baseline so commands can still
+run, and the version-control config lines exist because git aborts every
+command when `~/.gitconfig` exists but is unreadable. `allow *` leaves the
 network open.
 
 On Windows, the built-in policy is:
@@ -1178,6 +1208,15 @@ On Windows, the built-in policy is:
 ```
 deny /
 allow ~/AppData/Local/Temp
+allow ~/AppData/Local/npm-cache
+allow ~/AppData/Local/pip/cache
+allow ~/go
+allow ~/.npm
+allow ~/.cargo/registry
+allow ~/.cargo/git
+readonly ~/.cargo/bin
+readonly ~/.cargo/config.toml
+readonly ~/.rustup
 allow ./
 ```
 
