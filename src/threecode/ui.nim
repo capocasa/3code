@@ -1618,13 +1618,15 @@ proc isFirstUserMessage*(messages: JsonNode): bool =
       return false
   true
 
-proc buildUserMessage*(messages: JsonNode, raw: string): string =
+proc buildUserMessage*(messages: JsonNode, raw: string; cwd = safeCwd()): string =
   ## Apply @file inlining always; prepend the session preamble (cwd, git
   ## state, AGENTS.md, ls) only on the first user message of a session so
-  ## resumed conversations don't re-inject stale context.
+  ## resumed conversations don't re-inject stale context. `cwd` lets
+  ## embedded sessions (library, ACP) build the preamble from the session's
+  ## working dir instead of the process's.
   let body = inlineAtFiles(raw)
   if isFirstUserMessage(messages):
-    sessionPreamble(safeCwd()) & "\n\n" & body
+    sessionPreamble(cwd) & "\n\n" & body
   else:
     body
 

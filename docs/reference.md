@@ -34,7 +34,9 @@ usage: 3code [options] [prompt...]
 | `-v`, `--version` | print version (release builds carry branch/commit provenance) |
 | `-h`, `--help` | the usage message, including the config path |
 
-Subcommands: `good` (same as `--good`), `sandbox` / `sb` (run a command
+Subcommands: `good` (same as `--good`), `acp` (speak
+[ACP](manual.html#agent-client-protocol) on stdio for editors and custom
+clients), `sandbox` / `sb` (run a command
 under the [filesystem policy](manual.html#what-is-sandboxed)), `setup` and
 `unsetup` (Windows sandbox/network-wall install and removal, see
 [network rules](manual.html#network-rules)).

@@ -1449,6 +1449,35 @@ chat page, keeps the session on a worker thread, and streams replies to the
 browser over server-sent events. `nim c -r example/webserve.nim` and open
 http://localhost:8501.
 
+## Agent Client Protocol
+
+`3code acp` turns the binary into an [ACP](https://agentclientprotocol.com)
+v1 agent: newline-delimited JSON-RPC on stdin/stdout, the protocol Zed,
+JetBrains, Neovim plugins, and a growing pile of custom clients speak. Your
+editor launches 3code like any other ACP agent:
+
+```
+# Zed: agent settings, "Add custom agent"
+Command: 3code
+Arguments: acp
+```
+
+One session per process. The session id is the `.3log` id, so `session/load`
+resumes any past 3code conversation and `session/resume` reconnects without
+replaying it. Prompt turns stream as `session/update` notifications
+(message and reasoning chunks, tool activity, token usage when the context
+window is known); `session/cancel` is Ctrl-C over the wire and answers the
+prompt with `cancelled`. Model and provider come from the normal config
+(`-m` picks, `:model` philosophy otherwise); the sandbox and loop guard run
+exactly as in the terminal.
+
+Not advertised (because 3code does not do them over ACP yet): MCP servers,
+client-side filesystem and terminal execution, permission requests,
+elicitation, modes, and authentication.
+
+`--acp` is an alias. Diagnostics go to stderr; stdout is protocol records
+only, so the stream stays parseable.
+
 ## Build from source
 
 ```
