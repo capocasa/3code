@@ -1087,11 +1087,13 @@ In practice:
   setup at all.
 - The default also keeps ordinary development working: version control
   reads its user config (`readonly ~/.gitconfig`, `readonly ~/.config/git`,
-  the matching mercurial paths), and the dependency and build caches the
+  the matching mercurial paths), the Nim toolchain runs (`allow
+  ~/.nimble`, `readonly ~/.choosenim`), uv venvs execute (`readonly
+  ~/.local/share/uv`), and the dependency and build caches the
   mainstream toolchains keep under your home are writable (`~/go`,
-  `~/.cache`, `~/.npm`, `~/.cargo/registry`). Token-bearing files stay
-  fenced: `~/.npmrc`, `~/.cargo/credentials`, `~/.git-credentials`,
-  `~/.ssh`. On Windows the caches move to `~/AppData/Local/npm-cache` and
+  `~/.cache`, `~/.npm`, `~/.cargo/registry`, `~/.m2/repository`).
+  Token-bearing files stay fenced: `~/.npmrc`, `~/.cargo/credentials`,
+  `~/.git-credentials`, `~/.ssh`. On Windows the caches move to `~/AppData/Local/npm-cache` and
   `~/AppData/Local/pip/cache`, and the bash child gets a seeded copy of
   your global git config (it runs as a separate sandbox user, so git's
   ownership check would otherwise reject every project repo).
@@ -1188,6 +1190,10 @@ allow ~/.cargo/git
 readonly ~/.cargo/bin
 readonly ~/.cargo/config.toml
 readonly ~/.rustup
+allow ~/.nimble
+readonly ~/.choosenim
+readonly ~/.local/share/uv
+allow ~/.m2/repository
 readonly ~/.gitconfig
 readonly ~/.config/git
 readonly ~/.hgrc
@@ -1217,6 +1223,9 @@ allow ~/.cargo/git
 readonly ~/.cargo/bin
 readonly ~/.cargo/config.toml
 readonly ~/.rustup
+allow ~/.nimble
+readonly ~/.choosenim
+allow ~/.m2/repository
 allow ./
 ```
 
@@ -1226,6 +1235,61 @@ When no policy file exists, the built-in default is materialized into a
 per-run temporary file for the Bash sandbox; nothing is written into the
 project or the config directory. The default grants the project directory
 itself (`allow ./`), so a fresh project is writable out of the box.
+
+### Common toolchains
+
+Rules for stacks the default does not carry. Copy the line(s) you need
+into `.sandbox` with `:sandbox allow` / `:sandbox readonly`, or into
+`~/.config/3code/sandbox` to make them your baseline. The list is the
+tool's own documented home, nothing more - credentials stay out on
+purpose.
+
+==============  =========================================================
+Stack           Rule(s)
+==============  =========================================================
+maven, full     `allow ~/.m2` is *not* it: `~/.m2/settings.xml` holds
+                server passwords. Use the default's
+                `allow ~/.m2/repository` (and `mkdir -p` it once; the
+                rule is inert until the directory exists).
+gradle          `allow ~/.gradle/caches`, `allow ~/.gradle/wrapper`,
+                `allow ~/.gradle/jdks` - not `~/.gradle` whole:
+                `gradle.properties` often holds credentials.
+pnpm            `allow ~/.local/share/pnpm`
+yarn (berry)    `allow ~/.yarn`, `readonly ~/.yarnrc`
+bun             `allow ~/.bun`
+deno            cache already rides `~/.cache` / `~/Library/Caches`;
+                `readonly ~/.deno` for the old standalone install
+nvm / volta     `readonly ~/.nvm`, `readonly ~/.volta` (or install
+                toolchains elsewhere)
+pyenv / rbenv   `readonly ~/.pyenv`, `readonly ~/.rbenv` to run; add
+                `allow` on `versions`/`gems` subdirs to install
+conda           `readonly ~/miniconda3`; writable envs live in
+                projects anyway
+asdf / mise     `readonly ~/.asdf`; mise installs live under
+                `~/.local/share/mise` - `allow` that one subdir
+flutter, dart   `allow ~/.pub-cache`, `readonly ~/flutter` (wherever
+                the SDK is cloned)
+android         `readonly ~/Android/Sdk`; emulator state needs
+                `allow ~/.android/avd`
+julia           `allow ~/.julia` (depots, artifacts, registries)
+R packages      `allow ~/R`
+composer (php)  cache rides `~/.cache/composer`; `~/.config/composer`
+                holds `auth.json` - keep it out, pass tokens via env
+terraform       `allow ~/.terraform.d/plugin-cache`
+xcode           DerivedData: `allow ~/Library/Developer/Xcode/DerivedData`
+                (or build with `-derivedDataPath` inside the project);
+                simulator runs: `allow ~/Library/Developer/CoreSimulator`;
+                signing: `readonly ~/Library/MobileDevice`. Executing
+                Xcode itself needs no rule: `/Applications` is a
+                read-only baseline dir. Not yet verified against a
+                full Xcode install.
+==============  =========================================================
+
+Deliberately not defaultable, because handing them over is handing
+over the account: `~/.kube`, `~/.aws`, `~/.config/gcloud`,
+`~/.gnupg`, `~/.pgpass`, `~/.my.cnf`, `~/.netrc`, and the docker
+socket (`/var/run/docker.sock` is root-equivalent). If a task needs
+one, allow it for that project, for that session, and revoke it.
 
 ### Network rules
 
