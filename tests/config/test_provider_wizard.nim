@@ -181,7 +181,9 @@ suite "provider wizard configuration":
         (@["gpt-5.4", "gpt-5.5"], "")
       else:
         (@[], "HTTP 403")
-    inputs = @["", "", "", "gpt-5.5"]
+    # No api-key prompt for the oauth twin: one input per remaining
+    # field (name, url, models).
+    inputs = @["", "", "gpt-5.5"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -193,6 +195,51 @@ suite "provider wizard configuration":
     check fetchedUrls == @[auth_openai.CodexApiUrl]
     check activeProviders[0].models == @["gpt-5.5"]
     check verifiedModels == @["gpt-5.5"]
+    check not prompts.anyIt("api key" in it)
+
+  test "edit of an oauth provider offers no api key field":
+    # supergrok logs in with a token from the auth store; an api-key
+    # prompt would either persist dead weight or confuse the re-login
+    # story. The edit flow must skip straight from name to models.
+    activeProviders = @[
+      ProviderRec(name: "supergrok", url: "https://api.x.ai/v1",
+                  auth: "oauth", models: @["grok-4.6"])
+    ]
+    activeCurrent = "supergrok.grok-4.6"
+    inputs = @["", "grok-4.7"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider edit supergrok", messages, session,
+                          prof, editor)
+
+    check activeProviders[0].key == ""
+    check activeProviders[0].auth == "oauth"
+    check activeProviders[0].models == @["grok-4.7"]
+    check activeCurrent == "supergrok.grok-4.7"
+    check not prompts.anyIt("api key" in it)
+
+  test "edit still prompts for the api key on key providers":
+    # The oauth skip must not leak into ordinary api-key providers.
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.2"
+    inputs = @["", "", "gpt-oss-20b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider edit nvidia", messages, session, prof,
+                          editor)
+
+    check prompts.anyIt("api key" in it)
+    check activeProviders[0].key == "nvapi-old"
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
 
   test "edit prompts for model before verifying updated provider":
     activeProviders = @[

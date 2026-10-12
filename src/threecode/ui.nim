@@ -850,9 +850,19 @@ proc promptEditProvider*(editor: var minline.LineEditor,
         let newUrl = readOptional(editor,
           &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
         if newUrl == "": existing.url else: newUrl
-    let newKey = readOptional(editor,
-      "  api key [keep existing] : ", hidden = true)
-    let key = if newKey == "": existing.key else: newKey
+    # Subscription twins (supergrok, chatgpt, claudecode, geminicli)
+    # authenticate with a login token from the auth store, not an api
+    # key: offering a key field is at best dead weight in the config.
+    # Renewal is a re-login, which the add wizard runs.
+    let key =
+      if existing.auth == "oauth":
+        hintLn "  login token (oauth); re-login via :provider add " &
+          existing.name, resetStyle
+        existing.key
+      else:
+        let newKey = readOptional(editor,
+          "  api key [keep existing] : ", hidden = true)
+        if newKey == "": existing.key else: newKey
     let models = promptModelsSelection(editor, name, url, key,
                                        existing.models)
     return ProviderRec(name: name, url: url, key: key,
