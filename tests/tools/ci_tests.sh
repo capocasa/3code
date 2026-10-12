@@ -78,7 +78,12 @@ echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}
 # a b` does NOT select two categories: extra words are forwarded as
 # per-test arguments and every test fails with "arguments can only be
 # given if the '--run' option is selected".
+# Every dispatch's exit code is accumulated: a function's status is its
+# last command's, so an unrecovered `|| rc=1` on the non-tty batch was
+# silently dropped whenever the tty batch passed (the false-green OSX
+# rerun of run 38230677798).
 run_testament() {
+  rc_all=0
   if [ $# -eq 0 ]; then
     # Default selection: every category except tty in parallel, then tty
     # alone. The tty PTY tests are scheduler-sensitive: on small runners
@@ -96,10 +101,11 @@ run_testament() {
       [ "$d" = tests/tty ] && continue
       ls "$d"/t*.nim >/dev/null 2>&1 && cats="$cats ${d#tests/}"
     done
-    sh tests/tools/test_dispatch.sh categories $cats
+    sh tests/tools/test_dispatch.sh categories $cats || rc_all=1
     if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
-      sh tests/tools/test_dispatch.sh categories tty
+      sh tests/tools/test_dispatch.sh categories tty || rc_all=1
     fi
+    return $rc_all
   else
     sh tests/tools/test_dispatch.sh categories "$@"
   fi
