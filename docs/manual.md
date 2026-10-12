@@ -1085,15 +1085,20 @@ In practice:
 - The project directory is writable out of the box (`allow ./` is in the
   built-in default), plus the temp directories. A fresh clone needs no
   setup at all.
-- The default also keeps ordinary development working: version control
-  reads its user config (`readonly ~/.gitconfig`, `readonly ~/.config/git`,
-  the matching mercurial paths), the Nim toolchain runs (`allow
-  ~/.nimble`, `readonly ~/.choosenim`), uv venvs execute (`readonly
-  ~/.local/share/uv`), and the dependency and build caches the
-  mainstream toolchains keep under your home are writable (`~/go`,
-  `~/.cache`, `~/.npm`, `~/.cargo/registry`, `~/.m2/repository`).
-  Token-bearing files stay fenced: `~/.npmrc`, `~/.cargo/credentials`,
-  `~/.git-credentials`, `~/.ssh`. On Windows the caches move to `~/AppData/Local/npm-cache` and
+- The default covers command-line builds of the common languages:
+  version control reads its user config (`readonly ~/.gitconfig`,
+  `readonly ~/.config/git`, the matching mercurial paths), the Nim
+  toolchain runs (`allow ~/.nimble`, `readonly ~/.choosenim`), uv venvs
+  execute (`readonly ~/.local/share/uv`), RubyGems user installs and
+  Bundler's cache are writable (`allow ~/.gem/ruby`,
+  `~/.local/share/gem`, `~/.bundle/cache`), and the dependency and
+  build caches the mainstream toolchains keep under your home are
+  writable (`~/go`, `~/.cache`, `~/.npm`, `~/.cargo/registry`). C and
+  Zig builds ride the project dir and the read-only system baseline
+  (Zig's global cache is `~/.cache/zig`; on Windows
+  `~/AppData/Local/zig`). Token-bearing files stay fenced:
+  `~/.npmrc`, `~/.cargo/credentials`, `~/.git-credentials`,
+  `~/.gem/credentials`, `~/.bundle/config`, `~/.ssh`. On Windows the caches move to `~/AppData/Local/npm-cache` and
   `~/AppData/Local/pip/cache`, and the bash child gets a seeded copy of
   your global git config (it runs as a separate sandbox user, so git's
   ownership check would otherwise reject every project repo).
@@ -1193,7 +1198,9 @@ readonly ~/.rustup
 allow ~/.nimble
 readonly ~/.choosenim
 readonly ~/.local/share/uv
-allow ~/.m2/repository
+allow ~/.gem/ruby
+allow ~/.local/share/gem
+allow ~/.bundle/cache
 readonly ~/.gitconfig
 readonly ~/.config/git
 readonly ~/.hgrc
@@ -1225,7 +1232,9 @@ readonly ~/.cargo/config.toml
 readonly ~/.rustup
 allow ~/.nimble
 readonly ~/.choosenim
-allow ~/.m2/repository
+allow ~/.gem/ruby
+allow ~/.bundle/cache
+allow ~/AppData/Local/zig
 allow ./
 ```
 
@@ -1236,54 +1245,116 @@ per-run temporary file for the Bash sandbox; nothing is written into the
 project or the config directory. The default grants the project directory
 itself (`allow ./`), so a fresh project is writable out of the box.
 
-### Common toolchains
+### Sandbox settings collection
 
-Rules for stacks the default does not carry. Copy the line(s) you need
-into `.sandbox` with `:sandbox allow` / `:sandbox readonly`, or into
-`~/.config/3code/sandbox` to make them your baseline. The list is the
-tool's own documented home, nothing more - credentials stay out on
-purpose.
+Recipes for stacks past the basics. The default policy already covers
+git, mercurial, C, Zig, Go, Nim, Python (pip, uv, venv), Ruby
+(RubyGems user installs, Bundler with a project-local path), Rust, and
+the npm/pip caches - nothing below is needed for those. Copy the
+lines you need into `.sandbox` (via `:sandbox allow` /
+`:sandbox readonly`), or into `~/.config/3code/sandbox` to make them
+your baseline. Each entry is the tool's own documented home, narrowed
+wherever the tool keeps credentials next to its data; the Windows
+line is given when the paths move.
 
-==============  =========================================================
-Stack           Rule(s)
-==============  =========================================================
-maven, full     `allow ~/.m2` is *not* it: `~/.m2/settings.xml` holds
-                server passwords. Use the default's
-                `allow ~/.m2/repository` (and `mkdir -p` it once; the
-                rule is inert until the directory exists).
-gradle          `allow ~/.gradle/caches`, `allow ~/.gradle/wrapper`,
-                `allow ~/.gradle/jdks` - not `~/.gradle` whole:
-                `gradle.properties` often holds credentials.
-pnpm            `allow ~/.local/share/pnpm`
-yarn (berry)    `allow ~/.yarn`, `readonly ~/.yarnrc`
-bun             `allow ~/.bun`
-deno            cache already rides `~/.cache` / `~/Library/Caches`;
-                `readonly ~/.deno` for the old standalone install
-nvm / volta     `readonly ~/.nvm`, `readonly ~/.volta` (or install
-                toolchains elsewhere)
-pyenv / rbenv   `readonly ~/.pyenv`, `readonly ~/.rbenv` to run; add
-                `allow` on `versions`/`gems` subdirs to install
-conda           `readonly ~/miniconda3`; writable envs live in
-                projects anyway
-asdf / mise     `readonly ~/.asdf`; mise installs live under
-                `~/.local/share/mise` - `allow` that one subdir
-flutter, dart   `allow ~/.pub-cache`, `readonly ~/flutter` (wherever
-                the SDK is cloned)
-android         `readonly ~/Android/Sdk`; emulator state needs
-                `allow ~/.android/avd`
-julia           `allow ~/.julia` (depots, artifacts, registries)
-R packages      `allow ~/R`
-composer (php)  cache rides `~/.cache/composer`; `~/.config/composer`
-                holds `auth.json` - keep it out, pass tokens via env
-terraform       `allow ~/.terraform.d/plugin-cache`
-xcode           DerivedData: `allow ~/Library/Developer/Xcode/DerivedData`
-                (or build with `-derivedDataPath` inside the project);
-                simulator runs: `allow ~/Library/Developer/CoreSimulator`;
-                signing: `readonly ~/Library/MobileDevice`. Executing
-                Xcode itself needs no rule: `/Applications` is a
-                read-only baseline dir. Not yet verified against a
-                full Xcode install.
-==============  =========================================================
+`maven` (Java)::
+
+    allow ~/.m2/repository
+
+    `~/.m2/settings.xml` holds server passwords, so never allow
+    `~/.m2` whole. The rule is inert until the directory exists:
+    run the first build unfenced once, or `mkdir -p ~/.m2/repository`.
+    Inside a fenced network, JVM tools ignore `http_proxy`; pass
+    `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=$WALL_PROXY_PORT`.
+
+`gradle`::
+
+    allow ~/.gradle/caches
+    allow ~/.gradle/wrapper
+    allow ~/.gradle/jdks
+
+    Not `~/.gradle` whole: `gradle.properties` often holds
+    credentials. Same JVM proxy note as maven.
+
+`pnpm`::
+
+    allow ~/.local/share/pnpm     (Windows: allow ~/AppData/Local/pnpm)
+
+`yarn` (berry)::
+
+    allow ~/.yarn
+    readonly ~/.yarnrc            (can hold npm tokens)
+
+`bun`::
+
+    allow ~/.bun
+
+`deno`:: cache already rides `~/.cache` / `~/Library/Caches`; add
+    `readonly ~/.deno` only for the old standalone layout.
+
+`nvm` / `volta` (node version managers)::
+
+    readonly ~/.nvm
+    readonly ~/.volta
+
+`pyenv` / `rbenv`::
+
+    readonly ~/.pyenv             (add allow ~/.pyenv/versions to install)
+    readonly ~/.rbenv             (add allow ~/.rbenv/versions to install)
+
+`conda`::
+
+    readonly ~/miniconda3
+
+    Writable envs belong in projects (`conda create -p ./env`).
+
+`asdf` / `mise`::
+
+    readonly ~/.asdf
+    allow ~/.local/share/mise     (mise's installs; Windows:
+                                   allow ~/AppData/Local/mise)
+
+`zig toolchain`:: the build caches are already covered
+    (`~/.cache/zig`, project `.zig-cache`, Windows
+    `~/AppData/Local/zig`). The compiler itself is wherever you
+    unpacked it - typically `readonly ~/zig` or `/opt/zig`.
+
+`flutter` / `dart`::
+
+    allow ~/.pub-cache
+    readonly ~/flutter            (wherever the SDK is cloned)
+
+`android`::
+
+    readonly ~/Android/Sdk
+    allow ~/.android/avd          (emulator state, only if you run sims)
+
+`julia`::
+
+    allow ~/.julia                (depots, artifacts, registries)
+
+`R packages`::
+
+    allow ~/R                     (Windows: allow ~/Documents/R)
+
+`composer` (PHP):: cache rides `~/.cache/composer`;
+    `~/.config/composer/auth.json` is a token file - keep it out and
+    pass credentials via env.
+
+`terraform`::
+
+    allow ~/.terraform.d/plugin-cache
+
+`xcode`::
+
+    allow ~/Library/Developer/Xcode/DerivedData
+    allow ~/Library/Developer/CoreSimulator
+    readonly ~/Library/MobileDevice
+
+    Prefer `-derivedDataPath <project>/build` so DerivedData stays in
+    the project. Executing Xcode needs no rule: `/Applications` is a
+    read-only baseline dir. CoreSimulator is only needed to run
+    `xcodebuild test`. Not yet verified against a full Xcode install.
 
 Deliberately not defaultable, because handing them over is handing
 over the account: `~/.kube`, `~/.aws`, `~/.config/gcloud`,
