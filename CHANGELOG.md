@@ -1,7 +1,87 @@
 Changelog
 
-0.8.3  auto-update restored in linux and windows releases, patch folds
-       other harnesses' field spellings, auto-update hyphen-only
+0.8.3  flail guard cuts wedged thinking mid-stream and arms for every
+       family, sandbox defaults keep git and toolchains working, oauth
+       re-login, gpt-5.3-codex / 5.6 pro / haiku-5.5 rows, auto-update
+       restored in linux and windows releases, patch folds other
+       harnesses' field spellings
+
+- **The thinking loop guard: wedged reasoning gets cut mid-stream.**
+  Reasoning models have their own version of getting stuck: the
+  thinking stream re-emits one phrase until the output budget dies or
+  you interrupt, and no tool call ever fires, so the flailing detector
+  watched in vain. While a reply is still pure thinking, the recent
+  tail is scanned for a repeating phrase, and a wedged stream is cut
+  mid-flight. What lands instead is an empty turn plus a `»` re-prompt
+  naming what happened - "your reasoning kept repeating itself" - and
+  two re-prompts that both re-wedge end the turn with a notice
+  instead of burning retries. Calibrated against 63,479 recorded
+  reasoning passes: thinking that merely repeats a topic phrase, or
+  quotes dense tables, sails under it; every recorded loop trips it.
+
+- **The flailing detector is armed for every family, with an
+  escalation ladder.** It was glm-only before; mistral loops too. The
+  streak now arms on output staleness, so windowed scans over many
+  files don't read as loops; novel calls are fresh by definition and a
+  batch escalates one rung at a time. A reply that dies on output
+  length retries one rung down the model's own reasoning ladder
+  instead of repeating the same budget mistake. Flagged calls still
+  execute: they show in the transcript with the note riding on the
+  result, `»` items are the harness-voice tier (bold marker, no
+  magenta), and the old `auto:` context rows are gone - the `»` item
+  carries the story.
+
+- **Sandbox defaults keep git and toolchains working.** The default
+  policy now reads version-control config (`readonly ~/.gitconfig`,
+  `~/.config/git`, the matching mercurial paths - git aborts every command
+  when its config exists but is unreadable) and grants writable
+  access to the caches mainstream toolchains keep under the home:
+  `~/go`, `~/.cache`, `~/.npm`, the cargo registry and git checkouts,
+  `~/Library/Caches` on macOS, the npm/pip caches on Windows (cargo
+  bin, config, and rustup stay read-only). Ruby moved from the
+  default list to a recipe. Windows rules also stop path resolution
+  at bare drive prefixes, and sandbox asserts show the contracted
+  `./` form (sandwall 0.5.9).
+
+- **`:provider edit` can re-login an oauth provider.** The edit wizard
+  skips the api-key prompt for subscription twins and offers the
+  browser login instead; a dead refresh token now ends the turn
+  pointing at `:provider edit <name>` instead of `:provider rm` +
+  add. `geminicli` re-marks as an oauth twin like the other
+  subscription logins.
+
+- **`gpt-5.3-codex` and the GPT-5.6 pro tiers known-good.** The 5.6/6
+  `-pro` selections are not model ids on first-party /responses: the
+  base model rides with a pro reasoning mode instead, while pre-5.6
+  Pro ids (`gpt-5.5-pro` and older) are real models and pass through
+  untouched.
+
+- **`claude-haiku-5-5` known-good.** The first Haiku with the adaptive
+  effort knob (low..max): plain `disabled` thinking is accepted with
+  no between_tools mapping, 1M context, 128k output.
+
+- **Tesseracted requests collapse before the vLLM message-count
+  cap.** The tesseracted gateway (vLLM serving Kolibri-1) rejects a
+  request with more than 80 `messages` entries with an opaque 400,
+  far under the token window, so the same history collapse the byte
+  guard uses now fires on message count for that route. Self-hosted
+  kolibri carries no such cap and stays unguarded.
+
+- **Uncurated google/geminicli models default to the gemini family.**
+  A model id the curated registry doesn't know rides the gemini wire
+  shape instead of failing dispatch.
+
+- **The terminal tab title carries state.** A `3` brand plus a spinner
+  glyph while a turn runs, a checkmark (or an ✗ when you cancelled)
+  when it ends, and the project directory for wide tabs. Toggle with
+  `:tab-title on|off` or the `tab-title` setting.
+
+- **The Mistral preamble was rewritten economical, terse by example.**
+  24% smaller than the Vibe-mined version it replaced, compressed
+  against Mistral's own CLI prompt and the best sibling preambles,
+  and one prompt for all family members now (the family split is
+  gone). The anti-flailing sections it gained set the terse-budget
+  test's 7.6KB watermark.
 
 - **`patch` now folds other harnesses' field spellings.** Models
   trained on Claude-Code-style tools emit `old_string`/`new_string`/
