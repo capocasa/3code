@@ -17,7 +17,7 @@ when defined(posix):
 when defined(windows):
   import std/winlean
 import streamhttp
-import types, util, prompts, streamexec, netthread, auth_openai, auth_google,
+import types, util, prompts, plugins, streamexec, netthread, auth_openai, auth_google,
        codeassist, anthropic, auth_anthropic, oauth
 
 type
@@ -125,6 +125,8 @@ proc isInterrupted*(): bool {.gcsafe.} =
 
 proc setInterrupted*(value: bool) {.gcsafe.} =
   interruptedFlag.store(value, moRelease)
+
+plugins.pluginInterruptedProbe = proc (): bool {.gcsafe.} = isInterrupted()
 
 proc clearInterrupted*() {.gcsafe.} =
   setInterrupted(false)
@@ -3388,6 +3390,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     let retryLabel = detail & ", retry " & $(attempt + 1) &
       "/" & $MaxAttempts & " in"
     hookRetryNotice retryLabel & " " & humanDuration(backoff)
+    pluginOnModelRetry(p.name, p.model, code, category, backoff, attempt + 1)
     hookStartSpinner("")
     hookRetryWait(retryLabel, backoff)
     block wait:

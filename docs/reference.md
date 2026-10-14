@@ -90,6 +90,8 @@ names, model names, and paths where supported.
 | `:sandbox readonly P` | add a read-only rule |
 | `:sandbox deny T` | add a deny rule |
 | `:sandbox edit` | open the policy file in `$VISUAL`/`$EDITOR`, reload on quit |
+| `:plugins` | list loaded plugin libraries, hooks, call counts, registered tools |
+| `:plugin debug on/off` | trace every plugin call to `THREECODE_DEBUG_LOG` (or stderr) |
 | `:! CMD` | run a shell command yourself, output to scrollback only |
 | `:quit` / `:q` / `:exit` | leave |
 
@@ -211,6 +213,19 @@ keys](manual.html#rebinding-keys) in the manual for the key-name grammar
 and the full command list. Values merge onto the defaults; an empty value
 unbinds a command.
 
+### plugins
+
+The `[plugins]` section controls the native plugin tier (hooks and
+tools in dynamically loaded libraries); the keys are covered in detail
+in [plugins](plugins.html).
+
+| key | effect |
+| --- | --- |
+| `disable` | comma-separated plugin names (lib file stems) to skip at load |
+| `tools` | `"on"` advertises plugin-registered tools to the model (opt-in) |
+| `debug` | `"on"` traces every plugin call with mutation diffs |
+| `lib` | extra plugin discovery directory, scanned before the defaults |
+
 ## Environment variables
 
 | variable | effect |
@@ -219,6 +234,8 @@ unbinds a command.
 | `XDG_DATA_HOME` | relocates the data root: sessions, history, auth tokens, builtin skills |
 | `THREECODE_MAX_TIMEOUT` | bash timeout ceiling for this run; wins over `max_timeout` |
 | `THREECODE_ALLOW_ROOT` | set to 1 to allow running as root (POSIX; refused otherwise) |
+| `THREECODE_PLUGIN_SYNC_MS` | sync-hook deadline override in ms (default 2000) |
+| `THREECODE_PLUGIN_TOOL_MS` | plugin tool-exec default timeout in ms (default 120000) |
 
 Both XDG variables work on every platform, including Windows, and expect
 absolute paths. They exist so tests and isolated setups can redirect all of

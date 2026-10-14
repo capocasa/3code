@@ -12,7 +12,7 @@
 import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
-  auth_xai, auth_anthropic, auth_openai, auth_google, oauth
+  auth_xai, auth_anthropic, auth_openai, auth_google, oauth, plugins
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
@@ -73,6 +73,13 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
+  of ":plugins":
+    ckSafeImmediate
+  of ":plugin":
+    # `:plugin` and `:plugin debug` are safe; the verbs mutate runtime
+    # plugin state, so they go the mutating path.
+    if parts.len == 0 or (parts.len == 1 and parts[0] == "debug"): ckSafeImmediate
+    else: ckMutating
   of ":streaming", ":notify", ":retry", ":private", ":tab-title":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
@@ -1850,6 +1857,28 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       resp buildSystemPrompt(prof)
     of ":version":
       resp "3code v" & Version
+    of ":plugins":
+      resp pluginsListBody()
+    of ":plugin":
+      let verb = if parts.len == 0: "list" else: parts[0]
+      case verb
+      of "list":
+        resp pluginsListBody()
+      of "debug":
+        if parts.len >= 2:
+          case parts[1]
+          of "on", "true", "1":
+            setPluginTrace(true)
+            resp "plugin trace on (goes to THREECODE_DEBUG_LOG or stderr)"
+          of "off", "false", "0":
+            setPluginTrace(false)
+            resp "plugin trace off"
+          else:
+            resp "usage: :plugin debug on|off"
+        else:
+          resp "plugin trace is " & (if pluginTraceOn: "on" else: "off")
+      else:
+        resp "usage: :plugin [list|debug on|off]  (also :plugins)"
     of ":sandbox", ":sb":
       # `:sandbox show` (or bare) dumps the rules; allow/readonly/deny
       # append a line and reload. The path arg is written verbatim so

@@ -15,7 +15,7 @@
 ]#
 
 import std/[algorithm, hashes, json, options, os, sequtils, strutils, tables]
-import types, util, modelname, anthropic
+import types, util, modelname, anthropic, plugins
 
 # ThinkBackMode moved to types.nim (Profile.params needs it); re-export
 # for modules that historically reached it through prompts.
@@ -3595,10 +3595,20 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "other": otherSetup
   of "nemotron": nemotronSetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
-  if bashToolDisabled:
-    (base.prompt, withoutShellTools(base.tools))
-  else:
-    base
+  var (prompt, tools) =
+    if bashToolDisabled:
+      (base.prompt, withoutShellTools(base.tools))
+    else:
+      base
+  # Plugin-registered tools append after the family surface, but only
+  # under the explicit [plugins] tools gate: every schema rides every
+  # model request, so mounting is a standing token cost (see
+  # plan-plugin-system-so.md). The system prompt runs through
+  # tc_on_system_prompt, memoized per (provider, model, family).
+  let pluginTools = pluginToolSchemas()
+  if pluginTools.len > 0:
+    for t in pluginTools: tools.add t
+  (pluginSystemPrompt(prompt, p.name, p.model, p.family), tools)
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
     "{{credit}}",
@@ -3671,6 +3681,9 @@ commands:
   readonly, deny; see .sandbox)
   :! CMD              run CMD directly through the sandboxed shell
                       (output shown, not sent to the model)
+  :plugins            list plugin libraries, hooks, and registered tools
+  :plugin             plugin subcommands: debug on|off toggles the
+                      per-call plugin trace (calls, verdicts, mutation diffs)
   :q :quit            exit (also Ctrl-D)
 
 input:
