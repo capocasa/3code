@@ -174,6 +174,13 @@ jobs:
           mv 3code "$SLICE_DIR/3code-arm64"
           rm -rf ~/.cache/nim/threecode_r
           OPENSSL_STATIC=$PWD/openssl-static/darwin64-x86_64 nim c -d:release -d:staticSsl ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:"$SLICE_DIR/3code-x86_64" src/threecode.nim
+          # Sign each thin slice BEFORE lipo: codesign cannot grow a
+          # slice that lacks a signature once it is embedded in a fat
+          # archive (it fails the re-sign with ESRCH and verify reports
+          # an invalid signature). ld already ad-hoc signs arm64; signing
+          # both here also covers the x86_64 slice, which ld never signs.
+          codesign --force --sign - "$SLICE_DIR/3code-arm64"
+          codesign --force --sign - "$SLICE_DIR/3code-x86_64"
           # The fat binary must stay outside the workspace: the next step
           # (Run tests) rebuilds ./3code natively via ci_tests.sh ->
           # build_binary.sh, and a fat binary parked at ./3code gets silently
@@ -226,12 +233,9 @@ jobs:
           mkdir -p 3code-macos-universal
           cp "$RUNNER_TEMP/3code-universal" 3code-macos-universal/3code
           cp README.md LICENSE 3code-macos-universal/
-          # The main binary: ld auto-signs only its arm64 slice, so the
-          # x86_64 slice ships unsigned and macOS 26+ kills it at exec on
-          # Intel (issue #56; a single pass over the fat binary ad-hoc
-          # signs every slice, and --verify walks them all). Before the
-          # VERSION smoke test, so it exercises the shipped signature.
-          codesign --force --sign - 3code-macos-universal/3code
+          # Both slices were ad-hoc signed before lipo (see the slice
+          # build step); macOS 26+ kills unsigned code at exec (issue
+          # #56), and this gate walks every slice of the fat file.
           codesign --verify --strict 3code-macos-universal/3code \
             || { echo "invalid code signature on 3code" >&2; exit 1; }
           # Capture the version from the built binary so it can be checked
