@@ -646,6 +646,19 @@ proc resolvePath*(path: string): string =
   if p.startsWith("~"): p = expandTilde(p)
   try: absolutePath(p) except CatchableError: p
 
+proc isSlashHelp*(cmd: string): bool =
+  ## True when `cmd` is the `/help` synonym for `:help`: the exact token,
+  ## optionally followed by whitespace. New users reach for the slash form
+  ## before learning the colon convention; anything looser (`/helpful,` in a
+  ## sentence) must stay a model prompt, not become a command.
+  let c = cmd.strip
+  c == "/help" or c.startsWith("/help ") or c.startsWith("/help\t")
+
+proc colonForm*(cmd: string): string =
+  ## `cmd` with a leading `/help` token rewritten to `:help` (see
+  ## `isSlashHelp`); unchanged when it is not the synonym.
+  if isSlashHelp(cmd): ":help" & cmd.strip[5 .. ^1] else: cmd
+
 proc safeCwd*(): string =
   ## The current working directory, or ``/`` when the process's cwd has
   ## been removed or renamed out from under it. Nim's ``getCurrentDir``

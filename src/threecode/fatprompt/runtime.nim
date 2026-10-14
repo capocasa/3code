@@ -2400,7 +2400,8 @@ proc inputThreadProc() {.thread.} =
       let modal = inputModalActive.load(moAcquire)
       let turnActive = inputTurnActive.load(moAcquire)
       let hasText = ed.line.text.len > 0
-      if turnActive and hasText and not modal and ed.line.text.startsWith(":"):
+      if turnActive and hasText and not modal and
+          (ed.line.text.startsWith(":") or isSlashHelp(ed.line.text)):
         let cmd = ed.line.text
         pushInputEvent(InputEvent(kind: ieCommand, text: cmd))
         # Leave the editor's row model intact: whichever way the hook goes

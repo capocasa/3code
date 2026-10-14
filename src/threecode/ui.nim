@@ -61,7 +61,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                           editor: var minline.LineEditor): CommandResult
 
 proc classifyCommand*(cmd: string): CommandKind =
-  let c = cmd.strip
+  let c = colonForm(cmd).strip
   if c.len == 0 or c[0] != ':':
     return ckUnknown
   let sp = c.find({' ', '\t'})
@@ -1713,7 +1713,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   ## directly to scrollback. Command internals still use the legacy display
   ## helpers; their stdout is captured here so the outer controller can commit
   ## one high-level transcript item.
-  let c = cmd.strip
+  let c = colonForm(cmd).strip
   if c.len == 0 or c[0] != ':':
     return CommandResult(recognized: false)
   let sp = c.find({' ', '\t'})
