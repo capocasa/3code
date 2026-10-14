@@ -492,7 +492,7 @@ suite "display: truncated tool output expansion":
     for i in 1..30: lines.add "line" & align($i, 2)
     let output = lines.join("\n")
     let bytes = toolResultBytes(akRead, output, 0, 7)
-    check "… 23 lines hidden · click or :show 7 for full …" in bytes
+    check "… 23 lines hidden · T7.log ↗" in bytes
     check "\x1b]8;;file://" in bytes
     check "\x1b]8;;\x1b\\" in bytes   # the link span closes
     let dump = toolOutDir() / "T7.log"
@@ -504,7 +504,7 @@ suite "display: truncated tool output expansion":
     for i in 1..12: lines.add "out" & align($i, 2)
     let output = lines.join("\n") & "\n"
     let bytes = toolResultBytes(akBash, output, 0, 3)
-    check "... 5 lines omitted · click or :show 3 for full" in bytes
+    check "... 5 lines omitted · T3.log ↗" in bytes
     let dump = toolOutDir() / "T3.log"
     check fileExists(dump)
     check readFile(dump) == output
@@ -514,7 +514,7 @@ suite "display: truncated tool output expansion":
     for i in 1..50: lines.add "+added line " & $i
     let diff = lines.join("\n")
     let bytes = toolResultBytes(akBash, "done", 0, 5, diff = diff)
-    check "… 15 lines hidden · click or `git diff` for full …" in bytes
+    check "… 15 lines hidden · T5.diff ↗" in bytes
     let dump = toolOutDir() / "T5.diff"
     check fileExists(dump)
     check readFile(dump) == diff

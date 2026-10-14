@@ -292,19 +292,27 @@ proc wrappedSubtleBytes(body: string; widthPad = 3): string =
     for chunk in wrapAnsi(line, bodyW):
       result.add GreyFg & "  " & chunk & Reset & "\r\n"
 
-proc hiddenHintBytes(hidden: int; idx: int; body: string; lead: string;
-                     tailNote: string; ext = "log"): string =
-  ## The "… N lines hidden · <tailNote>" row. The untruncated output is
-  ## dumped to a temp file and the whole visible text becomes an OSC 8
+proc hiddenHintBytes(hidden: int; idx: int; body: string; note: string;
+                     lead = "… "; ext = "log"): string =
+  ## The "… N lines <note> · T7.log ↗" row — as short as the hint gets
+  ## while still naming where the full text went. The untruncated output
+  ## is dumped to a temp file and the whole visible text becomes an OSC 8
   ## `file://` hyperlink over it, so a click expands what the scrollback
   ## elided (a click opens it in the terminal's `file:` handler,
-  ## $VISUAL where configured). Without a usable dump the plain hint
-  ## stands and the `:show` fallback keeps working.
-  let vis = lead & $hidden & " line" & (if hidden == 1: "" else: "s") &
-            tailNote
+  ## $VISUAL where configured). The visible file name keeps the row
+  ## honest where OSC 8 is unsupported. Without a usable dump the plain
+  ## `:show` hint stands.
+  let vis = lead & $hidden & " line" & (if hidden == 1: "" else: "s") & note
   let url = dumpToolOutput(idx, body, ext)
+  let text =
+    if url.len > 0:
+      vis & " · " & &"T{idx}.{ext}" & " ↗"
+    elif idx > 0:
+      vis & " · :show " & $idx & " for full"
+    else:
+      vis
   result = GreyFg & "  " &
-    (if url.len > 0: osc8Link(url, vis) else: vis) & Reset & "\r\n"
+    (if url.len > 0: osc8Link(url, text) else: text) & Reset & "\r\n"
 
 proc compactHeadTailBytes(res: string; idx: int;
                           head = CompactHead; tail = CompactTail): string =
@@ -325,8 +333,7 @@ proc compactHeadTailBytes(res: string; idx: int;
   else:
     for i in header ..< header + head:
       result.add wrappedSubtleBytes(lines[i])
-    result.add hiddenHintBytes(hidden, idx, res, lead = "… ",
-      tailNote = " hidden · click or :show " & $idx & " for full …")
+    result.add hiddenHintBytes(hidden, idx, res, " hidden")
     for i in footer - tail ..< footer:
       result.add wrappedSubtleBytes(lines[i])
   if footer < lines.len:
@@ -360,8 +367,7 @@ proc diffBytes(diff: string; idx = 0): string =
   for i in 0 ..< DiffHead:
     result.addDiffPainted(lines[i])
   result.add hiddenHintBytes(lines.len - DiffHead - DiffTail, idx, diff,
-    lead = "… ", tailNote = " hidden · click or `git diff` for full …",
-    ext = "diff")
+    " hidden", ext = "diff")
   for i in lines.len - DiffTail ..< lines.len:
     result.addDiffPainted(lines[i])
 
@@ -741,9 +747,7 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
     else:
       let tailLen = max(0, StreamMaxLines - 1)
       let hidden = lines.len - tailLen
-      result.add hiddenHintBytes(hidden, idx, res, lead = "... ",
-        tailNote = " omitted" &
-          (if idx > 0: " · click or :show " & $idx & " for full" else: ""))
+      result.add hiddenHintBytes(hidden, idx, res, " omitted", lead = "... ")
       for i in lines.len - tailLen ..< lines.len:
         result.add wrappedSubtleBytes(lines[i])
   elif kind == akRead:
