@@ -27,6 +27,7 @@ target=${2:?targets: darwin64-arm64 darwin64-x86_64 mingw64}
 # openssl.org/source; a rotation is a deliberate change here).
 release_fp="B146647E45A7B33947AB226B2A2C87D161692D40"
 
+here=$(pwd)  # Configure demands an absolute --prefix
 root=openssl-static
 mkdir -p "$root/src"
 cd "$root"
@@ -79,9 +80,25 @@ if [ ! -f "$target/lib/libssl.a" ]; then
   rm -rf "build/$target"
   mkdir -p "build/$target"
   cd "build/$target"
+  # git-bash (Windows runners) ships a minimal perl without the core
+  # modules Configure needs; prefer a complete one if the default is
+  # gutted. No-op where the system perl is fine (macOS, Linux).
+  if ! perl -MLocale::Maketext::Simple -e 1 >/dev/null 2>&1; then
+    # msys2's perl, not Strawberry: a native-Windows perl would receive
+    # msys-style paths (/d/a/...) it cannot resolve. The image ships
+    # C:\msys64; git-bash shares its path conventions.
+    for cand in /c/msys64/usr/bin; do
+      if [ -x "$cand/perl" ] \
+          && "$cand/perl" -MLocale::Maketext::Simple -e 1 >/dev/null 2>&1; then
+        PATH="$cand:$PATH"; export PATH
+        break
+      fi
+    done
+  fi
   # no-shared is the point; no-tests/no-docs keep the build short.
-  ../../src/openssl-$ver/Configure "$conf" no-shared no-tests no-docs \
-    --prefix="../../$target" --libdir=lib
+  # Invoked through `perl` (not the shebang) so the PATH fix above holds.
+  perl ../../src/openssl-$ver/Configure "$conf" no-shared no-tests no-docs \
+    --prefix="$here/$root/$target" --libdir=lib
   make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
   make install_sw
 fi
