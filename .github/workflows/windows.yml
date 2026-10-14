@@ -69,11 +69,20 @@ jobs:
         # 0xC0000142). A static copy is frozen at build time, so instead
         # of pinning one version forever the script resolves the newest
         # 3.5.x release and verifies the tarball's PGP signature; the
-        # series and key fingerprint are the conscious-bump pins. Needs
-        # perl (openssl Configure) and the pinned mingw gcc from the
-        # toolchain step (already on PATH).
+        # series and key fingerprint are the conscious-bump pins.
+        #
+        # Runs under the image's real MSYS2: git-bash ships a gutted perl
+        # without the core modules openssl's Configure needs, so pacman
+        # installs perl/make/gpg into C:\msys64. PATH order keeps the
+        # pinned mingw gcc first so Configure compiles with the same
+        # toolchain nim uses. OPENSSL_STATIC is exported in native form
+        # (D:/...): nim and the linker are Windows binaries.
         run: |
-          sh tests/tools/fetch_openssl.sh 3.5 mingw64
+          MINGW_BIN="$(cygpath -u "$RUNNER_TEMP")/mingw/mingw64/bin"
+          export PATH="$MINGW_BIN:/c/msys64/usr/bin:$PATH"
+          /c/msys64/usr/bin/pacman -Sy --noconfirm perl make gnupg
+          /c/msys64/usr/bin/bash tests/tools/fetch_openssl.sh 3.5 mingw64
+          echo "OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64")" >> "$GITHUB_ENV"
           echo "THREECODE_TEST_NIMFLAGS=-d:staticSsl" >> "$GITHUB_ENV"
 
       - name: Compute build flags
@@ -99,7 +108,7 @@ jobs:
           # without auto-update (issue #49).
           [ -n "${BUILD_FLAGS:-}" ] || {
             echo "BUILD_FLAGS empty" >&2; exit 1; }
-          OPENSSL_STATIC=$PWD/openssl-static/mingw64 nimble build -y -d:staticSsl ${{ env.BUILD_FLAGS }}
+          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") nimble build -y -d:staticSsl ${{ env.BUILD_FLAGS }}
 
       - name: Generate nimble.paths for direct nim invocations
         # nim disables its pkgs2 package scan whenever a nimble.lock is
@@ -191,7 +200,7 @@ jobs:
         # as their child. Build it once here so every test reuses the same
         # binary instead of each test triggering a full rebuild.
         run: |
-          OPENSSL_STATIC=$PWD/openssl-static/mingw64 nim c -d:staticSsl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim
+          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") nim c -d:staticSsl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim
 
       - name: Run tests
         # Runs AFTER Package on purpose: ci_tests.sh rebuilds the workspace
@@ -209,7 +218,7 @@ jobs:
           # Smoke-check: the statically linked 3code binary starts
           # standalone (no DLLs anywhere near it).
           ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
-          OPENSSL_STATIC=$PWD/openssl-static/mingw64 sh tests/tools/ci_tests.sh 900 tty
+          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") sh tests/tools/ci_tests.sh 900 tty
         timeout-minutes: 20
 
       - name: Upload artifact (GitHub Actions)
