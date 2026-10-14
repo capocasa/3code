@@ -12,7 +12,7 @@
 import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
-  auth_xai, auth_anthropic, auth_openai, auth_google, oauth
+  auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
@@ -1764,7 +1764,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       # Direct shell command through the model's sandboxed executor;
       # output goes to scrollback only, never to the model. `c[2..^1]`
       # keeps the text after `:!` verbatim (unlike `arg`, which is
-      # stripped).
+      # stripped). Streamed through the same live viewport a model-run
+      # bash call uses, so lines appear while the command runs; the
+      # caller's transcript commit folds the viewport into one item.
       let cmdText = if c.len > 2: c[2..^1] else: ""
       if cmdText.strip.len == 0:
         ok = false
@@ -1775,16 +1777,15 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         let act = Action(kind: akBash, body: cmdText)
         var output = ""
         var code = -1
-        # The input thread owns stdin at idle; the tool cancel watcher
-        # would fight it for keystrokes and restore the wrong termios.
-        setToolStdinWatcherEnabled(false)
-        try:
-          (output, code, _) = runAction(act, session.readCache)
-        except CatchableError as e:
-          output = "ERROR: " & e.msg
-          code = -1
-        finally:
-          setToolStdinWatcherEnabled(true)
+        var streamedShown = false
+        withBarTick(currentBarLabel):
+          try:
+            (output, code, _) = runBashWithViewport(
+              act, session.readCache, nil, session.toolLog.len + 1,
+              addr streamedShown)
+          except CatchableError as e:
+            output = "ERROR: " & e.msg
+            code = -1
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: output,
           code: code, kind: act.kind, plan: act.plan)
         body.add toolBannerBytes(previewCmd(cmdText), akBash, code)

@@ -90,7 +90,7 @@ names, model names, and paths where supported.
 | `:sandbox readonly P` | add a read-only rule |
 | `:sandbox deny T` | add a deny rule |
 | `:sandbox edit` | open the policy file in `$VISUAL`/`$EDITOR`, reload on quit |
-| `:! CMD` | run a shell command yourself, output to scrollback only |
+| `:! CMD` | run a shell command yourself, output streamed live to scrollback only |
 | `:quit` / `:q` / `:exit` | leave |
 
 ## Config file
