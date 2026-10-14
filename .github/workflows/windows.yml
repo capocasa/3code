@@ -92,7 +92,8 @@ jobs:
             export PATH='/c/msys64/usr/bin:$MINGW_BIN:'\$PATH
             pacman -Sy --noconfirm perl make gnupg || true
             command -v perl make gpg
-            bash tests/tools/fetch_openssl.sh 3.5 mingw64"
+            head -c 80 tests/tools/fetch_openssl.sh | od -c | head -4
+            bash -x tests/tools/fetch_openssl.sh 3.5 mingw64"
           echo "OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64")" >> "$GITHUB_ENV"
           echo "THREECODE_TEST_NIMFLAGS=-d:staticSsl" >> "$GITHUB_ENV"
 
