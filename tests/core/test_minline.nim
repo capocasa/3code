@@ -492,6 +492,57 @@ suite "minline editor: completion cycle":
     d.push Enter
     check d.run(ed, prompt = "> ") == ":mode"
 
+  test "unique completion appends a space so args can be typed":
+    # Only one candidate survives the prefix filter: the completed
+    # command lands with a trailing space, exactly like a shell.
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      @[":model", ":misc"]
+    let d = newDriver()
+    d.pushString ":mod"
+    d.push Tab
+    d.pushString "x"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":model x"
+
+  test "directory completion keeps its slash, no space":
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      @["@alpha/", "@amber/"]
+    let d = newDriver()
+    d.pushString "@alp"
+    d.push Tab
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "@alpha/"
+
+  test "completion with the cursor mid-line adds no space":
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      @[":model", ":misc"]
+    let d = newDriver()
+    d.pushString ":mod zz"
+    d.push Left
+    d.push Left
+    d.push Left
+    d.push Tab
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":model zz"
+
+  test "Tab after a space-completed command completes the arg":
+    # The trailing space moves the cursor into the arg word; a fresh
+    # Tab cycle there completes against that position's candidates.
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      if ' ' in ed.lineText: @["sonnet4", "sonnet45"]
+      else: @[":model", ":misc"]
+    let d = newDriver()
+    d.pushString ":mod"
+    d.push Tab
+    d.push Tab
+    d.push Tab
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":model sonnet45"
+
   test "Tab keeps cycling and wraps around":
     var ed = initEditor()
     ed.completionCallback = proc(ed: LineEditor): seq[string] =
