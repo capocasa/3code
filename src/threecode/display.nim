@@ -166,6 +166,60 @@ const
   ReadHead = 2
   ReadTail = 5
 
+proc osc8Link*(url, text: string): string =
+  ## OSC 8 hyperlink: terminals that support it make `text` clickable and
+  ## carry `url` invisibly; others ignore the unknown OSC per ECMA-48 and
+  ## render `text` unchanged.
+  "\x1b]8;;" & url & "\x1b\\" & text & "\x1b]8;;\x1b\\"
+
+proc fileUrl*(path: string): string =
+  ## Percent-encoded `file://` URL for an absolute path (byte-wise, so
+  ## non-ASCII tmp paths stay valid URLs).
+  const Keep = {'A'..'Z', 'a'..'z', '0'..'9', '-', '.', '_', '~', '/'}
+  var p = path
+  when defined(windows):
+    p = p.replace('\\', '/')
+  result = "file://"
+  if not p.startsWith("/"): result.add "/"
+  for c in p:
+    if c in Keep: result.add c
+    else: result.add &"%{ord(c):02X}"
+
+proc toolOutDir*(): string =
+  tempDir() / ("3code_out_" & $getCurrentProcessId())
+
+proc dumpToolOutput*(idx: int; body: string; ext = "log"): string =
+  ## Write the untruncated tool output to a per-process temp file and
+  ## return its `file://` URL, so a truncation hint can carry it as an
+  ## OSC 8 hyperlink: a click opens the full output in whatever the
+  ## terminal's `file:` handler is ($VISUAL where configured). "" on a
+  ## failed write; the caller then emits the plain hint, `:show` still
+  ## works. Rewritten (same content) on session replay so a resumed
+  ## scrollback keeps its links live.
+  try:
+    createDir(toolOutDir())
+    let path = toolOutDir() / (&"T{idx}.{ext}")
+    writeFile(path, body)
+    result = fileUrl(path)
+  except CatchableError:
+    result = ""
+
+proc sweepStaleToolOutDirs*() =
+  ## Best-effort removal of tool-output dump dirs from dead 3code
+  ## processes (a killed run leaks its `3code_out_<pid>` dir; live
+  ## sessions keep their dumps clickable until exit). Mirrors
+  ## `sweepStaleBashDirs`.
+  let tmp = tempDir()
+  for kind, path in walkDir(tmp):
+    if kind != pcDir: continue
+    let name = path.lastPathPart
+    if not name.startsWith("3code_out_"): continue
+    let pid = try: parseInt(name["3code_out_".len .. ^1])
+              except ValueError: continue
+    if pid == getCurrentProcessId(): continue
+    if pidAlive(pid): continue
+    try: removeDir(path) except CatchableError: discard
+
 proc isSkillRead*(act: Action): bool =
   ## True when the action is a `cat`/`head`/`sed`-style read of a skill
   ## file (any path under a registered skills dir). The main loop
@@ -238,6 +292,20 @@ proc wrappedSubtleBytes(body: string; widthPad = 3): string =
     for chunk in wrapAnsi(line, bodyW):
       result.add GreyFg & "  " & chunk & Reset & "\r\n"
 
+proc hiddenHintBytes(hidden: int; idx: int; body: string; lead: string;
+                     tailNote: string; ext = "log"): string =
+  ## The "… N lines hidden · <tailNote>" row. The untruncated output is
+  ## dumped to a temp file and the whole visible text becomes an OSC 8
+  ## `file://` hyperlink over it, so a click expands what the scrollback
+  ## elided (a click opens it in the terminal's `file:` handler,
+  ## $VISUAL where configured). Without a usable dump the plain hint
+  ## stands and the `:show` fallback keeps working.
+  let vis = lead & $hidden & " line" & (if hidden == 1: "" else: "s") &
+            tailNote
+  let url = dumpToolOutput(idx, body, ext)
+  result = GreyFg & "  " &
+    (if url.len > 0: osc8Link(url, vis) else: vis) & Reset & "\r\n"
+
 proc compactHeadTailBytes(res: string; idx: int;
                           head = CompactHead; tail = CompactTail): string =
   var lines = res.splitLines
@@ -257,9 +325,8 @@ proc compactHeadTailBytes(res: string; idx: int;
   else:
     for i in header ..< header + head:
       result.add wrappedSubtleBytes(lines[i])
-    result.add GreyFg & "  … " & $hidden & " line" &
-      (if hidden == 1: "" else: "s") &
-      " hidden · :show " & $idx & " for full …" & Reset & "\r\n"
+    result.add hiddenHintBytes(hidden, idx, res, lead = "… ",
+      tailNote = " hidden · click or :show " & $idx & " for full …")
     for i in footer - tail ..< footer:
       result.add wrappedSubtleBytes(lines[i])
   if footer < lines.len:
@@ -278,7 +345,7 @@ proc addDiffPainted(outBytes: var string; l: string) =
     else:
       outBytes.add GreyFg & "  " & chunk & Reset & "\r\n"
 
-proc diffBytes(diff: string): string =
+proc diffBytes(diff: string; idx = 0): string =
   const DiffHead = 15
   const DiffTail = 20
   var lines = diff.splitLines
@@ -292,9 +359,9 @@ proc diffBytes(diff: string): string =
     return
   for i in 0 ..< DiffHead:
     result.addDiffPainted(lines[i])
-  result.add GreyFg & "  … " & $(lines.len - DiffHead - DiffTail) &
-    " line" & (if lines.len - DiffHead - DiffTail == 1: "" else: "s") &
-    " hidden · `git diff` for full …" & Reset & "\r\n"
+  result.add hiddenHintBytes(lines.len - DiffHead - DiffTail, idx, diff,
+    lead = "… ", tailNote = " hidden · click or `git diff` for full …",
+    ext = "diff")
   for i in lines.len - DiffTail ..< lines.len:
     result.addDiffPainted(lines[i])
 
@@ -304,7 +371,7 @@ proc firstDiffLine(diff: string): string =
       return line
   ""
 
-proc diffBytesSkippingFirst(diff: string): string =
+proc diffBytesSkippingFirst(diff: string; idx = 0): string =
   var skipped = false
   var rest: seq[string]
   for line in diff.splitLines:
@@ -313,7 +380,7 @@ proc diffBytesSkippingFirst(diff: string): string =
       continue
     if skipped:
       rest.add line
-  diffBytes(rest.join("\n"))
+  diffBytes(rest.join("\n"), idx)
 
 proc planStatusGlyph(status: string): string =
   case status
@@ -673,10 +740,9 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
     else:
       let tailLen = max(0, StreamMaxLines - 1)
       let hidden = lines.len - tailLen
-      result.add GreyFg & "  ... " & $hidden & " line" &
-        (if hidden == 1: "" else: "s") & " omitted" &
-        (if idx > 0: " :show " & $idx & " for full" else: "") &
-        Reset & "\r\n"
+      result.add hiddenHintBytes(hidden, idx, res, lead = "... ",
+        tailNote = " omitted" &
+          (if idx > 0: " · click or :show " & $idx & " for full" else: ""))
       for i in lines.len - tailLen ..< lines.len:
         result.add wrappedSubtleBytes(lines[i])
   elif kind == akRead:
@@ -697,7 +763,26 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
       let head = if nl < 0: res else: res[0 ..< nl]
       result.add wrappedSubtleBytes(head)
   if diff.len > 0 and kind notin {akWrite, akRead}:
-    result.add diffBytes(diff)
+    result.add diffBytes(diff, idx)
+
+proc fullToolResultBytes*(kind: ActionKind; res: string; code: int;
+                           diff = ""): string =
+  ## The untruncated rendering `:show` prints: same styling as the live
+  ## transcript but no head/tail compaction, so the middle the scrollback
+  ## elided is finally visible. Nothing is dumped or hyperlinked here -
+  ## this IS the full output.
+  if kind == akWrite and diff.len > 0:
+    for l in diff.splitLines:
+      result.addDiffPainted(l)
+    return
+  var lines = res.splitLines
+  if kind == akRead:
+    while lines.len > 0 and lines[^1].startsWith("... [") and
+          lines[^1].endsWith("] ..."):
+      lines.setLen lines.len - 1
+  trimBoundaryBlank(lines)
+  for l in lines:
+    result.add wrappedSubtleBytes(l)
 
 proc toolTranscriptBytes*(banner: string; kind: ActionKind; res: string;
                           code: int; idx: int; diff = "";
@@ -721,7 +806,7 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
     if code != 0:
       result.add toolResultBytes(act.kind, res, code, idx, diff = "")
     elif diff.len > 0:
-      result.add diffBytesSkippingFirst(diff)
+      result.add diffBytesSkippingFirst(diff, idx)
     else:
       result.add toolResultBytes(act.kind, res, code, idx, diff = "")
   of akPlan:
@@ -960,7 +1045,10 @@ proc showToolS*(arg: string, toolLog: seq[ToolRecord]): string =
   if rec.kind == akPlan and rec.plan.len > 0:
     result.add planResultBytes(rec.plan)
   else:
-    result.add toolResultBytes(rec.kind, rec.output, rec.code, n)
+    # `:show` exists to reveal what the transcript elided, so this is the
+    # untruncated renderer, never the compact head/tail one (the old bug:
+    # `:show N` re-printed the same truncated body with the same hint).
+    result.add fullToolResultBytes(rec.kind, rec.output, rec.code)
 
 proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
   stdout.write showToolS(arg, toolLog)

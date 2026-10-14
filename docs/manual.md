@@ -583,9 +583,13 @@ Each conversation event gets a one-character marker or banner icon:
 
 Tool output below the banner is dimmed to keep the model's prose the
 loudest thing on screen. Long output is elided in the middle (`... N lines
-omitted :show N for full`); `:show N` prints the whole capture, `:log` lists
-every tool call of the session. Diffs are painted green/red, and a long diff
-is clipped with a `git diff` hint rather than flooding the screen. Failed
+omitted · click or :show N for full`); `:show N` prints the whole capture,
+`:log` lists every tool call of the session. The truncation hint is also a
+terminal hyperlink (OSC 8) over a dump of the full output in
+`$TMPDIR/3code_out_<pid>/T<N>.log`, so terminals that support links open it
+in the `file:` handler (e.g. `$VISUAL`) on a click; the dumps live as long
+as the session does. Diffs are painted green/red, and a long diff is
+clipped with a `git diff` hint rather than flooding the screen. Failed
 tools mark their banner so a red `Ø`/`✕` scan tells you where a turn went
 wrong without reading anything.
 

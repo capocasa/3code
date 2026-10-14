@@ -7,6 +7,7 @@ discard """
 ## dir; the per-run `finally` never fires) and keep dirs of live owners,
 ## including its own pid and names it cannot parse.
 import std/[os, osproc, strtabs, unittest]
+import threecode/display
 import threecode/streamexec
 
 suite "stale bash wrapper dir sweep":
@@ -42,6 +43,46 @@ suite "stale bash wrapper dir sweep":
 
     putEnv("TMPDIR", root)
     streamexec.sweepStaleBashDirs()
+
+    check not dirExists(deadDir)
+    check dirExists(liveDir)
+    check dirExists(ownDir)
+    check dirExists(junkDir)
+
+suite "stale tool-output dump dir sweep":
+  # `3code_out_<pid>` holds the click-to-open dumps for a live session;
+  # sweepStaleToolOutDirs removes dirs of dead owners the same way
+  # sweepStaleBashDirs covers the bash wrapper dirs.
+  test "dead owner removed; live, own, and unparseable kept":
+    let root = getCurrentDir() / "tests/testdata/output/core" /
+        ("sweep_out_" & $getCurrentProcessId())
+    if dirExists(root): removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    let gone = startProcess("/bin/sh", args = ["-c", "exit 0"],
+                            options = {})
+    let deadPid = gone.processID
+    discard waitForExit(gone)
+    close(gone)
+
+    let live = startProcess("/bin/sleep", args = ["30"], options = {})
+    let livePid = live.processID
+    defer:
+      kill(live)
+      discard waitForExit(live)
+      close(live)
+
+    let deadDir = root / ("3code_out_" & $deadPid)
+    let liveDir = root / ("3code_out_" & $livePid)
+    let ownDir = root / ("3code_out_" & $getCurrentProcessId())
+    let junkDir = root / "3code_out_notalnum"
+    for d in [deadDir, liveDir, ownDir, junkDir]:
+      createDir(d)
+      writeFile(d / "T1.log", "stub\n")
+
+    putEnv("TMPDIR", root)
+    display.sweepStaleToolOutDirs()
 
     check not dirExists(deadDir)
     check dirExists(liveDir)
