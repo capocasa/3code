@@ -206,6 +206,16 @@ proc sendAltChord(s: TtySession; letter: char) =
   discard posix.write(s.masterFd, addr buf[0], 2)
   s.drain(30)
 
+proc requireRowBelow(s: TtySession; above, below: string) =
+  ## Assert `below` renders strictly below `above` on the live screen. The
+  ## pinned-queue contract: a queued prompt sticks to the bottom, so every
+  ## row appended after it lands above it, never between it and the prompt.
+  let aboveRow = s.rowContaining(above)
+  let belowRow = s.rowContaining(below)
+  doAssert aboveRow >= 0 and belowRow > aboveRow,
+    ("expected " & below & " (row " & $belowRow & ") below " & above &
+      " (row " & $aboveRow & ")\n") & s.dumpFramesAround(below)
+
 proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   # Drain until the child goes quiet so the checked frame is the settled
   # repaint, not a transient mid-paint state captured between two sync
@@ -2306,72 +2316,101 @@ max-tokens = "8192"
     # hourglass items while a turn runs, each echoed at queue time, and
     # the drain after the turn sends every one of them in FIFO order (a
     # full turn each), so the conversation reflects exactly what was
-    # queued.
-    let root = newFixture("two_queued")
-    writeConfiguredProvider(root)
-    writeStubResponses(root, %*[
-      {
-        "role": "assistant",
-        "waitForTestContinue": true,
-        "content": "First reply.",
-        "contentChunks": ["First reply."],
-        "usage": {
-          "promptTokens": 120,
-          "completionTokens": 24,
-          "totalTokens": 144,
-          "cachedTokens": 0
+    # queued. The echoes stick to the bottom: every row appended while a
+    # prompt waits (a streaming reply, a tool receipt) lands ABOVE the
+    # hourglass rows, so the queue stays in sight until it runs. The
+    # echo's committed position is where it runs (below the reply that
+    # was streaming when it was queued), not where it was typed.
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "multiple_prompts_queue_in_order":
+      check true
+    else:
+      let root = newFixture("two_queued")
+      writeConfiguredProvider(root)
+      writeStubResponses(root, %*[
+        {
+          "role": "assistant",
+          "waitForTestContinue": true,
+          "content": "First reply.",
+          "contentChunks": ["First reply."],
+          "usage": {
+            "promptTokens": 120,
+            "completionTokens": 24,
+            "totalTokens": 144,
+            "cachedTokens": 0
+          }
+        },
+        {
+          "role": "assistant",
+          "waitForTestContinue": true,
+          "content": "Reply to queued alpha.",
+          "contentChunks": ["Reply to queued alpha."],
+          "usage": {
+            "promptTokens": 150,
+            "completionTokens": 20,
+            "totalTokens": 170,
+            "cachedTokens": 0
+          }
+        },
+        {
+          "role": "assistant",
+          "waitForTestContinue": true,
+          "content": "Reply to queued beta.",
+          "contentChunks": ["Reply to queued beta."],
+          "usage": {
+            "promptTokens": 160,
+            "completionTokens": 21,
+            "totalTokens": 181,
+            "cachedTokens": 0
+          }
         }
-      },
-      {
-        "role": "assistant",
-        "content": "Reply to queued alpha.",
-        "contentChunks": ["Reply to queued alpha."],
-        "usage": {
-          "promptTokens": 150,
-          "completionTokens": 20,
-          "totalTokens": 170,
-          "cachedTokens": 0
-        }
-      },
-      {
-        "role": "assistant",
-        "content": "Reply to queued beta.",
-        "contentChunks": ["Reply to queued beta."],
-        "usage": {
-          "promptTokens": 160,
-          "completionTokens": 21,
-          "totalTokens": 181,
-          "cachedTokens": 0
-        }
-      }
-    ])
+      ])
 
-    let tty = startStub(root)
-    defer:
-      tty.writeFrameArtifact(root / "frames.txt")
-      tty.close()
+      let tty = startStub(root)
+      defer:
+        tty.writeFrameArtifact(root / "frames.txt")
+        tty.close()
 
-    tty.expect "❯"
-    tty.send "initial prompt\n"
-    tty.expect "initial prompt"
-    # Turn is held open. Queue two prompts; each Enter commits an hourglass
-    # echo and leaves a fresh editor for the next line.
-    tty.send "queued alpha\n"
-    tty.expect "queued alpha"
-    tty.requireVisibleEditorCaret("❯")
-    tty.drain 50
-    tty.send "queued beta\n"
-    tty.expect "queued beta"
-    tty.drain 50
-    tty.advanceTicker()
-    tty.continueStubApi()
+      tty.expect "❯"
+      tty.send "initial prompt\n"
+      tty.expect "initial prompt"
+      # Turn is held open. Queue two prompts; each Enter commits an hourglass
+      # echo and leaves a fresh editor for the next line.
+      tty.send "queued alpha\n"
+      tty.expect "queued alpha"
+      tty.requireVisibleEditorCaret("❯")
+      tty.drain 50
+      tty.send "queued beta\n"
+      tty.expect "queued beta"
+      tty.drain 50
+      tty.advanceTicker()
+      tty.continueStubApi()
 
-    tty.expectInHistory "❯ initial prompt"
-    tty.expectInHistory "First reply."
-    tty.expectInHistory "⧖ queued alpha"
-    tty.expectInHistory "Reply to queued alpha."
-    tty.expectInHistory "⧖ queued beta"
-    tty.expectInHistory "Reply to queued beta."
+      # The first reply commits while both prompts wait: it lands above
+      # both hourglass rows, which stay glued above the bar. The drain
+      # then sends alpha; its echo keeps its place (below the reply),
+      # while beta stays pinned through alpha's turn.
+      tty.expect "First reply."
+      tty.expect "⧖ queued beta"
+      tty.drain 50
+      tty.requireRowBelow("First reply.", "⧖ queued alpha")
+      tty.requireRowBelow("⧖ queued alpha", "⧖ queued beta")
+      tty.continueStubApi()
+
+      # Alpha's reply commits between alpha's echo and beta's still-pinned
+      # hourglass row: appends never bury the waiting queue.
+      tty.expect "Reply to queued alpha."
+      tty.drain 50
+      tty.requireRowBelow("⧖ queued alpha", "Reply to queued alpha.")
+      tty.requireRowBelow("Reply to queued alpha.", "⧖ queued beta")
+      tty.continueStubApi()
+
+      tty.expectInHistory "❯ initial prompt"
+      tty.expectInHistory "First reply."
+      tty.expectInHistory "⧖ queued alpha"
+      tty.expectInHistory "Reply to queued alpha."
+      tty.expectInHistory "⧖ queued beta"
+      tty.expectInHistory "Reply to queued beta."
 
   test "mutating command queued mid-turn runs at the next opportunity":
     # `:sandbox allow ./foo` used to be refused outright mid-turn ("cannot
@@ -2515,6 +2554,84 @@ max-tokens = "8192"
       "second echo committed at send time\n" & tty.dumpFramesAround("hello")
     doAssert tty.rowContaining("⧖ hello world") < 0,
       "popped echo resurrected\n" & tty.dumpFramesAround("hello")
+
+  test "backspace at the start of a draft prepends the last queued prompt":
+    # File-line join semantics at the queue's left edge: backspace with the
+    # caret at position 0 of a NON-empty draft pops the newest queued item
+    # and prepends its text to the draft, caret at the join, exactly like
+    # deleting the newline between two lines of a file. The popped item's
+    # hourglass rows leave the screen with it.
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "backspace_join_nonempty_draft":
+      check true
+    else:
+      let root = newFixture("queued_prompt_pos0_join")
+      writeConfiguredProvider(root)
+      writeStubResponses(root, %*[
+        {
+          "role": "assistant",
+          "waitForTestContinue": true,
+          "content": "Holding turn open.",
+          "contentChunks": ["Holding turn open."],
+          "usage": {
+            "promptTokens": 100,
+            "completionTokens": 10,
+            "totalTokens": 110,
+            "cachedTokens": 0
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Reply to joined prompt.",
+          "contentChunks": ["Reply to joined prompt."],
+          "usage": {
+            "promptTokens": 120,
+            "completionTokens": 8,
+            "totalTokens": 128,
+            "cachedTokens": 0
+          }
+        }
+      ])
+
+      let tty = startStub(root)
+      defer:
+        tty.writeFrameArtifact(root / "frames.txt")
+        tty.close()
+
+      tty.expect "❯"
+      tty.send "start turn\n"
+      tty.expect "start turn"
+      # Turn is held open. Queue a prompt, then draft a continuation and
+      # join it onto the queued text from the left edge.
+      tty.send "hello world"
+      tty.expect "hello world"
+      tty.send "\n"
+      tty.drain 50
+      tty.expectInHistory "⧖ hello world"
+      tty.send " and more"          # new draft, caret at its end
+      tty.expect " and more"
+      tty.send "\x1b[H"            # Home: caret to position 0
+      tty.send "\x7f"              # backspace at pos 0: pop + prepend
+      tty.drain 50
+      tty.expect "hello world and more"
+      tty.requireVisibleEditorCaret("hello world and more")
+      # Caret rests at the join point: right after the popped text.
+      doAssert tty.frames[^1].drawnCaretCol(tty.frames[^1].cursorRow) == 13,
+        "caret not at the join\n" & tty.dumpFramesAround("hello world")
+      # The popped item's hourglass rows left the screen with it.
+      doAssert tty.rowContaining("⧖ hello world") < 0,
+        "popped echo still on screen\n" & tty.dumpFramesAround("hello world")
+      tty.send "\n"                # queue the joined text again
+      tty.drain 50
+      tty.advanceTicker()
+      tty.continueStubApi()
+
+      tty.expectInHistory "❯ start turn"
+      tty.expectInHistory "⧖ hello world and more"
+      tty.expectInHistory "Reply to joined prompt."
+      tty.drain 100
+      doAssert tty.rowContaining("❯ hello") < 0,
+        "second echo committed at send time\n" & tty.dumpFramesAround("hello")
 
   test "queued prompt typed during a turn keeps the line on a multi-row footer":
     # Regression: editing a queued mid-turn prompt. On a narrow terminal the

@@ -720,7 +720,7 @@ proc main() =
         # queue behind whatever precedes it, echoed to scrollback with the
         # hourglass exactly like a queued prompt, and the post-turn drain
         # runs it (in order) before any later queued prompt is sent.
-        markTailEventEchoed(commitQueuedEcho(cmd))
+        commitQueuedEcho(cmd)
       else:
         let bytes = plainCommandBodyBytes(
           "unknown command: " & cmd.strip & "  (try :help)\n")
@@ -731,8 +731,13 @@ proc main() =
   proc runDeferredCommand(cmd: string) =
     ## Execute one command deferred from mid-turn. Identical to the idle
     ## loop's command path except there is no prompt echo to commit: the
-    ## queue-time hourglass item already stands in for it, and the editor
-    ## is left alone (it may hold an unrelated half-typed draft).
+    ## queue-time hourglass item is unpinned into scrollback first, and
+    ## the editor is left alone (it may hold an unrelated half-typed
+    ## draft).
+    # Convert this command's pinned hourglass echo into its committed
+    # scrollback item (a visual no-op where it sat) so later output lands
+    # below it and any further queued items stay pinned at the bottom.
+    commitQueuedEchoSend(cmd)
     if classifyCommand(cmd) == ckModal:
       # A modal wizard paints its own prompts and output flush at the
       # cursor without committing, so the idle chrome the turn-end paint
@@ -801,11 +806,11 @@ proc main() =
         refreshSystemPrompt(messages, prof, session.promptState)
         saveSession(session, messages)
         if ev.echoed:
-          # Consume the idle chrome, commit nothing: this prompt's echo is
-          # already in scrollback from queue time. restoreEditor keeps the
-          # user's in-progress draft (if any) painted and in the model.
-          commitTranscriptBytes("", restoreEditor = true,
-                                reserveFooter = true)
+          # Unpin this prompt's hourglass echo into its committed
+          # scrollback item (where it sat); any further queued items stay
+          # pinned. restoreEditor keeps the user's in-progress draft (if
+          # any) painted and in the model.
+          commitQueuedEchoSend(ev.text)
         clearDraft(session)
         discard runTurnsInteractive(prof, messages, session)
         # keep draining: anything queued during that turn runs next

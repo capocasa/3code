@@ -87,13 +87,6 @@ template currentBarHasGap*(): untyped = fatPromptState.footer.hasGap
 
 var spinnerFramePainted: Atomic[bool]
 var bufferedSubmitTurn: Atomic[bool]
-var queuedEchoRun = 0
-  ## How many queue-time echoes (hourglass items) sit at the very bottom
-  ## of scrollback, still unsent. Backspace on an empty editor pops one
-  ## back into the buffer while this is positive; any other transcript
-  ## commit resets it (its item became the new bottom). Guarded by the
-  ## terminal write lock: echoes, pops, and commits all run inside it, so
-  ## the counter can never disagree with the screen under a racing commit.
 var quietStop: Atomic[bool]
 var quietThread: Thread[void]
 var quietRunning = false
@@ -856,31 +849,24 @@ proc resetEditorRowModel*(ed: ptr minline.LineEditor) =
   ed[].echoRows = 0
   ed[].prevRowSpans = @[]
 
-proc updateQueuedEchoRun(transcriptBytes: string; queuedEcho: bool) {.gcsafe.} =
-  ## Bookkeeping half of a transcript commit, run inside the terminal write
-  ## lock so it is atomic with the bytes that hit the screen. A queued echo
-  ## extends the run of unsent echoes at the scrollback bottom (or starts
-  ## one); the drain-send transition (empty bytes) consumes the head echo of
-  ## the run; every other commit makes a non-echo item the new bottom.
-  if queuedEcho:
-    queuedEchoRun = (if queuedEchoRun > 0: queuedEchoRun + 1 else: 1)
-  elif transcriptBytes.len == 0:
-    queuedEchoRun = max(0, queuedEchoRun - 1)
-  else:
-    queuedEchoRun = 0
-
-proc countItemRows(bytes: string): int =
-  var rows = 1
-  for ch in bytes:
-    if ch == '\n': inc rows
-  rows
+proc echoedQueueTexts(): seq[string] =
+  ## Texts of the queue events that have a queue-time echo, in FIFO order.
+  ## These are the prompts/commands the engine paints pinned at the bottom;
+  ## the list is rebuilt from the event queue under its lock so the pinned
+  ## set can never drift from what the drain will actually run.
+  acquire inputStateLock
+  try:
+    for ev in inputState.eventQueue:
+      if ev.kind in {ieLine, ieCommand} and ev.echoed:
+        result.add ev.text
+  finally:
+    release inputStateLock
 
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
                             reserveFooter = true;
                             flushWithPrevious = false;
-                            clearEditor = false;
-                            queuedEcho = false) =
+                            clearEditor = false) =
   ## Commit transcript output while preserving the volatile footer.
   ## The controller owns the transcript bytes and item spacing. This proc owns
   ## the terminal mechanics: clear the volatile footer, append the bytes as
@@ -890,11 +876,7 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
   ## it without fatprompt reintroducing stale chrome. ``clearEditor`` (command
   ## submits, which repaint an empty prompt) drops the editor model inside
   ## the commit, AFTER its walk-up consumed the pre-submit geometry.
-  ## ``queuedEcho`` marks the mid-turn queue-time echo of a prompt/command;
-  ## it feeds the run counter that decides whether backspace may pop the
-  ## scrollback tail back into the editor. Empty bytes with ``queuedEcho``
-  ## unset mean "consume the chrome, commit nothing": the drain-send
-  ## transition for a prompt whose queue-time echo is already on screen.
+  ## Empty bytes mean "consume the chrome, commit nothing".
   debugOut &"writeTranscriptWithFatPrompt enter barLabel={currentBarLabel.len}"
   let oldFooter = footerFrame(fatPromptState)
   if receiptTouchesNextResponse and transcriptBytes.hasNonNewlineBytes:
@@ -936,55 +918,64 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
         reserveFooter,
         flushWithPrevious,
         clearEditor)
-    updateQueuedEchoRun(transcriptBytes, queuedEcho)
   if reserveFooter and transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
 
-proc commitQueuedEcho*(text: string): int =
-  ## Echo a mid-turn queued prompt or command into scrollback as an
-  ## hourglass item and clear the editor for the next line. Runs on the
-  ## input thread inside the keystroke's terminal-write lock. Returns the
-  ## item's row count so a later backspace-pop can erase exactly what this
-  ## painted.
-  let bytes = formatQueuedPromptItem(text)
-  result = countItemRows(bytes)
-  commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
-                        clearEditor = true, queuedEcho = true)
+proc commitQueuedEcho*(text: string) =
+  ## Echo a mid-turn queued prompt or command as an hourglass item pinned
+  ## at the bottom of the volatile block, and clear the editor for the next
+  ## line. Runs on the input thread inside the keystroke's terminal-write
+  ## lock. Stamps the just-pushed tail event as echoed FIRST (the pinned
+  ## set is derived from the stamped events), then sets the desired set and
+  ## runs a chrome-consuming commit: the walk-up erases only the OLD painted
+  ## rows while the repaint emits the queue including the new item, so the
+  ## echo appears glued above the bar.
+  let rows = queuedEchoPlainRows(text, currentTermW()).len
+  withTerminalWriteLock:
+    acquire inputStateLock
+    try:
+      if inputState.eventQueue.len > 0:
+        inputState.eventQueue[inputState.eventQueue.high].echoed = true
+        inputState.eventQueue[inputState.eventQueue.high].echoRows = rows
+    finally:
+      release inputStateLock
+    termengine.setPinnedEchoItems(echoedQueueTexts())
+    commitTranscriptBytes("", restoreEditor = true, reserveFooter = true,
+                          clearEditor = true)
 
-proc markTailEventEchoed*(rows: int) =
-  ## Stamp the just-pushed queue event with its queue-time echo geometry.
-  ## Called by the input thread right after `commitQueuedEcho`, before any
-  ## other event can be pushed (only the input thread pushes while a turn
-  ## runs), so the tail is provably the event the echo belongs to.
-  acquire inputStateLock
-  try:
-    if inputState.eventQueue.len > 0:
-      inputState.eventQueue[inputState.eventQueue.high].echoed = true
-      inputState.eventQueue[inputState.eventQueue.high].echoRows = rows
-  finally:
-    release inputStateLock
+proc commitQueuedEchoSend*(text: string) =
+  ## Drain-send transition for a queued prompt/command whose queue-time
+  ## echo is pinned on screen: commit the echo as real scrollback (it
+  ## lands exactly where its pinned rows sat, so nothing moves) in the same
+  ## critical section that drops it from the pinned set. The event was
+  ## already polled off the queue, so the remaining echoed events are the
+  ## pinned remainder; the walk-up counts the OLD painted rows, erases the
+  ## whole run, and the repaint re-emits only the remainder below the
+  ## committed echo.
+  withTerminalWriteLock:
+    termengine.setPinnedEchoItems(echoedQueueTexts())
+    commitTranscriptBytes(formatQueuedPromptItem(text),
+                          restoreEditor = true, reserveFooter = true)
 
 proc popQueuedEchoTail*(ed: ptr minline.LineEditor): bool =
-  ## Backspace on an empty editor with an unsent echo at the scrollback
-  ## bottom: remove the newest queued item from the event queue, erase its
-  ## hourglass rows from scrollback, and continue editing its text in the
-  ## prompt, exactly like backspacing over a newline in a multiline buffer.
-  ## Returns false when there is nothing to pop (the tail is not an unsent
-  ## echo: another commit landed below it, or the queue holds only
-  ## idle-submitted lines that were never echoed).
+  ## Backspace at the buffer's left edge (empty buffer, or caret at
+  ## position 0 of a draft) with an unsent queued item above: remove the
+  ## newest item from the event queue, drop its hourglass rows from the
+  ## pinned block, and prepend its text to the editor buffer with the
+  ## caret at the join - exactly like deleting a newline between two lines
+  ## of a file. Returns false when there is nothing to pop (the tail is
+  ## not an unsent echo, or the queue holds only idle-submitted lines that
+  ## were never echoed).
   ##
   ## Holds the terminal write lock across the whole pop (the keystroke
   ## already holds it; reentrant here) with the event-queue lock nested
   ## inside: the drain on the controller thread pops queue heads and
   ## commits under the terminal lock only, so this ordering makes a pop
   ## racing the turn-end drain impossible - the two can never interleave
-  ## between the queue mutation and the erase it must match.
+  ## between the queue mutation and the repaint it must match.
   withTerminalWriteLock:
-    if queuedEchoRun <= 0:
-      return false
     var text = ""
-    var rows = 0
     acquire inputStateLock
     try:
       if inputState.eventQueue.len == 0:
@@ -993,17 +984,17 @@ proc popQueuedEchoTail*(ed: ptr minline.LineEditor): bool =
       if last[].kind notin {ieLine, ieCommand} or not last[].echoed:
         return false
       text = last[].text
-      rows = last[].echoRows
       inputState.eventQueue.delete(inputState.eventQueue.high)
     finally:
       release inputStateLock
-    # The popped text must be in the model before the repaint: the erase
-    # walks from the caret with the OLD (empty) geometry, then the repaint
-    # paints the editor rows from the model it finds.
-    ed[].line = minline.Line(text: text, position: text.len)
-    termengine.eraseTranscriptTail(rows, inputThreadRunning, ed,
-                                   footerFrame(fatPromptState))
-    queuedEchoRun = max(0, queuedEchoRun - 1)
+    # The model must hold the joined buffer before the repaint: the block
+    # shrink-blanks the popped rows and paints the editor rows from the
+    # model it finds, caret at the join point.
+    ed[].line.text = text & ed[].line.text
+    ed[].line.position = text.len
+    termengine.setPinnedEchoItems(echoedQueueTexts())
+    termengine.renderFooter(liveFatPromptFrame(), inputThreadRunning,
+                            ed, currentTermW())
     result = true
 
 proc guiLoop(unused: string) {.thread.} =
@@ -2390,11 +2381,12 @@ proc inputThreadProc() {.thread.} =
       # Mark the prompt draft dirty so the flusher thread persists the current
       # editor text on its debounce. No I/O here — the input thread stays fast.
       draftDirty.store(true, moRelease)
-    edPtr[].onBackspaceAtEmpty = proc(ed: var minline.LineEditor): bool =
-      # Backspace on an empty buffer with a queued line at the scrollback
-      # bottom joins the two, exactly like deleting a newline between two
-      # lines of a file: the newest queued item comes back into the editor
-      # for further editing and its hourglass rows leave scrollback.
+    edPtr[].onBackspaceAtJoin = proc(ed: var minline.LineEditor): bool =
+      # Backspace at the buffer's left edge with a queued item above joins
+      # the two, exactly like deleting a newline between two lines of a
+      # file: the newest queued item comes back into the editor (prepended
+      # to any draft, caret at the join) and its hourglass rows leave the
+      # screen.
       popQueuedEchoTail(edPtr)
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
       let modal = inputModalActive.load(moAcquire)
@@ -2432,7 +2424,7 @@ proc inputThreadProc() {.thread.} =
           # clears the buffer before readLineWith's own historyAdd runs.
           ed.historyAdd()
           pushInputEvent(InputEvent(kind: ieLine, text: ed.line.text))
-          markTailEventEchoed(commitQueuedEcho(ed.line.text))
+          commitQueuedEcho(ed.line.text)
         else:
           let rows = minline.totalRows(ed.line.text, ed.promptW,
                                        ed.contPromptW, max(2, ed.width))
@@ -2811,7 +2803,7 @@ proc inputThreadProc() {.thread.} =
       edPtr[].deferSubmit = false
     edPtr[].onMutate = nil
     edPtr[].onSubmit = nil
-    edPtr[].onBackspaceAtEmpty = nil
+    edPtr[].onBackspaceAtJoin = nil
     edPtr[].preRedraw = nil
     edPtr[].postRedraw = nil
     edPtr[].painter = nil
