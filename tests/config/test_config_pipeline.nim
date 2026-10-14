@@ -140,13 +140,13 @@ suite "config: resolveFamily":
     check resolveFamily(prov, prof) == "glm"
 
   test "uncurated google model defaults to gemini":
-    let prov = ProviderRec(name: "google", models: @["gemini-4-argon"])
-    let prof = Profile(name: "google.gemini-4-argon", model: "gemini-4-argon")
+    let prov = ProviderRec(name: "google", models: @["gemini-9-unreleased"])
+    let prof = Profile(name: "google.gemini-9-unreleased", model: "gemini-9-unreleased")
     check resolveFamily(prov, prof) == "gemini"
 
   test "geminicli twin defaults to gemini too":
-    let prov = ProviderRec(name: "geminicli", models: @["gemini-4-argon"])
-    let prof = Profile(name: "geminicli.gemini-4-argon", model: "gemini-4-argon")
+    let prov = ProviderRec(name: "geminicli", models: @["gemini-9-unreleased"])
+    let prof = Profile(name: "geminicli.gemini-9-unreleased", model: "gemini-9-unreleased")
     check resolveFamily(prov, prof) == "gemini"
 
   test "experimental family override still wins over google default":
