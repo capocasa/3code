@@ -1015,6 +1015,55 @@ suite "terminal visual contract":
     tty.expectCount("combination of colors.", 1, where = "screen")
     tty.expect "❯"
 
+  test "overlong streamed words wrap in-app, tails stay visible (#58)":
+    # The terminal's autowrap must never be what breaks a transcript row.
+    # The app's row model does not count a terminal-side wrap, so every
+    # overlong word used to drift screen and model apart by one row: the
+    # wrapped tail was erased by the next commit's walk-up (output
+    # "partly vanishing") and each wide line scrolled the view one row
+    # extra. The app char-wraps wide words itself now; the tail lands as
+    # its own margin-indented row that survives, and a single model
+    # newline renders as a line break, not a paragraph break.
+    let root = newFixture("wide_stream")
+    writeConfiguredProvider(root)
+    let wide = "W".repeat(130)   # 118 cols of body + a 12-char tail at width 120
+    writeStubResponses(root, %*[
+      {"role": "assistant",
+       "content": wide & "\na short line follows\n" & wide,
+       "contentChunks": [wide & "\n", "a short line follows\n", wide],
+       "usage": {"promptTokens": 10, "completionTokens": 140,
+                 "totalTokens": 150, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "❯"
+    tty.send "wide\n"
+    tty.expect "a short line follows"
+    tty.expect "❯"
+    tty.drain(50)
+    let rows = tty.rows()
+    let headRow = tty.rowContaining("W".repeat(118))
+    check headRow >= 0
+    if headRow >= 0:
+      # The wrapped tail is its own margin-indented row directly below
+      # the full row: present, non-blank, no separator blank between.
+      check headRow + 1 < rows.len
+      check rows[headRow + 1].strip == "W".repeat(12)
+    let shortRow = tty.rowContaining("a short line follows")
+    check shortRow == headRow + 2
+    # The second wide line keeps the same shape (its head is the row
+    # after the short line, tail right below, nothing lost).
+    check shortRow >= 0 and shortRow + 1 < rows.len
+    if shortRow >= 0 and shortRow + 1 < rows.len:
+      check rows[shortRow + 1].contains("W".repeat(100))
+      check rows[shortRow + 2].strip == "W".repeat(12)
+    # No wide-word tail was dropped anywhere: both full rows on screen.
+    check tty.rowContaining("W".repeat(118)) >= 0
+    var tails = 0
+    for r in rows:
+      if r.strip == "W".repeat(12): inc tails
+    check tails == 2
+
   test "streamed checkpoint markers never paint, not even as bare bullets":
     # Kimi dmail tagging prefixes the first assistant message with
     # `[checkpoint N]\n`. Three artifacts when the marker streams in
