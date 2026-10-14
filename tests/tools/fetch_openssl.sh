@@ -32,18 +32,26 @@ mkdir -p "$root/src"
 cd "$root"
 
 if [ ! -f version ]; then
-  ver=$(curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-      https://www.openssl.org/source/ \
-    | grep -oE "openssl-${series}\.[0-9]+\.tar\.gz" | sort -V | tail -1 \
-    | sed -e 's/^openssl-//' -e 's/\.tar\.gz$//')
-  [ -n "$ver" ] || { echo "no openssl $series.* release listed" >&2; exit 1; }
+  # Resolve via the git tag list, not the website: openssl.org redirects
+  # through openssl-library.org to GitHub assets and 404s some networks
+  # (GitHub runner IPs included), while git transport and github.com
+  # release downloads are reachable everywhere this runs. Anchored to a
+  # plain X.Y.Z so prerelease tags (openssl-4.1.0-beta2) never match.
+  ver=$(git ls-remote --tags https://github.com/openssl/openssl.git \
+    | grep -oE "openssl-${series}\.[0-9]+$" | sort -V | tail -1 \
+    | sed -e 's/^openssl-//')
+  [ -n "$ver" ] || { echo "no openssl $series.* tag found" >&2; exit 1; }
   echo "$ver" > version
 
   cd src
-  for f in "openssl-$ver.tar.gz" "openssl-$ver.tar.gz.asc" pubkeys.asc; do
+  for f in "openssl-$ver.tar.gz" "openssl-$ver.tar.gz.asc"; do
     curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$f" \
-      "https://www.openssl.org/source/$f"
+      "https://github.com/openssl/openssl/releases/download/openssl-$ver/$f"
   done
+  curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o pubkeys.asc \
+    https://openssl-library.org/source/pubkeys.asc \
+    || curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o pubkeys.asc \
+      https://www.openssl.org/source/pubkeys.asc
 
   command -v gpg >/dev/null 2>&1 \
     || { echo "gpg not found; cannot verify the openssl tarball" >&2; exit 1; }
