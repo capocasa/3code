@@ -247,6 +247,14 @@ jobs:
             codesign --verify "3code-macos-universal/$f" \
               || { echo "invalid code signature on $f" >&2; exit 1; }
           done
+          # The main binary: ld auto-signs only its arm64 slice, so the
+          # x86_64 slice ships unsigned and macOS 26+ kills it at exec on
+          # Intel (issue #56; a single pass over the fat binary ad-hoc
+          # signs every slice, and --verify walks them all). Before the
+          # VERSION smoke test, so it exercises the shipped signature.
+          codesign --force --sign - 3code-macos-universal/3code
+          codesign --verify --strict 3code-macos-universal/3code \
+            || { echo "invalid code signature on 3code" >&2; exit 1; }
           # Capture the version from the built binary so it can be checked
           # without running the binary on its target OS (its native arm64
           # slice does run here). Runs after the dylibs are staged and
