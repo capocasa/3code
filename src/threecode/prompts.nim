@@ -257,6 +257,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # Older 3.x flash tiers keep the same thinking-level surface; 3.1 Pro
     # (preview) adds minimal back. maxTokens is pinned to the 64k
     # architectural output cap for every tier.
+    # 4 Argon (Oct 2026): flagship successor on the same wire surface.
+    # Unified 1M window (input, thinking, and output share it), 64k
+    # default AND max synchronous output (more 400s without the
+    # background long-decode flag, unused here), thinking
+    # low/medium(default)/high; `minimal` is not a level (the compat
+    # endpoint maps it down to low, so it is simply not offered).
+    ("google", "gemini-4-argon", "gemini", "4", "argon", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("google", "gemini-3.8-flash", "gemini", "3", "8-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("google", "gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("google", "gemini-3.6-flash", "gemini", "3", "6-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
@@ -954,6 +961,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "google/gemini-3.6-flash", "gemini", "3", "6-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("openrouter", "google/gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("openrouter", "google/gemini-3.8-flash", "gemini", "3", "8-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
+    ("openrouter", "google/gemini-4-argon", "gemini", "4", "argon", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("openrouter", "mistralai/mistral-large", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("openrouter", "mistralai/mistral-large-2407", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("openrouter", "openai/gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
@@ -1000,6 +1008,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "gemini-3.6-flash", "gemini", "3", "6-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("opencode", "gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("opencode", "gemini-3.8-flash", "gemini", "3", "8-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
+    ("opencode", "gemini-4-argon", "gemini", "4", "argon", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("opencode", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("opencode", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbCurrentTurn, false, 1_000_000, false),
     ("opencode", "gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
@@ -1019,6 +1028,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "google/gemini-3.6-flash", "gemini", "3", "6-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("nanogpt", "google/gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("nanogpt", "google/gemini-3.8-flash", "gemini", "3", "8-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
+    ("nanogpt", "google/gemini-4-argon", "gemini", "4", "argon", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("nanogpt", "mistralai/mistral-large", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("nanogpt", "mistralai/mistral-medium-3.5", "mistral", "", "medium", "high", 0.7, 32768, tbNone, false, 262_144, false),
     ("nanogpt", "openai/gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
@@ -3990,7 +4000,7 @@ proc maxOutputTokensFor*(p: Profile): int =
   if "glm-5.3" in m: return 131_072
   if "deepseek" in m and "v4" in m: return 384_000
   if "gpt-6" in m: return 128_000
-  if "gemini-3" in m: return 65_536
+  if "gemini-3" in m or "gemini-4" in m: return 65_536
   if "space-bunny" in m: return 524_288
   let kg = knownGoodContextWindow(p)
   if kg > 0: return kg
@@ -4128,7 +4138,10 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # minimal/low/medium/high. Thinking cannot be disabled on Gemini 3
         # (no off/none). 3.8 Flash rejects `minimal` outright; the older
         # 3.x tiers accept it. Default is medium on Flash, high on Pro.
-        if combo.variant == "8-flash": return @["low", "medium", "high"]
+        # 4 Argon drops `minimal` entirely (levels low/medium/high,
+        # default medium).
+        if combo.variant == "8-flash" or combo.variant == "argon":
+          return @["low", "medium", "high"]
         return @["minimal", "low", "medium", "high"]
       if fam == "grok":
         # grok-4.7/4.6: reasoning_effort low/medium/high (default)/xhigh;

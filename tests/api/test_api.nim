@@ -777,9 +777,29 @@ suite "api request shaping":
     check maxOutputTokensFor(Profile(name: "google.gemini-3.8-flash",
                                      model: "gemini-3.8-flash")) == 65_536
 
+  test "gemini-4-argon is known-good everywhere it is live":
+    # First-party plus the three aggregators serving it today (checked
+    # live against each /models). Same wire surface as 3.8 Flash, so the
+    # entries share the family defaults; only the levels differ.
+    for combo in [("google", "gemini-4-argon"),
+                  ("openrouter", "google/gemini-4-argon"),
+                  ("opencode", "gemini-4-argon"),
+                  ("nanogpt", "google/gemini-4-argon")]:
+      let (prov, model) = combo
+      check isKnownGood(Profile(name: prov & "." & model, model: model))
+      check knownGoodFamily(prov, model) == "gemini"
+      check knownGoodContextWindow(prov, model) == 1_048_576
+    # 64k is the default AND max synchronous output; more than that 400s
+    # without the background long-decode flag, so the escalation ladder
+    # must cap at 64k, not the 1M window.
+    check maxOutputTokensFor(Profile(name: "google.gemini-4-argon",
+                                     model: "gemini-4-argon")) == 65_536
+    check knownGoodReasoning("google", "gemini-4-argon") == "medium"
+
   test "geminicli aliases google known-good entries":
     check canonicalKnownGoodProvider("geminicli") == "google"
     check isKnownGood(Profile(name: "geminicli.gemini-3.8-flash", model: "gemini-3.8-flash"))
+    check isKnownGood(Profile(name: "geminicli.gemini-4-argon", model: "gemini-4-argon"))
     check knownGoodFamily("geminicli", "gemini-3.8-flash") == "gemini"
     check curatedFor("geminicli") == curatedFor("google")
 
@@ -787,6 +807,10 @@ suite "api request shaping":
     check knownGoodReasonings("google", "gemini-3.8-flash") == @["low", "medium", "high"]
     check knownGoodReasonings("google", "gemini-3.7-flash") == @["minimal", "low", "medium", "high"]
     check knownGoodReasonings("google", "gemini-3.1-pro-preview") == @["minimal", "low", "medium", "high"]
+    # 4 Argon: low/medium/high only; `minimal` is not a level (the
+    # compat endpoint would silently map it down to low).
+    check knownGoodReasonings("google", "gemini-4-argon") == @["low", "medium", "high"]
+    check knownGoodReasonings("opencode", "gemini-4-argon") == @["low", "medium", "high"]
     block effort:
       var body = %*{"stream": true}
       let p = Profile(name: "google.gemini-3.8-flash", family: "gemini",

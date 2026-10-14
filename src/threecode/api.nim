@@ -2825,7 +2825,9 @@ proc applyGeminiReasoning(p: Profile, body: JsonNode) =
   ## maps `reasoning_effort` onto thinking levels: minimal/low/medium/high
   ## (2.5 models map to thinking_budget instead). Thinking cannot be
   ## disabled on Gemini 3 (no off/none); 3.8 Flash additionally rejects
-  ## `minimal`. Thought summaries stay off (include_thoughts unset): the
+  ## `minimal`, and 4 Argon has no `minimal` level at all (the compat
+  ## layer maps it down to low; 3code simply does not offer it).
+  ## Thought summaries stay off (include_thoughts unset): the
   ## raw thoughts aren't exposed, and the summary would double the stream.
   case p.reasoning
   of "minimal", "low", "medium", "high":

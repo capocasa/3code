@@ -204,11 +204,6 @@ jobs:
           export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-macos-universal
           cp "$RUNNER_TEMP/3code-universal" 3code-macos-universal/3code
-          # Capture the version from the built binary so it can be checked
-          # without running the binary on its target OS (its native arm64
-          # slice does run here, which doubles as a smoke test of the fat
-          # binary itself).
-          ./3code-macos-universal/3code -v > 3code-macos-universal/VERSION
           cp README.md LICENSE 3code-macos-universal/
           # OpenSSL dylibs from a pinned Homebrew bottle instead of the
           # runner's floating brew tree: the ghcr blob is digest-addressed
@@ -241,6 +236,32 @@ jobs:
             3code-macos-universal/libssl.3.dylib
           ln -sf libssl.3.dylib    3code-macos-universal/libssl.dylib
           ln -sf libcrypto.3.dylib 3code-macos-universal/libcrypto.dylib
+          # install_name_tool invalidated the bottle's ad-hoc signature;
+          # re-sign, or macOS 26 SIGKILLs any process that maps the dylib
+          # (macos-15 loads an invalid signature anyway, so the smoke test
+          # below can't be the only guard, issue #53). Ad-hoc signing adds
+          # no library-validation restriction, so the pair still loads via
+          # DYLD_LIBRARY_PATH.
+          for f in libcrypto.3.dylib libssl.3.dylib; do
+            codesign --force --sign - "3code-macos-universal/$f"
+            codesign --verify "3code-macos-universal/$f" \
+              || { echo "invalid code signature on $f" >&2; exit 1; }
+          done
+          # The main binary: ld auto-signs only its arm64 slice, so the
+          # x86_64 slice ships unsigned and macOS 26+ kills it at exec on
+          # Intel (issue #56; a single pass over the fat binary ad-hoc
+          # signs every slice, and --verify walks them all). Before the
+          # VERSION smoke test, so it exercises the shipped signature.
+          codesign --force --sign - 3code-macos-universal/3code
+          codesign --verify --strict 3code-macos-universal/3code \
+            || { echo "invalid code signature on 3code" >&2; exit 1; }
+          # Capture the version from the built binary so it can be checked
+          # without running the binary on its target OS (its native arm64
+          # slice does run here). Runs after the dylibs are staged and
+          # re-signed: the app puts its own directory on
+          # DYLD_LIBRARY_PATH and dlopens libssl.dylib at init, so this
+          # doubles as a load test of the @loader_path rewrites.
+          ./3code-macos-universal/3code -v > 3code-macos-universal/VERSION
           # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
           # refresh must be a conscious pin bump, not silent drift.
           CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
