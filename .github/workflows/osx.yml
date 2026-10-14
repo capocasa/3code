@@ -235,9 +235,22 @@ jobs:
           cp README.md LICENSE 3code-macos-universal/
           # Both slices were ad-hoc signed before lipo (see the slice
           # build step); macOS 26+ kills unsigned code at exec (issue
-          # #56), and this gate walks every slice of the fat file.
-          codesign --verify --strict 3code-macos-universal/3code \
-            || { echo "invalid code signature on 3code" >&2; exit 1; }
+          # #56). Verify the fat file if codesign accepts it, else each
+          # thin slice: lipo -thin copies slice bytes unchanged, and
+          # per-slice validity is what the kernel enforces at exec.
+          # (codesign --verify on some lipo outputs reports "No such
+          # process"; the verbose dump is kept in the log for diagnosis.)
+          codesign -dv --verbose=2 3code-macos-universal/3code 2>&1 || true
+          if ! codesign --verify --strict --verbose=2 \
+              3code-macos-universal/3code 2>&1; then
+            echo "fat-file verify failed; verifying slices" >&2
+            lipo 3code-macos-universal/3code -thin arm64 -output /tmp/3code.arm64
+            lipo 3code-macos-universal/3code -thin x86_64 -output /tmp/3code.x86_64
+            codesign --verify --strict /tmp/3code.arm64 \
+              || { echo "invalid code signature (arm64 slice)" >&2; exit 1; }
+            codesign --verify --strict /tmp/3code.x86_64 \
+              || { echo "invalid code signature (x86_64 slice)" >&2; exit 1; }
+          fi
           # Capture the version from the built binary so it can be checked
           # without running the binary on its target OS (its native arm64
           # slice does run here).
