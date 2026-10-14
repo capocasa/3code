@@ -166,6 +166,28 @@ jobs:
             || fail "open-network curl google.com"
           [ "$code" = 200 ] || fail "open-network google.com expected 200, got $code"
 
+          # 6. JVM under the seatbelt profile (issue #66): java needs
+          # operations no path rule can reach - the kernel classifies the
+          # JVM's kern.grade_cputype startup read as a sysctl-write, and
+          # its getpwuid user lookup goes through opendirectoryd's mach
+          # service. Both ride the sandwall profile, so a plain policy
+          # with zero java-specific rules must compile and run hello
+          # world (the macos image ships Temurin JDKs; JAVA_HOME_21 is
+          # the default).
+          command -v javac >/dev/null || fail "macos image no longer ships javac"
+          cat > Hello.java <<'EOF'
+public class Hello {
+  public static void main(String[] args) {
+    System.out.println("jvm-ok");
+  }
+}
+EOF
+          "$BIN" sandbox --policy .sandbox restrict -- javac Hello.java \
+            || fail "javac under the sandbox"
+          out=$("$BIN" sandbox --policy .sandbox restrict -- java Hello) \
+            || fail "java under the sandbox"
+          [ "$out" = "jvm-ok" ] || fail "sandboxed java printed '$out'"
+
           echo "sandbox matrix: all checks passed"
 
       - name: Generate nimble.paths for direct nim invocations
