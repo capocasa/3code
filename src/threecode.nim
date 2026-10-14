@@ -360,6 +360,7 @@ proc main() =
   when defined(posix):
     sandbox.sweepStaleWallDirs()
   streamexec.sweepStaleBashDirs()
+  display.sweepStaleToolOutDirs()
   refuseRoot()
   # Internal flag for the detached background worker. Run silently and
   # exit before any other startup work (skill extraction, config load).
