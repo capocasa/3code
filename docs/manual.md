@@ -458,8 +458,9 @@ prefix it with `:!`:
 :! cargo test
 ```
 
-The output appears in your scrollback only; the model never sees it. The
-command runs through the same sandbox policy as model-run commands.
+Output streams into a live viewport while the command runs, then folds into
+your scrollback; the model never sees it. The command runs through the same
+sandbox policy and the same executor as model-run commands.
 
 Useful input keys:
 
@@ -1415,6 +1416,14 @@ and SOCKS5 allowlist proxy. Linux puts the command in a network namespace;
 macOS confines it to loopback with Seatbelt. 3code sets the standard proxy
 variables and a Git SSH proxy command for the child process. Denied HTTP
 connections return 403.
+
+.. note::
+
+   Inside the fence, only clients that speak the proxy variables get out:
+   ``curl``, ``wget``, git over HTTPS, package managers. ``ping`` (ICMP)
+   and ``host``/``dig`` (their own DNS queries) ignore the proxy and fail:
+   the fenced namespace has no route off the machine, and name resolution
+   happens at the proxy. REST over HTTP(S) only, for now.
 
 On Windows, host rules require one admin setup command:
 
