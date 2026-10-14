@@ -1099,7 +1099,13 @@ In practice:
   writable (`~/go`, `~/.cache`, `~/.npm`, `~/.cargo/registry`). C and
   Zig builds ride the project dir and the read-only system baseline
   (Zig's global cache is `~/.cache/zig`; on Windows
-  `~/AppData/Local/zig`). Token-bearing files stay fenced:
+  `~/AppData/Local/zig`). On macOS `javac` runs out of the box: the
+  JVM's own startup needs (a `kern.grade_cputype` sysctl the kernel
+  classifies as a write, and opendirectoryd user lookups) ride the
+  sandbox profile itself, and the JDK homes under your home are
+  read-only (`~/Library/Java`, `~/.jdks`, `~/.sdkman/candidates`;
+  system JVMs under `/Library/Java` and brew's `/opt` were already
+  covered by the baseline). Token-bearing files stay fenced:
   `~/.npmrc`, `~/.cargo/credentials`, `~/.git-credentials`, `~/.ssh`.
   Ruby and the heavier ecosystems live one section down, as recipes. On Windows the caches move to `~/AppData/Local/npm-cache` and
   `~/AppData/Local/pip/cache`, and the bash child gets a seeded copy of
@@ -1252,7 +1258,9 @@ itself (`allow ./`), so a fresh project is writable out of the box.
 
 Recipes for stacks past the basics. The default policy already covers
 git, mercurial, C, Zig, Go, Nim, Python (pip, uv, venv), Rust, and the
-npm/pip caches - nothing below is needed for those. Copy the
+npm/pip caches; on macOS `javac` itself runs too (the JDK homes are
+read-only by default, the JVM's system-level lookups ride the sandbox
+profile) - nothing below is needed for those. Copy the
 lines you need into `.sandbox` (via `:sandbox allow` /
 `:sandbox readonly`), or into `~/.config/3code/sandbox` to make them
 your baseline. Each entry is the tool's own documented home, narrowed
