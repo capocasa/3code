@@ -79,13 +79,19 @@ jobs:
         # (D:/...): nim and the linker are Windows binaries.
         run: |
           MINGW_BIN="$(cygpath -u "$RUNNER_TEMP")/mingw/mingw64/bin"
-          # One msys2 bash for everything: pacman's install-info hook can
-          # exit 2 on a fresh prefix, so its exit is not trusted; the
-          # command -v checks gate the tools the script needs instead.
+          # One msys2 bash for everything. msys2's usr/bin goes FIRST so
+          # the pacman-installed perl/make/gpg win over git-bash's gutted
+          # perl (msys2 ships none until installed; pacman itself is not
+          # on the inherited PATH, only at its absolute location), with
+          # the pinned mingw after it: msys2 has no gcc, so Configure
+          # still compiles with nim's toolchain. pacman's install-info
+          # hook can exit 2 on a fresh prefix, so its exit is not trusted;
+          # the command -v checks gate the tools the script needs.
           /c/msys64/usr/bin/bash -c "
+            set -x
+            export PATH='/c/msys64/usr/bin:$MINGW_BIN:'\$PATH
             pacman -Sy --noconfirm perl make gnupg || true
             command -v perl make gpg
-            export PATH='$MINGW_BIN:/c/msys64/usr/bin:'\$PATH
             bash tests/tools/fetch_openssl.sh 3.5 mingw64"
           echo "OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64")" >> "$GITHUB_ENV"
           echo "THREECODE_TEST_NIMFLAGS=-d:staticSsl" >> "$GITHUB_ENV"
