@@ -72,6 +72,32 @@ when defined(startupTrace):
 else:
   template startupTrace(label: string) = discard
 
+proc expandAttachedValues(args: seq[string]): seq[string] =
+  ## Value-taking options accept their value attached to the flag
+  ## (`-rID`, `-mID`, `-r=ID`, `-r:ID`) as well as space-separated
+  ## (`-r ID`). parseopt splits short clusters per letter and only
+  ## recognizes `=`/`:` separators, so `-rabc` would arrive as the four
+  ## flags r, a, b, c. Rewrite any cluster whose value-taking option
+  ## carries trailing characters into the equivalent `-x=v` form; the
+  ## space-separated case is handled by the `pending` mechanism in the
+  ## parse loop. Boolean-only clusters (`-la`) pass through unchanged.
+  ## Must stay in sync with the option table below: every short option
+  ## listed with a value belongs in `valueOpts`.
+  const valueOpts = {'m', 's', 'c', 'r'}
+  for a in args:
+    var expanded = false
+    if a.len > 2 and a[0] == '-' and a[1] != '-':
+      for i in 1 ..< a.len:
+        if a[i] notin valueOpts: continue
+        var rest = a[i + 1 ..< a.len]
+        if rest.len == 0: break  # value is the next token; pending covers it
+        if rest[0] in {'=', ':'}: rest = rest[1 ..< rest.len]
+        if rest.len > 0:
+          result.add a[0 .. i] & "=" & rest
+          expanded = true
+        break
+    if not expanded: result.add a
+
 proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
        3code good                   # list known-good provider/variant combos
@@ -83,7 +109,8 @@ proc usage() {.noreturn.} =
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -c, --config FILE    read providers and settings from FILE
                       (default: the config: path shown below)
-  -r, --resume[=ID]    resume latest session from this directory (or by id)
+  -r, --resume[=ID]    resume latest session from this directory, or one by id
+                      (value options take -r ID | -rID | -r=ID | -r:ID | --resume=ID)
   -i, --interactive    drop into the REPL after running an initial prompt
                       (without it, a prompt runs once and exits)
   -l, --list           list recent sessions for this directory (max 20) and exit
@@ -387,7 +414,7 @@ proc main() =
   var pageOpt = ""
   var page = 1
   var interactive = false
-  var p = initOptParser(commandLineParams())
+  var p = initOptParser(expandAttachedValues(commandLineParams()))
   for kind, k, v in p.getopt():
     case kind
     of cmdShortOption, cmdLongOption:
@@ -412,6 +439,7 @@ proc main() =
       of "r", "resume":
         resume = true
         if v != "": resumeId = v
+        else: pending = "resume"
       of "l", "list":
         # Short flags accumulate, so `-la` / `-al` both set this true
         # (parseopt emits one cmdShortOption per clustered letter).
@@ -442,10 +470,17 @@ proc main() =
       elif pending == "page":
         pageOpt = k
         pending = ""
+      elif pending == "resume":
+        resumeId = k
+        pending = ""
       else:
         args.add k
     of cmdEnd: discard
-  if pending != "":
+  # --resume's value is optional: bare `-r` still means "resume the
+  # latest session for this directory", so an unconsumed pending value
+  # (nothing followed, or the next token was another option) is not a
+  # usage error.
+  if pending != "" and pending != "resume":
     die("option --" & pending & " requires a value", ExitUsage)
   if pageOpt != "":
     try: page = parseInt(pageOpt)

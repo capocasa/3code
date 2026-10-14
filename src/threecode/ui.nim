@@ -16,8 +16,8 @@ import types, util, prompts, session, config, api, compact, display, minline,
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
-                      ":show", ":log", ":sessions", ":session", ":summarize", ":version",
-                      ":sandbox", ":sb", ":retry", ":private",
+                      ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
+                      ":version", ":sandbox", ":sb", ":retry", ":private",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -97,7 +97,7 @@ proc classifyCommand*(cmd: string): CommandKind =
     # verbs append to the sandbox file and reload, so they mutate.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "show"): ckSafeImmediate
     else: ckMutating
-  of ":clear", ":summarize":
+  of ":clear", ":resume", ":summarize":
     ckMutating
   of ":quit", ":q", ":exit":
     ckQuit
@@ -1910,6 +1910,82 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
              else: "no saved sessions for this directory")
       else:
         body.add printSessionListS(paths, session.savePath, askedAll)
+    of ":resume":
+      # Swap this REPL onto another saved session without restarting:
+      # the `:sessions` -> quit -> `3code -r <id>` loop collapsed into one
+      # command. Bare `:resume` lists candidates (same shape as
+      # `:sessions`); `:resume <id>` loads that session in place. The
+      # startup resume's scrollback replay is NOT run here: the replay
+      # writes raw scrollback rows, which mid-REPL would land on the
+      # footer chrome; the conversation itself is fully restored on the
+      # wire (and so cache-hot) either way.
+      if parts.len == 0:
+        let paths = listSessionPathsForCwd(safeCwd())
+        if paths.len == 0:
+          resp "no saved sessions for this directory"
+        else:
+          body.add printSessionListS(paths, session.savePath, false)
+          resp "resume with :resume <id>"
+      else:
+        let path = resolveSessionPath(arg, safeCwd())
+        if path == "":
+          ok = false
+          respErr "session not found: " & arg
+        elif path == session.savePath:
+          resp "already on session " & sessionIdFromPath(path)
+        else:
+          let (loaded, loadedMsgs) = loadSessionFile(path)
+          if loaded.cwd != "" and loaded.cwd != safeCwd():
+            ok = false
+            respErr "session " & sessionIdFromPath(path) & " belongs to " &
+              loaded.cwd & "; start 3code in that directory"
+          else:
+            # Same lock dance as `:clear`: release the outgoing session,
+            # claim the target, and keep the dir lock's session-id line
+            # current. A target held by a live process fails here with
+            # its lock message and leaves the current session in place.
+            if session.savePath != "":
+              releaseSessionLock(session.savePath)
+            block swap:
+              try:
+                acquireSessionLock(loaded.savePath)
+              except SessionLocked as e:
+                if session.savePath != "":
+                  try: acquireSessionLock(session.savePath)
+                  except SessionLocked: discard
+                ok = false
+                respErr e.msg
+                break swap
+              session = loaded
+              messages = loadedMsgs
+              updateActiveDirLockSession(session.savePath)
+              # Profile precedence mirrors a startup --resume: the
+              # session's own profile wins over the config current, an
+              # unknown one keeps what is running.
+              if session.profileName != "":
+                let cand = buildProfile(activeCurrent, activeProviders,
+                                        session.profileName)
+                if cand.name != "": prof = cand
+              session.profileName = prof.name
+              # Token bar carries the resumed session's last turn so the
+              # next submit converts it to a receipt, the same
+              # typing-ready shape a startup resume paints.
+              let window = contextWindowFor(prof)
+              let lastUsage = lastAssistantUsage(messages)
+              emitFatPromptEvent clearPendingHintEvent()
+              if lastUsage.totalTokens > 0:
+                let label = tokenLineLabel(lastUsage, window)
+                emitFatPromptEvent setBarEvent(label, hasGap = true)
+                emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
+                emitFatPromptEvent setRestingLabelEvent(
+                  contextLabel(lastUsage.promptTokens, window))
+              else:
+                emitFatPromptEvent clearBarEvent()
+                emitFatPromptEvent setRestingLabelEvent("")
+              pluginOnSessionStart(session.savePath, session.cwd,
+                                   prof.name, prof.model, true, messages.len)
+              resp "resumed " & sessionIdFromPath(session.savePath) &
+                " (" & $messages.len & " messages)"
     of ":summarize":
       if prof.name == "":
         ok = false

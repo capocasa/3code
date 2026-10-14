@@ -935,13 +935,21 @@ Resume the latest session:
 3code --resume
 ```
 
-Resume a session by ID:
+Resume a session by ID (any value-taking option accepts the value
+attached, `=`/`:`-separated, or space-separated):
 
 ```
 3code --resume=abc123
 # or
+3code -r abc123
+3code -rabc123
 3code -r:abc123
 ```
+
+Or, without restarting, from inside a running 3code: `:resume` lists this
+directory's sessions, `:resume abc123` swaps the running REPL onto that
+session (state, locks, and profile move with it; the scrollback is not
+replayed, scroll up or `:show` for old turns).
 
 Sessions are listed and searched per working directory by default, so
 unrelated projects stay out of each other's history; `-a` opts out of the

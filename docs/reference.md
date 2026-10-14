@@ -20,7 +20,7 @@ usage: 3code [options] [prompt...]
 | --- | --- |
 | `-m`, `--model PROVIDER[.MODEL]` | pick a model from the config, overriding `[settings] current` |
 | `-c`, `--config FILE` | read providers and settings from FILE for this run, instead of the default config path |
-| `-r`, `--resume[=ID]` | resume the latest session from this directory, or a specific one by ID |
+| `-r`, `--resume[=ID]` | resume the latest session from this directory, or a specific one by ID (`-r ID`, `-rID`, `-r=ID`, `-r:ID`, `--resume=ID`; every value option takes these forms) |
 | `-i`, `--interactive` | drop into the REPL after running an initial prompt; without it, a prompt argument runs once and exits |
 | `-l`, `--list` | list recent sessions for this directory (max 20) and exit |
 | `-a`, `--all` | with `-l` / `-f`: every directory, not just this one |
@@ -82,6 +82,7 @@ names, model names, and paths where supported.
 | `:log` | list all tool calls this session |
 | `:sessions` | list recent sessions saved in this directory (max 20) |
 | `:session` | show this session's ID (for `--resume=ID`) |
+| `:resume` | list this directory's sessions; `:resume ID` swaps the running 3code onto that session |
 | `:summarize` | collapse old turns into a synthetic recap |
 | `:version` | show the running 3code version |
 | `:sandbox` / `:sb` | show the active filesystem sandbox rules |
