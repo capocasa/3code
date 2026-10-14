@@ -1,5 +1,5 @@
-import std/[json, options, os, strutils, tables, unittest]
-import threecode/[config, minline, types, ui, util]
+import std/[json, options, os, strutils, tables, times, unittest]
+import threecode/[config, minline, session, types, ui, util]
 
 suite "config: [search]":
   var tmp = ""
@@ -641,3 +641,162 @@ suite "config: sticky model across provider switches":
     let (_, providers, _, _, _, _) = parseConfigFile(configPath())
     check providers[1].currentModel == "glm-4.7"
     check rememberedModel(providers[1]) == "glm-4.7"
+
+suite "config: :resume":
+  # #62: `:resume` swaps a running REPL onto another saved session. The
+  # handler is driven directly (same harness as the sticky-model suite):
+  # what matters here is the state swap -- messages, session identity,
+  # locks, profile -- not the terminal paint, which the tty shakedown
+  # covers.
+  var tmpData: string
+  var savedXdgData = ""
+  var hadXdgData = false
+  var seeded: seq[string]
+
+  setup:
+    hadXdgData = existsEnv("XDG_DATA_HOME")
+    savedXdgData = getEnv("XDG_DATA_HOME")
+    tmpData = getTempDir() / ("3code-test-resume-" & $getCurrentProcessId() & "-" &
+                              $epochTime().int64)
+    putEnv("XDG_DATA_HOME", tmpData)
+    activeCurrent = "zai.glm-5.2"
+    activeProviders = @[
+      ProviderRec(name: "zai", url: "https://api.z.ai/v1", key: "k",
+                  models: @["glm-5.2", "glm-5.3"]),
+      ProviderRec(name: "baseten", url: "https://inference.baseten.co/v1",
+                  key: "k", models: @["zai-org/GLM-4.7"])]
+    seeded = @[]
+
+  teardown:
+    if hadXdgData: putEnv("XDG_DATA_HOME", savedXdgData)
+    else: delEnv("XDG_DATA_HOME")
+    if dirExists(tmpData): removeDir(tmpData)
+    for id in seeded:
+      try: removeFile(sessionLockPathFor(sessionDir() / (id & ".3log")))
+      except CatchableError: discard
+
+  proc seed(id: string; profile = "zai.glm-5.3"; withUsage = false): string =
+    ## Minimal .3log + cwd-index entry so resolveSessionPath finds it.
+    let cwd = getCurrentDir()
+    createDir(sessionDir())
+    createDir(sessionPathIndexDir())
+    let path = sessionDir() / (id & ".3log")
+    var text = "session " & id & " profile=" & profile & " cwd=" & cwd & "\n\n" &
+      "system\n  sys\n\n" &
+      "user\n  hello " & id & "\n\n" &
+      "assistant\n  answer " & id & "\n\n"
+    if withUsage:
+      text.add "tokens fresh=80 cached=20 out=20 hit=20% elapsed=3s\n\n"
+    writeFile(path, text)
+    appendIndexAt(sessionPathIndexDir(), cwd, id)
+    seeded.add id
+    path
+
+  test "bare :resume with no sessions says so":
+    var messages = %*[]
+    var session = Session()
+    var prof = Profile()
+    var editor: LineEditor
+    let res = handleCommandResult(":resume", messages, session, prof, editor)
+    check res.ok
+    check "no saved sessions" in res.body
+
+  test "bare :resume lists ids and the pick hint":
+    discard seed("20260301T110000")
+    discard seed("20260301T120000")
+    var messages = %*[]
+    var session = Session()
+    var prof = Profile()
+    var editor: LineEditor
+    let res = handleCommandResult(":resume", messages, session, prof, editor)
+    check res.ok
+    check "20260301T110000" in res.body
+    check "20260301T120000" in res.body
+    check ":resume <id>" in res.body
+
+  test ":resume <id> swaps session, messages, and profile":
+    let target = seed("20260302T120000", profile = "zai.glm-5.3",
+                      withUsage = true)
+    var messages = %* [{"role": "system", "content": "old"}]
+    var session = Session()
+    session.savePath = sessionDir() / "20260302T999999.3log"
+    acquireSessionLock(session.savePath)
+    var prof = buildProfile(activeCurrent, activeProviders, "baseten")
+    var editor: LineEditor
+    check prof.name == "baseten.zai-org/GLM-4.7"
+    let res = handleCommandResult(":resume 20260302T120000", messages,
+                                  session, prof, editor)
+    check res.ok
+    check "resumed 20260302T120000" in res.body
+    check session.savePath == target
+    check session.profileName == "zai.glm-5.3"
+    check prof.name == "zai.glm-5.3"   # session profile wins, CLI precedence
+    check messages.len == 3            # system + user + assistant restored
+    check messages[1]{"content"}.getStr.contains "hello 20260302T120000"
+    # usage restored for :tokens
+    check session.usage.promptTokens == 100
+    check session.usage.completionTokens == 20
+
+  test ":resume to the session already on is a no-op reply":
+    let target = seed("20260303T120000")
+    var messages = %* []
+    var session = Session()
+    session.savePath = target
+    var prof = Profile()
+    var editor: LineEditor
+    let res = handleCommandResult(":resume 20260303T120000", messages,
+                                  session, prof, editor)
+    check res.ok
+    check "already on session 20260303T120000" in res.body
+    check session.savePath == target
+
+  test ":resume with an unknown id errors and swaps nothing":
+    var messages = %* [{"role": "system", "content": "old"}]
+    var session = Session()
+    session.savePath = sessionDir() / "20260304T999999.3log"
+    var prof = Profile()
+    var editor: LineEditor
+    let res = handleCommandResult(":resume nope", messages, session, prof,
+                                  editor)
+    check not res.ok
+    check "session not found: nope" in res.body
+    check messages.len == 1
+    check session.savePath.endsWith "20260304T999999.3log"
+
+  test ":resume refuses a session belonging to another directory":
+    let cwd = getCurrentDir()
+    createDir(sessionDir())
+    let path = sessionDir() / "20260305T120000.3log"
+    writeFile(path, "session 20260305T120000 profile=zai.glm-5.3" &
+                     " cwd=/elsewhere/proj\n\nsystem\n  sys\n\n")
+    var messages = %* []
+    var session = Session()
+    var prof = Profile()
+    var editor: LineEditor
+    let res = handleCommandResult(":resume " & path, messages, session, prof,
+                                  editor)
+    check not res.ok
+    check "belongs to /elsewhere/proj" in res.body
+    removeFile(path)
+
+  test ":resume leaves the current session in place when the target is locked":
+    let target = seed("20260306T120000")
+    let current = sessionDir() / "20260306T999999.3log"
+    # Simulate a live foreign holder: own pid counts as alive.
+    createDir(sessionLockDir())
+    writeFile(sessionLockPathFor(target),
+              $getCurrentProcessId() & "\n")
+    var messages = %* [{"role": "system", "content": "old"}]
+    var session = Session()
+    session.savePath = current
+    acquireSessionLock(session.savePath)
+    var prof = Profile()
+    var editor: LineEditor
+    let res = handleCommandResult(":resume 20260306T120000", messages,
+                                  session, prof, editor)
+    check not res.ok
+    check "already open" in res.body
+    check session.savePath == current       # swap did not happen
+    check messages.len == 1
+    # the current session's lock was re-acquired, so releasing still works
+    releaseSessionLock(session.savePath)

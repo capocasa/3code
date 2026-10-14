@@ -7,6 +7,7 @@
 ## threshold.
 
 import std/[httpclient, json, strutils]
+import plugins
 import util
 import types
 import prompts
@@ -306,4 +307,7 @@ proc summarizeHistory*(messages: JsonNode, p: Profile,
   if p.name == "": return 0
   let summary = callSummarizer(p, messages)
   if summary.strip.len == 0: return 0
-  applySummary(messages, summary, keepRecent)
+  let before = messages.len
+  let dropped = applySummary(messages, summary, keepRecent)
+  pluginOnCompact(before, messages.len, summary)
+  dropped

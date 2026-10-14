@@ -33,7 +33,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
                   auth_xai, auth_openai, auth_google, auth_anthropic,
-                  streamexec, cli, search, tabtitle]
+                  streamexec, cli, search, tabtitle, plugins]
 when not defined(android):
   import tinotify
 else:
@@ -72,6 +72,32 @@ when defined(startupTrace):
 else:
   template startupTrace(label: string) = discard
 
+proc expandAttachedValues(args: seq[string]): seq[string] =
+  ## Value-taking options accept their value attached to the flag
+  ## (`-rID`, `-mID`, `-r=ID`, `-r:ID`) as well as space-separated
+  ## (`-r ID`). parseopt splits short clusters per letter and only
+  ## recognizes `=`/`:` separators, so `-rabc` would arrive as the four
+  ## flags r, a, b, c. Rewrite any cluster whose value-taking option
+  ## carries trailing characters into the equivalent `-x=v` form; the
+  ## space-separated case is handled by the `pending` mechanism in the
+  ## parse loop. Boolean-only clusters (`-la`) pass through unchanged.
+  ## Must stay in sync with the option table below: every short option
+  ## listed with a value belongs in `valueOpts`.
+  const valueOpts = {'m', 's', 'c', 'r'}
+  for a in args:
+    var expanded = false
+    if a.len > 2 and a[0] == '-' and a[1] != '-':
+      for i in 1 ..< a.len:
+        if a[i] notin valueOpts: continue
+        var rest = a[i + 1 ..< a.len]
+        if rest.len == 0: break  # value is the next token; pending covers it
+        if rest[0] in {'=', ':'}: rest = rest[1 ..< rest.len]
+        if rest.len > 0:
+          result.add a[0 .. i] & "=" & rest
+          expanded = true
+        break
+    if not expanded: result.add a
+
 proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
        3code good                   # list known-good provider/variant combos
@@ -83,7 +109,8 @@ proc usage() {.noreturn.} =
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -c, --config FILE    read providers and settings from FILE
                       (default: the config: path shown below)
-  -r, --resume[=ID]    resume latest session from this directory (or by id)
+  -r, --resume[=ID]    resume latest session from this directory, or one by id
+                      (value options take -r ID | -rID | -r=ID | -r:ID | --resume=ID)
   -i, --interactive    drop into the REPL after running an initial prompt
                       (without it, a prompt runs once and exits)
   -l, --list           list recent sessions for this directory (max 20) and exit
@@ -384,7 +411,7 @@ proc main() =
   var pageOpt = ""
   var page = 1
   var interactive = false
-  var p = initOptParser(commandLineParams())
+  var p = initOptParser(expandAttachedValues(commandLineParams()))
   for kind, k, v in p.getopt():
     case kind
     of cmdShortOption, cmdLongOption:
@@ -409,6 +436,7 @@ proc main() =
       of "r", "resume":
         resume = true
         if v != "": resumeId = v
+        else: pending = "resume"
       of "l", "list":
         # Short flags accumulate, so `-la` / `-al` both set this true
         # (parseopt emits one cmdShortOption per clustered letter).
@@ -439,10 +467,17 @@ proc main() =
       elif pending == "page":
         pageOpt = k
         pending = ""
+      elif pending == "resume":
+        resumeId = k
+        pending = ""
       else:
         args.add k
     of cmdEnd: discard
-  if pending != "":
+  # --resume's value is optional: bare `-r` still means "resume the
+  # latest session for this directory", so an unconsumed pending value
+  # (nothing followed, or the next token was another option) is not a
+  # usage error.
+  if pending != "" and pending != "resume":
     die("option --" & pending & " requires a value", ExitUsage)
   if pageOpt != "":
     try: page = parseInt(pageOpt)
@@ -795,13 +830,15 @@ proc main() =
         if prof.name == "":
           editor.prefillText = ev.text
           return false
+        var promptText = ev.text
+        pluginOnPrompt(promptText, session.savePath, prof.name, prof.model)
         if not ev.echoed:
           # A submit that raced the drain from the idle prompt never got a
           # queue-time echo; send it through the ordinary transition.
-          commitUserPromptTranscript(ev.text)
+          commitUserPromptTranscript(promptText)
           resetEditorRowModel(addr editor)
         messages.add %*{"role": "user",
-                        "content": buildUserMessage(messages, ev.text)}
+                        "content": buildUserMessage(messages, promptText)}
         refreshSystemPrompt(messages, prof, session.promptState)
         saveSession(session, messages)
         if ev.echoed:
@@ -856,7 +893,9 @@ proc main() =
   # editor, clear the draft, run the turn, and fire the turn-finished
   # notification under the same condition as a typed turn. Returns true
   # if a buffered quit/interrupt event should end the session.
-  proc runInitialPrompt(text: string): bool =
+  proc runInitialPrompt(textIn: string): bool =
+    var text = textIn
+    pluginOnPrompt(text, session.savePath, prof.name, prof.model)
     messages.add %*{"role": "user", "content": buildUserMessage(messages, text)}
     refreshSystemPrompt(messages, prof, session.promptState)
     # Persist before the turn starts: a kill during the first model call
@@ -906,6 +945,13 @@ proc main() =
         paintInitialPrompt(prof)
     else:
       paintInitialPrompt(prof)
+    # Plugins load after config (they read [plugins]) and before the
+    # first prompt; the session event fires with the final profile and
+    # session path. Messages > 1 means a resumed session, not a fresh
+    # system-only one.
+    pluginsDiscoverAndLoad()
+    pluginOnSessionStart(session.savePath, session.cwd, prof.name,
+                         prof.model, messages.len > 1, messages.len)
     # The startup paint is a render boundary the tty harness synchronizes
     # on: without the frame event the first captured frame can predate the
     # chrome (or miss it entirely when the PTY burst is coalesced).
@@ -986,6 +1032,7 @@ proc main() =
           errLnS("no provider configured. use :provider add"), true)
         releaseIdleSubmittedInput()
         continue
+      pluginOnPrompt(line, session.savePath, prof.name, prof.model)
       messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
       refreshSystemPrompt(messages, prof, session.promptState)
       # Same mid-turn-kill window as runInitialPrompt: the draft sidecar
@@ -1003,6 +1050,7 @@ proc main() =
       # clean exit doesn't restore text the user already sent.
       clearDraft(session)
       if runTurnWithSafetyNet(): break
+    pluginsShutdown()
 
   except IOError as e:
     stderr.writeLine "3code: output stream broken (" & e.msg &

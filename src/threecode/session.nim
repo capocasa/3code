@@ -1454,6 +1454,17 @@ proc usageFromJson*(j: JsonNode): Usage =
     cachedTokens: j{"cachedTokens"}.getInt(0),
   )
 
+proc lastAssistantUsage*(messages: JsonNode): Usage =
+  ## Usage of the last assistant turn, read from the inline `usage` field
+  ## `loadSessionFile` restores onto it. Zero when the conversation has
+  ## no assistant turn (fresh session, or a legacy file saved before
+  ## inline usage). Powers the token bar `:resume` paints.
+  if messages == nil or messages.kind != JArray: return
+  for i in countdown(messages.len - 1, 0):
+    if messages[i].kind != JObject: continue
+    if messages[i]{"role"}.getStr == "assistant":
+      return usageFromJson(messages[i]{"usage"})
+
 proc firstUserMessage*(messages: JsonNode): string =
   if messages == nil or messages.kind != JArray: return ""
   for m in messages:

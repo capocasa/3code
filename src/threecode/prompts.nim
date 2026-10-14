@@ -15,7 +15,7 @@
 ]#
 
 import std/[algorithm, hashes, json, options, os, sequtils, strutils, tables]
-import types, util, modelname, anthropic
+import types, util, modelname, anthropic, plugins
 
 # ThinkBackMode moved to types.nim (Profile.params needs it); re-export
 # for modules that historically reached it through prompts.
@@ -3605,10 +3605,20 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "other": otherSetup
   of "nemotron": nemotronSetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
-  if bashToolDisabled:
-    (base.prompt, withoutShellTools(base.tools))
-  else:
-    base
+  var (prompt, tools) =
+    if bashToolDisabled:
+      (base.prompt, withoutShellTools(base.tools))
+    else:
+      base
+  # Plugin-registered tools append after the family surface, but only
+  # under the explicit [plugins] tools gate: every schema rides every
+  # model request, so mounting is a standing token cost (see
+  # plan-plugin-system-so.md). The system prompt runs through
+  # tc_on_system_prompt, memoized per (provider, model, family).
+  let pluginTools = pluginToolSchemas()
+  if pluginTools.len > 0:
+    for t in pluginTools: tools.add t
+  (pluginSystemPrompt(prompt, p.name, p.model, p.family), tools)
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
     "{{credit}}",
@@ -3666,7 +3676,9 @@ commands:
   :show [N]           show full output of tool call N (default: last)
   :log                list all tool calls this session
   :sessions           list recent sessions saved in this directory (max 20)
-  :session            show this session's id (for --resume <id>)
+  :session            show this session's id (for --resume=ID / :resume ID)
+  :resume             list sessions of this directory, pick with :resume <id>
+  :resume ID          swap this running 3code onto saved session ID
   :summarize          collapse old turns into a synthetic recap (meta model call)
   :version            show the running 3code version
   :sandbox (:sb)      show the active filesystem sandbox rules
@@ -3681,6 +3693,9 @@ commands:
   readonly, deny; see .sandbox)
   :! CMD              run CMD directly through the sandboxed shell
                       (output shown, not sent to the model)
+  :plugins            list plugin libraries, hooks, and registered tools
+  :plugin             plugin subcommands: debug on|off toggles the
+                      per-call plugin trace (calls, verdicts, mutation diffs)
   :q :quit            exit (also Ctrl-D)
 
 input:

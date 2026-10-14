@@ -47,6 +47,7 @@ task docs, "Build HTML manual and reference from docs/*.md":
   exec "nim md2html --docCmd:skip --outdir:docs docs/manual.md"
   mvFile("docs/manual.html", "docs/index.html")
   exec "nim md2html --docCmd:skip --outdir:docs docs/reference.md"
+  exec "nim md2html --docCmd:skip --outdir:docs docs/plugins.md"
   cpFile("docs/3code.css", "docs/nimdoc.out.css")
 
 task devdocs, "Build developer HTML docs from source":

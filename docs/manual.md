@@ -933,13 +933,21 @@ Resume the latest session:
 3code --resume
 ```
 
-Resume a session by ID:
+Resume a session by ID (any value-taking option accepts the value
+attached, `=`/`:`-separated, or space-separated):
 
 ```
 3code --resume=abc123
 # or
+3code -r abc123
+3code -rabc123
 3code -r:abc123
 ```
+
+Or, without restarting, from inside a running 3code: `:resume` lists this
+directory's sessions, `:resume abc123` swaps the running REPL onto that
+session (state, locks, and profile move with it; the scrollback is not
+replayed, scroll up or `:show` for old turns).
 
 Sessions are listed and searched per working directory by default, so
 unrelated projects stay out of each other's history; `-a` opts out of the
@@ -1040,9 +1048,10 @@ To override one, put a file with the same name in a directory higher up
 the list. To add your own, drop a `.md` file in any of those directories
 with an instructive name: the filename is the trigger, so
 `release-notes.md` loads when the task smells like release notes.
-There is deliberately no MCP-style plugin protocol: a skill file plus
-command-line tools covers the same ground at a fraction of the context
-cost.
+For heavier machinery than a skill there is a native plugin tier
+(C-ABI hooks and model-facing tools, running host-side); see
+[plugins](plugins.html). A skill file plus command-line tools still
+covers most of the same ground at a fraction of the context cost.
 
 ## Cybernetic mode
 

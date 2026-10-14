@@ -33,7 +33,7 @@
 ## changing globals.
 
 import std/[json, os, strutils, tables, times, atomics]
-import types, util, prompts, session, config, actions, api, display, ui,
+import types, util, prompts, session, config, actions, api, display, ui, plugins,
        auth_xai, auth_openai, auth_google, sandbox, minline, transcript, turns
 import fatprompt as fatruntime
 import engine as termengine
@@ -255,6 +255,12 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
       s.emit(AgentEvent(kind: aevDone, usage: usage, elapsed: elapsed)),
     retryNotice: proc(msg: string) =
       s.emit(AgentEvent(kind: aevRetry, text: msg))))
+  # Plugins: same lifecycle point as the CLI (after config, before the
+  # first prompt). The session event fires with the final profile.
+  pluginsDiscoverAndLoad()
+  pluginOnSessionStart(s.state.savePath, s.state.cwd, s.profile.name,
+                       s.profile.model, opts.resume or opts.resumeId.len > 0,
+                       s.messages.len)
   initialized = true
   s
 
@@ -270,6 +276,7 @@ proc close*(s: AgentSession) =
   termengine.engineOutputEnabled = true
   fatruntime.installApiStreamHooks()
   agentSessionOwned.store(false)
+  pluginsShutdown()
 
 # ---------- prompts and commands ----------
 
@@ -279,8 +286,10 @@ proc prompt*(s: AgentSession; text: string): string =
   ## return the final assistant text. Events stream to `onEvent` as they
   ## happen. Raises `AgentError` on turn failure; the session stays valid
   ## and saved.
+  var promptText = text
+  pluginOnPrompt(promptText, s.state.savePath, s.profile.name, s.profile.model)
   s.messages.add %*{"role": "user",
-                    "content": buildUserMessage(s.messages, text)}
+                    "content": buildUserMessage(s.messages, promptText)}
   refreshSystemPrompt(s.messages, s.profile, s.state.promptState)
   clearDraft(s.state)
   let interrupted = runTurnsInteractive(s.profile, s.messages, s.state)

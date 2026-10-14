@@ -1,5 +1,44 @@
 Changelog
 
+Unreleased
+
+- **Prompts and `:commands` queue while a turn runs.** Mid-turn input
+  used to funnel into a single slot: the first prompt submitted during
+  a turn was remembered (unechoed until it ran), every later line was
+  silently dropped, and commands ran inline only if they were safe.
+  Now each line submitted during a turn - prompt or command - echoes
+  immediately as a `⧖` item in the scrollback and joins an ordered
+  queue. When the turn ends the queue drains in order: each queued
+  prompt runs its own full turn (anything queued during that turn
+  lines up behind it), each queued command runs exactly as it would at
+  the idle prompt, mutating and modal ones included. Backspace on an
+  empty prompt pulls the last queued line back into the editor, joined
+  file-editing style, so a typo spotted in the hourglass row can be
+  fixed before the line ever reaches the model.
+
+- **Plugins: native libraries hooking the host, on a dedicated
+  thread.** A plugin is a dynamic library (`.so`/`.dylib`/`.dll`)
+  dropped into `~/.local/share/3code/lib` - no manifest, no
+  registration call, no RPC protocol: export `tc_on_prompt` and
+  friends, and the host probes for them at startup. Hooks cover the
+  lifecycle: prompts (mutable), the system prompt (memoized per
+  provider/model), every tool call before execution (rewrite, veto,
+  takeover, or wrap - host-side policy without touching the model) and
+  after it (redact output, amend the exit code), turn, session,
+  compact, file-write, and model-retry events, plus model-facing tools
+  registered from plugin code behind an opt-in `[plugins] tools` gate
+  (each schema rides every request, so it is a standing token cost).
+  All plugin code runs on one dedicated host thread, one call at a
+  time, in load order - a plugin needs no locks of its own to be safe
+  against the host; sync hooks round-trip with a deadline so a slow
+  plugin cannot stall a turn, async hooks land in a bounded
+  fire-and-forget queue. `:plugins` lists libraries, subscribed hooks,
+  and call counts; `:plugin debug on` traces calls, verdicts, and
+  mutation diffs live. The Nim SDK in `src/threecode/plugin_sdk.nim`
+  makes a plugin one file, and `docs/plugins.md` is the full author
+  manual. Plugins are native code with your full user rights; the
+  default sandbox already fences the model out of the lib directories.
+
 0.8.3  flail guard cuts wedged thinking mid-stream and arms for every
        family, sandbox defaults keep git and toolchains working, oauth
        re-login, gpt-5.3-codex / 5.6 pro / haiku-5.5 rows, auto-update

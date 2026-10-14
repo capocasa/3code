@@ -20,7 +20,7 @@ usage: 3code [options] [prompt...]
 | --- | --- |
 | `-m`, `--model PROVIDER[.MODEL]` | pick a model from the config, overriding `[settings] current` |
 | `-c`, `--config FILE` | read providers and settings from FILE for this run, instead of the default config path |
-| `-r`, `--resume[=ID]` | resume the latest session from this directory, or a specific one by ID |
+| `-r`, `--resume[=ID]` | resume the latest session from this directory, or a specific one by ID (`-r ID`, `-rID`, `-r=ID`, `-r:ID`, `--resume=ID`; every value option takes these forms) |
 | `-i`, `--interactive` | drop into the REPL after running an initial prompt; without it, a prompt argument runs once and exits |
 | `-l`, `--list` | list recent sessions for this directory (max 20) and exit |
 | `-a`, `--all` | with `-l` / `-f`: every directory, not just this one |
@@ -82,6 +82,7 @@ names, model names, and paths where supported.
 | `:log` | list all tool calls this session |
 | `:sessions` | list recent sessions saved in this directory (max 20) |
 | `:session` | show this session's ID (for `--resume=ID`) |
+| `:resume` | list this directory's sessions; `:resume ID` swaps the running 3code onto that session |
 | `:summarize` | collapse old turns into a synthetic recap |
 | `:version` | show the running 3code version |
 | `:sandbox` / `:sb` | show the active filesystem sandbox rules |
@@ -90,6 +91,8 @@ names, model names, and paths where supported.
 | `:sandbox readonly P` | add a read-only rule |
 | `:sandbox deny T` | add a deny rule |
 | `:sandbox edit` | open the policy file in `$VISUAL`/`$EDITOR`, reload on quit |
+| `:plugins` | list loaded plugin libraries, hooks, call counts, registered tools |
+| `:plugin debug on/off` | trace every plugin call to `THREECODE_DEBUG_LOG` (or stderr) |
 | `:! CMD` | run a shell command yourself, output streamed live to scrollback only |
 | `:quit` / `:q` / `:exit` | leave |
 
@@ -211,6 +214,19 @@ keys](manual.html#rebinding-keys) in the manual for the key-name grammar
 and the full command list. Values merge onto the defaults; an empty value
 unbinds a command.
 
+### plugins
+
+The `[plugins]` section controls the native plugin tier (hooks and
+tools in dynamically loaded libraries); the keys are covered in detail
+in [plugins](plugins.html).
+
+| key | effect |
+| --- | --- |
+| `disable` | comma-separated plugin names (lib file stems) to skip at load |
+| `tools` | `"on"` advertises plugin-registered tools to the model (opt-in) |
+| `debug` | `"on"` traces every plugin call with mutation diffs |
+| `lib` | extra plugin discovery directory, scanned before the defaults |
+
 ## Environment variables
 
 | variable | effect |
@@ -219,6 +235,8 @@ unbinds a command.
 | `XDG_DATA_HOME` | relocates the data root: sessions, history, auth tokens, builtin skills |
 | `THREECODE_MAX_TIMEOUT` | bash timeout ceiling for this run; wins over `max_timeout` |
 | `THREECODE_ALLOW_ROOT` | set to 1 to allow running as root (POSIX; refused otherwise) |
+| `THREECODE_PLUGIN_SYNC_MS` | sync-hook deadline override in ms (default 2000) |
+| `THREECODE_PLUGIN_TOOL_MS` | plugin tool-exec default timeout in ms (default 120000) |
 
 Both XDG variables work on every platform, including Windows, and expect
 absolute paths. They exist so tests and isolated setups can redirect all of
