@@ -55,6 +55,20 @@ type
     ## frame; committed lines go to real scrollback via `appendTranscript`.
     liveContentRows: seq[string]
     liveContentHasGap: bool  # separator row above live content, matching committed scrollback spacing
+    ## Prompts/commands queued for the next turn, painted pinned at the
+    ## bottom of the volatile block (between the tool viewport and the
+    ## footer) so appends land above them and the queue stays in sight
+    ## while the turn streams. `pinnedEchoItems` holds the raw texts (the
+    ## desired state, set by the queue/pop/drain transitions under the
+    ## terminal write lock); `paintedPinnedRows` holds the block rows
+    ## (per-item separator blank + wrapped rows) currently on screen, the
+    ## count every walk-up and erase must agree with. They differ inside
+    ## a commit: the erase consumes the painted rows while the repaint
+    ## re-emits the desired ones below the new item.
+    pinnedEchoItems: seq[string]
+    paintedPinnedRows: seq[string]
+    pinnedEchoWidth: int  # width the rendered cache was wrapped at
+    pinnedEchoRowsCache: seq[string]
     editorRedrawPending: bool
     editorRedrawFooterRows: int
     ## Terminal width at the last paint. A width change means the terminal
@@ -175,7 +189,60 @@ proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
   ## rows to move up before erasing the volatile region.
   editorRowsAboveCursor(ed) + e.paintedFooterRows +
     e.viewportGapRows + e.toolViewportRows.len +
-    e.liveContentGapRows + e.liveContentRows.len
+    e.liveContentGapRows + e.liveContentRows.len +
+    e.paintedPinnedRows.len
+
+proc pinnedEchoBlockRows(e: var TerminalEngine; width: int): seq[string] =
+  ## The pinned queue's block rows at `width`: one separator blank above
+  ## each item, then its wrapped hourglass rows. Cached per width so the
+  ## 80ms footer tick does not re-wrap the queue every frame.
+  if e.pinnedEchoItems.len == 0: return @[]
+  if e.pinnedEchoRowsCache.len == 0 or e.pinnedEchoWidth != width:
+    e.pinnedEchoRowsCache = @[]
+    for item in e.pinnedEchoItems:
+      e.pinnedEchoRowsCache.add ""
+      for row in queuedEchoPlainRows(item, width):
+        e.pinnedEchoRowsCache.add row
+    e.pinnedEchoWidth = width
+  e.pinnedEchoRowsCache
+
+proc pinnedEchoBlockBytes(e: var TerminalEngine; width: int): string =
+  ## The pinned queue as terminal bytes for the repaint paths that write
+  ## the block by hand (transcript commits, endTurn): one separator blank
+  ## plus the wrapped rows per item, then one trailing advance so
+  ## whatever follows (footer bytes, an erase) starts on the fresh row
+  ## below the queue. The FIRST row is written AT the cursor - after an
+  ## item `writeTranscriptItem`'s trailing newline already parked there,
+  ## and an empty commit or a walk-up enters ON the block top - so
+  ## advancing before it would strand a doubled separator above the
+  ## queue. Also syncs the painted model to the rows it emits.
+  let rows = e.pinnedEchoBlockRows(width)
+  for i, row in rows:
+    if i > 0:
+      result.add "\r\n"
+    result.add row
+  if rows.len > 0:
+    result.add "\r\n"
+  e.paintedPinnedRows = rows
+
+
+proc pinnedEchoSig(e: TerminalEngine): string =
+  ## Distinguishes otherwise-identical paints whose pinned queue differs,
+  ## so the diff signature never skips a repaint the queue needs.
+  $e.pinnedEchoItems.len & "\x1e" & join(e.pinnedEchoItems, "\x1e")
+
+proc setPinnedEchoItems*(e: var TerminalEngine; items: openArray[string]) =
+  ## Set the desired pinned queue. Must run under the terminal write lock
+  ## (every caller is inside a keystroke or commit critical section): the
+  ## change takes effect at the next paint, whose walk-up still counts the
+  ## OLD painted rows. Callers that shrink or reorder the queue must
+  ## follow up with a block repaint in the same critical section.
+  e.pinnedEchoItems = @items
+  e.pinnedEchoRowsCache = @[]
+
+proc setPinnedEchoItems*(items: openArray[string]) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.setPinnedEchoItems(items)
 
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
@@ -309,11 +376,13 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
     else: 0
     let prevAbove = e.paintedFooterRows + e.toolViewportRows.len +
       e.viewportGapRows + e.liveContentRows.len + e.liveContentGapRows +
+      e.paintedPinnedRows.len +
       (if entryCaretRow >= 0: min(entryCaretRow, prevEdRows - 1)
        else: prevEdRows - 1)
     let newAbove = newLiveRows.len + newViewportRows.len +
       (if newLiveRows.len > 0 and newLiveGap: 1 else: 0) +
       (if newViewportRows.len > 0 and newViewportGap: 1 else: 0) +
+      e.pinnedEchoBlockRows(width).len +
       (if edPtr != nil: sections.len - 1 + edPtr[].freshCaretRowAbove()
        else: sections.len)
     resizeErase = max(prevAbove, newAbove)
@@ -324,10 +393,9 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
     e.toolViewportHasGap = false
     e.liveContentRows = @[]
     e.liveContentHasGap = false
+    e.paintedPinnedRows = @[]
   let prevBarCount = (if prevPaintedFooterRows >= 0:
       prevPaintedFooterRows else: e.paintedFooterRows)
-
-
   # Previous on-screen block, top-down: the tracked gap rows, live
   # content, viewport, then `lastVolatileRows` (bar+ticker, editor).
   # Volatile repaints never commit, so the new block shifts this one
@@ -339,6 +407,7 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   if e.toolViewportRows.len > 0 and e.toolViewportHasGap:
     prevRows.add ""
   prevRows.add e.toolViewportRows
+  prevRows.add e.paintedPinnedRows
   prevRows.add e.lastVolatileRows
   let prevEditorRows =
     if e.lastVolatileRows.len > prevBarCount:
@@ -375,7 +444,8 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
     (if edPtr != nil: physEd else: 0) +
     max(e.paintedFooterRows, prevBarCount) +
     e.viewportGapRows + e.toolViewportRows.len +
-    e.liveContentGapRows + e.liveContentRows.len
+    e.liveContentGapRows + e.liveContentRows.len +
+    e.paintedPinnedRows.len
   let physH = max(walkH, prevRows.len - prevEditorRows.len + prevPhysEdRows)
   var prevH = physH
   # New block, top-down.
@@ -387,6 +457,12 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   if newViewportRows.len > 0 and newViewportGap:
     cur.add vrText("")
   for row in newViewportRows:
+    cur.add vrText(row)
+  # The pinned queue rides at the block's bottom, above the footer: new
+  # live/viewport rows stack above it, so streaming growth never buries
+  # the waiting prompts.
+  let newPinnedRows = e.pinnedEchoBlockRows(width)
+  for row in newPinnedRows:
     cur.add vrText(row)
   cur.add sections
   var newEdModel: seq[string]
@@ -590,6 +666,7 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   e.toolViewportRows = newViewportRows
   e.toolViewportHasGap = newViewportGap
   e.toolViewportBannerRows = newViewportBannerRows
+  e.paintedPinnedRows = newPinnedRows
 
 
 # Row 0 is the tool banner (command line); the rest is streaming bash
@@ -674,7 +751,8 @@ proc diffEditorFrame*(e: var TerminalEngine; ed: var minline.LineEditor;
     refreshEditorWidth(ed)
     let rows = e.clampedFooterRows(frame, termW)
     let sig = "T\x1f" & $rows & "\x1f" & frame.footerFrameBytes(termW) &
-      "\x1f" & e.viewportSig() & "\x1f" & editorSig(ed) & "\x1f" & $termW
+      "\x1f" & e.viewportSig() & "\x1f" & editorSig(ed) & "\x1f" &
+      e.pinnedEchoSig() & "\x1f" & $termW
     if sig == e.lastPaintSig:
       return
     stdout.write termio.SyncBegin()
@@ -745,7 +823,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       if not (inputRunning and editor != nil):
         let sig = "F\x1f" & $footerRowsAboveEditor & "\x1f" & bytes &
-          "\x1f\x1f\x1f" & $width
+          "\x1f\x1f\x1f" & e.pinnedEchoSig() & "\x1f" & $width
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin()
@@ -765,7 +843,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
       refreshEditorWidth(edPtr[])
       let sig = "F\x1f" & $footerRowsAboveEditor & "\x1f" &
         e.viewportSig() & "\x1f" & bytes & "\x1f" & editorSig(edPtr[]) &
-        "\x1f" & $width
+        "\x1f" & e.pinnedEchoSig() & "\x1f" & $width
       if sig == e.lastPaintSig:
         return
       stdout.write termio.SyncBegin()
@@ -822,7 +900,8 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         # width change here made the next full repaint fall short and
         # left stale banner fragments stacking in scrollback.
         let sig = "V\x1f" & join(rows, "\x1e") &
-          "\x1f" & $bannerRows & "\x1f" & bytes & "\x1f\x1f" & $width
+          "\x1f" & $bannerRows & "\x1f" & bytes & "\x1f\x1f" &
+          e.pinnedEchoSig() & "\x1f" & $width
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin()
@@ -840,7 +919,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
       refreshEditorWidth(editor[])
       let sig = "V\x1f" & join(rows, "\x1e") &
         "\x1f" & $bannerRows & "\x1f" & bytes & "\x1f" &
-        editorSig(editor[]) & "\x1f" & $width
+        editorSig(editor[]) & "\x1f" & e.pinnedEchoSig() & "\x1f" & $width
       if sig == e.lastPaintSig:
         return
       stdout.write termio.SyncBegin()
@@ -903,7 +982,8 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       if not (inputRunning and editor != nil):
         let sig = "L\x1f" &
-          join(rows, "\x1e") & "\x1f" & bytes & "\x1f\x1f" & $width
+          join(rows, "\x1e") & "\x1f" & bytes & "\x1f\x1f" &
+          e.pinnedEchoSig() & "\x1f" & $width
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin()
@@ -920,7 +1000,8 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         return
       refreshEditorWidth(editor[])
       let sig = "L\x1f" & join(rows, "\x1e") &
-        "\x1f" & bytes & "\x1f" & editorSig(editor[]) & "\x1f" & $width
+        "\x1f" & bytes & "\x1f" & editorSig(editor[]) & "\x1f" &
+        e.pinnedEchoSig() & "\x1f" & $width
       if sig == e.lastPaintSig:
         return
       stdout.write termio.SyncBegin()
@@ -986,7 +1067,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       if not (inputRunning and editor != nil):
         let sig = "R\x1f" & $e.liveContentHasGap & "\x1f" & bytes &
-          "\x1f\x1f" & $width
+          "\x1f\x1f" & e.pinnedEchoSig() & "\x1f" & $width
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin()
@@ -1001,7 +1082,8 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         return
       refreshEditorWidth(editor[])
       let sig = "R\x1f" & $e.liveContentHasGap & "\x1f" & bytes &
-        "\x1f" & editorSig(editor[]) & "\x1f" & $width
+        "\x1f" & editorSig(editor[]) & "\x1f" & e.pinnedEchoSig() &
+        "\x1f" & $width
       if sig == e.lastPaintSig:
         return
       stdout.write termio.SyncBegin()
@@ -1098,6 +1180,10 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
   ## below it. `edPtr` is nil (or restoreEditor false) when no editor is
   ## being restored (submit path, wizard).
   if not reserveFooter:
+    # The commit's erase consumed the painted pinned rows and nothing
+    # repaints them (wizard teardown); the desired set survives for the
+    # next block paint to restore.
+    e.paintedPinnedRows = @[]
     e.noteNoFooter()
     return
   let editing = edPtr != nil and restoreEditor
@@ -1109,6 +1195,14 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
     stdout.write "\r\n"
     stdout.write "\x1b[1A"
     footerRowsAboveEditor = 1
+  # The pinned queue is rebuilt directly below the committed item: every
+  # append lands above the waiting prompts and the queue stays glued to
+  # the bottom until its items run. `pinnedEchoBlockBytes` starts its
+  # first row AT the cursor (after an item the trailing newline already
+  # parked on the fresh row; the empty commit enters on the block top)
+  # and parks below the queue where the footer bytes paint from.
+  stdout.write e.pinnedEchoBlockBytes(
+    try: terminalWidth() except CatchableError: 0)
   if footerBytes.len > 0:
     # The row model and the emitted bytes must agree on the footer's
     # height: the bar+ticker bytes are exactly footerRowsAboveEditor rows
@@ -1182,7 +1276,7 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
       # chrome: the resume-with-usage startup paint registers its bar rows
       # while no editor exists yet, and a commit that ignored them would
       # leave the bar stranded in scrollback as a duplicated line.
-      e.paintedFooterRows +
+      e.paintedFooterRows + e.paintedPinnedRows.len +
         max(0, e.toolViewportRows.len + max(0, compactRowsAboveFooter))
   if up > 0:
     stdout.write "\x1b[" & $up & "A"
@@ -1276,7 +1370,11 @@ proc prepareAssistantContentStart*(e: var TerminalEngine;
         stdout.write "\x1b[" & $up & "B"
       # Keep the painted-chrome count, drop the row contents: the next
       # paint rebuilds chrome + editor at this anchor, and a zero count
-      # would fabricate a phantom growth scroll of the chrome rows.
+      # would fabricate a phantom growth scroll of the chrome rows. The
+      # pinned rows' painted count stays for the same reason: the rebuild
+      # rewrites the whole block ([live][pinned][chrome][editor]) in
+      # place, and dropping their count made it anchor short and strand
+      # blank rows above the queue.
       e.noteFooterPainted(e.paintedFooterRows)
       stdout.write termio.SyncEnd()
       if flush:
@@ -1305,8 +1403,13 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
               bytes: string) =
   ## Render the transition from running turn to idle prompt. The visual
   ## transition bytes are produced by the fat-prompt renderer; cursor
-  ## geometry uses the engine's live footer state.
+  ## geometry uses the engine's live footer state. The pinned queue is
+  ## re-emitted below the walk-up erase (its rows were consumed like the
+  ## rest of the volatile block) so the waiting prompts survive the
+  ## transition; `bytes` then erases and repaints downward from below
+  ## them, leaving the queue glued above the idle chrome.
   termio.withTerminalWriteLock:
+    let termW = try: terminalWidth() except CatchableError: 0
     stdout.write termio.SyncBegin()
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
@@ -1314,6 +1417,7 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
       stdout.write "\r"
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
+      stdout.write e.pinnedEchoBlockBytes(termW)
     stdout.write bytes
     e.noteNoFooter()
     stdout.write termio.SyncEnd()
@@ -1350,45 +1454,3 @@ proc appendTranscript*(transcriptBytes: string;
     reserveFooter,
     flushWithPrevious,
     clearEditor)
-
-proc eraseTranscriptTail*(e: var TerminalEngine; itemRows: int;
-                          inputRunning: bool;
-                          editor: ptr minline.LineEditor;
-                          newFooter: FooterFrame) =
-  ## Inverse of a transcript commit for the item that is currently the
-  ## last in scrollback: walk from the cursor over the volatile region,
-  ## then over the item's rows and the separator row above it, erase, and
-  ## repaint the volatile chrome (footer + editor) in place. The caller
-  ## must guarantee the last committed item is the one being erased (the
-  ## fat-prompt runtime tracks that via its queued-echo run counter) and
-  ## must already have refilled the editor model with the popped text, so
-  ## the repaint lands the buffer back in the prompt row.
-  if not engineOutputEnabled: return
-  if not (inputRunning and editor != nil): return
-  termio.withTerminalWriteLock:
-    let termW = try: terminalWidth() except CatchableError: 0
-    let footerBytes = newFooter.footerFrameBytes(termW)
-    var footerRowsAboveEditor = newFooter.rowsAboveEditor(termW)
-    stdout.write termio.SyncBegin()
-    stdout.write "\r"
-    let up = max(0, e.walkUp(editor[])) + max(1, itemRows) + 1
-    stdout.write "\x1b[" & $up & "A"
-    stdout.write "\r\x1b[J"
-    # The erase consumed the volatile live-content rows exactly like a
-    # commit's erase does; drop the tracked model inside the same critical
-    # section so a gui-tick repaint cannot walk against stale rows.
-    e.toolViewportRows = @[]
-    e.liveContentRows = @[]
-    e.liveContentHasGap = false
-    e.repaintVolatileAfterCommit(editor, footerBytes, footerRowsAboveEditor,
-                                 restoreEditor = true, reserveFooter = true)
-    stdout.write termio.SyncEnd()
-    stdout.flushFile
-
-proc eraseTranscriptTail*(itemRows: int;
-                          inputRunning: bool;
-                          editor: ptr minline.LineEditor;
-                          newFooter: FooterFrame) =
-  if not engineOutputEnabled: return
-  defaultEngine.eraseTranscriptTail(itemRows, inputRunning, editor,
-                                    newFooter)

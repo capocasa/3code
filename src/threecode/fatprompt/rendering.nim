@@ -728,14 +728,32 @@ proc formatUserPromptItem*(line: string): string =
   ## included; the controller/transcript emitter owns inter-item spacing.
   result.addUserEcho(line, trailingNewline = false)
 
+proc queuedEchoPlainRows*(line: string; termW: int): seq[string] =
+  ## The queued item's rows as plain text: hourglass marker on the first
+  ## row, continuation rows indented under it, wrapped to the width. The
+  ## engine paints these as volatile pinned rows while the item waits, and
+  ## `formatQueuedPromptItem` emits the same rows as scrollback bytes when
+  ## the item finally runs, so the two renderings can never diverge.
+  let lines = line.splitLines
+  for idx, l in lines:
+    let prefix = if idx == 0: DeferredSubmitMarker & " " else: "  "
+    if termW <= 0:
+      result.add prefix & l
+    else:
+      let chunks = wrapPlain(l, max(1, termW - 2))
+      for ci, chunk in chunks:
+        result.add (if ci == 0: prefix else: "  ") & chunk
+
 proc formatQueuedPromptItem*(line: string): string =
   ## Format a prompt or colon command queued for the next turn as a
-  ## scrollback item body, echoed at queue time. The hourglass stands in
-  ## for the prompt marker so the row reads as a prompt item whose send is
-  ## still pending; when the queued item eventually runs, no second echo is
-  ## committed. Wrapped like the user echo, continuation rows indented
-  ## under the marker.
-  result.addUserEcho(line, trailingNewline = false, marker = DeferredSubmitMarker)
+  ## scrollback item body, committed when the queued item runs. The
+  ## hourglass stands in for the prompt marker so the row reads as a
+  ## prompt item; before then the same rows are painted pinned at the
+  ## screen bottom (see `queuedEchoPlainRows`), so the queue stays in
+  ## sight while the turn streams. Wrapped like the user echo,
+  ## continuation rows indented under the marker.
+  let termW = try: terminalWidth() except CatchableError: 0
+  result = join(queuedEchoPlainRows(line, termW), "\r\n")
 
 proc formatAgentPromptItem*(line: string): string =
   ## Format a harness-autosent prompt (empty-reply steer, flail prod, and
