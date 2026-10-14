@@ -181,7 +181,7 @@ proc one(realBin: string; iter: int): string =
   tty.drain(300)
   block:
     let echo1 = tty.rowContaining("❯ first prompt here")
-    let echo2 = tty.rowContaining("❯ second prompt now")
+    let echo2 = tty.rowContaining("⧖ second prompt now")
     if echo1 < 0:
       return "iter " & $iter & " turn2: FIRST echo deleted\n" & tty.dumpFramesAround("word2")
     if echo2 < 0:

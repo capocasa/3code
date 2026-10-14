@@ -375,10 +375,18 @@ suite "terminal visual contract":
     tty.send ":tokens\n"
     tty.expect "no tokens used yet"
     tty.send ":provider add\n"
-    tty.expect "cannot run :provider add while a turn is active"
+    tty.drain 50
+    # Mutating/modal commands are no longer refused mid-turn: they queue
+    # with the hourglass exactly like a prompt and the drain runs them
+    # once the turn yields.
+    tty.expectInHistory "⧖ :provider add"
     tty.continueStubApi()
     tty.expectInHistory "Active command turn complete."
-    tty.expectIdleCaret()  # streaming makes content live before saveSession runs
+    # The queued wizard runs at the next opportunity; cancel it.
+    tty.expect "provider, url, or api key"
+    tty.send "\x1b"
+    tty.drain(300)
+    tty.expectIdleCaret()
     tty.expectAlive()  # an active turn that ran colon commands must not exit
     tty.drain(200)
 
@@ -2266,16 +2274,22 @@ max-tokens = "8192"
     tty.requireVisibleEditorCaret("queued line two")
     tty.advanceTicker()
     tty.requireVisibleEditorCaret("queued line two")
-    tty.advanceTicker()
-    tty.requireVisibleEditorCaret("queued line two")
     tty.send "\n"
+    tty.drain 50
+    # The queue-time echo is committed immediately: an hourglass prompt
+    # item in scrollback, editor cleared for the next line, caret drawn on
+    # the empty prompt row.
+    tty.expectInHistory "⧖ queued line one"
+    tty.expectInHistory "  queued line two"
+    tty.advanceTicker()
+    tty.requireVisibleEditorCaret("❯")
     tty.advanceTicker()
     tty.continueStubApi()
 
     tty.expectInHistory "❯ first line"
     tty.expectInHistory "  second line"
     tty.expectInHistory "First multiline response."
-    tty.expectInHistory "❯ queued line one"
+    tty.expectInHistory "⧖ queued line one"
     tty.expectInHistory "  queued line two"
     tty.expectInHistory "Queued multiline response."
     # Each reply streamed exactly once (not duplicated, not dropped).
@@ -2287,11 +2301,12 @@ max-tokens = "8192"
       MultilineVisualTestFrames,
       root / "multiline_visual_test_actual.txt")
 
-  test "queued prompt survives a second submit during one turn":
-    # After queuing a prompt mid-turn, the user can revise it: typing appends
-    # to the buffered text (the queue is cancelled and the line kept), so a
-    # second Enter re-queues the revised text. Only the revised prompt reaches
-    # the conversation; the stale first queue is dropped, not merged in.
+  test "multiple prompts queue in order during one turn":
+    # Queueing is no longer single-slot: several prompts can line up as
+    # hourglass items while a turn runs, each echoed at queue time, and
+    # the drain after the turn sends every one of them in FIFO order (a
+    # full turn each), so the conversation reflects exactly what was
+    # queued.
     let root = newFixture("two_queued")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[
@@ -2309,12 +2324,23 @@ max-tokens = "8192"
       },
       {
         "role": "assistant",
-        "content": "Reply to revised prompt.",
-        "contentChunks": ["Reply to revised prompt."],
+        "content": "Reply to queued alpha.",
+        "contentChunks": ["Reply to queued alpha."],
         "usage": {
           "promptTokens": 150,
           "completionTokens": 20,
           "totalTokens": 170,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Reply to queued beta.",
+        "contentChunks": ["Reply to queued beta."],
+        "usage": {
+          "promptTokens": 160,
+          "completionTokens": 21,
+          "totalTokens": 181,
           "cachedTokens": 0
         }
       }
@@ -2328,29 +2354,95 @@ max-tokens = "8192"
     tty.expect "❯"
     tty.send "initial prompt\n"
     tty.expect "initial prompt"
-    # Turn is held open. Queue a prompt, then keep typing: the text appends to
-    # the buffered line rather than starting fresh, and a second Enter re-queues
-    # the whole revised text.
+    # Turn is held open. Queue two prompts; each Enter commits an hourglass
+    # echo and leaves a fresh editor for the next line.
     tty.send "queued alpha\n"
     tty.expect "queued alpha"
+    tty.requireVisibleEditorCaret("❯")
     tty.drain 50
-    tty.send " queued beta"
-    tty.expect "queued alpha queued beta"
-    tty.send "\n"
+    tty.send "queued beta\n"
+    tty.expect "queued beta"
     tty.drain 50
     tty.advanceTicker()
     tty.continueStubApi()
 
     tty.expectInHistory "❯ initial prompt"
     tty.expectInHistory "First reply."
-    tty.expectInHistory "❯ queued alpha queued beta"
-    tty.expectInHistory "Reply to revised prompt."
+    tty.expectInHistory "⧖ queued alpha"
+    tty.expectInHistory "Reply to queued alpha."
+    tty.expectInHistory "⧖ queued beta"
+    tty.expectInHistory "Reply to queued beta."
 
-  test "editing a queued prompt keeps the text instead of wiping it":
-    # Regression: typing after a queued submit used to wipe the buffer and
-    # start over. Now it cancels the queue and edits the existing text in
-    # place, so the user can queue, change their mind, backspace, type, and
-    # queue again. The edited text is what reaches scrollback at turn end.
+  test "mutating command queued mid-turn runs at the next opportunity":
+    # `:sandbox allow ./foo` used to be refused outright mid-turn ("cannot
+    # run ... while a turn is active"). Now it queues exactly like a
+    # prompt — hourglass echo at submit time — and the post-turn drain
+    # runs it before the model sees another turn, so a prompt queued
+    # behind it executes with the rule already live.
+    let root = newFixture("queued_command")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "Holding turn open.",
+        "contentChunks": ["Holding turn open."],
+        "usage": {
+          "promptTokens": 100,
+          "completionTokens": 10,
+          "totalTokens": 110,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "After the rule.",
+        "contentChunks": ["After the rule."],
+        "usage": {
+          "promptTokens": 110,
+          "completionTokens": 11,
+          "totalTokens": 121,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "start turn\n"
+    tty.expect "start turn"
+    tty.drain 50
+    # Turn is held open: the command queues with the hourglass, no denial.
+    tty.send ":sandbox allow ./foo\n"
+    tty.drain 50
+    tty.expectInHistory "⧖ :sandbox allow ./foo"
+    tty.expectNeverInHistory "cannot run"
+    # A prompt queued behind it sends only after the command ran.
+    tty.send "next prompt\n"
+    tty.drain 50
+    tty.expectInHistory "⧖ next prompt"
+    tty.advanceTicker()
+    tty.continueStubApi()
+
+    # Drain order: the sandbox command's output lands first, then the
+    # queued prompt's turn.
+    tty.expectInHistory "sandbox updated: allow ./foo"
+    tty.expectInHistory "After the rule."
+    let ruleFile = root / "run" / ".sandbox"
+    doAssert fileExists(ruleFile), "rule file missing: " & ruleFile
+    check readFile(ruleFile).contains("./foo")
+
+  test "backspace on an empty prompt joins the last queued prompt":
+    # Editing a queue feels like editing lines of a file: backspace on the
+    # empty editor (which would delete a newline in a true multiline
+    # buffer) pops the newest queued item back into the editor, erases its
+    # hourglass rows from scrollback, and lets the user edit and re-queue.
+    # The edited text is what finally sends; no second echo is committed
+    # when it does.
     let root = newFixture("queued_prompt_edit")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[
@@ -2388,13 +2480,23 @@ max-tokens = "8192"
     tty.send "start turn\n"
     tty.expect "start turn"
     # Turn is held open. Type and queue a prompt, then change your mind:
-    # backspace over the tail and retype an edited version. The hourglass
-    # must clear and the edited text must survive, not be wiped.
+    # backspace on the empty editor joins it back in, delete the tail,
+    # retype an edited version, re-queue.
     tty.send "hello world"
     tty.expect "hello world"
     tty.send "\n"
     tty.drain 50
-    tty.send "\x7f"           # backspace: delete the 'd'
+    tty.expectInHistory "⧖ hello world"
+    tty.send "\x7f"           # backspace on empty buffer: pop the queue
+    tty.expect "hello world"  # text is back in the editor
+    tty.requireVisibleEditorCaret("hello world")
+    # The popped item's hourglass rows left the screen with it (the
+    # pre-pop frame stays in the captured history, so assert on the
+    # live screen, not on historyText).
+    tty.drain 50
+    doAssert tty.rowContaining("⧖ hello world") < 0,
+      "popped echo still on screen\n" & tty.dumpFramesAround("hello world")
+    tty.send "\x7f"           # ordinary backspace: delete the 'd'
     tty.send " edited"         # buffer now reads "hello worl edited"
     tty.expect "hello worl edited"
     tty.requireVisibleEditorCaret("hello worl edited")
@@ -2404,12 +2506,15 @@ max-tokens = "8192"
     tty.continueStubApi()
 
     tty.expectInHistory "❯ start turn"
-    tty.expectInHistory "❯ hello worl edited"
+    tty.expectInHistory "⧖ hello worl edited"
     tty.expectInHistory "Reply to edited prompt."
-    # Regression guard for the old wipe behavior: backspacing and retyping
-    # after the queue must build on the existing text, not start from empty.
-    # With the bug, the buffer would have been wiped to " edited".
-    tty.expectNeverInHistory "❯  edited"
+    # The send itself commits no second echo: the hourglass item is the
+    # prompt's only row on the final screen.
+    tty.drain 100
+    doAssert tty.rowContaining("❯ hello") < 0,
+      "second echo committed at send time\n" & tty.dumpFramesAround("hello")
+    doAssert tty.rowContaining("⧖ hello world") < 0,
+      "popped echo resurrected\n" & tty.dumpFramesAround("hello")
 
   test "queued prompt typed during a turn keeps the line on a multi-row footer":
     # Regression: editing a queued mid-turn prompt. On a narrow terminal the
@@ -2433,6 +2538,17 @@ max-tokens = "8192"
           "totalTokens": 15,
           "cachedTokens": 0
         }
+      },
+      {
+        "role": "assistant",
+        "content": "Second reply.",
+        "contentChunks": ["Second reply."],
+        "usage": {
+          "promptTokens": 12,
+          "completionTokens": 6,
+          "totalTokens": 18,
+          "cachedTokens": 0
+        }
       }
     ])
 
@@ -2446,7 +2562,9 @@ max-tokens = "8192"
     tty.requireVisibleEditorCaret("hello")
     tty.send "\n"
     tty.drain 50
-    var acc = "hello"
+    # The queued "hello" stays queued; typing builds a fresh draft line on
+    # the cleared editor while the tall footer repaints per keystroke.
+    var acc = ""
     for ch in " world":
       acc.add ch
       tty.send $ch
@@ -2455,6 +2573,11 @@ max-tokens = "8192"
     tty.drain(400)
     tty.requireVisibleEditorCaret(acc)
     tty.continueStubApi()
+    # The queue drains after the turn: "hello" sends and its reply lands,
+    # with the draft still sitting in the editor.
+    tty.expectInHistory "⧖ hello"
+    tty.expectInHistory "Second reply."
+    tty.requireVisibleEditorCaret("world")
 
   test "answer start with a multi-row recalled draft keeps the committed echo whole":
     # Reported: "sometimes, sending a prompt removes the line above the
@@ -2594,28 +2717,31 @@ max-tokens = "8192"
       doAssert echoHeads == 1,
         "stale editor row duplicated above the committed echo\n" &
         tty.dumpFramesAround("sandbox updated")
-    # Mid-turn submit of the same wrapped command: the buffered editor
-    # must be consumed whole by the rejection commit, leaving no `❯ :...`
-    # remnant on screen and a clean blank above the rejection.
+    # Mid-turn submit of the same wrapped command: it queues for the
+    # next opportunity, and the queue-time echo commit must consume the
+    # whole buffered editor block, leaving no `❯ :...` remnant on screen
+    # and a clean blank above the hourglass echo.
     tty.send "hold turn open\n"
     tty.drain(500) # stream held open: bar + buffered editor are live
     tty.send ":sandbox allow " & repeat('v', 120) & "\n"
-    tty.expect "cannot run :sandbox allow"
     tty.drain(400)
     block:
       let rows = tty.rows()
-      var rejectRow = -1
+      var echoRow = -1
       for i, r in rows:
-        if r.startsWith("cannot run :sandbox allow"): rejectRow = i
-      doAssert rejectRow >= 1,
-        "rejection row missing\n" & tty.dumpFramesAround("cannot run")
+        if r.startsWith("⧖ :sandbox allow"): echoRow = i
+      doAssert echoRow >= 1,
+        "queue-time echo head row missing\n" &
+        tty.dumpFramesAround(":sandbox allow")
       for r in rows:
         # 'v' filler only exists in the mid-turn command; the idle echo
         # above (w's) is legitimate committed scrollback.
         doAssert not r.startsWith("❯ :sandbox allow v"),
           "stale command editor row lingered: '" & r & "'\n" &
-          tty.dumpFramesAround("cannot run")
+          tty.dumpFramesAround(":sandbox allow")
     tty.continueStubApi()
+    # The drain runs the queued command once the turn yields.
+    tty.expectInHistory "sandbox updated: allow vvv"
     tty.expectInHistory "second reply marker two"
     tty.expectIdleCaret()
     tty.drain(300)

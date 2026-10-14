@@ -1350,3 +1350,45 @@ proc appendTranscript*(transcriptBytes: string;
     reserveFooter,
     flushWithPrevious,
     clearEditor)
+
+proc eraseTranscriptTail*(e: var TerminalEngine; itemRows: int;
+                          inputRunning: bool;
+                          editor: ptr minline.LineEditor;
+                          newFooter: FooterFrame) =
+  ## Inverse of a transcript commit for the item that is currently the
+  ## last in scrollback: walk from the cursor over the volatile region,
+  ## then over the item's rows and the separator row above it, erase, and
+  ## repaint the volatile chrome (footer + editor) in place. The caller
+  ## must guarantee the last committed item is the one being erased (the
+  ## fat-prompt runtime tracks that via its queued-echo run counter) and
+  ## must already have refilled the editor model with the popped text, so
+  ## the repaint lands the buffer back in the prompt row.
+  if not engineOutputEnabled: return
+  if not (inputRunning and editor != nil): return
+  termio.withTerminalWriteLock:
+    let termW = try: terminalWidth() except CatchableError: 0
+    let footerBytes = newFooter.footerFrameBytes(termW)
+    var footerRowsAboveEditor = newFooter.rowsAboveEditor(termW)
+    stdout.write termio.SyncBegin()
+    stdout.write "\r"
+    let up = max(0, e.walkUp(editor[])) + max(1, itemRows) + 1
+    stdout.write "\x1b[" & $up & "A"
+    stdout.write "\r\x1b[J"
+    # The erase consumed the volatile live-content rows exactly like a
+    # commit's erase does; drop the tracked model inside the same critical
+    # section so a gui-tick repaint cannot walk against stale rows.
+    e.toolViewportRows = @[]
+    e.liveContentRows = @[]
+    e.liveContentHasGap = false
+    e.repaintVolatileAfterCommit(editor, footerBytes, footerRowsAboveEditor,
+                                 restoreEditor = true, reserveFooter = true)
+    stdout.write termio.SyncEnd()
+    stdout.flushFile
+
+proc eraseTranscriptTail*(itemRows: int;
+                          inputRunning: bool;
+                          editor: ptr minline.LineEditor;
+                          newFooter: FooterFrame) =
+  if not engineOutputEnabled: return
+  defaultEngine.eraseTranscriptTail(itemRows, inputRunning, editor,
+                                    newFooter)

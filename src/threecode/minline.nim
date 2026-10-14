@@ -509,6 +509,12 @@ type
     onMutate*: proc(ed: var LineEditor) {.closure.}
     onSubmit*: SubmitCallback
     onCancelDeferredSubmit*: proc(ed: var LineEditor) {.closure.}
+    onBackspaceAtEmpty*: proc(ed: var LineEditor): bool {.closure.}
+      ## Backspace on a completely empty buffer: the host may "join" the
+      ## buffer with a line it holds elsewhere (the runtime's queued-prompt
+      ## stack) by refilling the buffer and erasing that line's rows from
+      ## scrollback. Returning true consumes the keystroke; the hook owns
+      ## its repaint.
     preRedraw*: proc(ed: var LineEditor) {.closure.}
     postRedraw*: proc(ed: var LineEditor) {.closure.}
     preMutate*: proc(ed: var LineEditor) {.closure.}
@@ -3373,6 +3379,14 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
                                 max(2, ed.width))
         suffixJustCleared = true
       if c1 == 8 or c1 == 127:
+        # An empty buffer has nothing to delete backward, but the host may
+        # hold a queued line above it: backspace joins the two (deleting
+        # the newline between them, file-editing style). The hook refills
+        # the buffer and repaints inside the keystroke's lock window.
+        if ed.line.text.len == 0 and ed.onBackspaceAtEmpty != nil and
+            ed.onBackspaceAtEmpty(ed):
+          paintIfCleared(ed, suffixJustCleared)
+          continue
         if runCommandsForKey(ed, "backspace"):
           paintIfCleared(ed, suffixJustCleared)
           continue

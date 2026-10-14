@@ -1372,14 +1372,18 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     let displayEmpty = cutVisibleContent(content).strip.len == 0
     discard stopBarTick()
     stopSpinner(clearLiveFooter = false)
+    # The editor keeps whatever draft the user is typing through the final
+    # commit even when the queue will drain next: the queued items live in
+    # the event queue now, not in the editor, so there is nothing to tear
+    # down here. The drain's own transition consumes the chrome.
     if streamedLive and not displayEmpty:
-      commitPendingReceiptAfterStream(restoreEditor = not queuedBeforeFinalRender)
+      commitPendingReceiptAfterStream(restoreEditor = true)
     else:
       if not queuedBeforeFinalRender and not streamedLive:
         stopTurnInputForFinalRender()
       commitAssistantItem(
         content,
-        restoreEditor = not queuedBeforeFinalRender)
+        restoreEditor = true)
     if queuedBeforeFinalRender or hasQueuedAutosend():
       stopTurnInputForFinalRender()
       turnEnded = true

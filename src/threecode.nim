@@ -716,10 +716,11 @@ proc main() =
         pushInputEvent(InputEvent(kind: ieQuit))
         requestTurnInterrupt("quit-command-during-turn")
       of ckMutating, ckModal:
-        let msg = "cannot run " & cmd.strip & " while a turn is active"
-        let bytes = plainCommandBodyBytes(msg & "\n")
-        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
-                              clearEditor = true)
+        # Deferred to the next opportunity: the command lines up in the
+        # queue behind whatever precedes it, echoed to scrollback with the
+        # hourglass exactly like a queued prompt, and the post-turn drain
+        # runs it (in order) before any later queued prompt is sent.
+        markTailEventEchoed(commitQueuedEcho(cmd))
       else:
         let bytes = plainCommandBodyBytes(
           "unknown command: " & cmd.strip & "  (try :help)\n")
@@ -727,40 +728,85 @@ proc main() =
                               clearEditor = true)
   )
 
+  proc runDeferredCommand(cmd: string) =
+    ## Execute one command deferred from mid-turn. Identical to the idle
+    ## loop's command path except there is no prompt echo to commit: the
+    ## queue-time hourglass item already stands in for it, and the editor
+    ## is left alone (it may hold an unrelated half-typed draft).
+    if classifyCommand(cmd) == ckModal:
+      # A modal wizard paints its own prompts and output flush at the
+      # cursor without committing, so the idle chrome the turn-end paint
+      # left (bar + prompt + drawn caret) must be consumed first, with
+      # nothing repainted in its place, or the wizard's rows stack below
+      # a stranded caret. The post-wizard body commit (or the input
+      # thread's post-finish prompt repaint, for a cancelled wizard)
+      # rebuilds the chrome. Transcript commands walk over the chrome
+      # themselves inside their output commit.
+      commitTranscriptBytes("", restoreEditor = true, reserveFooter = false)
+    var res = handleCommandResult(cmd, messages, session, prof, editor)
+    if not res.recognized:
+      res = CommandResult(recognized: true, ok: false, name: "command",
+                          body: "unknown command: " & cmd.strip &
+                                "  (try :help)\n")
+    if res.disposition == cdModal:
+      wizardFinish()
+    proc clearSubmittedCommandFooter() =
+      if res.clearFooter:
+        emitFatPromptEvent clearPendingHintEvent()
+        emitFatPromptEvent clearBarEvent()
+    if res.body.len == 0:
+      return
+    commitTranscriptBytes(plainCommandBodyBytes(res.body),
+                          restoreEditor = true,
+                          beforeRepaint = clearSubmittedCommandFooter,
+                          reserveFooter = true)
+
   proc handleBufferedAfterTurn(): bool =
-    var queued = ""
-    var queuedRows = 0
+    ## Drain the queue in order once the turn yields: each queued prompt
+    ## runs a full turn (anything queued during that turn drains after
+    ## it), each deferred command runs exactly as it would at the idle
+    ## prompt. Prompts echo nothing here — their queue-time hourglass item
+    ## already sits in scrollback — so the send transition only consumes
+    ## the idle chrome and repaints the footer + whatever draft the user
+    ## is still typing. Returns true when a queued quit should end the
+    ## session.
     while true:
       let ev = pollInputEvent()
       case ev.kind
       of ieQuit:
         return true
-      of ieLine:
-        if queued.len == 0:
-          queued = ev.text
-          queuedRows = ev.echoRows
-        # drain any remaining events; keep first line only
-      of ieCommand:
-        discard  # commands handled by activeCommandHook during turn
       of ieInterrupt:
         discard  # already handled
       of ieNone:
-        break
-    if queued.len == 0:
-      return false
-    if prof.name == "":
-      editor.prefillText = queued
-      return false
-    messages.add %*{"role": "user",
-                    "content": buildUserMessage(messages, queued)}
-    refreshSystemPrompt(messages, prof, session.promptState)
-    editor.echoRows = queuedRows
-    commitUserPromptTranscript(queued)
-    resetEditorRowModel(addr editor)
-    editor.prefillText = ""
-    clearDraft(session)
-    discard runTurnsInteractive(prof, messages, session)
-    handleBufferedAfterTurn()
+        return false
+      of ieCommand:
+        releaseIdleSubmittedInput()
+        if not ev.echoed:
+          continue  # safe/unknown commands ran inline via the hook
+        runDeferredCommand(ev.text)
+      of ieLine:
+        releaseIdleSubmittedInput()
+        if prof.name == "":
+          editor.prefillText = ev.text
+          return false
+        if not ev.echoed:
+          # A submit that raced the drain from the idle prompt never got a
+          # queue-time echo; send it through the ordinary transition.
+          commitUserPromptTranscript(ev.text)
+          resetEditorRowModel(addr editor)
+        messages.add %*{"role": "user",
+                        "content": buildUserMessage(messages, ev.text)}
+        refreshSystemPrompt(messages, prof, session.promptState)
+        saveSession(session, messages)
+        if ev.echoed:
+          # Consume the idle chrome, commit nothing: this prompt's echo is
+          # already in scrollback from queue time. restoreEditor keeps the
+          # user's in-progress draft (if any) painted and in the model.
+          commitTranscriptBytes("", restoreEditor = true,
+                                reserveFooter = true)
+        clearDraft(session)
+        discard runTurnsInteractive(prof, messages, session)
+        # keep draining: anything queued during that turn runs next
 
   # Run one turn + its post-turn cleanup under a single safety net.
   # `runTurnsInteractive` catches ApiError/OSError/IOError/CatchableError

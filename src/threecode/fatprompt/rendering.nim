@@ -706,11 +706,12 @@ proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
   else:
     result = frame.footerLayout(termW).bytes
 
-proc addUserEcho(result: var string, line: string; trailingNewline = true) =
+proc addUserEcho(result: var string, line: string; trailingNewline = true,
+                  marker = "❯") =
   let termW = try: terminalWidth() except CatchableError: 0
   let lines = line.splitLines
   for idx, l in lines:
-    let prefix = if idx == 0: "❯ " else: "  "
+    let prefix = if idx == 0: marker & " " else: "  "
     result.add prefix
     if termW <= 0:
       result.add l
@@ -726,6 +727,15 @@ proc formatUserPromptItem*(line: string): string =
   ## Format a user prompt as a scrollback item body. No trailing separator is
   ## included; the controller/transcript emitter owns inter-item spacing.
   result.addUserEcho(line, trailingNewline = false)
+
+proc formatQueuedPromptItem*(line: string): string =
+  ## Format a prompt or colon command queued for the next turn as a
+  ## scrollback item body, echoed at queue time. The hourglass stands in
+  ## for the prompt marker so the row reads as a prompt item whose send is
+  ## still pending; when the queued item eventually runs, no second echo is
+  ## committed. Wrapped like the user echo, continuation rows indented
+  ## under the marker.
+  result.addUserEcho(line, trailingNewline = false, marker = DeferredSubmitMarker)
 
 proc formatAgentPromptItem*(line: string): string =
   ## Format a harness-autosent prompt (empty-reply steer, flail prod, and

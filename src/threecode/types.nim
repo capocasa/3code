@@ -252,6 +252,7 @@ type
     kind*: InputEventKind
     text*: string
     echoRows*: int
+    echoed*: bool ## mid-turn queue-time echo already committed (hourglass item); the drain must not echo again
 
   InputState* = object
     ## Shared between the main thread and the buffered prompt thread during
