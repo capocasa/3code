@@ -6,11 +6,6 @@ on:
     branches: [main]
     tags: ['[0-9]+.[0-9]+.[0-9]+']
 
-env:
-  # dlls.zip is a mutable URL: pinned by sha256 so an upstream refresh is
-  # a conscious bump, not silent drift.
-  DLLS_SHA256: 4b20b0fc775d2cfece0c1a09d4ec0bdbcd01d257ce8d556d9a8a88e6c4cd6961
-
 jobs:
   build:
     # Pinned label (windows-latest rolls to new Server releases); the
@@ -66,6 +61,21 @@ jobs:
         run: |
           nimble install -y --depsOnly
 
+      - name: Build static OpenSSL (latest 3.5 LTS)
+        # OpenSSL is linked into the exe (-d:staticSsl in config.nims),
+        # replacing the bundled DLLs the package used to ship - those were
+        # OpenSSL 1.1, end-of-life since 2023, and the dlopen design also
+        # broke the sandbox relay (LoadLibrary as the sandwall user,
+        # 0xC0000142). A static copy is frozen at build time, so instead
+        # of pinning one version forever the script resolves the newest
+        # 3.5.x release and verifies the tarball's PGP signature; the
+        # series and key fingerprint are the conscious-bump pins. Needs
+        # perl (openssl Configure) and the pinned mingw gcc from the
+        # toolchain step (already on PATH).
+        run: |
+          sh tests/tools/fetch_openssl.sh 3.5 mingw64
+          echo "THREECODE_TEST_NIMFLAGS=-d:staticSsl" >> "$GITHUB_ENV"
+
       - name: Compute build flags
         # POSIX sh: runners and containers differ in the default step
         # shell; [[ ]] fails the condition silently under `sh -e` and
@@ -89,7 +99,7 @@ jobs:
           # without auto-update (issue #49).
           [ -n "${BUILD_FLAGS:-}" ] || {
             echo "BUILD_FLAGS empty" >&2; exit 1; }
-          nimble build -y ${{ env.BUILD_FLAGS }}
+          OPENSSL_STATIC=$PWD/openssl-static/mingw64 nimble build -y -d:staticSsl ${{ env.BUILD_FLAGS }}
 
       - name: Generate nimble.paths for direct nim invocations
         # nim disables its pkgs2 package scan whenever a nimble.lock is
@@ -111,53 +121,32 @@ jobs:
           } > nimble.paths
           cat nimble.paths
 
-      - name: Stage OpenSSL DLLs for test binaries
-        # The tty tests spawn the real 3code binary (built -d:ssl), which
-        # dlopens libssl/libcrypto by Nim's hardcoded names. Stock Windows
-        # ships neither; without them next to the exe the child dies with
-        # STATUS_DLL_INIT_FAILED (0xC0000142). Place them next to the root
-        # binary and the test build dir so both load. cacert.pem feeds
-        # SSL_CERT_FILE for the stub provider's local TLS path.
-        # dlls.zip is a mutable URL: pinned by sha256 so an upstream
-        # refresh is a conscious bump, not silent drift.
-        shell: pwsh
+      - name: Stage cacert.pem for tests
+        # The statically linked OpenSSL has no default cert store on stock
+        # Windows, so the tty tests' local-TLS stub provider path needs
+        # SSL_CERT_FILE pointed at a bundle. Same pinned cacert.pem the
+        # package ships (curl.se, mutable URL: pinned by sha256 so an
+        # upstream refresh is a conscious bump, not silent drift).
         run: |
-          Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
-          if ((Get-FileHash dlls.zip -Algorithm SHA256).Hash -ne $env:DLLS_SHA256) {
-            throw "dlls.zip sha256 mismatch (expected $env:DLLS_SHA256)"
-          }
-          Expand-Archive -Path dlls.zip -DestinationPath dlls
-          New-Item -ItemType Directory -Path build -Force | Out-Null
-          Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem .
-          Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem build/
+          CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            https://curl.se/ca/cacert.pem -o cacert.pem
+          echo "${CACERT_SHA256}  cacert.pem" | sha256sum -c -
+          mkdir -p build && cp cacert.pem build/
           echo "SSL_CERT_FILE=$PWD/cacert.pem" >> "$GITHUB_ENV"
 
-      - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
-        # Stock Windows ships no OpenSSL. Nim's std/net dlopens libssl /
-        # libcrypto by hardcoded names; without these DLLs alongside
-        # 3code.exe, any TLS code path dies with
-        #   could not load: (libcrypto-1_1-x64|libeay64).dll
-        # Use the canonical Nim Windows DLL bundle from nim-lang.org
-        # (pinned by sha256 above); it also ships a cacert.pem that we
-        # point SSL_CERT_FILE at. The "Stage OpenSSL DLLs" step already
-        # downloaded + extracted dlls/ earlier; reuse it instead of
-        # re-downloading. Re-fetch (still pinned) only if staging was
-        # skipped (e.g. running this job standalone).
+      - name: Package (Windows) - single exe, no DLLs
+        # OpenSSL is compiled into 3code.exe (static archives from the
+        # fetch_openssl.sh step), so the zip carries no libssl/libcrypto
+        # DLLs anymore; only the exe, docs, and the CA bundle ship.
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-windows-amd64
           cp 3code.exe 3code-windows-amd64/
           cp README.md LICENSE 3code-windows-amd64/
-          if [ ! -f dlls/libssl-1_1-x64.dll ]; then
-            curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o dlls.zip \
-              https://nim-lang.org/download/dlls.zip
-            echo "${DLLS_SHA256}  dlls.zip" | sha256sum -c -
-            unzip -q dlls.zip -d dlls
-          fi
-          cp dlls/libssl-1_1-x64.dll dlls/libcrypto-1_1-x64.dll dlls/cacert.pem 3code-windows-amd64/
-          # Capture the version from the staged binary (needs the DLLs
-          # alongside it to launch) so it can be checked without running
-          # the binary on its target OS.
+          cp cacert.pem 3code-windows-amd64/
+          # Capture the version from the staged binary so it can be checked
+          # without running the binary on its target OS.
           ./3code-windows-amd64/3code.exe -v > 3code-windows-amd64/VERSION
           # Toolchain provenance: answers "same toolchain?" when comparing
           # two builds later. gcc is the pinned mingw64.7z from the first
@@ -165,6 +154,7 @@ jobs:
           {
             nim --version | head -1
             gcc --version | head -1
+            echo "openssl $(cat openssl-static/version) source-built (mingw64)"
             sha256sum 3code.exe | cut -d' ' -f1
             echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
           } > 3code-windows-amd64/BUILD_INFO
@@ -201,7 +191,7 @@ jobs:
         # as their child. Build it once here so every test reuses the same
         # binary instead of each test triggering a full rebuild.
         run: |
-          nim c -d:ssl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim
+          OPENSSL_STATIC=$PWD/openssl-static/mingw64 nim c -d:staticSsl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim
 
       - name: Run tests
         # Runs AFTER Package on purpose: ci_tests.sh rebuilds the workspace
@@ -216,9 +206,10 @@ jobs:
         # test_interrupt_network_connect, test_resize_ticker,
         # test_broken_stdout_exit). The remaining tests pass on Windows.
         run: |
-          # Smoke-check: the built 3code binary loads its DLLs standalone.
+          # Smoke-check: the statically linked 3code binary starts
+          # standalone (no DLLs anywhere near it).
           ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
-          sh tests/tools/ci_tests.sh 900 tty
+          OPENSSL_STATIC=$PWD/openssl-static/mingw64 sh tests/tools/ci_tests.sh 900 tty
         timeout-minutes: 20
 
       - name: Upload artifact (GitHub Actions)

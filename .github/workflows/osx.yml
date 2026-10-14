@@ -64,6 +64,21 @@ jobs:
         run: |
           nimble install -y --depsOnly
 
+      - name: Build static OpenSSL (latest 3.5 LTS, both slices)
+        # OpenSSL is linked into the binary (-d:staticSsl in config.nims),
+        # replacing the Homebrew dylibs the tarball used to bundle - the
+        # dylib dance caused #53 (relocation broke the signature, macOS 26
+        # SIGKILLs the loader) and #56, and the bottle was arm64-only, so
+        # Intel users had no usable libs at all. A static copy is frozen
+        # at build time, so instead of pinning one version forever the
+        # script resolves the newest 3.5.x release and verifies the
+        # tarball's PGP signature; the series and key fingerprint are the
+        # conscious-bump pins. Both slices build from one verified source
+        # download (~4 min each on the 3-core runner).
+        run: |
+          sh tests/tools/fetch_openssl.sh 3.5 darwin64-arm64
+          sh tests/tools/fetch_openssl.sh 3.5 darwin64-x86_64
+
       - name: Compute build flags
         # POSIX sh, not bash: the linux jobs run the same step under a
         # container's `sh -e`, where [[ ]] silently fails the condition
@@ -82,7 +97,7 @@ jobs:
             refs/tags/*) [ -n "${BUILD_FLAGS:-}" ] || {
               echo "BUILD_FLAGS empty on a tag build" >&2; exit 1; } ;;
           esac
-          nimble build -y -d:release ${{ env.BUILD_FLAGS }}
+          OPENSSL_STATIC=$PWD/openssl-static/darwin64-arm64 nimble build -y -d:release -d:staticSsl ${{ env.BUILD_FLAGS }}
 
       - name: Verify sandbox matrix (seatbelt + wall proxy)
         # End-to-end enforcement check of the shipped binary, mirroring
@@ -158,7 +173,7 @@ jobs:
         run: |
           mv 3code "$SLICE_DIR/3code-arm64"
           rm -rf ~/.cache/nim/threecode_r
-          nim c -d:release ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:"$SLICE_DIR/3code-x86_64" src/threecode.nim
+          OPENSSL_STATIC=$PWD/openssl-static/darwin64-x86_64 nim c -d:release -d:staticSsl ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:"$SLICE_DIR/3code-x86_64" src/threecode.nim
           # The fat binary must stay outside the workspace: the next step
           # (Run tests) rebuilds ./3code natively via ci_tests.sh ->
           # build_binary.sh, and a fat binary parked at ./3code gets silently
@@ -185,6 +200,12 @@ jobs:
         # (Oct 6); a slow runner tips it over and the timeout, not a test,
         # fails the job.
         if: github.event_name != 'workflow_dispatch' || inputs.run-tests
+        # OPENSSL_STATIC + THREECODE_TEST_NIMFLAGS make the test-rebuilt
+        # 3code binary statically linked too, so spawned test children
+        # need no dylibs and TLS works against the stub provider.
+        env:
+          OPENSSL_STATIC: ${{ github.workspace }}/openssl-static/darwin64-arm64
+          THREECODE_TEST_NIMFLAGS: -d:staticSsl
         run: sh tests/tools/ci_tests.sh 2400
         timeout-minutes: 45
 
@@ -197,56 +218,14 @@ jobs:
         # (the step shell is bash -e, no pipefail), which shipped an empty
         # tarball that still passed the h1==h2 double-pack check. Python
         # writes every field explicitly and the member-count guard below
-        # catches any empty archive. The openssl dylibs come from the
-        # pinned bottle below.
+        # catches any empty archive. OpenSSL is statically linked into
+        # the binary (no dylibs bundled since the fetch_openssl.sh step).
         shell: bash
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-macos-universal
           cp "$RUNNER_TEMP/3code-universal" 3code-macos-universal/3code
           cp README.md LICENSE 3code-macos-universal/
-          # OpenSSL dylibs from a pinned Homebrew bottle instead of the
-          # runner's floating brew tree: the ghcr blob is digest-addressed
-          # and immutable, and the sha256 makes a pin bump a conscious act
-          # (same policy as cacert.pem). The bottle's pre-pour install
-          # names (@@HOMEBREW_CELLAR@@/...) are rewritten to @loader_path
-          # so the pair loads standalone.
-          OPENSSL_VERSION=3.6.4
-          OPENSSL_BOTTLE_SHA256=b7139450ed389be82f807daaadffa778d9c4753a3b2d8f784da1cf7383994ee2
-          TOKEN="$(curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-            "https://ghcr.io/token?scope=repository:homebrew/core/openssl/3:pull&service=ghcr.io" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
-          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${TOKEN}" \
-            "https://ghcr.io/v2/homebrew/core/openssl/3/blobs/sha256:${OPENSSL_BOTTLE_SHA256}" \
-            -o openssl-bottle.tar.gz
-          echo "${OPENSSL_BOTTLE_SHA256}  openssl-bottle.tar.gz" | shasum -a 256 -c -
-          OSSL="$(mktemp -d)"
-          tar -xzf openssl-bottle.tar.gz -C "$OSSL" \
-            "openssl@3/${OPENSSL_VERSION}/lib/libssl.3.dylib" \
-            "openssl@3/${OPENSSL_VERSION}/lib/libcrypto.3.dylib"
-          cp "$OSSL/openssl@3/${OPENSSL_VERSION}/lib/libssl.3.dylib"    3code-macos-universal/
-          cp "$OSSL/openssl@3/${OPENSSL_VERSION}/lib/libcrypto.3.dylib" 3code-macos-universal/
-          chmod +w 3code-macos-universal/libssl.3.dylib 3code-macos-universal/libcrypto.3.dylib
-          install_name_tool -id @loader_path/libcrypto.3.dylib 3code-macos-universal/libcrypto.3.dylib
-          install_name_tool -id @loader_path/libssl.3.dylib    3code-macos-universal/libssl.3.dylib
-          # The pre-pour reference to libcrypto varies by bottle; rewrite
-          # whatever otool reports instead of hardcoding it.
-          CRYPTO_REF="$(otool -L 3code-macos-universal/libssl.3.dylib | awk '/libcrypto/ {print $1; exit}')"
-          install_name_tool -change "$CRYPTO_REF" @loader_path/libcrypto.3.dylib \
-            3code-macos-universal/libssl.3.dylib
-          ln -sf libssl.3.dylib    3code-macos-universal/libssl.dylib
-          ln -sf libcrypto.3.dylib 3code-macos-universal/libcrypto.dylib
-          # install_name_tool invalidated the bottle's ad-hoc signature;
-          # re-sign, or macOS 26 SIGKILLs any process that maps the dylib
-          # (macos-15 loads an invalid signature anyway, so the smoke test
-          # below can't be the only guard, issue #53). Ad-hoc signing adds
-          # no library-validation restriction, so the pair still loads via
-          # DYLD_LIBRARY_PATH.
-          for f in libcrypto.3.dylib libssl.3.dylib; do
-            codesign --force --sign - "3code-macos-universal/$f"
-            codesign --verify "3code-macos-universal/$f" \
-              || { echo "invalid code signature on $f" >&2; exit 1; }
-          done
           # The main binary: ld auto-signs only its arm64 slice, so the
           # x86_64 slice ships unsigned and macOS 26+ kills it at exec on
           # Intel (issue #56; a single pass over the fat binary ad-hoc
@@ -257,10 +236,7 @@ jobs:
             || { echo "invalid code signature on 3code" >&2; exit 1; }
           # Capture the version from the built binary so it can be checked
           # without running the binary on its target OS (its native arm64
-          # slice does run here). Runs after the dylibs are staged and
-          # re-signed: the app puts its own directory on
-          # DYLD_LIBRARY_PATH and dlopens libssl.dylib at init, so this
-          # doubles as a load test of the @loader_path rewrites.
+          # slice does run here).
           ./3code-macos-universal/3code -v > 3code-macos-universal/VERSION
           # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
           # refresh must be a conscious pin bump, not silent drift.
@@ -271,7 +247,7 @@ jobs:
           {
             nim --version | head -1
             cc --version | head -1
-            echo "openssl@3 ${OPENSSL_VERSION} bottle:${OPENSSL_BOTTLE_SHA256}"
+            echo "openssl $(cat openssl-static/version) source-built"
             shasum -a 256 3code-macos-universal/3code | cut -d' ' -f1
             echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
           } > 3code-macos-universal/BUILD_INFO
@@ -299,9 +275,10 @@ jobs:
           pack() { python3 /tmp/mktar.py 3code-macos-universal 3code-macos-universal.tar.gz "$SOURCE_DATE_EPOCH"; }
           pack
           h1=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)
-          # files-only layout, like the windows zip: 10 members
+          # files-only layout, like the windows zip: 6 members
+          # (3code BUILD_INFO cacert.pem LICENSE README.md VERSION)
           members=$(tar -tzf 3code-macos-universal.tar.gz | wc -l)
-          [ "$members" -ge 10 ] || { echo "archive has only $members members" >&2; exit 1; }
+          [ "$members" -ge 6 ] || { echo "archive has only $members members" >&2; exit 1; }
           find 3code-macos-universal ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
           pack
           h2=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)

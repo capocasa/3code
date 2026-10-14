@@ -23,7 +23,10 @@
 #   PER_TEST_SECS env overrides the per-test cap (default 480, 0=off).
 set -u
 
-sh tests/tools/build_binary.sh 3code src/threecode.nim || exit $?
+# THREECODE_TEST_NIMFLAGS: extra nim flags for the test binary. CI
+# exports '-d:staticSsl' (with OPENSSL_STATIC) on macOS/Windows so the
+# test-spawned 3code needs no bundled openssl libs.
+sh tests/tools/build_binary.sh 3code src/threecode.nim ${THREECODE_TEST_NIMFLAGS:-} || exit $?
 
 TIMEOUT_SECS=${1:-1500}
 [ $# -gt 0 ] && shift

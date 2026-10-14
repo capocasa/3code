@@ -190,16 +190,19 @@ proc initSandbox(cwd: string) =
     sandbox.procboxExe = ""
 
 proc setupTlsEnv() =
-  ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
-  ## against most modern endpoints, so we ship Homebrew OpenSSL 3 dylibs
-  ## alongside the binary (see `release.yml`). Prepend the binary's
-  ## directory to DYLD_LIBRARY_PATH so `dlopen("libssl.dylib")` (from
-  ## Nim's std/net openssl wrapper) hits ours first. dyld consults the
-  ## env var on every dlopen, so updating it from inside the process
-  ## before any TLS code runs is sufficient.
+  ## macOS packaging builds link OpenSSL statically (config.nims
+  ## `-d:staticSsl`) and this proc compiles to nothing. Dev builds run
+  ## from a source tree: stock LibreSSL at `/usr/lib/libssl.dylib` fails
+  ## handshakes against most modern endpoints, so if Homebrew OpenSSL 3
+  ## dylibs sit alongside the binary, prepend the binary's directory to
+  ## DYLD_LIBRARY_PATH so `dlopen("libssl.dylib")` (from Nim's std/net
+  ## openssl wrapper) hits ours first. dyld consults the env var on
+  ## every dlopen, so updating it from inside the process before any
+  ## TLS code runs is sufficient.
   ##
-  ## Windows: DLLs are found next to the .exe by the app-directory
-  ## rule, no path manipulation needed.
+  ## Windows: static in packaging builds; dynamic dev builds find DLLs
+  ## next to the .exe by the app-directory rule, no path manipulation
+  ## needed.
   ##
   ## CA bundle: bundled OpenSSL on both platforms has its OPENSSLDIR
   ## baked to a build-runner path that doesn't exist on user systems,
@@ -210,7 +213,9 @@ proc setupTlsEnv() =
   ## Termux's openssl libs are found via DT_RUNPATH baked in at link
   ## time (see config.nims); LD_LIBRARY_PATH can't help because the
   ## openssl wrapper dlopens at module init, before main runs.
-  when defined(macosx):
+  ## CI packaging builds link OpenSSL statically (-d:staticSsl, see
+  ## config.nims) and bundle no dylibs, so the env dance is dead there.
+  when defined(macosx) and not defined(staticSsl):
     let dir = parentDir(getAppFilename())
     let cur = getEnv("DYLD_LIBRARY_PATH")
     let newVal = if cur.len > 0: dir & ":" & cur else: dir
