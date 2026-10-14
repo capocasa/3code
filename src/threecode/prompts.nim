@@ -3634,7 +3634,7 @@ const HelpText* = """
 3code the economical coding agent
 
 commands:
-  :help               show this message
+  :help               show this message (/help works too)
   :tokens             show token usage for this session
   :clear              reset conversation (keeps system prompt)
   :model              list models for current provider (current marked with *)
