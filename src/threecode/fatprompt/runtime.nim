@@ -2306,7 +2306,8 @@ proc inputThreadProc() {.thread.} =
         release inputStateLock
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
       let modal = inputModalActive.load(moAcquire)
-      if inputTurnActive.load(moAcquire) and ed.line.text.startsWith(":") and not modal:
+      if inputTurnActive.load(moAcquire) and not modal and
+          (ed.line.text.startsWith(":") or isSlashHelp(ed.line.text)):
         let cmd = ed.line.text
         let rows = minline.totalRows(ed.line.text, ed.promptW, ed.contPromptW,
                                      max(2, ed.width))
