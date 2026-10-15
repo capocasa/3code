@@ -1568,6 +1568,35 @@ suite "minline editor: shortcuts":
     check not ed2.canceled
     check ed2.line.text == "ab"
 
+  test "one input, several trigger keys: plain, chord, and cmd":
+    # A value lists alternative triggers: any one of them fires the
+    # command. Plain key, chord, and kitty-protocol Cmd key mixed.
+    minline.configuredShortcuts =
+      {"transpose-chars": "CtrlT CtrlG>CtrlT CmdT"}.toTable
+    block:
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "ab"
+      d.push CtrlT
+      d.push Enter
+      check d.run(ed, prompt = "> ") == "ba"
+    block:
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "ab"
+      d.push CtrlG
+      d.push CtrlT
+      d.push Enter
+      check d.run(ed, prompt = "> ") == "ba"
+    block:
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "ab"
+      d.push @[27, 91, 49, 49, 54, 59, 57, 117]  # CSI 116;9 u = cmd+t
+      d.push Enter
+      check d.run(ed, prompt = "> ") == "ba"
+    minline.configuredShortcuts = initTable[string, string]()
+
   test "chord with a longer alternative: exact wins over prefix":
     var ed = initEditor()
     let d = newDriver()
