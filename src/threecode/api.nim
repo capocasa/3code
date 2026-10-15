@@ -1418,6 +1418,22 @@ proc responsesInput(messages: JsonNode): JsonNode =
       for k, v in m.pairs:
         dev[k] = if k == "role": %"developer" else: v
       result.add dev
+    of "user":
+      # A user message with content-array (text + image_url blocks) becomes
+      # Responses input_text / input_image items; string content passes
+      # through as-is.
+      let c = m{"content"}
+      if c != nil and c.kind == JArray:
+        var content = newJArray()
+        for b in c.getElems:
+          if b{"type"}.getStr == "image_url":
+            content.add %*{"type": "input_image",
+                           "image_url": b{"image_url"}{"url"}.getStr("")}
+          else:
+            content.add %*{"type": "input_text", "text": b{"text"}.getStr("")}
+        result.add %*{"role": "user", "content": content}
+      else:
+        result.add m
     of "assistant":
       let tcs = m{"tool_calls"}
       if tcs == nil or tcs.kind != JArray or tcs.len == 0:

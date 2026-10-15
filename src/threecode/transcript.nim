@@ -6,7 +6,7 @@
 
 import std/[json, strutils, tables]
 
-import actions, display, fatprompt, session, types, util
+import actions, display, fatprompt, session, types, util, images
 
 export isEmptyReplyMsg
 
@@ -167,6 +167,21 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
     let m = messages[i]
     case m{"role"}.getStr
     of "user":
+      let raw = m{"content"}
+      # Image-bearing user messages: a user @attach echoes with the same
+      # `[image attached]` marker the live path painted (array content has
+      # no string to getStr); the harness-made follow-up that rides image
+      # reads (`attached: ... (image read)`) rendered nothing live — its
+      # tool row already carries the `· read img` banner — so it stays
+      # invisible here too. Replay/live parity is the contract.
+      if raw != nil and raw.kind == JArray:
+        let text = userTextBlocks(raw).strip
+        if text.startsWith("attached: ") and "(image read)" in text:
+          continue
+        let c = stripPreamble(text).strip & " [image attached]"
+        stdout.write "\n"
+        stdout.write formatItem(userPromptItem(c)) & "\n"
+        continue
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
       # A harness-autosent steer renders as the `»` agent-prompt item the

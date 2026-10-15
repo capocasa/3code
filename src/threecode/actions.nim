@@ -17,7 +17,8 @@
 ## `patch` can reject stale edits when the file changed since last read.
 
 import std/[json, os, sequtils, strformat, strutils, tables, times, uri]
-import types, util, shell, web, config, streamexec, sandbox, browse, plugins
+import types, util, shell, web, config, streamexec, sandbox, browse, plugins,
+  images
 
 # ---------------------------------------------------------------------------
 # Tool dispatch: strictly per-model.
@@ -440,9 +441,16 @@ proc parseV4APatch(text: string): seq[V4AOp] =
       inc i
 
 proc runActionStreaming*(act: Action, cache: ReadCache = nil,
-    onLine: proc(line: string) = nil): tuple[output: string, code: int, diff: string]
+    onLine: proc(line: string) = nil, vision = false, visionDir = ""):
+    tuple[output: string, code: int, diff: string]
 
-proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code: int, diff: string] =
+proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
+    visionDir = ""): tuple[output: string, code: int, diff: string] =
+  ## `vision`/`visionDir`: read-on-image support. A vision profile passes
+  ## the per-session image dir so `read` of an image encodes into it and
+  ## records the ImageInfo on `cache` for the turn loop to attach; a
+  ## non-vision profile gets a code-1 error naming a vision model. Defaults
+  ## keep every other caller (skills, tests, ui @-commands) unchanged.
   case act.kind
   of akPlugin:
     # Plugin tools never reach the action layer: the turn loop routes
@@ -462,6 +470,19 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
       return (&"error: {rdReason}", 1, "")
     if not fileExists(path):
       return (&"error: {path} does not exist", 1, "")
+    if isImagePath(path):
+      if not vision:
+        return (&"error: {path} is an image and this model cannot see " &
+          "images. Switch to a vision model (glm-5.3-flash on zai) to " &
+          "have images described, or inspect it another way (file, identify).", 1, "")
+      let (info, encErr) =
+        encodeForVision(path, visionDir, nextImageIndex(visionDir))
+      if encErr.len > 0:
+        return (encErr, 1, "")
+      if cache != nil: cache.images.add info
+      let note = if act.offset > 0 or act.limit != 0:
+        "offset/limit ignored for images" else: ""
+      return (imageReceipt(path.extractFilename, info, note), 0, "")
     # Dedupe: full reads with no offset/limit on an unchanged file don't
     # re-send the body. Ranged reads still go through (the model may want a
     # different slice than was returned earlier).
@@ -783,11 +804,12 @@ proc semanticExitNote*(cmd: string, code: int, body: string): string =
     ""
 
 proc runActionStreaming*(act: Action, cache: ReadCache = nil,
-    onLine: proc(line: string) = nil): tuple[output: string, code: int, diff: string] =
+    onLine: proc(line: string) = nil, vision = false, visionDir = ""):
+    tuple[output: string, code: int, diff: string] =
   ## Like `runAction` but streams bash stdout line-by-line via `onLine`.
   ## Non-bash actions delegate to `runAction` (no streaming needed).
   if act.kind != akBash:
-    return runAction(act, cache)
+    return runAction(act, cache, vision, visionDir)
   let cmd = act.body.strip
   let mutPath = bashMutationPath(cmd)
   let (readPath, _) = bashReadPath(cmd)

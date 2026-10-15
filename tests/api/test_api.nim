@@ -1517,6 +1517,51 @@ suite "xml tool_call fallback":
     # tbCurrentTurn never touches the live history, only the wire copy
     check messages[1]{"reasoning_content"}.getStr == "old"
 
+  test "chat wire keeps image content arrays verbatim":
+    # The completions path forwards `messages` through stripInternalFields /
+    # repairToolCallPairing / stripThinkBack into the body untouched; the
+    # array must survive all three with bytes intact (providers' prompt
+    # caches key on content bytes).
+    let uri = "data:image/jpeg;base64," & "QUJD".repeat(64)
+    let messages = %*[
+      {"role": "user", "content": [
+        {"type": "text", "text": "describe this"},
+        {"type": "image_url", "image_url": {"url": uri}}]},
+      {"role": "assistant", "content": "a mockup"},
+      {"role": "user", "content": [
+        {"type": "text", "text": "and now?"},
+        {"type": "image_url", "image_url": {"url": uri}}]}
+    ]
+    let wire = repairToolCallPairing(stripInternalFields(messages))
+    stripThinkBack(tbNone, wire)
+    check wire[0]{"content"}.kind == JArray
+    check wire[0]{"content"}[1]{"image_url"}{"url"}.getStr == uri
+    check wire[2]{"content"}[0]{"text"}.getStr == "and now?"
+    check $wire[0]{"content"} == $messages[0]{"content"}
+
+  test "responses input translates image blocks to input_text + input_image":
+    let uri = "data:image/png;base64,iVBOR"
+    let p = Profile(name: "openai.gpt-5.6", family: "gpt", model: "gpt-5.6")
+    let body = buildResponsesBody(p, %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": [
+        {"type": "text", "text": "look"},
+        {"type": "image_url", "image_url": {"url": uri}},
+        {"type": "text", "text": "twice"}]}
+    ])
+    let input = body{"input"}
+    check input[1]{"role"}.getStr == "user"
+    let c = input[1]{"content"}
+    check c.len == 3
+    check c[0] == %*{"type": "input_text", "text": "look"}
+    check c[1] == %*{"type": "input_image", "image_url": uri}
+    check c[2] == %*{"type": "input_text", "text": "twice"}
+
+  test "responses input passes string user content through":
+    let p = Profile(name: "openai.gpt-5.6", family: "gpt", model: "gpt-5.6")
+    let body = buildResponsesBody(p, %*[{"role": "user", "content": "go"}])
+    check body{"input"}[0]{"content"}.getStr == "go"
+
   test "applyThinkBack sends explicit knobs on z.ai and kimi":
     block zai:
       # standard-API rows strip: no preserved-thinking knob is sent

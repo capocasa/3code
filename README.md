@@ -31,6 +31,7 @@ That's why I made 3code. It's a free and open source AI-assisted coding agent th
 - goes where you go: cross platform
 - is convenient but powerful: prompt and it will just keep going
 - has unique token-saving features: chunked mode and goal files split tasks serially, keeping context low
+- can see: `@mockup.png rebuild this` attaches the image; `read` on an image returns a receipt and the pixels ride the next message (vision models: glm-5.3-flash on zai/zaicode, deepseek flash-vision hostings)
 
 As a heavy command-line and no-chrome tiling window manager user, everything else feels like a noisy token burner that's going to run away with my data at any time.
 

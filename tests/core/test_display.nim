@@ -527,3 +527,67 @@ suite "display: truncated tool output expansion":
 
   test "fileUrl percent-encodes non-URL bytes":
     check fileUrl("/tmp/a b/T1.log") == "file:///tmp/a%20b/T1.log"
+when not defined(windows):
+  import std/[json, os]
+  import threecode/[transcript, images]
+
+  suite "display: image read replay and :show":
+    proc captureReplay2(messages: JsonNode; toolLog: seq[ToolRecord]): string =
+      let outPath = getTempDir() / ("tc_replay2_" & $getCurrentProcessId())
+      let saved = stdout
+      let f = open(outPath, fmWrite)
+      stdout = f
+      try:
+        discard replaySessionTail(messages, toolLog, 0, "glm")
+      finally:
+        stdout.flushFile
+        stdout = saved
+        close(f)
+      result = readFile(outPath)
+      removeFile(outPath)
+
+    test "replay echoes an @attach user message with the marker":
+      let msgs = %*[
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": [
+          {"type": "text", "text": "@mockup.png describe"},
+          {"type": "image_url",
+           "image_url": {"url": "data:image/png;base64,AAAA"}}]},
+        {"role": "assistant", "content": "ok"},
+      ]
+      let outp = captureReplay2(msgs, @[])
+      check "@mockup.png describe [image attached]" in outp
+      check "base64" notin outp
+
+    test "replay skips the harness image follow-up":
+      let msgs = %*[
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "c1", "type": "function",
+           "function": {"name": "read",
+                        "arguments": "{\"path\":\"tiny.png\"}"}}]},
+        {"role": "user", "content": [
+          {"type": "text", "text": "attached: tiny.png (image read)"},
+          {"type": "image_url",
+           "image_url": {"url": "data:image/png;base64,AAAA"}}]},
+        {"role": "assistant", "content": "it is tiny"},
+      ]
+      let outp = captureReplay2(msgs, @[ToolRecord(
+        banner: "tiny.png",
+        output: "image tiny.png 16x12 PNG -> delivered 16x12 JPEG; attached below",
+        code: 0, kind: akRead)])
+      # The tool row carries the one-line `· read img` banner; the follow-up
+      # user message echoed nothing live, so it echoes nothing here.
+      check "· read img tiny.png 16x12 -> 16x12" in outp
+      check "(image read)" notin outp
+      check "base64" notin outp
+
+    test ":show renders the whole receipt, never the base64":
+      let receipt = "image tiny.png 16x12 PNG -> delivered 16x12 JPEG; " &
+        "attached below"
+      let s = showToolS("1", @[ToolRecord(banner: "tiny.png",
+        output: receipt, code: 0, kind: akRead)])
+      check "── T1" in s
+      check "delivered 16x12" in s
+      check "attached below" in s
+      check "base64" notin s

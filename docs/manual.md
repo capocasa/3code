@@ -985,6 +985,46 @@ A file without them runs without those sections.
 An override takes effect in new sessions; a running session keeps its
 prompt until restart or profile change.
 
+## Images
+
+Vision-capable models can see images. Two ways to get one in front of the
+model:
+
+- **Attach**: put `@mockup.png` in your prompt. The image rides the message
+  as an image block (not 64 KB of inlined binary), the echo shows
+  `@mockup.png [image attached]`, and the model answers about what it sees.
+- **Read**: the model calls `read` on an image path — e.g. to inspect its own
+  rendered output — and the image rides the next message. The tool result is
+  a one-line text receipt
+  (`image logo.png 1920x1080 PNG -> delivered 1280x720 JPEG; attached below`),
+  the transcript shows `· read img logo.png 1920x1080 -> 1280x720`, and the
+  follow-up message carries the pixels.
+
+Which models can see: `zai.glm-5.3-flash`, `zaicode.glm-5.3-flash` and the
+`deepseek-v4-flash-vision-exp` hostings are curated vision-capable in the
+known-good table (`--good`). Third-party hostings of the same models are a
+patchwork: add `[params] vision = "on"` for a provider+model you have
+probed yourself (`:provider edit`), or `"off"` to disable a curated one.
+On a non-vision model, `@x.png` and `read x.png` both fail with a hint naming
+a vision model — nothing silently degrades.
+
+Delivery is budgeted, not original: images are re-encoded once to JPEG q85
+inside a 1280 px box and a 190 KB base64 budget, with a quality-then-scale
+ladder shrinking further until it fits. The delivered bytes are written
+under the session's image dir and
+re-used verbatim, so a resumed session re-sends identical bytes and the
+provider's prompt cache stays hot. At most 3 images attach per message and 4
+per turn; repeated reads of the same image count as flailing.
+
+Session files store `image <path> <sha1>` records, never base64. On resume
+the image re-embeds from disk when file and checksum still match; otherwise
+it becomes an `[image stale: name]` note. Compaction collapses old image
+blocks to `[image WxH]` text notes — summaries never carry image blobs.
+
+`read` on an image needs a resizer for the budget ladder: ImageMagick
+(`magick` or `convert`) or, on macOS, `sips`. Without one, small originals
+pass through unchanged and large ones error with an install hint. (Windows
+resizer support is pending the Windows sandbox work.)
 ## Sessions
 
 List the 20 most recent sessions for the current directory:

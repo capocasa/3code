@@ -5,6 +5,7 @@
 ## profile needs it, and threading it through every call site is noise.
 
 import std/[json, options, os, strutils, tables, times]
+import images
 
 var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`.
@@ -168,6 +169,12 @@ type
                                 ## private-mode data. `none` means "not
                                 ## configured", deferring to the known-good
                                 ## table's curated flag.
+    vision*: Option[bool]       ## capability flag, never a wire param:
+                                ## `some(true)` says this (provider, model)
+                                ## accepts image content even when the
+                                ## known-good table says otherwise (and
+                                ## `some(false)` revokes a curated combo).
+                                ## `none` defers to the table's flag.
 
   Profile* = object
     ## `model` is the full wire value sent in the API `model` field
@@ -179,6 +186,9 @@ type
     ## `family` may also come from the per-provider config override.
     name*, url*, key*, model*: string
     family*, version*, variant*: string
+    vision*: bool  ## resolved at profile-build time from the known-good
+                   ## table's vision flag with `[params] vision` override;
+                   ## gates every image source (attach, read-on-image).
     reasoning*: string  ## reasoning/thinking effort level: "low", "medium",
                         ## "high", or "" when the model has no such knob.
                         ## Mapped to a wire field in `callModel` per family
@@ -201,6 +211,8 @@ type
     plan*: seq[PlanItem]
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
+    images*: seq[ImageInfo]  ## image reads this tool batch; the turn loop
+                            ## drains it into a follow-up user message
   PromptState* = object
     ## Cache proof for the constructed system prompt: `identity` is the
     ## `profileIdentity` stamp of the profile that built it, `skills` the

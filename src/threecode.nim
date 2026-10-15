@@ -853,10 +853,12 @@ proc main() =
         if not ev.echoed:
           # A submit that raced the drain from the idle prompt never got a
           # queue-time echo; send it through the ordinary transition.
-          commitUserPromptTranscript(promptText)
+          commitUserPromptTranscript(promptText & imageAttachEcho())
           resetEditorRowModel(addr editor)
         messages.add %*{"role": "user",
-                        "content": buildUserMessage(messages, promptText)}
+                        "content": buildUserMessage(messages, promptText,
+                          vision = prof.vision,
+                          imgDir = sessionImageDir(session.savePath))}
         refreshSystemPrompt(messages, prof, session.promptState)
         saveSession(session, messages)
         if ev.echoed:
@@ -864,7 +866,7 @@ proc main() =
           # scrollback item (where it sat); any further queued items stay
           # pinned. restoreEditor keeps the user's in-progress draft (if
           # any) painted and in the model.
-          commitQueuedEchoSend(ev.text)
+          commitQueuedEchoSend(ev.text & imageAttachEcho())
         clearDraft(session)
         discard runTurnsInteractive(prof, messages, session)
         # keep draining: anything queued during that turn runs next
@@ -914,14 +916,15 @@ proc main() =
   proc runInitialPrompt(textIn: string): bool =
     var text = textIn
     pluginOnPrompt(text, session.savePath, prof.name, prof.model)
-    messages.add %*{"role": "user", "content": buildUserMessage(messages, text)}
+    messages.add %*{"role": "user", "content": buildUserMessage(messages, text,
+      vision = prof.vision, imgDir = sessionImageDir(session.savePath))}
     refreshSystemPrompt(messages, prof, session.promptState)
     # Persist before the turn starts: a kill during the first model call
     # (job teardown of a detached oneshot, power loss) otherwise loses the
     # prompt entirely - the .3log stays empty until the first response and
     # a CLI prompt never passes through the draft sidecar.
     saveSession(session, messages)
-    emitUserSubmit(text)
+    emitUserSubmit(text & imageAttachEcho())
     resetEditorRowModel(addr editor)
     clearDraft(session)
     result = runTurnWithSafetyNet()
@@ -1051,7 +1054,8 @@ proc main() =
         releaseIdleSubmittedInput()
         continue
       pluginOnPrompt(line, session.savePath, prof.name, prof.model)
-      messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
+      messages.add %*{"role": "user", "content": buildUserMessage(messages, line,
+        vision = prof.vision, imgDir = sessionImageDir(session.savePath))}
       refreshSystemPrompt(messages, prof, session.promptState)
       # Same mid-turn-kill window as runInitialPrompt: the draft sidecar
       # is cleared below, so without this save the typed prompt only
@@ -1062,7 +1066,7 @@ proc main() =
       # echo the user's input as scroll-history content. Cursor lands
       # on the row directly after the last echo line, where callModel's
       # leading `\n` will set up the new spinner-footer scratch row.
-      emitUserSubmit(line)
+      emitUserSubmit(line & imageAttachEcho())
       resetEditorRowModel(addr editor)
       # The prompt is now a committed user turn: drop the draft sidecar so a
       # clean exit doesn't restore text the user already sent.

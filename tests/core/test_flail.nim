@@ -594,3 +594,32 @@ suite "flail detector":
       else:
         check v == fvEscalate
       det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true)
+
+  test "repeated image reads of one file escalate even when args vary":
+    # Image reads are expensive, and `read` of an image ignores the
+    # offset/limit window (the budget encoder delivers the same bytes),
+    # so the fingerprint keys on the path alone: reads of one image
+    # varying only in offset are the same call, and the consecutive
+    # repeat signal flags the run on the first repeat.
+    var det: FlailDetector
+    var verdict = fvOk
+    for i in 1 .. FlailStreakArm + FlailStreakMin:
+      verdict = det.observeCall("read",
+        "{\"path\":\"a.png\",\"offset\":" & $i & "}")
+      det.noteResult("read", "{\"path\":\"a.png\",\"offset\":" & $i & "}", true)
+      if verdict != fvOk: break
+    check verdict == fvEscalate
+
+  test "the same shape under a non-read tool name never arms":
+    # Control for the token above: without `read` in the name there is no
+    # synthetic token, and the 5-char path falls under the floor, so the
+    # streak signal must stay quiet.
+    var det: FlailDetector
+    var verdict = fvOk
+    for i in 1 .. FlailStreakArm + FlailStreakMin:
+      verdict = det.observeCall("peek",
+        "{\"path\":\"a.png\",\"offset\":" & $i & "}")
+      det.noteResult("peek", "{\"path\":\"a.png\",\"offset\":" & $i & "}", true)
+      if verdict != fvOk: break
+    check verdict == fvOk
+    check det.escalations == 0

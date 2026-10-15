@@ -11,6 +11,7 @@ import plugins
 import util
 import types
 import prompts
+import images
 
 proc contextWindowFor*(model: string): int =
   ## Heuristic fallback for models off the known-good table
@@ -157,6 +158,23 @@ proc applySummary*(messages: JsonNode, summary: string,
   for m in rebuilt: messages.add m
   collapsed
 
+proc collapseForSummary*(payload: JsonNode): JsonNode =
+  ## Field-by-field copy of the summarizer payload in which user image
+  ## blocks collapse to their `[image WxH]` text stand-in: the bytes
+  ## already live in the earlier history the summary replaces, and a
+  ## meta-call must not carry megabyte blobs. A copy because the live
+  ## history's JsonNode refs are shared with the payload entries.
+  result = newJArray()
+  for m in payload:
+    if m.kind == JObject:
+      var c = newJObject()
+      for k, v in m.pairs: c[k] = v
+      if c{"role"}.getStr == "user" and c{"content"}.kind == JArray:
+        c["content"] = %userTextContent(c)
+      result.add c
+    else:
+      result.add m
+
 proc callSummarizer(p: Profile, messages: JsonNode): string =
   ## Fires a single meta-call to the model with a dedicated summarizer
   ## system prompt and no tools. Returns "" on any failure.
@@ -181,6 +199,11 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     if m.kind == JObject:
       var c = newJObject()
       for k, v in m.pairs: c[k] = v
+      # Image blocks collapse to their `[image WxH]` text stand-in for the
+      # summarizer call: the bytes already live in the earlier history the
+      # summary replaces, and a meta-call must not carry megabyte blobs.
+      if c{"role"}.getStr == "user" and c{"content"}.kind == JArray:
+        c["content"] = %userTextContent(c)
       payload2.add c
     else:
       payload2.add m

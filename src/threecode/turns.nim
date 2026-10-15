@@ -6,11 +6,12 @@
 ## `api.nim` should stay transport/protocol focused; visual consequences of
 ## model/tool progress should flow through this layer.
 
-import std/[algorithm, json, os, sets, strformat, strutils, tables, terminal, times]
+import std/[algorithm, json, os, sequtils, sets, strformat, strutils, tables,
+  terminal, times]
 when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api, plugins,
-  display, fatprompt, streamexec, toolstream, transcript
+  display, fatprompt, streamexec, toolstream, transcript, images
 import sandbox
 import tabtitle
 import goal
@@ -115,7 +116,20 @@ proc fingerprint(name, argsStr: string): string =
   var canonical = argsStr
   if argsStr.len > 0:
     try:
-      canonical = canonicalJson(parseJson(argsStr))
+      let node = parseJson(argsStr)
+      # `read` of an image ignores offset/limit (the budget encoder
+      # delivers the same bytes whatever window was asked for), so those
+      # args don't change the work: key the fingerprint on the path alone
+      # and a run of reads varying only the window compares as the same
+      # call, which the ordinary repeat signals flag.
+      if "read" in name.toLowerAscii:
+        let p = node{"path"}.getStr("")
+        if p.len > 0 and isImagePath(p):
+          canonical = canonicalJson(%*{"path": p})
+        else:
+          canonical = canonicalJson(node)
+      else:
+        canonical = canonicalJson(node)
     except CatchableError:
       discard
   name & "\x1f" & canonical
@@ -1322,7 +1336,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
                 if toolStub != nil and toolStub.kind == JObject:
                   stubToolCallResult(toolStub)
                 else:
-                  runAction(act, session.readCache)
+                  runAction(act, session.readCache, p.vision,
+                            sessionImageDir(session.savePath))
           except CatchableError as e:
             r = "ERROR: tool execution failed: " & e.msg
             code = -1
@@ -1467,6 +1482,22 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         endTurnAfterTranscriptAppend(failed = true)
         turnEnded = true
         return false
+      # Image reads this batch ride a follow-up user message: image
+      # blocks in tool results are not portable across OpenAI-compat
+      # providers, user-message blocks are. Capped at MaxImagesPerTurn so
+      # a model that reads a gallery cannot attach it all in one turn.
+      if session.readCache != nil and session.readCache.images.len > 0:
+        var imgs = session.readCache.images
+        session.readCache.images.setLen 0
+        var extraNote = ""
+        if imgs.len > MaxImagesPerTurn:
+          let rest = imgs[MaxImagesPerTurn ..^ 1].mapIt(it.name)
+          extraNote = &"\n[{rest.len} image read(s) not attached: " &
+            rest.join(", ") & "]"
+          imgs.setLen MaxImagesPerTurn
+        let names = imgs.mapIt(it.name).join(", ")
+        messages.add imageUserMessage(
+          &"attached: {names} (image read){extraNote}", imgs)
       saveSession(session, messages)
       if isInterrupted():
         onTurnInterrupted()

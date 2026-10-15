@@ -102,7 +102,38 @@ Unreleased
   empty prompt pulls the last queued line back into the editor, joined
   file-editing style, so a typo spotted in the hourglass row can be
   fixed before the line ever reaches the model.
+- **Vision: images in, images out.** Vision-capable models see images:
+  `@mockup.png rebuild this` attaches the image to your message (echo:
+  `@mockup.png [image attached]`), and `read` on an image returns a text
+  receipt (`image logo.png 1920x1080 PNG -> delivered 1280x720 JPEG;
+  attached below`, transcript: `· read img logo.png 1920x1080 -> 1280x720`)
+  with the pixels riding the next user message — the OpenAI-compat shape
+  every gateway accepts. Curated vision models: `zai`/`zaicode`
+  `glm-5.3-flash` and the `deepseek-v4-flash-vision-exp` hostings;
+  `[params] vision = "on"/"off"` overrides the curation per provider+model
+  (third-party hostings are a patchwork — probe before flipping). On
+  non-vision models both paths fail fast with a hint naming a vision model.
+  Delivery is budget-driven: one deterministic encode to JPEG q85 inside a
+  1280 px box and a 190 KB base64 budget (quality-then-scale ladder, needs
+  ImageMagick or `sips` for big sources), capped at 3 images per message
+  and 4 per turn; repeated reads of one image trip the flail detector.
+  Sessions persist images as `path+sha1` records — never base64 — and
+  resume re-embeds the exact delivered bytes (prompt cache stays hot);
+  a missing or changed file becomes an `[image stale]` note, and
+  compaction collapses image blocks to `[image WxH]` text notes.
+  Works on chat-completions (verbatim `image_url` blocks) and the
+  Responses API (`input_image` items) alike.
 
+- **Private mode.** `-p`/`--private` or `:private on` (default off,
+  session-only, like a browser's private window). While on, turns only
+  run on allow-private providers/models and the live token bar repaints
+  magenta (`[colors] private-bar`, configurable like every other color;
+  scrollback receipts stay cyan so old receipts mark which turns ran
+  private). Trust is a `[params] allow-private = "true"` setting
+  (provider-wide or per model, `:private allow <provider> [model]`
+  writes it), or a curated known-good flag for providers whose published
+  policy is zero data retention / no training on API data: together,
+  fireworks, ovh, novita. Shortlist and walkthrough in the manual.
 - **Plugins: native libraries hooking the host, on a dedicated
   thread.** A plugin is a dynamic library (`.so`/`.dylib`/`.dll`)
   dropped into `~/.local/share/3code/lib` - no manifest, no

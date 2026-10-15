@@ -23,7 +23,8 @@
 ## clean mode switch.
 
 import std/[critbits, exitprocs, json, os, strformat, strutils, tables, terminal]
-import types, util, config, prompts, session, search, actions, minline, toolstream
+import types, util, config, prompts, session, search, actions, minline,
+  toolstream, images
 import goal
 import terminal as termui
 
@@ -751,6 +752,8 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
       result.add hiddenHintBytes(hidden, idx, res, " omitted", lead = "... ")
       for i in lines.len - tailLen ..< lines.len:
         result.add wrappedSubtleBytes(lines[i])
+  elif kind == akRead and isImageReceipt(res):
+    result.add wrappedSubtleBytes(imageReadBanner(res))
   elif kind == akRead:
     var lines = res.splitLines
     while lines.len > 0 and lines[^1].startsWith("... [") and
@@ -1053,7 +1056,11 @@ proc showToolS*(arg: string, toolLog: seq[ToolRecord]): string =
     return errLnS(&"show: T{n} out of range (1..{toolLog.len})")
   let rec = toolLog[n-1]
   result = &"── T{n}  " & rec.banner & "\r\n"
-  if rec.kind == akPlan and rec.plan.len > 0:
+  if rec.kind == akRead and isImageReceipt(rec.output):
+    # The detail view shows the whole receipt (source format, delivered
+    # size) — still one line, never the base64.
+    result.add wrappedSubtleBytes(rec.output)
+  elif rec.kind == akPlan and rec.plan.len > 0:
     result.add planResultBytes(rec.plan)
   else:
     # `:show` exists to reveal what the transcript elided, so this is the
