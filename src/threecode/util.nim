@@ -464,112 +464,6 @@ proc debugOutForced*(msg, tag: string) =
     stderr.writeLine BlueFg & "[dbg " & t & "] " & BoldOn & tag &
       Reset & BlueFg & " " & msg & Reset
 
-proc userDataRoot*(): string =
-  ## XDG data root for 3code: `~/.local/share/3code/` on Linux,
-  ## `~/.config/3code/` on macOS, `%APPDATA%/3code/` on Windows (collapses
-  ## with config-root there — fine, the split is a Linux convention). Holds
-  ## app-managed state: sessions, history, extracted built-in skills.
-  ##
-  ## `XDG_DATA_HOME` overrides the platform default on all POSIX platforms.
-  ## Honoring it on macOS (not just Linux) matches the spec and makes the
-  ## data root redirectable for tests; the platform default is unchanged
-  ## when the variable is unset.
-  let xdg = getEnv("XDG_DATA_HOME")
-  when defined(windows):
-    # Windows default is %APPDATA% (collapses with config-root there —
-    # fine, the split is a Linux convention). XDG_DATA_HOME overrides it
-    # for the same test-redirectability reason as the POSIX branches.
-    let base = if xdg.len > 0: xdg else: getConfigDir()
-  elif defined(macosx):
-    let base = if xdg.len > 0: xdg else: getConfigDir()
-  else:
-    let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
-  base / "3code"
-
-const embeddedCaCertPath {.strdefine.}: string = ""
-  ## Build-time path to a PEM bundle baked into the binary. Release CI
-  ## passes `-d:embeddedCaCertPath=<pinned cacert.pem>`; dev builds leave it
-  ## empty and the system trust store applies.
-
-const embeddedCaCert* =
-  when embeddedCaCertPath.len > 0: staticRead(embeddedCaCertPath) else: ""
-
-proc materializeCa*(dir, pem: string): string =
-  ## Write `pem` into `dir` under a content-derived name (first use
-  ## only) and return the path, "" when the write fails. Staging through
-  ## a per-pid temp plus rename means a concurrent 3code never sees a
-  ## torn bundle; the name carries the content hash so a rotated bundle
-  ## in a new binary never collides with the old file.
-  let p = dir / ("cacert-" & $hash(pem) & ".pem")
-  if fileExists(p): return p
-  try:
-    createDir(dir)
-    let tmp = p & "." & $getCurrentProcessId() & ".tmp"
-    writeFile(tmp, pem)
-    moveFile(tmp, p)
-  except CatchableError:
-    # Another process may have won the race (moveFile fails when the
-    # destination exists on Windows); a real write failure degrades to
-    # "", which callers treat exactly like a missing bundle.
-    if not fileExists(p): return ""
-  p
-
-proc bundledCaFile*(): string =
-  ## CA bundle path for `newContext(caFile = ...)`, or "" to scan
-  ## default system cert locations. Release macOS/Windows builds link
-  ## OpenSSL statically with OPENSSLDIR baked to a build-runner path
-  ## that doesn't exist on user systems, so those platforms need an
-  ## explicit bundle: a `cacert.pem` next to the binary wins (manual
-  ## override, pre-embed installs), then the compile-time-embedded
-  ## bundle written out to the data dir on first use. Linux and dev
-  ## builds return "" and use the system trust store, which works on
-  ## every distro.
-  when defined(macosx) or defined(windows):
-    let adjacent = parentDir(getAppFilename()) / "cacert.pem"
-    if fileExists(adjacent): return adjacent
-    when embeddedCaCert.len > 0:
-      return materializeCa(userDataRoot(), embeddedCaCert)
-  ""
-
-when defined(ssl):
-  import std/openssl except raiseException, newContext
-  var
-    sslCtxLock: Lock
-    sslCtxHandle {.guard: sslCtxLock.}: openssl.SslCtx
-  sslCtxLock.initLock()
-
-proc bundledSslContext*(): SslContext {.gcsafe.} =
-  ## Drop-in `SslContext` for `newHttpClient(sslContext = ...)` and
-  ## anywhere else a TLS context is consumed. macOS/Windows ship
-  ## OpenSSL whose `OPENSSLDIR` is baked to a build-runner path that
-  ## doesn't exist on user systems, so `verifyMode = CVerifyPeer`
-  ## can't scan the default location — `bundledCaFile()` feeds an
-  ## adjacent `cacert.pem` or the compile-time-embedded bundle. Linux
-  ## passes `caFile = ""` and falls through to the system trust
-  ## store. The `streamhttp` SSE path
-  ## takes `bundledCaFile()` directly (it builds its own context
-  ## internally), so the bundle wiring lives in one place either way.
-  ##
-  ## Cached for the process lifetime: `SslContext` has no `=destroy`,
-  ## so every fresh `newContext` leaks its `SSL_CTX` plus the full
-  ## parsed CA trust store (~0.8 MB) in C heap. The summarizer calls
-  ## this per compaction, so an uncached context was a per-few-turns
-  ## RSS leak (issue #35). The raw `SslCtx` handle is shared (OpenSSL
-  ## contexts are thread-safe once built); each caller gets its own
-  ## thin `SslContext` ref so no Nim refcount is ever shared across
-  ## threads. The handle intentionally outlives its refs: it is freed
-  ## only by an explicit `destroyContext` nobody wants here. A failed
-  ## construction isn't cached, so retried calls still raise.
-  when defined(ssl):
-    withLock(sslCtxLock):
-      if sslCtxHandle == nil:
-        sslCtxHandle = newContext(verifyMode = CVerifyPeer,
-                                  caFile = bundledCaFile()).context
-      result = new SslContext
-      result.context = sslCtxHandle
-  else:
-    result = newContext(verifyMode = CVerifyPeer, caFile = bundledCaFile())
-
 proc httpStatusDetail*(msg: string): string =
   ## Pull the offending status out of the RangeDefect httpclient raises
   ## when a server sends a non-standard status (LinkedIn's anti-bot 999,
@@ -683,6 +577,116 @@ proc userConfigRoot*(): string =
   let xdg = getEnv("XDG_CONFIG_HOME")
   let base = if xdg.len > 0: xdg else: getConfigDir()
   base / "3code"
+
+proc userDataRoot*(): string =
+  ## XDG data root for 3code: `~/.local/share/3code/` on Linux,
+  ## `~/.config/3code/` on macOS, `%APPDATA%/3code/` on Windows (collapses
+  ## with config-root there — fine, the split is a Linux convention). Holds
+  ## app-managed state: sessions, history, extracted built-in skills.
+  ##
+  ## `XDG_DATA_HOME` overrides the platform default on all POSIX platforms.
+  ## Honoring it on macOS (not just Linux) matches the spec and makes the
+  ## data root redirectable for tests; the platform default is unchanged
+  ## when the variable is unset.
+  let xdg = getEnv("XDG_DATA_HOME")
+  when defined(windows):
+    # Windows default is %APPDATA% (collapses with config-root there —
+    # fine, the split is a Linux convention). XDG_DATA_HOME overrides it
+    # for the same test-redirectability reason as the POSIX branches.
+    let base = if xdg.len > 0: xdg else: getConfigDir()
+  elif defined(macosx):
+    let base = if xdg.len > 0: xdg else: getConfigDir()
+  else:
+    let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
+  base / "3code"
+
+# TLS trust: the embedded/adjacent CA bundle and the process-wide
+# verifying context. Defined after `userDataRoot` because top-level
+# routines resolve in declaration order.
+
+when defined(ssl):
+  import std/openssl except raiseException, newContext
+  var
+    sslCtxLock: Lock
+    sslCtxHandle {.guard: sslCtxLock.}: openssl.SslCtx
+  sslCtxLock.initLock()
+
+const embeddedCaCertPath {.strdefine.}: string = ""
+  ## Build-time path to a PEM bundle baked into the binary. Release CI
+  ## passes `-d:embeddedCaCertPath=<pinned cacert.pem>`; dev builds leave it
+  ## empty and the system trust store applies.
+
+const embeddedCaCert* =
+  when embeddedCaCertPath.len > 0: staticRead(embeddedCaCertPath) else: ""
+
+proc materializeCa*(dir, pem: string): string =
+  ## Write `pem` into `dir` under a content-derived name (first use
+  ## only) and return the path, "" when the write fails. Staging through
+  ## a per-pid temp plus rename means a concurrent 3code never sees a
+  ## torn bundle; the name carries the content hash so a rotated bundle
+  ## in a new binary never collides with the old file.
+  let p = dir / ("cacert-" & $hash(pem) & ".pem")
+  if fileExists(p): return p
+  try:
+    createDir(dir)
+    let tmp = p & "." & $getCurrentProcessId() & ".tmp"
+    writeFile(tmp, pem)
+    moveFile(tmp, p)
+  except CatchableError:
+    # Another process may have won the race (moveFile fails when the
+    # destination exists on Windows); a real write failure degrades to
+    # "", which callers treat exactly like a missing bundle.
+    if not fileExists(p): return ""
+  p
+
+proc bundledCaFile*(): string =
+  ## CA bundle path for `newContext(caFile = ...)`, or "" to scan
+  ## default system cert locations. Release macOS/Windows builds link
+  ## OpenSSL statically with OPENSSLDIR baked to a build-runner path
+  ## that doesn't exist on user systems, so those platforms need an
+  ## explicit bundle: a `cacert.pem` next to the binary wins (manual
+  ## override, pre-embed installs), then the compile-time-embedded
+  ## bundle written out to the data dir on first use. Linux and dev
+  ## builds return "" and use the system trust store, which works on
+  ## every distro.
+  when defined(macosx) or defined(windows):
+    let adjacent = parentDir(getAppFilename()) / "cacert.pem"
+    if fileExists(adjacent): return adjacent
+    when embeddedCaCert.len > 0:
+      return materializeCa(userDataRoot(), embeddedCaCert)
+  ""
+
+proc bundledSslContext*(): SslContext {.gcsafe.} =
+  ## Drop-in `SslContext` for `newHttpClient(sslContext = ...)` and
+  ## anywhere else a TLS context is consumed. macOS/Windows ship
+  ## OpenSSL whose `OPENSSLDIR` is baked to a build-runner path that
+  ## doesn't exist on user systems, so `verifyMode = CVerifyPeer`
+  ## can't scan the default location — `bundledCaFile()` feeds an
+  ## adjacent `cacert.pem` or the compile-time-embedded bundle. Linux
+  ## passes `caFile = ""` and falls through to the system trust
+  ## store. The `streamhttp` SSE path
+  ## takes `bundledCaFile()` directly (it builds its own context
+  ## internally), so the bundle wiring lives in one place either way.
+  ##
+  ## Cached for the process lifetime: `SslContext` has no `=destroy`,
+  ## so every fresh `newContext` leaks its `SSL_CTX` plus the full
+  ## parsed CA trust store (~0.8 MB) in C heap. The summarizer calls
+  ## this per compaction, so an uncached context was a per-few-turns
+  ## RSS leak (issue #35). The raw `SslCtx` handle is shared (OpenSSL
+  ## contexts are thread-safe once built); each caller gets its own
+  ## thin `SslContext` ref so no Nim refcount is ever shared across
+  ## threads. The handle intentionally outlives its refs: it is freed
+  ## only by an explicit `destroyContext` nobody wants here. A failed
+  ## construction isn't cached, so retried calls still raise.
+  when defined(ssl):
+    withLock(sslCtxLock):
+      if sslCtxHandle == nil:
+        sslCtxHandle = newContext(verifyMode = CVerifyPeer,
+                                  caFile = bundledCaFile()).context
+      result = new SslContext
+      result.context = sslCtxHandle
+  else:
+    result = newContext(verifyMode = CVerifyPeer, caFile = bundledCaFile())
 
 proc resolvePath*(path: string): string =
   if path.len == 0: return ""
