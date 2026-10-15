@@ -99,6 +99,16 @@ jobs:
           esac
           OPENSSL_STATIC=$PWD/openssl-static/darwin64-arm64 nimble build -y -d:release -d:staticSsl ${{ env.BUILD_FLAGS }}
 
+      - uses: actions/setup-java@v4
+        # The sandbox matrix runs javac/java under the seatbelt profile
+        # (#66). The macos image USED to ship Temurin JDKs; it no longer
+        # does (/usr/bin/javac is a stub that prints "Unable to locate a
+        # Java Runtime"), so the JDK is pinned here like the other
+        # toolchains instead of trusting image contents.
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Verify sandbox matrix (seatbelt + wall proxy)
         # End-to-end enforcement check of the shipped binary, mirroring
         # the manual stefani VM verification: the wall proxy fences
@@ -160,8 +170,7 @@ jobs:
           # its getpwuid user lookup goes through opendirectoryd's mach
           # service. Both ride the sandwall profile, so a plain policy
           # with zero java-specific rules must compile and run hello
-          # world (the macos image ships Temurin JDKs; JAVA_HOME_21 is
-          # the default).
+          # world (JDK from the setup-java step above).
           command -v javac >/dev/null || fail "macos image no longer ships javac"
           # printf, not a heredoc: a column-1 heredoc body (or its
           # terminator) breaks out of the YAML block scalar and
