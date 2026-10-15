@@ -1632,18 +1632,32 @@ suite "minline editor: kitty keyboard protocol":
     d.push Enter
     check d.run(ed, prompt = "> ") == "ab\nc"
 
-  test "cmd+left runs home by default":
+  test "cmd+left is bindable (no default)":
     var ed = initEditor()
     let d = newDriver()
+    minline.configuredShortcuts = {"home": "CmdLeft"}.toTable
     d.pushString "ab"
     d.push CmdLeftSeq
     d.pushString "X"
     d.push Enter
     check d.run(ed, prompt = "> ") == "Xab"
+    minline.configuredShortcuts = initTable[string, string]()
 
-  test "alt+backspace and cmd+backspace delete word and line":
+    # Without a binding the chord is dead: the buffer is untouched.
+    var ed2 = initEditor()
+    let d2 = newDriver()
+    d2.pushString "ab"
+    d2.push CmdLeftSeq
+    d2.pushString "X"
+    d2.push Enter
+    check d2.run(ed2, prompt = "> ") == "abX"
+
+  test "alt+backspace and cmd+backspace are bindable":
     var ed = initEditor()
     let d = newDriver()
+    minline.configuredShortcuts =
+      {"delete-word-left": "AltBackspace",
+       "delete-to-bol": "CmdBackspace"}.toTable
     d.pushString "one two"
     d.push KittyAltBackspace
     d.push Enter
@@ -1655,6 +1669,7 @@ suite "minline editor: kitty keyboard protocol":
     d2.push KittyCmdBackspace
     d2.push Enter
     check d2.run(ed2, prompt = "> ") == ""
+    minline.configuredShortcuts = initTable[string, string]()
 
 # ---------------- Driver: selection ----------------
 

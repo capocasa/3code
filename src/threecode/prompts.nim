@@ -3712,9 +3712,6 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  cmd+arrow     start/end of line; alt+arrow word-by-word (mac keys via
-                the kitty keyboard protocol)
-  cmd+backspace delete to start of line
   ctrl+u        clear the buffer
   ctrl+w        delete the word before the cursor
   ctrl+k        delete to end of line
@@ -3723,7 +3720,7 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e / cmd+e edit the prompt buffer in $VISUAL/$EDITOR
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
   ctrl+x ctrl+e same (emacs edit-and-execute-command)
   shift+arrows  select text (also shift+home/end, ctrl+shift+arrows,
                 ctrl+shift+home/end for the whole buffer)

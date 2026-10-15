@@ -469,16 +469,13 @@ Useful input keys:
 | Shift+Enter or Alt+Enter | insert a newline |
 | Up / Down | move through visual rows, then history |
 | Ctrl+Arrow | move by word |
-| Alt+Left / Alt+Right | move by word (mac Option+Arrow) |
-| Cmd+Left / Cmd+Right | line start / end (mac) |
-| Cmd+Backspace | delete to start of line (mac) |
 | Ctrl+U | clear the input buffer |
 | Ctrl+W | delete the previous word |
 | Ctrl+K | delete to end of line |
 | Alt+D / Ctrl+Delete | delete the next word |
 | Ctrl+T | transpose characters around the cursor |
 | Ctrl+L | clear the screen |
-| Alt+E / Cmd+E | edit the input buffer in $VISUAL/$EDITOR |
+| Alt+E | edit the input buffer in $VISUAL/$EDITOR |
 | Ctrl+X Ctrl+E | same (emacs edit-and-execute-command) |
 | Ctrl+C | clear current input; cancel the turn when it is empty |
 | Esc | same as Ctrl+C |
@@ -492,10 +489,25 @@ of submitting on the first embedded newline, so you can paste a code block,
 edit it, and submit with Enter. `:!` and `@file` prefixes still work inside
 a pasted draft.
 
-The `Cmd` keys need a terminal with the kitty keyboard protocol (kitty,
-Ghostty, iTerm2, WezTerm, foot, Warp). 3code enables it automatically where
-available; terminals without it ignore the handshake and the Cmd bindings
-simply never fire. This is what makes the Command key usable on macOS:
+The defaults are the same readline-style Ctrl keys everywhere, including
+macOS. If you want the Mac editing keys instead, bind the `Cmd` names in
+the config; they arrive through the kitty keyboard protocol (kitty,
+Ghostty, iTerm2, WezTerm, foot, Warp), which 3code enables automatically
+where available:
+
+```
+[shortcuts]
+edit-in-editor   = AltE CmdE CtrlX>CtrlE
+home             = Home CtrlA CmdLeft
+end              = End CtrlE CmdRight
+word-left        = AltB CtrlLeft AltLeft
+word-right       = AltF CtrlRight AltRight
+delete-to-bol    = CmdBackspace
+delete-word-left = CtrlW AltBackspace
+```
+
+Terminals without the protocol ignore the handshake, and unbound Cmd keys
+simply do nothing. This is what makes the Command key usable on macOS:
 Option composes characters there (a dead accent on German layouts, so
 Alt+E and friends cannot arrive as keystrokes), while Cmd chords are
 reported as-is through the protocol.
