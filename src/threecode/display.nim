@@ -698,16 +698,18 @@ proc renderAssistantContentBytes*(content: string): string =
     # Trim each commit's tail exactly as the transcript emitter trims an
     # item before writing it (`trimTrailingNewlines`): the markdown body
     # carries its own `\n` line ending, and keeping it would stack an
-    # extra blank row onto every separator.
+    # extra blank row onto every join.
     var body = c
     while body.len > 0 and body[^1] in {'\r', '\n'}:
       body.setLen(body.len - 1)
-    # An empty commit (the stream's deferred paragraph break) also writes
-    # nothing in the live emitter (`writeTranscriptItem` returns early on
-    # empty), so a paragraph break renders exactly one blank row, same as
-    # any line break.
-    if body.len == 0: continue
-    result.add "\r\n" & body & "\r\n"
+    # Consecutive commits join flush (one `\r\n`), mirroring the live
+    # stream's `flushWithPrevious` commit (#58: a single newline is a line
+    # break, not a paragraph). An empty commit is the deferred paragraph
+    # break: its `\r\n` lands between two body rows, so it renders
+    # exactly one blank row.
+    result.add "\r\n"
+    if body.len > 0:
+      result.add body
   while result.len > 0 and result[^1] in {'\r', '\n'}:
     result.setLen(result.len - 1)
   if result.startsWith("\r\n"): result.delete(0, 1)
