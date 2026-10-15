@@ -2,6 +2,20 @@ Changelog
 
 Unreleased
 
+- **Sandbox `ask`: one-key approval for the gray zone.** `:sandbox ask
+  P` denies exactly like `:sandbox deny P`, but when a sandboxed bash
+  command is blocked on an ask-protected path, 3code puts one question
+  in the tool output view - `sandbox ask: ~/vault/notes/x.md is
+  ask-protected.  [f] ~/vault  [d] ~  [n]o  (60s)` - and one key answers
+  it: `f` allows the ask-protected path (the `ask` rule's own target),
+  `d` the directory around it, `n` keeps the denial. A grant is written
+  into the active policy file, so it sticks for the session and beyond;
+  no answer within 60 seconds counts as `n`, and the failed command is
+  never retried without an explicit grant. The sandbox stays kernel-
+  enforced and silent for everything else: `ask` covers the paths you
+  would probably allow if you were watching (a browser profile, a notes
+  vault) where `deny` costs a manual policy edit and `allow` feels too
+  broad unattended.
 - **ACP: 3code as an editor-native agent.** `3code --acp` speaks Agent
   Client Protocol v1 over stdio - newline-delimited JSON-RPC on
   stdin/stdout, the protocol Zed, JetBrains, and Neovim plugins use - so
