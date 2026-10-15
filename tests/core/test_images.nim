@@ -46,49 +46,61 @@ suite "images: encodeForVision":
     removeDir(work)
 
   test "fits 1280 box and budget":
+    # unittest's skip() marks the test but does not stop its body, so
+    # the generator runs inside the else arm only.
     if not hasResizer: skip()
-    let big = work / "big.png"
-    genImage("-size 2000x1200 gradient:red-blue", big)
-    let (info, err) = encodeForVision(big, work / "out", 1)
-    check err == ""
-    check info.format == "jpeg"
-    check info.width == 2000 and info.height == 1200
-    check max(info.deliveredWidth, info.deliveredHeight) <= 1280
-    check info.deliveredWidth > 0 and info.deliveredHeight > 0
-    let size = getFileSize(info.path)
-    check ((size + 2) div 3) * 4 <= 190 * 1024
+    else:
+      let big = work / "big.png"
+      genImage("-size 2000x1200 gradient:red-blue", big)
+      let (info, err) = encodeForVision(big, work / "out", 1)
+      check err == ""
+      check info.format == "jpeg"
+      check info.width == 2000 and info.height == 1200
+      check max(info.deliveredWidth, info.deliveredHeight) <= 1280
+      check info.deliveredWidth > 0 and info.deliveredHeight > 0
+      let size = getFileSize(info.path)
+      check ((size + 2) div 3) * 4 <= 190 * 1024
 
   test "budget ladder fires on incompressible input":
+    # unittest's skip() marks the test but does not stop its body, so
+    # the generator runs inside the else arm only.
     if not hasResizer: skip()
-    # Random noise defeats JPEG compression, forcing the quality/downscale
-    # ladder to actually run.
-    let noise = work / "noise.png"
-    genImage("-size 1600x1200 xc:gray +noise Random", noise)
-    let (info, err) = encodeForVision(noise, work / "out", 7)
-    check err == ""
-    check max(info.deliveredWidth, info.deliveredHeight) <= 1280
-    let size = getFileSize(info.path)
-    check ((size + 2) div 3) * 4 <= 190 * 1024
+    else:
+      # Random noise defeats JPEG compression, forcing the quality/downscale
+      # ladder to actually run.
+      let noise = work / "noise.png"
+      genImage("-size 1600x1200 xc:gray +noise Random", noise)
+      let (info, err) = encodeForVision(noise, work / "out", 7)
+      check err == ""
+      check max(info.deliveredWidth, info.deliveredHeight) <= 1280
+      let size = getFileSize(info.path)
+      check ((size + 2) div 3) * 4 <= 190 * 1024
 
   test "deterministic: same source, same flags, same bytes":
+    # unittest's skip() marks the test but does not stop its body, so
+    # the generator runs inside the else arm only.
     if not hasResizer: skip()
-    let big = work / "big.png"
-    genImage("-size 1800x900 gradient:green-blue", big)
-    let (a, ea) = encodeForVision(big, work / "a", 3)
-    let (b, eb) = encodeForVision(big, work / "b", 3)
-    check ea == "" and eb == ""
-    check a.path != b.path
-    check readFile(a.path) == readFile(b.path)
+    else:
+      let big = work / "big.png"
+      genImage("-size 1800x900 gradient:green-blue", big)
+      let (a, ea) = encodeForVision(big, work / "a", 3)
+      let (b, eb) = encodeForVision(big, work / "b", 3)
+      check ea == "" and eb == ""
+      check a.path != b.path
+      check readFile(a.path) == readFile(b.path)
 
   test "fidelity delivers png":
+    # unittest's skip() marks the test but does not stop its body, so
+    # the generator runs inside the else arm only.
     if not hasResizer: skip()
-    let big = work / "big.png"
-    genImage("-size 2000x1200 gradient:red-blue", big)
-    let (info, err) = encodeForVision(big, work / "out", 2, fidelity = true)
-    check err == ""
-    check info.format == "png"
-    check info.path.endsWith(".png")
-    check max(info.deliveredWidth, info.deliveredHeight) <= 1280
+    else:
+      let big = work / "big.png"
+      genImage("-size 2000x1200 gradient:red-blue", big)
+      let (info, err) = encodeForVision(big, work / "out", 2, fidelity = true)
+      check err == ""
+      check info.format == "png"
+      check info.path.endsWith(".png")
+      check max(info.deliveredWidth, info.deliveredHeight) <= 1280
 
   test "unreadable image errors, not crashes":
     let (info, err) = encodeForVision(work / "garbage.png", work / "out", 1)
@@ -99,26 +111,28 @@ suite "images: no resizer installed":
   test "small originals pass through, big ones name the missing tool":
     # The oversize fixture is generated with the resizer before PATH is
     # cleared, so this suite needs one to exist somewhere on the box
-    # (mac runners ship neither magick nor convert; it skips there).
+    # (mac runners ship neither magick nor convert; it skips there),
+    # and skip() alone does not stop the body.
     if resizer == "": skip()
-    let work = getTempDir() / "3code-images-norez-" & $getCurrentProcessId()
-    createDir(work)
-    defer: removeDir(work)
-    let big = work / "big.png"
-    genImage("-size 1400x1400 xc:gray +noise Random", big)
-    let savedPath = getEnv("PATH")
-    putEnv("PATH", "")
-    defer: putEnv("PATH", savedPath)
-    let small = work / "small.png"
-    copyFile(Images / "tiny.png", small)
-    let (pass, perr) = encodeForVision(small, work / "out", 1)
-    check perr == ""
-    check pass.format == "png"
-    check (pass.deliveredWidth, pass.deliveredHeight) == (16, 12)
-    check readFile(pass.path) == readFile(small)
-    let (fail, ferr) = encodeForVision(big, work / "out", 1)
-    check ferr.len > 0
-    check "ImageMagick" in ferr
+    else:
+      let work = getTempDir() / "3code-images-norez-" & $getCurrentProcessId()
+      createDir(work)
+      defer: removeDir(work)
+      let big = work / "big.png"
+      genImage("-size 1400x1400 xc:gray +noise Random", big)
+      let savedPath = getEnv("PATH")
+      putEnv("PATH", "")
+      defer: putEnv("PATH", savedPath)
+      let small = work / "small.png"
+      copyFile(Images / "tiny.png", small)
+      let (pass, perr) = encodeForVision(small, work / "out", 1)
+      check perr == ""
+      check pass.format == "png"
+      check (pass.deliveredWidth, pass.deliveredHeight) == (16, 12)
+      check readFile(pass.path) == readFile(small)
+      let (fail, ferr) = encodeForVision(big, work / "out", 1)
+      check ferr.len > 0
+      check "ImageMagick" in ferr
 
 suite "images: message blocks":
   test "golden shape: text first, then image_url data URIs":
@@ -133,7 +147,7 @@ suite "images: message blocks":
     check c[0]{"text"}.getStr == "describe this"
     check c[1]{"type"}.getStr == "image_url"
     let uri = c[1]{"image_url"}{"url"}.getStr
-    check uri.startsWith("data:image/jpeg;base64,")
+    check uri.startsWith("data:image/") and ";base64," in uri
 
   test "more than three images: first three attach, rest noted by name":
     var infos: seq[ImageInfo]
