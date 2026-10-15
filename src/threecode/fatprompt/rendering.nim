@@ -728,32 +728,41 @@ proc formatUserPromptItem*(line: string): string =
   ## included; the controller/transcript emitter owns inter-item spacing.
   result.addUserEcho(line, trailingNewline = false)
 
-proc queuedEchoPlainRows*(line: string; termW: int): seq[string] =
-  ## The queued item's rows as plain text: hourglass marker on the first
-  ## row, continuation rows indented under it, wrapped to the width. The
-  ## engine paints these as volatile pinned rows while the item waits, and
-  ## `formatQueuedPromptItem` emits the same rows as scrollback bytes when
-  ## the item finally runs, so the two renderings can never diverge.
+proc queuedEchoPlainRows*(line: string; termW: int;
+                          withMarker = true): seq[string] =
+  ## The queued item's rows as plain text: the ordinary prompt marker on
+  ## the first row, continuation rows indented under it, wrapped to the
+  ## width, and (with `withMarker`) the hourglass appended after the
+  ## message's last row, so the item reads as a prompt with a pending
+  ## marker rather than as a foreign symbol. The engine paints these as
+  ## volatile pinned rows while the item waits; `formatQueuedPromptItem`
+  ## emits the same rows minus the hourglass as scrollback bytes when the
+  ## item finally runs, so the committed row count always matches the
+  ## pinned one and the send transition moves nothing. The wrap reserves
+  ## two extra columns beyond the user echo's so the appended hourglass
+  ## can never spill the last row into an unpainted soft wrap.
   let lines = line.splitLines
   for idx, l in lines:
-    let prefix = if idx == 0: DeferredSubmitMarker & " " else: "  "
+    let prefix = if idx == 0: "❯ " else: "  "
     if termW <= 0:
       result.add prefix & l
     else:
-      let chunks = wrapPlain(l, max(1, termW - 2))
+      let chunks = wrapPlain(l, max(1, termW - 4))
       for ci, chunk in chunks:
         result.add (if ci == 0: prefix else: "  ") & chunk
+  if withMarker and result.len > 0:
+    result[result.high].add " " & DeferredSubmitMarker
 
 proc formatQueuedPromptItem*(line: string): string =
   ## Format a prompt or colon command queued for the next turn as a
-  ## scrollback item body, committed when the queued item runs. The
-  ## hourglass stands in for the prompt marker so the row reads as a
-  ## prompt item; before then the same rows are painted pinned at the
-  ## screen bottom (see `queuedEchoPlainRows`), so the queue stays in
-  ## sight while the turn streams. Wrapped like the user echo,
-  ## continuation rows indented under the marker.
+  ## scrollback item body, committed when the queued item runs. From the
+  ## moment the item is sent it is an ordinary prompt item in scrollback:
+  ## the hourglass exists only while the item waits pinned at the screen
+  ## bottom (see `queuedEchoPlainRows`), and the rows wrap identically
+  ## with and without it so the commit lands exactly where the pinned
+  ## rows sat.
   let termW = try: terminalWidth() except CatchableError: 0
-  result = join(queuedEchoPlainRows(line, termW), "\r\n")
+  result = join(queuedEchoPlainRows(line, termW, withMarker = false), "\r\n")
 
 proc formatAgentPromptItem*(line: string): string =
   ## Format a harness-autosent prompt (empty-reply steer, flail prod, and

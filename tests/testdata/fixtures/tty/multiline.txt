@@ -14,7 +14,7 @@
 ● First multiline response.
   ○1%  ↑120  ↓24  0
 
-⧖ queued line one
+❯ queued line one
   queued line two
 
 ● Queued multiline response.

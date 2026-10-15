@@ -3718,10 +3718,11 @@ commands:
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
-  queueing      Enter while a turn runs queues the line (a ⧖ item in
-                history); prompts and :commands send in order at the
-                turn's end, and backspace on an empty prompt pulls the
-                last queued line back into the editor
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line

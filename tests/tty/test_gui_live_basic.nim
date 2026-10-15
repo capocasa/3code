@@ -103,8 +103,12 @@ proc one(iter: int; term: string): string =
   block:
     let echo1 = tty.rowContaining("❯ first prompt here")
     # Submitted mid-turn, so the second prompt queues: its queue-time echo
-    # carries the hourglass marker, not the prompt marker.
-    let echo2 = tty.rowContaining("⧖ second prompt now")
+    # keeps the prompt marker with the hourglass appended after the text,
+    # and one blank row separates it from the item above.
+    let echo2 = tty.rowContaining("❯ second prompt now ⧖")
+    if echo2 >= 0 and tty.rows()[echo2 - 1].strip.len != 0:
+      return "iter " & $iter & " turn2: no blank row above the queued echo\n" &
+        tty.dumpFramesAround("TWO chunk1")
     if echo1 < 0:
       return "iter " & $iter & " turn2: FIRST echo deleted\n" & tty.dumpFramesAround("TWO chunk1")
     if echo2 < 0:
