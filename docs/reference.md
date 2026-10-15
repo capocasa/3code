@@ -78,7 +78,7 @@ names, model names, and paths where supported.
 | `:private` | show private mode and trusted providers |
 | `:private on/off` | toggle private mode for this session (bar recolors) |
 | `:private allow X [M]` | trust provider X, optionally one model, with private data |
-| `:prompt` | show the active system prompt |
+| `:prompt` | show the active system prompt (compiled-in, or the [file override](manual.html#system-prompt-override) if one matched) |
 | `:show [N]` | show the full output of tool call N (default: last) |
 | `:log` | list all tool calls this session |
 | `:sessions` | list recent sessions saved in this directory (max 20) |
@@ -160,7 +160,7 @@ a config error.
 | `models` | space-separated model IDs offered by `:model` |
 | `current_model` | the model `:model` last picked here; switching back to the provider returns to it. Written automatically |
 | `auth` | `oauth` for browser-OAuth subscription logins (`supergrok`, `chatgpt`) |
-| `family` | experimental-only override that picks the system-prompt branch by family name, for combos off the known-good list |
+| `family` | experimental-only override that picks the system-prompt branch by family name, for combos off the known-good list. The same name drives the [prompt-file override](manual.html#system-prompt-override) |
 | `model_prefix` | legacy: prepended to bare `models` names; expanded on load, never written back |
 
 ### params

@@ -4294,9 +4294,7 @@ proc discoverSkills*(): string =
 
 proc findSystemPromptOverride*(family: string): string =
   ## Look for <family>.txt in project `.3code/` then `.agents/`, then
-  ## `userConfigRoot()`. Returns the file path if found and experimental
-  ## mode is on, else "".
-  if not experimentalEnabled: return ""
+  ## `userConfigRoot()`. Returns the file path if found, else "".
   for dir in [safeCwd() / ".3code", safeCwd() / ".agents"]:
     let local = dir / family & ".txt"
     if fileExists(local): return local
