@@ -3665,10 +3665,14 @@ commands:
   :sandbox allow T    add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
   :sandbox deny T     add a deny rule (deny T)
+  :sandbox ask P      deny P, but offer a one-key approval when a
+                      sandboxed command is blocked on P (allow on
+                      f = file, d = its directory; n/timeout keeps the
+                      denial)
   :sandbox edit       open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
-  readonly, deny; see .sandbox)
+  readonly, deny, ask; see .sandbox)
   :! CMD              run CMD directly through the sandboxed shell
                       (output shown, not sent to the model)
   :q :quit            exit (also Ctrl-D)

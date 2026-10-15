@@ -11,6 +11,7 @@ when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api,
   display, fatprompt, streamexec, toolstream, transcript
+import sandbox
 import tabtitle
 import engine as termengine
 
@@ -575,6 +576,64 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
         view.addLine(line)
         renderView()
       result = runActionStreaming(act, cache, onLine)
+      # Sandbox ask gate: a failed command that smells like an EACCES
+      # from the sandbox, whose denied target is covered by an `ask`
+      # rule (not a hard deny), can be redeemed by the user once. The
+      # question rides the tool viewport; the answer is a single key
+      # diverted from the input thread (fatprompt requestAskKey). On
+      # f/d the ask rule's root (or its parent directory) is appended
+      # to the active policy file as `allow` and the command is
+      # retried once; on n, an undecided key, or a timeout the denial
+      # stands and the result goes back to the model unretried.
+      block askGate:
+        if result.code == 0: break askGate
+        if not sandboxEnabled or not sandbox.active: break askGate
+        if "Permission denied" notin result.output and
+            "Operation not permitted" notin result.output:
+          break askGate
+        if not askGateAvailable(): break askGate
+        let deniedPath = sandbox.deniedAskPath(act.body, result.output)
+        if deniedPath.len == 0: break askGate
+        # Narrow offer = the ask rule root (a file grant under an ask
+        # DIRECTORY cannot pierce the Linux mount mask, so the root is
+        # the narrowest grant that takes effect); broad offer = the
+        # root's parent directory, one level up.
+        let rootPath = sandbox.askRuleRoot(deniedPath)
+        if rootPath.len == 0: break askGate
+        let broadPath = parentDir(rootPath)
+        view.addLine("sandbox ask: " & sandbox.askPathDisplay(deniedPath) &
+          " is ask-protected.  [f] " & sandbox.askPathDisplay(rootPath) &
+          "  [d] " & sandbox.askPathDisplay(broadPath) &
+          "  [n]o  (" & $(askTimeoutMs() div 1000) & "s)")
+        renderView()
+        let key = requestAskKey()
+        var marker = ""
+          # The model-visible record of the decision, appended to the
+          # tool output after any retry (each side sees what was decided
+          # and whether a retry happened).
+        if key == 'f' or key == 'd':
+          let target = if key == 'd': broadPath else: rootPath
+          if sandbox.grantAskAllow(target):
+            view.addLine("· allowed " & sandbox.askPathDisplay(target) &
+              " - retrying")
+            renderView()
+            result = runActionStreaming(act, cache, onLine)
+            marker = "user allowed " & sandbox.askPathDisplay(target) &
+              "; command retried"
+          else:
+            view.addLine("· policy update failed; not retried")
+            renderView()
+            marker = "policy update failed; not retried"
+        else:
+          let why =
+            if key == '\0': "no answer before timeout"
+            else: "declined by user"
+          view.addLine("· " & why & "; not retried")
+          renderView()
+          marker = why & "; not retried"
+        if result.output.len > 0 and not result.output.endsWith("\n"):
+          result.output.add "\n"
+        result.output.add "[sandbox ask: " & marker & "]"
       setCommandStatusActive(false)
       view.setExitCode(result.code)
       renderView()

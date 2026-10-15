@@ -89,6 +89,7 @@ names, model names, and paths where supported.
 | `:sandbox allow T` | add a writable/connectable rule |
 | `:sandbox readonly P` | add a read-only rule |
 | `:sandbox deny T` | add a deny rule |
+| `:sandbox ask P` | deny P, but offer a one-key approval (`f` file / `d` dir / `n` no) when a sandboxed command is blocked on P |
 | `:sandbox edit` | open the policy file in `$VISUAL`/`$EDITOR`, reload on quit |
 | `:! CMD` | run a shell command yourself, output to scrollback only |
 | `:quit` / `:q` / `:exit` | leave |
