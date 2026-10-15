@@ -54,13 +54,16 @@ if [ ! -f version ]; then
     || curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o pubkeys.asc \
       https://www.openssl.org/source/pubkeys.asc
 
-  command -v gpg >/dev/null 2>&1 \
-    || { echo "gpg not found; cannot verify the openssl tarball" >&2; exit 1; }
-  gpg --import pubkeys.asc 2>/dev/null
-  have=$(gpg --list-keys --with-colons 2>/dev/null | awk -F: '$1=="fpr"{print $10}')
+  # GPG env override: CI windows points it at git-bash's gpg because
+  # the MSYS2 one exits 2 on --import without a word.
+  gpg="${GPG:-gpg}"
+  command -v "$gpg" >/dev/null 2>&1 \
+    || { echo "$gpg not found; cannot verify the openssl tarball" >&2; exit 1; }
+  "$gpg" --import pubkeys.asc 2>/dev/null
+  have=$("$gpg" --list-keys --with-colons 2>/dev/null | awk -F: '$1=="fpr"{print $10}')
   printf '%s\n' "$have" | grep -qix "$release_fp" \
     || { echo "openssl release key fingerprint mismatch" >&2; exit 1; }
-  gpg --verify "openssl-$ver.tar.gz.asc" "openssl-$ver.tar.gz"
+  "$gpg" --verify "openssl-$ver.tar.gz.asc" "openssl-$ver.tar.gz"
 
   tar -xzf "openssl-$ver.tar.gz"
   cd ..
