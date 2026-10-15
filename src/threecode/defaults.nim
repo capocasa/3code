@@ -32,8 +32,13 @@
 ##   Rust - command-line builds only. C and Zig ride the project dir,
 ##   the read-only system baseline, and ~/.cache (Zig's global cache;
 ##   on Windows ~/AppData/Local/zig). Node rides the project's
-##   node_modules, ~/.npm, and the baseline. Everything past that -
-##   ruby, java, gradle, scons, and friends - is a manual recipe, not
+##   node_modules, ~/.npm, and the baseline. Java joins on macOS: the
+##   JVM's non-path needs (kern.grade_cputype sysctl, opendirectoryd
+##   user lookup) are granted by the sandwall seatbelt profile itself,
+##   and the JDK homes under $HOME ride readonly lines below (the
+##   system ones - /Library/Java, brew's /opt, the /usr/libexec/java_home
+##   shim - are already baseline-readable). Everything past that -
+##   ruby, maven, gradle, scons, and friends - is a manual recipe, not
 ##   a default.
 ##
 ## What stays fenced, on purpose: token-bearing files (~/.npmrc,
@@ -88,6 +93,9 @@ readonly ~/.rustup
 allow ~/.nimble
 readonly ~/.choosenim
 readonly ~/.local/share/uv
+readonly ~/Library/Java
+readonly ~/.jdks
+readonly ~/.sdkman/candidates
 readonly ~/.gitconfig
 readonly ~/.config/git
 readonly ~/.hgrc

@@ -527,7 +527,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 2 lines omitted :show 3 for full
+  ... 2 lines omitted · T3.log ↗
   scroll-3
   scroll-4
   scroll-5
@@ -563,7 +563,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 3 lines omitted :show 3 for full
+  ... 3 lines omitted · T3.log ↗
   scroll-4
   scroll-5
   scroll-6
@@ -599,7 +599,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 3 lines omitted :show 3 for full
+  ... 3 lines omitted · T3.log ↗
   scroll-4
   scroll-5
   scroll-6
@@ -637,7 +637,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 3 lines omitted :show 3 for full
+  ... 3 lines omitted · T3.log ↗
   scroll-4
   scroll-5
   scroll-6
@@ -676,7 +676,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 3 lines omitted :show 3 for full
+  ... 3 lines omitted · T3.log ↗
   scroll-4
   scroll-5
   scroll-6
@@ -718,7 +718,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 3 lines omitted :show 3 for full
+  ... 3 lines omitted · T3.log ↗
   scroll-4
   scroll-5
   scroll-6
@@ -762,7 +762,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 3 lines omitted :show 3 for full
+  ... 3 lines omitted · T3.log ↗
   scroll-4
   scroll-5
   scroll-6
@@ -809,7 +809,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 3 lines omitted :show 3 for full
+  ... 3 lines omitted · T3.log ↗
   scroll-4
   scroll-5
   scroll-6
@@ -856,7 +856,7 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
-  ... 3 lines omitted :show 3 for full
+  ... 3 lines omitted · T3.log ↗
   scroll-4
   scroll-5
   scroll-6
@@ -870,8 +870,8 @@ $ sleep 3; printf 'slow-done\n'
 
 $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxx
-  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-xx
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  xxx
   ○1%  ↑130  ↓18  0
 
 ● Bash checks complete.

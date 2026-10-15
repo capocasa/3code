@@ -2719,6 +2719,10 @@ proc complCurrentWord(ed: LineEditor): string =
 proc complAdvance(ed: var LineEditor; offset: int) =
   ## Move completion by `offset` steps (+1 forward, -1 backward).
   ## Initialises state on first call; cycles on subsequent calls.
+  ## A unique match inserted at the end of the line gains a trailing
+  ## space (shell-style) so command args can be typed straight away;
+  ## directory completions already end in `/` and are left alone so
+  ## completion keeps descending into them.
   if ed.completionCallback.isNil: return
   let word = ed.complCurrentWord()
   # Fresh cycle: user just typed a new prefix
@@ -2733,6 +2737,10 @@ proc complAdvance(ed: var LineEditor; offset: int) =
     if ed.complPrefix.len > 0:
       for _ in 0 ..< ed.complPrefix.len: ed.deletePrevious()
     ed.insertText(ed.complMatches[0])
+    if ed.complMatches.len == 1 and
+        ed.line.position == ed.line.text.len and
+        ed.complMatches[0].len > 0 and ed.complMatches[0][^1] != '/':
+      ed.insertText(" ")
     return
   # Continue existing cycle
   if ed.complMatches.len == 0: return

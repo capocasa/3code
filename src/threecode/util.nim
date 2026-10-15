@@ -656,6 +656,19 @@ proc resolvePath*(path: string): string =
   if p.startsWith("~"): p = expandTilde(p)
   try: absolutePath(p) except CatchableError: p
 
+proc isSlashHelp*(cmd: string): bool =
+  ## True when `cmd` is the `/help` synonym for `:help`: the exact token,
+  ## optionally followed by whitespace. New users reach for the slash form
+  ## before learning the colon convention; anything looser (`/helpful,` in a
+  ## sentence) must stay a model prompt, not become a command.
+  let c = cmd.strip
+  c == "/help" or c.startsWith("/help ") or c.startsWith("/help\t")
+
+proc colonForm*(cmd: string): string =
+  ## `cmd` with a leading `/help` token rewritten to `:help` (see
+  ## `isSlashHelp`); unchanged when it is not the synonym.
+  if isSlashHelp(cmd): ":help" & cmd.strip[5 .. ^1] else: cmd
+
 proc safeCwd*(): string =
   ## The current working directory, or ``/`` when the process's cwd has
   ## been removed or renamed out from under it. Nim's ``getCurrentDir``
@@ -994,37 +1007,6 @@ func visibleWidth*(s: string): int =
       inc result, runeCellWidth(s.runeAt(i))
     inc i, rl
 
-func wrapAnsi*(s: string, width: int): seq[string] =
-  ## Greedy word-wrap on whitespace; each chunk's visible width is at
-  ## most `width`. ANSI CSI escape sequences pass through without
-  ## counting toward width. Words longer than `width` overflow on their
-  ## own line — terminal wrap takes them from there. Multiple inter-word
-  ## spaces collapse to one.
-  if width <= 0:
-    result.add s
-    return
-  let words = s.split(' ').filterIt(it.len > 0)
-  if words.len == 0:
-    result.add s
-    return
-  var line = ""
-  var lineW = 0
-  for w in words:
-    let wW = visibleWidth(w)
-    if lineW == 0:
-      line = w
-      lineW = wW
-    elif lineW + 1 + wW <= width:
-      line.add ' '
-      line.add w
-      lineW += 1 + wW
-    else:
-      result.add line
-      line = w
-      lineW = wW
-  if line.len > 0:
-    result.add line
-
 func charWrapAnsi*(s: string, width: int): seq[string] =
   ## Character-wrap: break at exactly `width` visible columns, even
   ## mid-word. ANSI CSI and OSC escapes pass through without counting
@@ -1055,15 +1037,60 @@ func charWrapAnsi*(s: string, width: int): seq[string] =
       inc i
       while i < s.len and (s[i].uint8 and 0xC0'u8) == 0x80'u8:
         inc i
-      if lineW + 1 > width:
+      let rw = runeCellWidth(s.runeAt(start))
+      if lineW + rw > width:
         result.add line
         line = s[start ..< i]
-        lineW = 1
+        lineW = rw
       else:
         line.add s[start ..< i]
-        inc lineW
+        inc lineW, rw
     else:
       inc i
+  if line.len > 0:
+    result.add line
+
+func wrapAnsi*(s: string, width: int): seq[string] =
+  ## Greedy word-wrap on whitespace; each chunk's visible width is at
+  ## most `width`. ANSI CSI escape sequences pass through without
+  ## counting toward width. A word wider than `width` is char-wrapped
+  ## into width-sized chunks: the terminal's own autowrap must never be
+  ## what breaks a row, or the app's row model and the screen drift by
+  ## a row per overlong word (erased tails, creeping scroll). Multiple
+  ## inter-word spaces collapse to one.
+  if width <= 0:
+    result.add s
+    return
+  let words = s.split(' ').filterIt(it.len > 0)
+  if words.len == 0:
+    result.add s
+    return
+  var line = ""
+  var lineW = 0
+  for w in words:
+    let wW = visibleWidth(w)
+    if wW > width:
+      if lineW > 0:
+        result.add line
+        line = ""
+        lineW = 0
+      let chunks = charWrapAnsi(w, width)
+      for j in 0 ..< chunks.len - 1:
+        result.add chunks[j]
+      line = chunks[^1]
+      lineW = visibleWidth(chunks[^1])
+      continue
+    if lineW == 0:
+      line = w
+      lineW = wW
+    elif lineW + 1 + wW <= width:
+      line.add ' '
+      line.add w
+      lineW += 1 + wW
+    else:
+      result.add line
+      line = w
+      lineW = wW
   if line.len > 0:
     result.add line
 

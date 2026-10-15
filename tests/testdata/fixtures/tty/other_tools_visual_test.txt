@@ -79,7 +79,7 @@ r notes.txt
 r bigfile.txt
   line01
   line02
-  … 13 lines hidden · :show 2 for full …
+  … 13 lines hidden · T2.log ↗
   line16
   line17
   line18
@@ -147,7 +147,7 @@ r notes.txt
 r bigfile.txt
   line01
   line02
-  … 13 lines hidden · :show 2 for full …
+  … 13 lines hidden · T2.log ↗
   line16
   line17
   line18
@@ -215,7 +215,7 @@ r notes.txt
 r bigfile.txt
   line01
   line02
-  … 13 lines hidden · :show 2 for full …
+  … 13 lines hidden · T2.log ↗
   line16
   line17
   line18

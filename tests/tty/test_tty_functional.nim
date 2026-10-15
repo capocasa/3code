@@ -18,6 +18,7 @@ discard """
 """
 import std/[json, os, re, strutils, times, unicode, unittest]
 import threecode/types
+import threecode/session
 when defined(posix):
   import posix except SocketHandle
 import tty_expect
@@ -572,6 +573,7 @@ suite "terminal visual contract":
       (":tokens", "no tokens used yet"),
       (":clear", "═══"),
       (":sessions", "no saved sessions for this directory"),
+      (":resume", "no saved sessions for this directory"),
       (":sessions all", "no saved sessions for this directory"),
       (":log", "no tool calls yet"),
       (":show", "no tool calls yet"),
@@ -619,6 +621,71 @@ suite "terminal visual contract":
     tty.requireVisibleEditorCaret(":session")
     discard tty.checkpoint("commands/recalled-session")
     tty.writeCheckpoints(root / "checkpoints.jsonl")
+
+  test "resume command swaps onto a saved session":
+    # #62: `:resume <id>` replaces the running session in place: state,
+    # locks, and the token bar move onto the saved session, the next
+    # prompt continues that conversation, and the swap is visible in
+    # history (`resumed ...`) plus `:session` reporting the target id.
+    let root = newFixture("resume_command")
+    writeHarnessProviders(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant", "preStreamDelayMs": 100,
+       "content": "post-resume-reply",
+       "contentChunks": ["post-resume-reply"],
+       "usage": {"promptTokens": 130, "completionTokens": 6,
+                  "totalTokens": 136, "cachedTokens": 100}}
+    ])
+    # Seed a prior session for this cwd with one completed turn: its
+    # message tree and usage must come back, and its .3log must keep
+    # growing after the swap (the proof the wire side moved too).
+    let targetId = "20260401T120000"
+    let sessDir = root / "data" / "3code" / "sessions"
+    createDir(sessDir)
+    createDir(root / "data" / "3code" / "session-paths")
+    writeFile(sessDir / (targetId & ".3log"),
+      "session " & targetId & " profile=stub.stub-model" &
+      " cwd=" & (root / "run") & "\n\n" &
+      "system\n  sys\n\n" &
+      "user\n  seeded question\n\n" &
+      "assistant\n  seeded answer\n\n" &
+      "tokens fresh=80 cached=20 out=20 hit=20% elapsed=3s\n\n")
+    appendIndexAt(root / "data" / "3code" / "session-paths", root / "run",
+                  targetId)
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send ":resume\n"
+    tty.expectInHistory targetId          # bare form lists the candidate
+    tty.expectInHistory "resume with :resume <id>"
+    tty.send ":resume " & targetId & "\n"
+    tty.expectInHistory "resumed " & targetId
+    # The token bar carries the seeded turn's usage in the typing-ready
+    # shape a startup resume paints (fresh 80 + cached 20 = prompt 100).
+    tty.expect "\u2191100"
+    tty.expect "\u219320"
+    # :session reports the swapped-in session.
+    tty.send ":session\n"
+    tty.expectInHistory targetId
+    # The next prompt continues the resumed conversation on the wire.
+    tty.send "after resume\n"
+    tty.expectInHistory "post-resume-reply"
+    # And it landed in the TARGET session's .3log. The turn-end save
+    # trails the history commit, so poll for it rather than reading once.
+    var grown = ""
+    let deadline = epochTime() + 10.0
+    while epochTime() < deadline:
+      grown = readFile(sessDir / (targetId & ".3log"))
+      if "post-resume-reply" in grown: break
+      tty.drain(100)
+    check "after resume" in grown
+    check "post-resume-reply" in grown
+    tty.send ":q\n"
+    tty.expectExit(0, timeoutMs = 5000)
 
   test "profile commands return to prompt and accept further input":
     let root = newFixture("profile_cmd_noexit")
@@ -965,6 +1032,55 @@ suite "terminal visual contract":
     # repaints are volatile chrome that the final screen does not double).
     tty.expectCount("combination of colors.", 1, where = "screen")
     tty.expect "❯"
+
+  test "overlong streamed words wrap in-app, tails stay visible (#58)":
+    # The terminal's autowrap must never be what breaks a transcript row.
+    # The app's row model does not count a terminal-side wrap, so every
+    # overlong word used to drift screen and model apart by one row: the
+    # wrapped tail was erased by the next commit's walk-up (output
+    # "partly vanishing") and each wide line scrolled the view one row
+    # extra. The app char-wraps wide words itself now; the tail lands as
+    # its own margin-indented row that survives, and a single model
+    # newline renders as a line break, not a paragraph break.
+    let root = newFixture("wide_stream")
+    writeConfiguredProvider(root)
+    let wide = "W".repeat(130)   # 118 cols of body + a 12-char tail at width 120
+    writeStubResponses(root, %*[
+      {"role": "assistant",
+       "content": wide & "\na short line follows\n" & wide,
+       "contentChunks": [wide & "\n", "a short line follows\n", wide],
+       "usage": {"promptTokens": 10, "completionTokens": 140,
+                 "totalTokens": 150, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "❯"
+    tty.send "wide\n"
+    tty.expect "a short line follows"
+    tty.expect "❯"
+    tty.drain(50)
+    let rows = tty.rows()
+    let headRow = tty.rowContaining("W".repeat(118))
+    check headRow >= 0
+    if headRow >= 0:
+      # The wrapped tail is its own margin-indented row directly below
+      # the full row: present, non-blank, no separator blank between.
+      check headRow + 1 < rows.len
+      check rows[headRow + 1].strip == "W".repeat(12)
+    let shortRow = tty.rowContaining("a short line follows")
+    check shortRow == headRow + 2
+    # The second wide line keeps the same shape (its head is the row
+    # after the short line, tail right below, nothing lost).
+    check shortRow >= 0 and shortRow + 1 < rows.len
+    if shortRow >= 0 and shortRow + 1 < rows.len:
+      check rows[shortRow + 1].contains("W".repeat(100))
+      check rows[shortRow + 2].strip == "W".repeat(12)
+    # No wide-word tail was dropped anywhere: both full rows on screen.
+    check tty.rowContaining("W".repeat(118)) >= 0
+    var tails = 0
+    for r in rows:
+      if r.strip == "W".repeat(12): inc tails
+    check tails == 2
 
   test "streamed checkpoint markers never paint, not even as bare bullets":
     # Kimi dmail tagging prefixes the first assistant message with

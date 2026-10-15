@@ -3644,7 +3644,7 @@ const HelpText* = """
 3code the economical coding agent
 
 commands:
-  :help               show this message
+  :help               show this message (/help works too)
   :tokens             show token usage for this session
   :clear              reset conversation (keeps system prompt)
   :model              list models for current provider (current marked with *)
@@ -3676,7 +3676,9 @@ commands:
   :show [N]           show full output of tool call N (default: last)
   :log                list all tool calls this session
   :sessions           list recent sessions saved in this directory (max 20)
-  :session            show this session's id (for --resume <id>)
+  :session            show this session's id (for --resume=ID / :resume ID)
+  :resume             list sessions of this directory, pick with :resume <id>
+  :resume ID          swap this running 3code onto saved session ID
   :summarize          collapse old turns into a synthetic recap (meta model call)
   :version            show the running 3code version
   :sandbox (:sb)      show the active filesystem sandbox rules

@@ -341,14 +341,16 @@ when not defined(windows):
       result = readFile(outPath)
       removeFile(outPath)
 
-    test "showTool body matches toolResultBytes for multi-line bash":
-      # :show keeps its own `── T{n}` header but the BODY must come from the
-      # shared byte builder so it matches the live transcript.
+    test "showTool body matches fullToolResultBytes for multi-line bash":
+      # :show keeps its own `── T{n}` header but the BODY must come from
+      # the shared untruncated builder; for output under the compaction
+      # threshold that rendering is identical to the live compact one.
       let output = "line one\nline two\nline three\n"
       let toolLog = @[ToolRecord(banner: "echo long", output: output,
         code: 0, kind: akBash)]
       let rendered = captureShow("1", toolLog)
       check "── T1" in rendered
+      check rendered.contains(fullToolResultBytes(akBash, output, 0))
       check rendered.contains(toolResultBytes(akBash, output, 0, 1))
       check "line one" in rendered
       check "line three" in rendered
@@ -443,3 +445,85 @@ when not defined(windows):
       check rendered.count(BoldOn & "» " & Reset & note) == 1
       check "$ make" in rendered     # the aborting call executed and shows
       check "made" in rendered
+
+suite "display: truncated tool output expansion":
+  # warp (#64): too much output was trapped behind the truncation hints.
+  # The hint now dumps the full output to a per-process temp file and
+  # carries it as an OSC 8 `file://` hyperlink (click to open), and
+  # `:show N` prints the untruncated body instead of re-rendering the
+  # same compacted view with the same hint.
+  proc captureShow(arg: string; toolLog: seq[ToolRecord]): string =
+    let outPath = getTempDir() / ("tc_show_" & $getCurrentProcessId())
+    let saved = stdout
+    let f = open(outPath, fmWrite)
+    stdout = f
+    try:
+      showTool(arg, toolLog)
+    finally:
+      stdout.flushFile
+      stdout = saved
+      close(f)
+    result = readFile(outPath)
+    removeFile(outPath)
+
+  teardown:
+    if dirExists(toolOutDir()): removeDir(toolOutDir())
+
+  test ":show reveals the elided middle of a truncated bash output":
+    var lines: seq[string]
+    for i in 1..40: lines.add "line " & $i
+    let output = lines.join("\n") & "\n"
+    let toolLog = @[ToolRecord(banner: "seq 40", output: output,
+      code: 0, kind: akBash)]
+    let live = toolResultBytes(akBash, output, 0, 1)
+    check "line20" notin live        # the middle stays elided in scrollback
+    check "line 7" notin live
+    check "omitted" in live
+    let shown = captureShow("1", toolLog)
+    check "── T1" in shown
+    check "line 7" in shown
+    check "line 20" in shown
+    check "line 40" in shown
+    check "omitted" notin shown
+    check "hidden" notin shown
+
+  test "read hint is a file:// hyperlink over a dump of the full output":
+    var lines: seq[string]
+    for i in 1..30: lines.add "line" & align($i, 2)
+    let output = lines.join("\n")
+    let bytes = toolResultBytes(akRead, output, 0, 7)
+    check "… 23 lines hidden · T7.log ↗" in bytes
+    check "\x1b]8;;file://" in bytes
+    check "\x1b]8;;\x1b\\" in bytes   # the link span closes
+    let dump = toolOutDir() / "T7.log"
+    check fileExists(dump)
+    check readFile(dump) == output
+
+  test "bash omitted hint links its dump":
+    var lines: seq[string]
+    for i in 1..12: lines.add "out" & align($i, 2)
+    let output = lines.join("\n") & "\n"
+    let bytes = toolResultBytes(akBash, output, 0, 3)
+    check "... 5 lines omitted · T3.log ↗" in bytes
+    let dump = toolOutDir() / "T3.log"
+    check fileExists(dump)
+    check readFile(dump) == output
+
+  test "diff hint links a .diff dump":
+    var lines: seq[string]
+    for i in 1..50: lines.add "+added line " & $i
+    let diff = lines.join("\n")
+    let bytes = toolResultBytes(akBash, "done", 0, 5, diff = diff)
+    check "… 15 lines hidden · T5.diff ↗" in bytes
+    let dump = toolOutDir() / "T5.diff"
+    check fileExists(dump)
+    check readFile(dump) == diff
+
+  test "short outputs render without any hint or dump":
+    let bytes = toolResultBytes(akRead, "one\ntwo\nthree", 0, 9)
+    check "hidden" notin bytes
+    check "file://" notin bytes
+    check not fileExists(toolOutDir() / "T9.log")
+
+  test "fileUrl percent-encodes non-URL bytes":
+    check fileUrl("/tmp/a b/T1.log") == "file:///tmp/a%20b/T1.log"

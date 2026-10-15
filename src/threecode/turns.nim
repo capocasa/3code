@@ -521,9 +521,13 @@ proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
   result.code = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
   result.diff = stub{"diff"}.getStr("")
 
-proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
-                         idx: int; streamedOutputShown: ptr bool):
+proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
+                          idx: int; streamedOutputShown: ptr bool):
     tuple[output: string, code: int, diff: string] =
+  ## Also the engine behind `:! CMD`: the live bash viewport (banner,
+  ## streamed lines, bar-tick clock) is the same one a model-run bash
+  ## call paints, and the caller's transcript commit folds it into one
+  ## scrollback item afterwards.
   var view = initStreamingView(StreamMaxLines, idx, bannerFor(act))
   let promptOwnsStdin = inputEditor != nil
 

@@ -457,8 +457,9 @@ prefix it with `:!`:
 :! cargo test
 ```
 
-The output appears in your scrollback only; the model never sees it. The
-command runs through the same sandbox policy as model-run commands.
+Output streams into a live viewport while the command runs, then folds into
+your scrollback; the model never sees it. The command runs through the same
+sandbox policy and the same executor as model-run commands.
 
 Useful input keys:
 
@@ -583,11 +584,16 @@ Each conversation event gets a one-character marker or banner icon:
 
 Tool output below the banner is dimmed to keep the model's prose the
 loudest thing on screen. Long output is elided in the middle (`... N lines
-omitted :show N for full`); `:show N` prints the whole capture, `:log` lists
-every tool call of the session. Diffs are painted green/red, and a long diff
-is clipped with a `git diff` hint rather than flooding the screen. Failed
-tools mark their banner so a red `Ø`/`✕` scan tells you where a turn went
-wrong without reading anything.
+omitted · T7.log ↗`); `:show N` prints the whole capture, `:log` lists
+every tool call of the session. The whole elision row is a terminal
+hyperlink (OSC 8) over a dump of the full output in
+`$TMPDIR/3code_out_<pid>/T<N>.log(.diff)`, so terminals that support links
+open it in the `file:` handler (e.g. `$VISUAL`) on a click; the visible
+file name keeps the row honest where links are unsupported, and the dumps
+live as long as the session does. Diffs are painted green/red, and a long
+diff is clipped the same linked way rather than flooding the screen.
+Failed tools mark their banner so a red `Ø`/`✕` scan tells you where a
+turn went wrong without reading anything.
 
 Grey `·` rows are 3code's own commentary: the context gauge warning before
 auto-summarization, the elapsed time when a turn ends without usage, the
@@ -928,13 +934,21 @@ Resume the latest session:
 3code --resume
 ```
 
-Resume a session by ID:
+Resume a session by ID (any value-taking option accepts the value
+attached, `=`/`:`-separated, or space-separated):
 
 ```
 3code --resume=abc123
 # or
+3code -r abc123
+3code -rabc123
 3code -r:abc123
 ```
+
+Or, without restarting, from inside a running 3code: `:resume` lists this
+directory's sessions, `:resume abc123` swaps the running REPL onto that
+session (state, locks, and profile move with it; the scrollback is not
+replayed, scroll up or `:show` for old turns).
 
 Sessions are listed and searched per working directory by default, so
 unrelated projects stay out of each other's history; `-a` opts out of the
@@ -1111,7 +1125,13 @@ In practice:
   writable (`~/go`, `~/.cache`, `~/.npm`, `~/.cargo/registry`). C and
   Zig builds ride the project dir and the read-only system baseline
   (Zig's global cache is `~/.cache/zig`; on Windows
-  `~/AppData/Local/zig`). Token-bearing files stay fenced:
+  `~/AppData/Local/zig`). On macOS `javac` runs out of the box: the
+  JVM's own startup needs (a `kern.grade_cputype` sysctl the kernel
+  classifies as a write, and opendirectoryd user lookups) ride the
+  sandbox profile itself, and the JDK homes under your home are
+  read-only (`~/Library/Java`, `~/.jdks`, `~/.sdkman/candidates`;
+  system JVMs under `/Library/Java` and brew's `/opt` were already
+  covered by the baseline). Token-bearing files stay fenced:
   `~/.npmrc`, `~/.cargo/credentials`, `~/.git-credentials`, `~/.ssh`.
   Ruby and the heavier ecosystems live one section down, as recipes. On Windows the caches move to `~/AppData/Local/npm-cache` and
   `~/AppData/Local/pip/cache`, and the bash child gets a seeded copy of
@@ -1264,7 +1284,9 @@ itself (`allow ./`), so a fresh project is writable out of the box.
 
 Recipes for stacks past the basics. The default policy already covers
 git, mercurial, C, Zig, Go, Nim, Python (pip, uv, venv), Rust, and the
-npm/pip caches - nothing below is needed for those. Copy the
+npm/pip caches; on macOS `javac` itself runs too (the JDK homes are
+read-only by default, the JVM's system-level lookups ride the sandbox
+profile) - nothing below is needed for those. Copy the
 lines you need into `.sandbox` (via `:sandbox allow` /
 `:sandbox readonly`), or into `~/.config/3code/sandbox` to make them
 your baseline. Each entry is the tool's own documented home, narrowed
@@ -1431,6 +1453,14 @@ and SOCKS5 allowlist proxy. Linux puts the command in a network namespace;
 macOS confines it to loopback with Seatbelt. 3code sets the standard proxy
 variables and a Git SSH proxy command for the child process. Denied HTTP
 connections return 403.
+
+.. note::
+
+   Inside the fence, only clients that speak the proxy variables get out:
+   ``curl``, ``wget``, git over HTTPS, package managers. ``ping`` (ICMP)
+   and ``host``/``dig`` (their own DNS queries) ignore the proxy and fail:
+   the fenced namespace has no route off the machine, and name resolution
+   happens at the proxy. REST over HTTP(S) only, for now.
 
 On Windows, host rules require one admin setup command:
 

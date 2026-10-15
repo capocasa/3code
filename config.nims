@@ -46,6 +46,38 @@ proc getVersionString(): string =
 switch("path", "src")
 switch("path", "tests")  # test helpers (tty_expect, stub_helpers, minline_testutils)
 switch("d", "ssl")
+
+when defined(staticSsl):
+  # CI packaging builds (macOS/Windows): link the OpenSSL built by
+  # tests/tools/fetch_openssl.sh straight into the binary instead of
+  # shipping dylibs/DLLs. Dev and Linux builds stay dynamic (dlopen of
+  # the system/bundled libs), which is what they want: distro-patched
+  # openssl on Linux, no staging hassle for devs.
+  #
+  # The three dynlibOverride keys cover Nim's DLL-name canonization
+  # (compiler canonDynlibName strips a leading "lib" and truncates at
+  # the first '(' or '.'): "ssl"/"crypto" match the libssl.so/dylib
+  # spellings, but the Windows alternation names like
+  # "(libssl-1_1-x64|...).dll" canonize to the empty string, and the
+  # only override key that matches those is one that also canonizes
+  # empty ("("). With only --dynlibOverride:ssl the Windows (and the
+  # libcrypto half of every) build silently keeps runtime LoadLibrary
+  # stubs and links the archives in as dead weight.
+  switch("dynlibOverride", "ssl")
+  switch("dynlibOverride", "crypto")
+  switch("dynlibOverride", "(")
+  switch("define", "useOpenssl3")
+  let osslDir = getEnv("OPENSSL_STATIC", "openssl-static")
+  switch("passL", osslDir & "/lib/libssl.a")
+  switch("passL", osslDir & "/lib/libcrypto.a")
+  when defined(windows):
+    # libcrypto's bss_conn/e_capi objects reference winsock and the cert
+    # store; nim's own -l flags come before the archives in the link
+    # line, so they must be repeated after them.
+    switch("passL", "-lws2_32")
+    switch("passL", "-lcrypt32")
+    switch("passL", "-ladvapi32")
+
 # Plain http is accepted for local/LAN hosts (see util.plainHttpHost);
 # non-local HTTP stays forbidden so keys never cross a public network in
 # cleartext. Historical define name kept for the transport tests.

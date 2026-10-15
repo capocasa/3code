@@ -6,7 +6,7 @@ discard """
 ## Feature tests: `:! CMD` runs a shell command through the tool executor
 ## (banner + output in scrollback, never to the model), and Alt+E /
 ## Ctrl+X Ctrl+E edit the prompt buffer in $VISUAL/$EDITOR.
-import std/[json, os, posix, times, unittest]
+import std/[json, os, posix, strutils, times, unittest]
 import tty_expect
 import stub_helpers
 
@@ -109,6 +109,34 @@ suite "shell command and edit-in-editor":
     tty.drain(200)
     tty.expect "\u276f"
     echo "  PASS: :! echo hello"
+
+  test ":! streams output live, not only at completion":
+    let root = newFixture("shell_stream")
+    writeConfiguredProvider(root)
+    writeStubResponses(root)
+    let tty = startStub(root, "")
+    defer: tty.close()
+
+    tty.expect "\u276f"
+
+    tty.typeText ":! sh -c 'echo ST\"\"REAM\"\"ONE; sleep 2; echo ST\"\"REAM\"\"TWO'"
+    tty.send "\n"
+
+    # The command sleeps 2s after its first line: only a streaming
+    # executor can put STREAMONE on screen before completion. Output
+    # buffered until exit misses this deadline. The quoted-string split
+    # (ST""REAM) keeps the marker out of the typed line, which is echoed
+    # on submit and would otherwise satisfy the wait immediately.
+    require tty.waitForText("STREAMONE", 1200)
+
+    tty.expectInHistory "$ sh -c"
+    tty.expectInHistory "STREAMTWO"
+    tty.drain(200)
+    tty.expect "\u276f"
+    # The final commit folds the live viewport into one scrollback item;
+    # the banner must appear exactly once, not again below itself.
+    require tty.screenText().count("$ sh -c") == 1
+    echo "  PASS: :! streams live"
 
   test ":! alone prints usage":
     let root = newFixture("shell_usage")

@@ -674,6 +674,12 @@ type LiveMarkdownStream* = object
   ## content resumes. This mirrors `splitLines` + `trimTranscriptTail`
   ## in the batch path.
   pendingBlank: bool
+  ## True once this reply committed a content line. Continuation lines
+  ## flush against the row above (no separator blank): the transcript
+  ## item separator is the paragraph row, and a model line break is not
+  ## a paragraph break. The batch/replay path renders the same reply
+  ## that way; the live path must not diverge (double-spaced scroll).
+  committedLine: bool
 
 var apiLiveStream: LiveMarkdownStream
 
@@ -1753,7 +1759,10 @@ proc renderPendingPartial(s: var LiveMarkdownStream, slurpedNow: int) =
   s.partialActive = true
 
 proc commitBlankLine(s: var LiveMarkdownStream) =
-  ## Commit one blank paragraph-break row to real scrollback.
+  ## Commit one blank paragraph-break row to real scrollback. The row
+  ## itself is painted by the next line's item separator; dropping
+  ## `committedLine` here is what arms it.
+  s.committedLine = false
   commitTranscriptBytes(assistantTextBytes(""))
   termengine.clearLiveContent()
   s.partialActive = false
@@ -1796,7 +1805,8 @@ proc commitPendingLine(s: var LiveMarkdownStream, slurpedNow: int) =
   # would make the turn loop commit the whole reply again at end of turn
   # (duplicating the streamed prose under a fresh bullet).
   s.startContent(slurpedNow)
-  commitTranscriptBytes(rendered)
+  commitTranscriptBytes(rendered, flushWithPrevious = s.committedLine)
+  s.committedLine = true
   termengine.clearLiveContent()
   s.partialActive = false
 
@@ -2475,7 +2485,8 @@ proc inputThreadProc() {.thread.} =
       let modal = inputModalActive.load(moAcquire)
       let turnActive = inputTurnActive.load(moAcquire)
       let hasText = ed.line.text.len > 0
-      if turnActive and hasText and not modal and ed.line.text.startsWith(":"):
+      if turnActive and hasText and not modal and
+          (ed.line.text.startsWith(":") or isSlashHelp(ed.line.text)):
         let cmd = ed.line.text
         pushInputEvent(InputEvent(kind: ieCommand, text: cmd))
         # Leave the editor's row model intact: whichever way the hook goes

@@ -12,12 +12,12 @@
 import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
-  auth_xai, auth_anthropic, auth_openai, auth_google, oauth, plugins
+  auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
-                      ":show", ":log", ":sessions", ":session", ":summarize", ":version",
-                      ":sandbox", ":sb", ":retry", ":private",
+                      ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
+                      ":version", ":sandbox", ":sb", ":retry", ":private",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -61,7 +61,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                           editor: var minline.LineEditor): CommandResult
 
 proc classifyCommand*(cmd: string): CommandKind =
-  let c = cmd.strip
+  let c = colonForm(cmd).strip
   if c.len == 0 or c[0] != ':':
     return ckUnknown
   let sp = c.find({' ', '\t'})
@@ -104,7 +104,7 @@ proc classifyCommand*(cmd: string): CommandKind =
     # verbs append to the sandbox file and reload, so they mutate.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "show"): ckSafeImmediate
     else: ckMutating
-  of ":clear", ":summarize":
+  of ":clear", ":resume", ":summarize":
     ckMutating
   of ":quit", ":q", ":exit":
     ckQuit
@@ -1722,7 +1722,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   ## directly to scrollback. Command internals still use the legacy display
   ## helpers; their stdout is captured here so the outer controller can commit
   ## one high-level transcript item.
-  let c = cmd.strip
+  let c = colonForm(cmd).strip
   if c.len == 0 or c[0] != ':':
     return CommandResult(recognized: false)
   let sp = c.find({' ', '\t'})
@@ -1773,7 +1773,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       # Direct shell command through the model's sandboxed executor;
       # output goes to scrollback only, never to the model. `c[2..^1]`
       # keeps the text after `:!` verbatim (unlike `arg`, which is
-      # stripped).
+      # stripped). Streamed through the same live viewport a model-run
+      # bash call uses, so lines appear while the command runs; the
+      # caller's transcript commit folds the viewport into one item.
       let cmdText = if c.len > 2: c[2..^1] else: ""
       if cmdText.strip.len == 0:
         ok = false
@@ -1784,16 +1786,15 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         let act = Action(kind: akBash, body: cmdText)
         var output = ""
         var code = -1
-        # The input thread owns stdin at idle; the tool cancel watcher
-        # would fight it for keystrokes and restore the wrong termios.
-        setToolStdinWatcherEnabled(false)
-        try:
-          (output, code, _) = runAction(act, session.readCache)
-        except CatchableError as e:
-          output = "ERROR: " & e.msg
-          code = -1
-        finally:
-          setToolStdinWatcherEnabled(true)
+        var streamedShown = false
+        withBarTick(currentBarLabel):
+          try:
+            (output, code, _) = runBashWithViewport(
+              act, session.readCache, nil, session.toolLog.len + 1,
+              addr streamedShown)
+          except CatchableError as e:
+            output = "ERROR: " & e.msg
+            code = -1
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: output,
           code: code, kind: act.kind, plan: act.plan)
         body.add toolBannerBytes(previewCmd(cmdText), akBash, code)
@@ -1941,6 +1942,82 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
              else: "no saved sessions for this directory")
       else:
         body.add printSessionListS(paths, session.savePath, askedAll)
+    of ":resume":
+      # Swap this REPL onto another saved session without restarting:
+      # the `:sessions` -> quit -> `3code -r <id>` loop collapsed into one
+      # command. Bare `:resume` lists candidates (same shape as
+      # `:sessions`); `:resume <id>` loads that session in place. The
+      # startup resume's scrollback replay is NOT run here: the replay
+      # writes raw scrollback rows, which mid-REPL would land on the
+      # footer chrome; the conversation itself is fully restored on the
+      # wire (and so cache-hot) either way.
+      if parts.len == 0:
+        let paths = listSessionPathsForCwd(safeCwd())
+        if paths.len == 0:
+          resp "no saved sessions for this directory"
+        else:
+          body.add printSessionListS(paths, session.savePath, false)
+          resp "resume with :resume <id>"
+      else:
+        let path = resolveSessionPath(arg, safeCwd())
+        if path == "":
+          ok = false
+          respErr "session not found: " & arg
+        elif path == session.savePath:
+          resp "already on session " & sessionIdFromPath(path)
+        else:
+          let (loaded, loadedMsgs) = loadSessionFile(path)
+          if loaded.cwd != "" and loaded.cwd != safeCwd():
+            ok = false
+            respErr "session " & sessionIdFromPath(path) & " belongs to " &
+              loaded.cwd & "; start 3code in that directory"
+          else:
+            # Same lock dance as `:clear`: release the outgoing session,
+            # claim the target, and keep the dir lock's session-id line
+            # current. A target held by a live process fails here with
+            # its lock message and leaves the current session in place.
+            if session.savePath != "":
+              releaseSessionLock(session.savePath)
+            block swap:
+              try:
+                acquireSessionLock(loaded.savePath)
+              except SessionLocked as e:
+                if session.savePath != "":
+                  try: acquireSessionLock(session.savePath)
+                  except SessionLocked: discard
+                ok = false
+                respErr e.msg
+                break swap
+              session = loaded
+              messages = loadedMsgs
+              updateActiveDirLockSession(session.savePath)
+              # Profile precedence mirrors a startup --resume: the
+              # session's own profile wins over the config current, an
+              # unknown one keeps what is running.
+              if session.profileName != "":
+                let cand = buildProfile(activeCurrent, activeProviders,
+                                        session.profileName)
+                if cand.name != "": prof = cand
+              session.profileName = prof.name
+              # Token bar carries the resumed session's last turn so the
+              # next submit converts it to a receipt, the same
+              # typing-ready shape a startup resume paints.
+              let window = contextWindowFor(prof)
+              let lastUsage = lastAssistantUsage(messages)
+              emitFatPromptEvent clearPendingHintEvent()
+              if lastUsage.totalTokens > 0:
+                let label = tokenLineLabel(lastUsage, window)
+                emitFatPromptEvent setBarEvent(label, hasGap = true)
+                emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
+                emitFatPromptEvent setRestingLabelEvent(
+                  contextLabel(lastUsage.promptTokens, window))
+              else:
+                emitFatPromptEvent clearBarEvent()
+                emitFatPromptEvent setRestingLabelEvent("")
+              pluginOnSessionStart(session.savePath, session.cwd,
+                                   prof.name, prof.model, true, messages.len)
+              resp "resumed " & sessionIdFromPath(session.savePath) &
+                " (" & $messages.len & " messages)"
     of ":summarize":
       if prof.name == "":
         ok = false

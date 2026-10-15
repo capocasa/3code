@@ -1,4 +1,5 @@
-import std/[net, os, osproc, posix, sequtils, strtabs, strutils, times, unittest]
+import std/[net, os, osproc, posix, sequtils, streams, strtabs, strutils,
+               times, unittest]
 import threecode/session
 
 const binName = when defined(windows): "3code.exe" else: "3code"
@@ -206,6 +207,102 @@ suite "cli --list cap, all-directories scope, and --find":
     let r = runIn(tmp, "-f zebra --page 2")
     check r.code == 2
     check "out of range" in r.o
+
+suite "cli resume value forms":
+  # #62: `--resume <id>` parsed `<id>` as the prompt and `-r<id>` as a
+  # short-flag cluster. Every value-taking option now accepts the value
+  # attached (`-rID`), `=`/`:`-separated, or space-separated. Verified
+  # against the dir lock's second line (the session id the process
+  # holds), read while the process sits in the provider wizard with its
+  # stdin held open: the observable that the NAMED session was loaded,
+  # not just that the id was validated.
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-cli-resume-" & $getCurrentProcessId() & "deny" &
+                          $epochTime().int64)
+    createDir(tmp / "d" / "3code" / "sessions")
+    createDir(tmp / "d" / "3code" / "session-paths")
+    createDir(tmp / "c")
+    let savedCwd = getCurrentDir()
+    setCurrentDir(tmp)
+    tmp = getCurrentDir()   # resolve symlink (macOS /var -> /private/var)
+    setCurrentDir(savedCwd)
+    for id in ["20260101T110000", "20260102T120000"]:
+      writeFile(tmp / "d" / "3code" / "sessions" / (id & ".3log"),
+        "session " & id & " profile=stub cwd=" & tmp & "\n\n" &
+        "system\n  sys\n\nuser\n  hello " & id & "\n\n")
+      appendIndexAt(tmp / "d" / "3code" / "session-paths", tmp, id)
+
+  teardown:
+    if dirExists(tmp): removeDir(tmp)
+
+  proc heldSessionId(flags: string): string =
+    ## Run the binary with stdin held open (it parks in the provider
+    ## wizard under the isolated empty config), read the dir lock's
+    ## session-id line, then close stdin and reap.
+    let lockPath = dirLockPathFor(tmp)
+    try: removeFile(lockPath) except OSError: discard
+    let env = newStringTable({"XDG_DATA_HOME": tmp / "d",
+                              "XDG_CONFIG_HOME": tmp / "c"})
+    let p = startProcess(binPath(), args = flags.splitWhitespace(),
+                         workingDir = tmp, env = env,
+                         options = {poStdErrToStdOut, poUsePath})
+    for i in 0 ..< 100:
+      if fileExists(lockPath): break
+      sleep 50
+    result = try: readFile(lockPath).strip.splitLines[^1] except CatchableError: ""
+    p.inputStream().close()
+    discard p.waitForExit()
+    close(p)
+
+  proc runIn(flags: string): tuple[o: string, code: int] =
+    let env = newStringTable({"XDG_DATA_HOME": tmp / "d",
+                              "XDG_CONFIG_HOME": tmp / "c"})
+    let (outp, code) = execCmdEx(binPath().quoteShell & " " & flags,
+                                 {poStdErrToStdOut, poUsePath, poDaemon},
+                                 env, tmp)
+    result = (outp.strip(), code)
+
+  test "attached, separated, and space forms all load the named session":
+    for flags in ["--resume=20260101T110000", "--resume:20260101T110000",
+                  "-r=20260101T110000", "-r:20260101T110000",
+                  "--resume 20260101T110000", "-r 20260101T110000",
+                  "-r20260101T110000"]:
+      check heldSessionId(flags) == "20260101T110000"
+
+  test "bare -r and --resume still mean the latest session":
+    check heldSessionId("-r") == "20260102T120000"
+    check heldSessionId("--resume") == "20260102T120000"
+
+  test "an option token after -r is not eaten as its value":
+    check heldSessionId("-r -x") == "20260102T120000"
+
+  test "a bogus id fails session-not-found in every form":
+    for flags in ["--resume nope", "-r nope", "-rnope"]:
+      let r = runIn(flags)
+      check r.code == 3
+      check "session not found: nope" in r.o
+
+  test "-c attached/space/=/: forms are equivalent":
+    # The same mechanism serves every value-taking option; -c has a
+    # deterministic offline observable (config file actually read).
+    writeFile(tmp / "cfg", "[settings]\ncurrent = \"x\"\n")
+    let expect = runIn("-c " & (tmp / "cfg").quoteShell).o
+    for form in ["-c", "-c=", "-c:"]:
+      let r = runIn(form & (tmp / "cfg").quoteShell)
+      check r.code == 3
+      check "no [provider] section" in r.o
+      check r.o == expect
+
+  test "-m attached form reaches the wizard like -m VALUE":
+    # No provider under the isolated config: both forms abort at the
+    # first-run wizard with identical output; before the fix `-mVAL`
+    # died as "unknown option: -V...".
+    let expect = runIn("-m zai.glm-5.3").o
+    let r = runIn("-mzai.glm-5.3")
+    check r.code == 3
+    check r.o == expect
 
 suite "cli --config switch":
   # -c/--config redirects the config file. The observable used here: a
