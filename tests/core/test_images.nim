@@ -97,6 +97,10 @@ suite "images: encodeForVision":
 
 suite "images: no resizer installed":
   test "small originals pass through, big ones name the missing tool":
+    # The oversize fixture is generated with the resizer before PATH is
+    # cleared, so this suite needs one to exist somewhere on the box
+    # (mac runners ship neither magick nor convert; it skips there).
+    if resizer == "": skip()
     let work = getTempDir() / "3code-images-norez-" & $getCurrentProcessId()
     createDir(work)
     defer: removeDir(work)
