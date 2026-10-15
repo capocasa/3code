@@ -1457,6 +1457,7 @@ suite "minline editor: terminal reply filtering":
 
 suite "minline editor: shortcuts":
   const CtrlG = @[7]
+  const CtrlT = @[20]
   var histFile = ""
 
   setup:
@@ -1507,6 +1508,76 @@ suite "minline editor: shortcuts":
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "> hello"
+
+  test "plain CtrlE is end-of-line, not edit-in-editor":
+    # The default spec once read "AltE CtrlX CtrlE" with no chord
+    # grammar, which bound bare Ctrl+E to the editor on top of
+    # end-of-line. Ctrl+E must only move the cursor.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push CtrlA
+    d.pushString "X"
+    d.push CtrlE
+    d.pushString "Y"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "XabY"
+
+  test "chord: two keys in sequence run one command":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts =
+      {"transpose-chars": "CtrlG>CtrlT"}.toTable
+    d.pushString "ab"
+    d.push CtrlG
+    d.push CtrlT
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ba"
+
+  test "chord prefix defers without selection, dead end swallowed":
+    var ed = initEditor()
+    let d = newDriver()
+    # Default CtrlX starts the CtrlX>CtrlE chord: with no selection it
+    # must defer, and a dead-end completion is swallowed.
+    d.pushString "ab"
+    d.push @[24]     # chord prefix
+    d.push CtrlE    # named dead end: swallowed
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abc"
+
+  test "chord abandoned by Esc and by a printable":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts =
+      {"transpose-chars": "CtrlT CtrlG>CtrlT"}.toTable
+    d.pushString "ab"
+    d.push CtrlG
+    d.pushString "z"    # printable while pending: swallowed, chord gone
+    d.push CtrlT         # no chord pending: the single-key binding runs
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ba"
+
+    var ed2 = initEditor()
+    let d2 = newDriver()
+    d2.pushString "ab"
+    d2.push CtrlG
+    d2.push Esc          # bare Esc abandons the chord, no line clear
+    expect EOFError:     # queue drained: nothing else was pushed
+      discard d2.run(ed2, prompt = "> ")
+    check not ed2.canceled
+    check ed2.line.text == "ab"
+
+  test "chord with a longer alternative: exact wins over prefix":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts =
+      {"transpose-chars": "CtrlG>CtrlT", "home": "CtrlG>CtrlT>CtrlA"}.toTable
+    d.pushString "xy"
+    d.push CtrlG
+    d.push CtrlT    # exact A>B fires even though A>B>C also exists
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "yx"
 
 # ---------------- Driver: selection ----------------
 
@@ -1598,6 +1669,20 @@ suite "minline editor: selection":
     d.push Enter
     check d.run(ed, prompt = "> ") == " world"
     check ed.lastKill == "hello"
+
+  test "chord prefix yields to cut while a selection exists":
+    # Ctrl+X starts the CtrlX>CtrlE chord by default, but with a
+    # selection it must cut immediately (the text-widget contract);
+    # only without one does it become a chord prefix.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello world"
+    d.push CtrlA
+    d.push ShiftEnd
+    d.push @[24]   # selection spans the line: cut, not chord prefix
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+    check ed.lastKill == "hello world"
 
   test "alt+w copies without deleting":
     var ed = initEditor()

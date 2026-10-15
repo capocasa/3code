@@ -308,3 +308,18 @@ suite "config validation: [shortcuts] schema (in-process)":
     let entries = @[("settings", "current", "p.m", 2),
                     ("shortcuts", "clear", "", 5)]
     check validateConfig(P, entries) == ""
+
+  test "shortcuts chord spec accepted":
+    let entries = @[("settings", "current", "p.m", 2),
+                    ("shortcuts", "edit-in-editor", "AltE CtrlX>CtrlE", 5)]
+    check validateConfig(P, entries) == ""
+
+  test "shortcuts chord with a bad member rejected":
+    let entries = @[("settings", "current", "p.m", 2),
+                    ("shortcuts", "cancel", "CtrlX>MetaX", 5)]
+    check "invalid shortcut value" in validateConfig(P, entries)
+
+  test "shortcuts Double chord rejected":
+    let entries = @[("settings", "current", "p.m", 2),
+                    ("shortcuts", "cancel", "DoubleCtrlX>CtrlE", 5)]
+    check "invalid shortcut value" in validateConfig(P, entries)
