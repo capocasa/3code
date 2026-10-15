@@ -13,6 +13,7 @@ import types, util, prompts, session, compact, config, actions, api, plugins,
   display, fatprompt, streamexec, toolstream, transcript
 import sandbox
 import tabtitle
+import goal
 import engine as termengine
 
 const
@@ -1507,6 +1508,65 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       stopTurnInputForFinalRender()
       turnEnded = true
       return false
+    # Goal mode end-call boundary — the only hook. The turn's final model
+    # call completed, the reply is committed, nothing is queued, and the
+    # harness is about to hand the prompt back. goal.md in the project root
+    # keeps the session on its goal: a fresh-context side-call verifier
+    # (same model, own message list, read-only roster) judges the goal text
+    # against harness-built evidence from this turn. FEEDBACK sends the
+    # agent back in with the verifier's words; SATISFIED renames the file
+    # and idles normally. No session-start check, no per-tool-call checks.
+    # Interrupt is the pause lever: it skips the check and ends the turn;
+    # on resume the file is still there, so the goal is still on.
+    if goalModeActive():
+      if isInterrupted():
+        onTurnInterrupted()
+        turnEnded = true
+        return true
+      if not session.goalNotified:
+        session.goalNotified = true
+        commitTranscriptBytes(
+          receiptBytes("goal mode: " & GoalFileName &
+            " detected (interrupt to stop)"), true)
+      let check = runGoalCheck(p, readGoalText(), buildGoalEvidence(messages))
+      # The side call ran the bar/spinner hooks again; its usage is not
+      # this turn's and must not leak into the next receipt.
+      emitFatPromptEvent clearPendingHintEvent()
+      if isInterrupted():
+        onTurnInterrupted()
+        turnEnded = true
+        return true
+      if not check.ok:
+        # Verifier call failed (network, provider, rounds exhausted): keep
+        # running without feedback, note it in the receipt, retry at the
+        # next boundary. goal.md is untouched, so the goal is still on.
+        debugOut "goal check failed: " & check.err
+        commitTranscriptBytes(
+          receiptBytes("goal check unavailable, retrying next turn"), true)
+      elif check.verdict.kind == gvkSatisfied:
+        if completeGoal():
+          session.goalNotified = false
+          commitTranscriptBytes(receiptBytes("goal complete"), true)
+        else:
+          commitTranscriptBytes(
+            errLnS("goal satisfied but " & GoalFileName & " could not be " &
+              "renamed to " & GoalCompletedName), true)
+      elif check.verdict.kind == gvkFeedback:
+        commitTranscriptBytes(receiptBytes("goal check: feedback"), true)
+        messages.add goalFeedbackMessage(check.verdict.feedback)
+        saveSession(session, messages)
+        commitTranscriptBytes(
+          receiptBytes("auto: goal check - continuing toward " & GoalFileName), true)
+        commitTranscriptBytes(
+          formatItem(agentPromptItem(check.verdict.feedback)), true)
+        debugOut "runTurns: goal check feedback, continuing"
+        continue
+      else:
+        commitTranscriptBytes(
+          receiptBytes("goal check returned no verdict, retrying next turn"),
+          true)
+    else:
+      session.goalNotified = false
     if streamedLive:
       stopTurnInputForFinalRender()
     endTurnAfterTranscriptAppend()

@@ -52,7 +52,7 @@ proc unknownTool(family, name: string): Action =
                "This harness exposes shell-style commands and file " &
                "edits; re-emit using the tools you were offered.")
 
-proc bashAction(args: JsonNode): Action =
+proc bashAction*(args: JsonNode): Action =
   ## Accepts both shapes that show up in practice:
   ## - glm/qwen `bash`: `{command: "...", stdin?: "..."}`
   ## - gpt-oss/Codex `shell`: `{cmd: ["bash", "-lc", "..."]}`
@@ -71,7 +71,7 @@ proc bashAction(args: JsonNode): Action =
          stdin: args{"stdin"}.getStr,
          timeoutSecs: args{"timeout"}.getInt)
 
-proc readAction(args: JsonNode): Action =
+proc readAction*(args: JsonNode): Action =
   Action(kind: akRead,
          path:  args{"path"}.getStr,
          offset: args{"offset"}.getInt,

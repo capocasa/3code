@@ -197,6 +197,12 @@ var apiStreamHooks*: ApiStreamHooks
 proc setApiStreamHooks*(hooks: ApiStreamHooks) =
   apiStreamHooks = hooks
 
+var sideCallMode* = false
+  ## While true, the in-flight call is a harness side call (the goal-mode
+  ## verifier): same transport, retries and tool plumbing, but no live
+  ## content painting — the side call's prose is verdict machinery, not
+  ## the user's scrollback. The caller owns the flag's scope.
+
 proc hookBeforeCall(lastPromptTokens, window: int): string =
   if apiStreamHooks.beforeCall != nil:
     result = apiStreamHooks.beforeCall(lastPromptTokens, window)
@@ -224,15 +230,18 @@ proc hookProviderActivity() =
 
 proc hookReasoningDelta(reasoning, baseLabel: string; slurped: int;
                         contentStarted: bool) =
+  if sideCallMode: return
   if apiStreamHooks.reasoningDelta != nil:
     apiStreamHooks.reasoningDelta(reasoning, baseLabel, slurped,
                                   contentStarted)
 
 proc hookContentDelta(chunk, baseLabel: string; slurped: int): bool =
+  if sideCallMode: return false
   if apiStreamHooks.contentDelta != nil:
     result = apiStreamHooks.contentDelta(chunk, baseLabel, slurped)
 
 proc hookContentFinished(fullContent, baseLabel: string; slurped: int): bool =
+  if sideCallMode: return false
   if apiStreamHooks.contentFinished != nil:
     result = apiStreamHooks.contentFinished(fullContent, baseLabel, slurped)
 
@@ -1469,10 +1478,12 @@ func proModeBase*(p: Profile): string =
   if chatgptProfile(p) or '/' in p.model: ""
   else: proModeWire(p.model)
 
-proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
+proc buildResponsesBody*(p: Profile, wireMessages: JsonNode,
+                           toolsOverride: JsonNode = nil): JsonNode =
   ## Request body for POST /responses. Mirrors the completions body built
   ## in `callModel` (same generation defaults, same tools) with the
-  ## Responses field naming.
+  ## Responses field naming. `toolsOverride`, when non-nil, replaces the
+  ## profile's advertised roster (the goal-mode verifier's read-only set).
   result = %*{
     "model": p.model,
     "input": responsesInput(wireMessages),
@@ -1482,7 +1493,8 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
   # pro slug ships as the base model plus `reasoning.mode: pro`.
   let proBase = proModeBase(p)
   if proBase != "": result["model"] = %proBase
-  result["tools"] = responsesTools(setup(p).tools)
+  result["tools"] = responsesTools(
+    if toolsOverride != nil: toolsOverride else: setup(p).tools)
   result["tool_choice"] = %"auto"
   let d = knownGoodGeneration(p)
   # The Codex backend rejects `max_output_tokens` outright (400
@@ -3125,12 +3137,16 @@ when providerStub:
   include "../../tests/testdata/stub/provider.nim"
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
-    lastPromptTokens: int, maxTokensOverride = 0): JsonNode =
+    lastPromptTokens: int, maxTokensOverride = 0,
+    toolsOverride: JsonNode = nil): JsonNode =
   ## `maxTokensOverride`, when > 0, replaces the known-good `max_tokens` in
   ## the request body. Used by the turn loop's empty-content auto-handling
   ## to escalate the budget when a `finish_reason: "length"` reply starved
   ## on reasoning tokens. The body is rebuilt fresh on every callModel so
   ## an override takes effect without rebuilding anything externally.
+  ## `toolsOverride`, when non-nil, replaces the profile's advertised tool
+  ## roster in the request body; the goal-mode verifier's side call uses it
+  ## to advertise only its read-only set. The agent path always passes nil.
   when providerStub:
     return callModelStub(p, messages, usage, lastPromptTokens, maxTokensOverride)
   debugOut "callModel start"
@@ -3151,7 +3167,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   let bodyStr =
     if useResponses:
       block:
-        let body = buildResponsesBody(p, wireMessages)
+        let body = buildResponsesBody(p, wireMessages, toolsOverride)
         if maxTokensOverride > 0 and not chatgptProfile(p):
           body["max_output_tokens"] = %maxTokensOverride
         sanitizeUtf8($body)
@@ -3168,7 +3184,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         # both streaming and provider.
         if streamingEnabled and providerOf(p) != "fireworks":
           body["stream_options"] = %*{"include_usage": true}
-        body["tools"] = setup(p).tools
+        body["tools"] =
+          if toolsOverride != nil: toolsOverride else: setup(p).tools
         body["tool_choice"] = %"auto"
         applyStreamingOptions(p, body)
         applyGenerationDefaults(p, body)

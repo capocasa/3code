@@ -1044,7 +1044,7 @@ collision:
 4. `~/.local/share/3code/skills/` (built-ins, extracted by 3code itself)
 
 The built-ins shipped today are the role skills (conversational, sysadmin,
-thinking partner, writing), task-debug-systematic, and cybernetic-plan.
+thinking partner, writing) and task-debug-systematic.
 To override one, put a file with the same name in a directory higher up
 the list. To add your own, drop a `.md` file in any of those directories
 with an instructive name: the filename is the trigger, so
@@ -1054,29 +1054,31 @@ For heavier machinery than a skill there is a native plugin tier
 [plugins](plugins.html). A skill file plus command-line tools still
 covers most of the same ground at a fraction of the context cost.
 
-## Cybernetic mode
+## Goal mode
 
-Cybernetic mode is the sturdier option for a long coding task. Give the model a
-worktree and ask it to use the built-in cybernetic planning skill.
+Goal mode is the sturdier option for a long coding task. Drop a `goal.md` into
+the project root stating the goal: what must be true when the work is done,
+how to verify it. Anyone can write the file — you directly, or the model when
+you ask for multi-part work.
 
-The skill:
+While `goal.md` exists, every turn end runs a satisfaction check: a fresh
+side conversation with the same model, given the goal text and a summary of
+what the turn actually did (files, patches, commands — never the agent's own
+claims), verifies the repository itself and answers with a verdict. Not
+satisfied, the agent is sent back in with the verifier's feedback. Satisfied,
+the harness renames the file to `goal-completed.md` (the record of the run)
+and idles.
 
-1. writes a plan file with concrete tasks
-2. implements one task
-3. updates the plan with results and new information
-4. clears context and tells the next session to load the plan
-5. repeats until all tasks are complete
-6. reviews the completed work
-
-The current task keeps its detailed context while the plan file keeps the
-durable state. This loses less information than repeatedly summarizing all the
-old work.
+The file is the whole interface. Edit `goal.md` mid-run to steer (the next
+check reads it fresh), delete it to end goal mode silently, interrupt to
+pause. `goal-completed.md` accumulation is harmless; delete or archive it
+whenever.
 
 ## No sub-agents
 
 3code does not provide sub-agents. They use plenty of tokens, and I have not
 seen enough benefit to justify the little management consultancy they form.
-For parallel or long-running work, use worktrees with cybernetic mode.
+For parallel or long-running work, use worktrees with goal mode.
 
 ## Sandbox
 
@@ -1603,8 +1605,8 @@ absent one, even before it stops anything.
 No sub-agents, no trees of delegated prompts. A single conversation with
 bash, file tools, plan, and web access, plus skills loaded on demand, keeps
 the token budget on the work instead of on orchestration. When a task
-outgrows one context, chunked and cybernetic modes split it along files and
-worktrees instead of spawning agents.
+outgrows one context, chunked mode and goal files split it along worktrees
+instead of spawning agents.
 
 ## Scripting
 

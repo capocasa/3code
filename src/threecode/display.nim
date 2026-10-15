@@ -24,6 +24,7 @@
 
 import std/[critbits, exitprocs, json, os, strformat, strutils, tables, terminal]
 import types, util, config, prompts, session, search, actions, minline, toolstream
+import goal
 import terminal as termui
 
 # Three visible tiers, designed to read on both light + dark terminal
@@ -865,6 +866,11 @@ proc profileLinesS*(p: Profile; bold = false): string =
   if p.reasoning != "":
     result.add labelOn & pad & "reasoning " & ansiResetCode &
       BrightWhiteFg & p.reasoning & ansiResetCode & "\r\n"
+  # Same conditional style as the reasoning row: present exactly while
+  # goal mode is on (goal.md exists in the project root), absent otherwise.
+  if goalModeActive():
+    result.add labelOn & pad & "goal      " & ansiResetCode &
+      BrightWhiteFg & "on" & ansiResetCode & "\r\n"
   if privateMode:
     result.add labelOn & pad & "private   " & ansiResetCode &
       BrightWhiteFg & (if privateAllowed(p): "allowed" else: "NOT allowed") &
