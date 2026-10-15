@@ -31,7 +31,7 @@ current = "ollama.qwen3-coder:480b"
 ;
 ; [shortcuts] remaps editor commands. Value is a space-separated list of
 ; keys; empty string unbinds. Defaults match today's hardcoded behaviour.
-; Key syntax: ESC / Escape, CtrlX / Ctrl+X, AltX / Alt+X, Home, End, Up,
+; Key syntax: ESC / Escape, CtrlX, AltX, Home, End, Up,
 ; Down, Left, Right, Insert, Delete, Backspace, Tab, ShiftTab, and the
 ; modified navigation keys ShiftLeft, ShiftHome, CtrlLeft, CtrlRight,
 ; CtrlDelete, CtrlShiftLeft, CtrlShiftEnd, ... Prefix Double for two
