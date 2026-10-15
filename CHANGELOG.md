@@ -2,6 +2,20 @@ Changelog
 
 Unreleased
 
+- **Shortcut chords, kitty-protocol keys, and a fixed Ctrl+E (#61).**
+  `[shortcuts]` values now mix plain keys and chords: `A>B` is a key
+  sequence (`CtrlX>CtrlE`, the emacs edit-and-execute chord), space
+  still lists alternatives, and one command can carry any number of
+  triggers. A chord's first key is reserved while the chord is half
+  pressed; Esc abandons it. Bare Ctrl+E is only end-of-line again -
+  the old `AltE CtrlX CtrlE` default accidentally bound the editor to
+  plain Ctrl+E, and the hardcoded Alt+E / Ctrl+X Ctrl+E paths are gone,
+  so unbinding `edit-in-editor` now really unbinds. On kitty-protocol
+  terminals (kitty, Ghostty, iTerm2, WezTerm, foot) 3code enables the
+  protocol automatically: Cmd/Super chords (`CmdE`, `CmdLeft`,
+  `AltBackspace`, ...) become bindable keys for Mac keyboards whose
+  Option key composes characters. Defaults stay Ctrl everywhere; the
+  manual ships the Mac block to paste.
 - **Own your line breaks; wrap in-app, not by terminal luck (#58).**
   3code no longer relies on the terminal's autowrap to fit its output:
   overlong words are character-wrapped by 3code itself, so a frame
