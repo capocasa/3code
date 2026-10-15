@@ -171,14 +171,15 @@ suite "library: AgentSession":
       let root = newFixture("parity")
       writeConfig(root)
       isolateEnv(root)
-      let liveRun = root / "live"
-      let resRun = root / "res"
-      createDir(liveRun)
-      createDir(resRun)
+      # One shared run dir: the session preamble embeds the session cwd,
+      # so separate live/res dirs would make the first user message differ
+      # for fixture reasons, not app ones.
+      let run = root / "run"
+      createDir(run)
 
       block live:
         resetStubResponses()
-        writeFile(liveRun / "stub_responses.json", $(%*[
+        writeFile(run / "stub_responses.json", $(%*[
           {"role": "assistant", "content": "", "reasoning_content": "",
            "tool_calls": [{
             "id": "call_p1", "type": "function",
@@ -190,8 +191,8 @@ suite "library: AgentSession":
           {"role": "assistant", "content": "turn two live",
            "reasoning_content": ""}
         ]))
-        putEnv("THREECODE_STUB_RESPONSES", liveRun / "stub_responses.json")
-        let s = initAgentSession(AgentOptions(cwd: liveRun,
+        putEnv("THREECODE_STUB_RESPONSES", run / "stub_responses.json")
+        let s = initAgentSession(AgentOptions(cwd: run,
                                               experimental: true))
         discard s.prompt("run a tool")
         discard s.prompt("continue")
@@ -201,7 +202,7 @@ suite "library: AgentSession":
 
       block resumed:
         resetStubResponses()
-        writeFile(resRun / "stub_responses.json", $(%*[
+        writeFile(run / "stub_responses.json", $(%*[
           {"role": "assistant", "content": "", "reasoning_content": "",
            "tool_calls": [{
             "id": "call_p1", "type": "function",
@@ -211,19 +212,19 @@ suite "library: AgentSession":
           {"role": "assistant", "content": "ran it",
            "reasoning_content": "thought briefly"}
         ]))
-        putEnv("THREECODE_STUB_RESPONSES", resRun / "stub_responses.json")
-        let s1 = initAgentSession(AgentOptions(cwd: resRun,
+        putEnv("THREECODE_STUB_RESPONSES", run / "stub_responses.json")
+        let s1 = initAgentSession(AgentOptions(cwd: run,
                                                experimental: true))
         discard s1.prompt("run a tool")
         s1.close()
 
-        writeFile(resRun / "stub_responses.json", $(%*[
+        writeFile(run / "stub_responses.json", $(%*[
           {"role": "assistant", "content": "unused"},
           {"role": "assistant", "content": "unused"},
           {"role": "assistant", "content": "turn two live",
            "reasoning_content": ""}
         ]))
-        let s2 = initAgentSession(AgentOptions(cwd: resRun, resume: true,
+        let s2 = initAgentSession(AgentOptions(cwd: run, resume: true,
                                                experimental: true))
         discard s2.prompt("continue")
         writeFile(stableTmp / "3code-parity-resume.txt",
