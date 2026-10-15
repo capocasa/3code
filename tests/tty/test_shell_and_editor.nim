@@ -184,6 +184,9 @@ suite "shell command and edit-in-editor":
   test "Cmd+E edits the buffer in $VISUAL (kitty protocol)":
     let root = newFixture("cmd_e_editor")
     writeConfiguredProvider(root)
+    # Cmd bindings are opt-in, not defaults.
+    let cfg = root / "xdg" / "3code" / "config"
+    writeFile(cfg, readFile(cfg) & "\n[shortcuts]\nedit-in-editor = CmdE\n")
     writeStubResponses(root)
     let marker = root / "cmde_marker"
     let editor = editorScript(root, marker)
