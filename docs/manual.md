@@ -550,8 +550,8 @@ Key names look like `CtrlC`, `AltF`, `ShiftTab`, `Home`, `End`, `Up`,
 Modified navigation keys take a prefix: `ShiftLeft`, `ShiftHome`,
 `CtrlLeft`, `CtrlRight`, `CtrlDelete`, `CtrlShiftLeft`, `CtrlShiftEnd`,
 and so on across the arrows, Home, End, and Delete. Names are
-case-insensitive (`ctrlc` is `CtrlC`) and never contain `+`. `Double`
-requires two quick presses, as in `DoubleESC` or `DoubleCtrlC`.
+case-insensitive (`ctrlc` is `CtrlC`). `Double` requires two quick
+presses, as in `DoubleESC` or `DoubleCtrlC`.
 
 `:help` always shows the bindings currently in effect.
 

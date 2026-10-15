@@ -2321,9 +2321,7 @@ var CommandProcsAll* {.threadvar.}: Table[string, KeyCallback]
 proc normalizeKeyToken(token: string): string =
   ## Convert a user shortcut token ("CtrlC", "ESC", "Home",
   ## "DoubleESC") into the internal key name DISPATCH/KEYMAP uses.
-  ## Plus spellings ("ctrl+c") are rejected, not aliased: one canonical
-  ## form per key.
-  var t = token.strip.toLowerAscii
+  var t = token.strip.toLowerAscii.replace("+", "")
   if t.startsWith("double"):
     t = t[6 .. ^1]
   if t == "esc" or t == "escape":
