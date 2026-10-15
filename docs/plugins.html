@@ -28,6 +28,31 @@
     <label for="nav-toggle" id="nav-overlay"></label>
     <div class="container">
       <h1 class="title">3code - plugins</h1>
+<div class="row">
+<div class="three columns" id="page-toc">
+<div class="page-toc-title">Contents</div>
+<ul class="page-toc-list">
+<li><a href="#introduction">Introduction</a></li>
+<li><a href="#the-model-in-one-page">The model in one page</a></li>
+<li><a href="#writing-a-plugincolon-the-short-manual">Writing a plugin: the short manual</a><ul>
+<li><a href="#the-shape-of-a-module">The shape of a module</a></li>
+<li><a href="#editing-data-in-place">Editing data in place</a></li>
+<li><a href="#steering-tool-calls">Steering tool calls</a></li>
+<li><a href="#registering-a-modelminusfacing-tool">Registering a model-facing tool</a></li>
+<li><a href="#long-work-and-interruption">Long work and interruption</a></li>
+<li><a href="#beyond-nim">Beyond Nim</a></li>
+</ul>
+</li>
+<li><a href="#hook-reference">Hook reference</a></li>
+<li><a href="#strings-and-buffers">Strings and buffers</a></li>
+<li><a href="#state-services-cancellation">State, services, cancellation</a></li>
+<li><a href="#failure-handling">Failure handling</a></li>
+<li><a href="#config-and-debug">Config and debug</a></li>
+<li><a href="#abi-stability">ABI stability</a></li>
+</ul>
+</div>
+<div class="nine columns" id="content">
+
       
 <h2 id="introduction">Introduction</h2><p>A plugin is a native dynamic library (<tt class="docutils literal"><span class="pre">.so</span></tt> on Linux, <tt class="docutils literal"><span class="pre">.dylib</span></tt> on macOS, <tt class="docutils literal"><span class="pre">.dll</span></tt> on Windows) that 3code loads at startup and calls at fixed points in its lifecycle: prompts, tool calls, turns, sessions. There is no manifest, no registration call, no RPC protocol. The library exports C functions; the host probes for them; whichever hooks exist get called. Each <tt class="docutils literal"><span class="pre">dynlib</span></tt> carries its own runtime, so a plugin can be written in anything that speaks the C ABI, and the reference SDK makes Nim one-file simple.</p>
 <p>Reach for a plugin when you want machinery on the <em>host</em> side of the agent: policy (veto writes to frozen paths, redact secrets from tool output), instrumentation (usage counters, audit logs, custom notifications), or a model-facing tool backed by your own code. For teaching the <em>model</em> something, a skill file is still the right tool: it costs nothing until used, while every plugin-registered tool schema rides along on every model request. Most plugins want both halves: a host-side hook implementation plus a small skill that tells the model how to drive it.</p>
@@ -145,10 +170,12 @@ cp myplugin.so ~/.local/share/3code/lib/</pre>
 
 
 
-      <div class="twelve-columns footer">
+      </div>
+</div>
+<div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-15 10:18:46 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-15 11:51:18 UTC</small>
       </div>
     </div>
   </div>

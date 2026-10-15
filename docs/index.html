@@ -28,6 +28,105 @@
     <label for="nav-toggle" id="nav-overlay"></label>
     <div class="container">
       <h1 class="title">3code - the economical coding agent</h1>
+<div class="row">
+<div class="three columns" id="page-toc">
+<div class="page-toc-title">Contents</div>
+<ul class="page-toc-list">
+<li><a href="#introduction">Introduction</a></li>
+<li><a href="#quickstart">Quickstart</a><ul>
+<li><a href="#get-a-provider">Get a provider</a><ul>
+<li><a href="#free-providers">Free providers</a></li>
+<li><a href="#flatminusrate-coding-plans">Flat-rate coding plans</a></li>
+<li><a href="#eu-providers">EU providers</a></li>
+<li><a href="#lowminuscost-providers">Low-cost providers</a></li>
+<li><a href="#other-models">Other models</a></li>
+</ul>
+</li>
+<li><a href="#install">Install</a></li>
+<li><a href="#manual-install-on-windows">Manual install on Windows</a></li>
+<li><a href="#termux-on-android-arm64">Termux on Android arm64</a></li>
+<li><a href="#add-a-provider">Add a provider</a></li>
+<li><a href="#run-your-first-prompt">Run your first prompt</a></li>
+</ul>
+</li>
+<li><a href="#providers-and-authentication">Providers and authentication</a><ul>
+<li><a href="#api-keys">API keys</a></li>
+<li><a href="#xai-and-supergrok">xAI and SuperGrok</a></li>
+<li><a href="#openai-and-chatgpt">OpenAI and ChatGPT</a></li>
+<li><a href="#anthropic-and-claude">Anthropic and Claude</a></li>
+<li><a href="#command-code">Command Code</a></li>
+</ul>
+</li>
+<li><a href="#provider-catalog">Provider catalog</a><ul>
+<li><a href="#model-labs">Model labs</a></li>
+<li><a href="#us-inference-clouds">US inference clouds</a></li>
+<li><a href="#eu-providers">EU providers</a></li>
+<li><a href="#routers-and-aggregators">Routers and aggregators</a></li>
+</ul>
+</li>
+<li><a href="#interactive-use">Interactive use</a><ul>
+<li><a href="#selecting-text">Selecting text</a></li>
+<li><a href="#rebinding-keys">Rebinding keys</a></li>
+</ul>
+</li>
+<li><a href="#the-screen">The screen</a><ul>
+<li><a href="#scrollback-contents">Scrollback contents</a></li>
+<li><a href="#the-token-bar">The token bar</a></li>
+<li><a href="#the-thinking-ticker">The thinking ticker</a></li>
+<li><a href="#receipts-and-conversation-cost">Receipts and conversation cost</a></li>
+</ul>
+</li>
+<li><a href="#patient-retry">Patient retry</a></li>
+<li><a href="#when-the-model-misbehaves">When the model misbehaves</a><ul>
+<li><a href="#the-flailing-detector">The flailing detector</a></li>
+<li><a href="#the-thinking-loop-guard">The thinking loop guard</a></li>
+<li><a href="#the-empty-response-handler">The empty response handler</a></li>
+</ul>
+</li>
+<li><a href="#private-mode">Private mode</a><ul>
+<li><a href="#picking-a-private-provider">Picking a private provider</a></li>
+<li><a href="#walkthrough">Walkthrough</a></li>
+</ul>
+</li>
+<li><a href="#reasoning">Reasoning</a></li>
+<li><a href="#web-research">Web research</a></li>
+<li><a href="#knownminusgood-models">Known-good models</a></li>
+<li><a href="#system-prompt-override">System prompt override</a></li>
+<li><a href="#sessions">Sessions</a></li>
+<li><a href="#notifications-and-autominusupdate">Notifications and auto-update</a></li>
+<li><a href="#context-management">Context management</a></li>
+<li><a href="#chunked-mode">Chunked mode</a></li>
+<li><a href="#skills">Skills</a></li>
+<li><a href="#goal-mode">Goal mode</a></li>
+<li><a href="#no-subminusagents">No sub-agents</a></li>
+<li><a href="#sandbox">Sandbox</a><ul>
+<li><a href="#policy-format">Policy format</a></li>
+<li><a href="#builtminusin-default">Built-in default</a></li>
+<li><a href="#sandbox-settings-collection">Sandbox settings collection</a></li>
+<li><a href="#network-rules">Network rules</a></li>
+<li><a href="#editing-the-policy">Editing the policy</a></li>
+<li><a href="#policy-file-protection">Policy file protection</a></li>
+<li><a href="#what-is-sandboxed">What is sandboxed</a></li>
+<li><a href="#platform-behavior-and-fallback">Platform behavior and fallback</a></li>
+</ul>
+</li>
+<li><a href="#colors">Colors</a></li>
+<li><a href="#design-decisions">Design decisions</a><ul>
+<li><a href="#no-tui">No TUI</a></li>
+<li><a href="#kernel-enforcement-no-questions">Kernel enforcement, no questions</a></li>
+<li><a href="#one-model-small-tool-set">One model, small tool set</a></li>
+</ul>
+</li>
+<li><a href="#scripting">Scripting</a></li>
+<li><a href="#library-api">Library API</a></li>
+<li><a href="#agent-client-protocol">Agent Client Protocol</a></li>
+<li><a href="#build-from-source">Build from source</a></li>
+<li><a href="#contributing">Contributing</a></li>
+<li><a href="#prior-art">Prior art</a></li>
+</ul>
+</div>
+<div class="nine columns" id="content">
+
       
 <h2 id="introduction">Introduction</h2><p>3code is the coding agent I wanted for my own work: capable, quiet, and not forever looking for new ways to spend tokens. It works with OpenAI-compatible providers, including free tiers, flat-rate coding plans, and local servers.</p>
 <p>The design rule is simple: get a correct result with the least model work, token use, and computer time. Open models, especially GLM, are good enough for most of my programming work. 3code gives them a focused prompt, a small tool set, persistent sessions, and a terminal interface that stays out of the way.</p>
@@ -700,10 +799,12 @@ Arguments: --acp</pre></p>
 
 
 
-      <div class="twelve-columns footer">
+      </div>
+</div>
+<div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-15 10:18:44 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-15 11:51:13 UTC</small>
       </div>
     </div>
   </div>

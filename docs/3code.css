@@ -126,6 +126,54 @@ body {
   padding: 2rem 2.5rem 5rem;
 }
 
+/* Pinned per-page heading menu (manual/reference/plugins pages) */
+#page-toc {
+  padding: 2.25rem 1.1rem 2rem 1.6rem;
+}
+
+.page-toc-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--hint);
+  margin: 0 0 0.9rem;
+  padding: 0 0.4rem;
+}
+
+#page-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+#page-toc li { margin: 0; padding: 0; }
+
+#page-toc a {
+  display: block;
+  padding: 0.28em 0.4rem 0.28em 0.65rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0 4px 4px 0;
+}
+
+#page-toc a:hover {
+  color: var(--anchor-focus);
+  border-left-color: var(--anchor);
+  background-color: rgba(116, 200, 193, 0.06);
+}
+
+#page-toc ul ul {
+  margin-left: 0.85rem;
+}
+
+#page-toc ul ul a { color: var(--hint); }
+#page-toc ul ul a:hover { color: var(--anchor-focus); }
+
 .twelve.columns {
   width: 100%;
   margin-left: 0;
@@ -198,6 +246,9 @@ body {
     margin-left: 0;
     padding: 1rem 1.25rem 4rem;
   }
+  /* #page-toc's own padding would tuck the menu under the floating
+     burger button in drawer mode */
+  #page-toc { padding-top: 3.4rem; }
   body {
     font-size: 1em;
     line-height: 1.55;

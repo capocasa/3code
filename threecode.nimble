@@ -15,6 +15,69 @@ requires "libsha >= 1.0"
 requires "zippy >= 0.10"
 requires "ws >= 0.6.0"
 
+import std/strutils
+
+# nim md2html emits no table of contents. addPageToc wraps the page body in
+# the nimdoc row/sidebar skeleton and fills a pinned left menu with every
+# h2-h6 heading (styled via #page-toc in docs/3code.css).
+proc stripTags(s: string): string =
+  result = ""
+  var i = 0
+  while i < s.len:
+    if s[i] == '<':
+      let j = s.find('>', i)
+      if j < 0: break
+      i = j + 1
+    else:
+      result.add s[i]
+      inc i
+
+proc addPageToc(path: string) =
+  let html = readFile(path)
+  var entries: seq[tuple[level: int, id, text: string]] = @[]
+  var i = 0
+  while true:
+    let h = html.find("<h", i)
+    if h < 0: break
+    i = h + 2
+    if html.len - h < 10 or html[h + 2] notin {'2'..'6'} or
+        html[h + 3] != ' ' or html[h + 4 .. h + 6] != "id=":
+      continue
+    let idEnd = html.find('"', h + 8)
+    let openEnd = html.find('>', h)
+    let close = html.find("</h", h)
+    if idEnd < 0 or openEnd < 0 or close < 0: continue
+    entries.add((ord(html[h + 2]) - ord('0'), html[h + 8 ..< idEnd],
+                 stripTags(html[openEnd + 1 ..< close]).strip))
+  if entries.len == 0: return
+  var menu = "<ul class=\"page-toc-list\">\n<li><a href=\"#" & entries[0].id &
+             "\">" & entries[0].text & "</a>"
+  var cur = entries[0].level
+  for e in entries[1 .. ^1]:
+    if e.level > cur:
+      for _ in 1 .. e.level - cur: menu.add "<ul>\n<li>"
+    elif e.level == cur:
+      menu.add "</li>\n<li>"
+    else:
+      menu.add "</li>\n"
+      for _ in 1 .. cur - e.level: menu.add "</ul>\n</li>\n"
+      menu.add "<li>"
+    cur = e.level
+    menu.add "<a href=\"#" & e.id & "\">" & e.text & "</a>"
+  menu.add "</li>\n"
+  if cur > entries[0].level:
+    for _ in 1 .. cur - entries[0].level: menu.add "</ul>\n</li>\n"
+  menu.add "</ul>\n"
+  let nav = "<div class=\"row\">\n<div class=\"three columns\" id=\"page-toc\">\n" &
+            "<div class=\"page-toc-title\">Contents</div>\n" & menu &
+            "</div>\n<div class=\"nine columns\" id=\"content\">\n"
+  let titleEnd = html.find("</h1>")
+  let footer = html.find("<div class=\"twelve-columns footer\">")
+  if titleEnd < 0 or footer < 0 or footer < titleEnd: return
+  writeFile(path, html[0 .. titleEnd + 4] & "\n" & nav &
+            html[titleEnd + 5 ..< footer] & "</div>\n</div>\n" &
+            html[footer .. ^1])
+
 task test, "Run the test suite via testament (all, or named files)":
   var files: seq[string] = @[]
   for p in commandLineParams:
@@ -49,6 +112,8 @@ task docs, "Build HTML manual and reference from docs/*.md":
   exec "nim md2html --docCmd:skip --outdir:docs docs/reference.md"
   exec "nim md2html --docCmd:skip --outdir:docs docs/plugins.md"
   cpFile("docs/3code.css", "docs/nimdoc.out.css")
+  for page in ["index.html", "reference.html", "plugins.html"]:
+    addPageToc("docs/" & page)
 
 task devdocs, "Build developer HTML docs from source":
   # nim doc regenerates nimdoc.out.css and dochack.js from its built-in
