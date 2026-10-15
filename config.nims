@@ -48,6 +48,13 @@ switch("path", "tests")  # test helpers (tty_expect, stub_helpers, minline_testu
 switch("d", "ssl")
 
 when defined(staticSsl):
+  # Distribution policy: single binary plus OS. Link dynamically
+  # against whatever the target OS commonly ships (distro openssl and
+  # libc on Linux, UCRT on Windows); bake in only what it never ships
+  # (OpenSSL on Windows - and on macOS the system libssl is LibreSSL,
+  # a legacy compat fork without the OpenSSL 1.1/3 ABI, so it counts
+  # as not shipped). Fully-static builds are unwanted.
+  #
   # CI packaging builds (macOS/Windows): link the OpenSSL built by
   # tests/tools/fetch_openssl.sh straight into the binary instead of
   # shipping dylibs/DLLs. Dev and Linux builds stay dynamic (dlopen of
