@@ -1579,6 +1579,83 @@ suite "minline editor: shortcuts":
     d.push Enter
     check d.run(ed, prompt = "> ") == "yx"
 
+# ---------------- Driver: kitty keyboard protocol ----------------
+
+const
+  KittyCtrlA* = @[27, 91, 57, 55, 59, 53, 117]       # CSI 97;5 u
+  KittyCtrlE* = @[27, 91, 49, 48, 49, 59, 53, 117]   # CSI 101;5 u
+  KittyCmdT* = @[27, 91, 49, 49, 54, 59, 57, 117]    # CSI 116;9 u
+  KittyEsc* = @[27, 91, 50, 55, 117]                  # CSI 27 u
+  KittyShiftEnter* = @[27, 91, 49, 51, 59, 50, 117]  # CSI 13;2 u
+  KittyAltBackspace* = @[27, 91, 49, 50, 55, 59, 51, 117]  # CSI 127;3 u
+  KittyCmdBackspace* = @[27, 91, 49, 50, 55, 59, 57, 117]  # CSI 127;9 u
+  CmdLeftSeq* = @[27, 91, 49, 59, 57, 68]            # CSI 1;9 D
+
+suite "minline editor: kitty keyboard protocol":
+  test "CSI u ctrl+letter maps to the control key":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push KittyCtrlA   # ctrl+a -> home
+    d.pushString "X"
+    d.push KittyCtrlE   # ctrl+e -> end
+    d.pushString "Y"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "XabY"
+
+  test "CSI u cmd+letter is a bindable key":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"transpose-chars": "CmdT"}.toTable
+    d.pushString "ab"
+    d.push KittyCmdT
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ba"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "CSI 27 u behaves like the Esc key":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"clear": ""}.toTable
+    d.pushString "hello"
+    d.push KittyEsc
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "CSI 13;2 u inserts a newline (Shift+Enter)":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push KittyShiftEnter
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab\nc"
+
+  test "cmd+left runs home by default":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push CmdLeftSeq
+    d.pushString "X"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "Xab"
+
+  test "alt+backspace and cmd+backspace delete word and line":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one two"
+    d.push KittyAltBackspace
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one "
+
+    var ed2 = initEditor()
+    let d2 = newDriver()
+    d2.pushString "hello"
+    d2.push KittyCmdBackspace
+    d2.push Enter
+    check d2.run(ed2, prompt = "> ") == ""
+
 # ---------------- Driver: selection ----------------
 
 const

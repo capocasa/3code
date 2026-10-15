@@ -181,6 +181,32 @@ suite "shell command and edit-in-editor":
     tty.expect "\u276f"
     echo "  PASS: Alt+E edit-in-editor"
 
+  test "Cmd+E edits the buffer in $VISUAL (kitty protocol)":
+    let root = newFixture("cmd_e_editor")
+    writeConfiguredProvider(root)
+    writeStubResponses(root)
+    let marker = root / "cmde_marker"
+    let editor = editorScript(root, marker)
+    let tty = startStub(root, editor)
+    defer: tty.close()
+
+    tty.expect "\u276f"
+
+    tty.typeText "base text"
+    tty.drain(100)
+    # Cmd+E on a kitty-protocol terminal: CSI 101;9 u (super modifier)
+    tty.sendBytes "\x1b[101;9u"
+
+    require waitForFile(marker)
+    tty.drain(300)
+    tty.expectInHistory "edited line"
+
+    tty.send "\n"
+    tty.expectInHistory "ok."
+    tty.drain(200)
+    tty.expect "\u276f"
+    echo "  PASS: Cmd+E edit-in-editor"
+
   test "plain Ctrl+E is end-of-line, not the editor":
     let root = newFixture("ctrl_e_alone")
     writeConfiguredProvider(root)
