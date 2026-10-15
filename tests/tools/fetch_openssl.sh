@@ -23,9 +23,12 @@ set -eu
 series=${1:?usage: fetch_openssl.sh SERIES TARGET}
 target=${2:?targets: darwin64-arm64 darwin64-x86_64 mingw64}
 
-# Current OpenSSL release-signing key (canonical fingerprint published on
-# openssl.org/source; a rotation is a deliberate change here).
-release_fp="B146647E45A7B33947AB226B2A2C87D161692D40"
+# OpenSSL release-signing key. This is the SIGNING SUBKEY fingerprint
+# (of primary B146647E45A7B33947AB226B2A2C87D161692D40, canonical on
+# openssl.org/source) because verification runs through gpgv, which
+# reports the key that made the signature, not the primary. A rotation
+# is a deliberate change here.
+release_fp="C46ED3F2CBEFDA1FDAADA44264ED7B1DCCE71CB2"
 
 here=$(pwd)  # Configure demands an absolute --prefix
 root=openssl-static
@@ -54,16 +57,37 @@ if [ ! -f version ]; then
     || curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o pubkeys.asc \
       https://www.openssl.org/source/pubkeys.asc
 
-  # GPG env override: CI windows points it at git-bash's gpg because
-  # the MSYS2 one exits 2 on --import without a word.
-  gpg="${GPG:-gpg}"
-  command -v "$gpg" >/dev/null 2>&1 \
-    || { echo "$gpg not found; cannot verify the openssl tarball" >&2; exit 1; }
-  "$gpg" --import pubkeys.asc 2>/dev/null
-  have=$("$gpg" --list-keys --with-colons 2>/dev/null | awk -F: '$1=="fpr"{print $10}')
-  printf '%s\n' "$have" | grep -qix "$release_fp" \
-    || { echo "openssl release key fingerprint mismatch" >&2; exit 1; }
-  "$gpg" --verify "openssl-$ver.tar.gz.asc" "openssl-$ver.tar.gz"
+  # gpgv, not gpg --import: the import path drags in an agent/keybox,
+  # and on the Windows runner both candidates are unusable that way
+  # (msys2's gpg exits 2 without a word; git-bash's hangs forever under
+  # msys2 bash - it sat 90 minutes in run 38713657681). gpgv is the
+  # unattended verifier apt-style tools use: no agent, no keybox.
+  # gpgv rejects armored keyrings, so dearmor first - in pure shell
+  # (awk+base64, byte-identical to gpg --dearmor) because every gpg on
+  # the Windows runner is untrusted to even start.
+  awk '/-----BEGIN PGP PUBLIC KEY BLOCK-----/{inblk=1;body=0;next}
+       inblk&&body==0&&/^$/{body=1;next}
+       inblk&&body==1&&/^-----END/{inblk=0;next}
+       inblk&&body==1&&/^=/{next}
+       inblk&&body==1{print}' pubkeys.asc > pubkeys.b64
+  # BSD base64 (macOS) wants -D; GNU (linux, msys2, git-bash) wants -d.
+  echo aGk= | base64 -d >/dev/null 2>&1 && b64f=-d || b64f=-D
+  base64 "$b64f" < pubkeys.b64 > pubkeys.gpg
+  gpgv="${GPGV:-gpgv}"
+  command -v "$gpgv" >/dev/null 2>&1 \
+    || { echo "$gpgv not found; cannot verify the openssl tarball" >&2; exit 1; }
+  # pubkeys.asc is itself downloaded, so the pin is enforced on the key
+  # gpgv reports as having made the good signature - a substituted key
+  # file cannot print the pinned fingerprint.
+  sig=$("$gpgv" --keyring "$PWD/pubkeys.gpg" "openssl-$ver.tar.gz.asc" \
+    "openssl-$ver.tar.gz" 2>&1 || true)
+  printf '%s\n' "$sig" | grep -q "Good signature" \
+    || { echo "openssl tarball signature not good:" >&2
+         printf '%s\n' "$sig" >&2; exit 1; }
+  fp=$(printf '%s\n' "$sig" | sed -n 's/.*using [A-Z0-9]* key //p' | head -1)
+  printf '%s\n' "$fp" | grep -qix "$release_fp" \
+    || { echo "openssl release key fingerprint mismatch: '$fp'" >&2; exit 1; }
+  echo "fetch_openssl: $ver signature verified $(date +%T)" >&2
 
   tar -xzf "openssl-$ver.tar.gz"
   cd ..
@@ -102,8 +126,11 @@ if [ ! -f "$target/lib/libssl.a" ]; then
   # Invoked through `perl` (not the shebang) so the PATH fix above holds.
   perl ../../src/openssl-$ver/Configure "$conf" no-shared no-tests no-docs \
     --prefix="$here/$root/$target" --libdir=lib
+  echo "fetch_openssl: Configure done, make starting $(date +%T)" >&2
   make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+  echo "fetch_openssl: make done $(date +%T)" >&2
   make install_sw
+  echo "fetch_openssl: install_sw done $(date +%T)" >&2
 fi
 
 echo "openssl $ver static libs: $root/$target/lib"

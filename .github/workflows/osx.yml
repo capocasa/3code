@@ -111,6 +111,16 @@ jobs:
           esac
           OPENSSL_STATIC=$PWD/openssl-static/darwin64-arm64 nimble build -y -d:release -d:staticSsl -d:embeddedCaCertPath=$PWD/cacert.pem ${{ env.BUILD_FLAGS }}
 
+      - uses: actions/setup-java@v4
+        # The sandbox matrix runs javac/java under the seatbelt profile
+        # (#66). The macos image USED to ship Temurin JDKs; it no longer
+        # does (/usr/bin/javac is a stub that prints "Unable to locate a
+        # Java Runtime"), so the JDK is pinned here like the other
+        # toolchains instead of trusting image contents.
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Verify sandbox matrix (seatbelt + wall proxy)
         # End-to-end enforcement check of the shipped binary, mirroring
         # the manual stefani VM verification: the wall proxy fences
@@ -172,19 +182,32 @@ jobs:
           # its getpwuid user lookup goes through opendirectoryd's mach
           # service. Both ride the sandwall profile, so a plain policy
           # with zero java-specific rules must compile and run hello
-          # world (the macos image ships Temurin JDKs; JAVA_HOME_21 is
-          # the default).
+          # world (JDK from the setup-java step above).
           command -v javac >/dev/null || fail "macos image no longer ships javac"
-          cat > Hello.java <<'EOF'
-public class Hello {
-  public static void main(String[] args) {
-    System.out.println("jvm-ok");
-  }
-}
-EOF
-          "$BIN" sandbox --policy .sandbox restrict -- javac Hello.java \
+          # printf, not a heredoc: a column-1 heredoc body (or its
+          # terminator) breaks out of the YAML block scalar and
+          # invalidates the whole workflow file - push runs then fail
+          # "workflow file issue" and workflow_dispatch 422s (exactly
+          # what run 38571243045 showed until this fix).
+          printf '%s\n' \
+            'public class Hello {' \
+            '  public static void main(String[] args) {' \
+            '    System.out.println("jvm-ok");' \
+            '  }' \
+            '}' > Hello.java
+          javac -version || fail "javac broken outside the sandbox"
+          # The JDK grant is toolchain-location bookkeeping, not a
+          # java-specific sandbox rule: the #66 profile work (sysctl,
+          # opendirectoryd) is unconditional. Exec follows the readable
+          # set, and setup-java's JDK lives under hostedtoolcache,
+          # outside the baseline (/usr, /Library, ...); a dev mac with
+          # java under /Library needs no grant.
+          # Bare `allow` = the project dir writable (the JVM needs cwd
+          # readable to bootstrap user.dir).
+          printf 'allow\nreadonly %s\n' "$JAVA_HOME" > .sandbox-java
+          "$BIN" sandbox --policy .sandbox-java restrict -- javac Hello.java \
             || fail "javac under the sandbox"
-          out=$("$BIN" sandbox --policy .sandbox restrict -- java Hello) \
+          out=$("$BIN" sandbox --policy .sandbox-java restrict -- java Hello) \
             || fail "java under the sandbox"
           [ "$out" = "jvm-ok" ] || fail "sandboxed java printed '$out'"
 
