@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **ACP: 3code as an editor-native agent.** `3code --acp` speaks Agent
+  Client Protocol v1 over stdio - newline-delimited JSON-RPC on
+  stdin/stdout, the protocol Zed, JetBrains, and Neovim plugins use - so
+  an editor can drive 3code like any other agent (Zed: agent settings,
+  "Add custom agent", command `3code`, arguments `--acp`). One session
+  per process; the session id is the `.3log` id, so `session/load`
+  resumes any past 3code conversation. Prompt turns stream as
+  `session/update` notifications (message and reasoning chunks, tool
+  activity, token usage), and `session/cancel` is Ctrl-C over the wire.
+  Model and provider come from the normal config (`-m` picks, `:model`
+  philosophy otherwise); the sandbox and loop guard run exactly as in
+  the terminal. Diagnostics go to stderr so stdout stays parseable
+  protocol records.
 - **Prompts and `:commands` queue while a turn runs.** Mid-turn input
   used to funnel into a single slot: the first prompt submitted during
   a turn was remembered (unechoed until it ran), every later line was
