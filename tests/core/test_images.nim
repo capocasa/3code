@@ -3,6 +3,14 @@ import threecode/images
 
 const Images = "testdata/images"
 
+# The fixture generators shell out; use whichever ImageMagick binary the
+# box has (IM7 `magick`, IM6 `convert`). A bare `magick` breaks IM6-only
+# images (ubuntu runners ship IM6 `convert` without a `magick` symlink).
+let resizer = block:
+  if findExe("magick").len > 0: "magick"
+  elif findExe("convert").len > 0: "convert"
+  else: ""
+
 suite "images: dimension sniffing":
   test "fixtures parse (png, jpeg, gif, webp)":
     check imageDimensions(Images / "tiny.png") == (16, 12)
@@ -23,8 +31,7 @@ suite "images: dimension sniffing":
     check not isImagePath("noext")
 
 suite "images: encodeForVision":
-  let hasResizer = findExe("magick").len > 0 or
-    findExe("convert").len > 0 or findExe("sips").len > 0
+  let hasResizer = resizer.len > 0
   let work = getTempDir() / "3code-images-" & $getCurrentProcessId()
   setup:
     createDir(work)
@@ -34,7 +41,7 @@ suite "images: encodeForVision":
   test "fits 1280 box and budget":
     if not hasResizer: skip()
     let big = work / "big.png"
-    discard execCmdEx(&"magick -size 2000x1200 gradient:red-blue {quoteShell(big)}")
+    discard execCmdEx(&"{resizer} -size 2000x1200 gradient:red-blue {quoteShell(big)}")
     let (info, err) = encodeForVision(big, work / "out", 1)
     check err == ""
     check info.format == "jpeg"
@@ -50,7 +57,7 @@ suite "images: encodeForVision":
     # ladder to actually run.
     let noise = work / "noise.png"
     discard execCmdEx(
-      &"magick -size 1600x1200 xc:gray +noise Random {quoteShell(noise)}")
+      &"{resizer} -size 1600x1200 xc:gray +noise Random {quoteShell(noise)}")
     let (info, err) = encodeForVision(noise, work / "out", 7)
     check err == ""
     check max(info.deliveredWidth, info.deliveredHeight) <= 1280
@@ -60,7 +67,7 @@ suite "images: encodeForVision":
   test "deterministic: same source, same flags, same bytes":
     if not hasResizer: skip()
     let big = work / "big.png"
-    discard execCmdEx(&"magick -size 1800x900 gradient:green-blue {quoteShell(big)}")
+    discard execCmdEx(&"{resizer} -size 1800x900 gradient:green-blue {quoteShell(big)}")
     let (a, ea) = encodeForVision(big, work / "a", 3)
     let (b, eb) = encodeForVision(big, work / "b", 3)
     check ea == "" and eb == ""
@@ -70,7 +77,7 @@ suite "images: encodeForVision":
   test "fidelity delivers png":
     if not hasResizer: skip()
     let big = work / "big.png"
-    discard execCmdEx(&"magick -size 2000x1200 gradient:red-blue {quoteShell(big)}")
+    discard execCmdEx(&"{resizer} -size 2000x1200 gradient:red-blue {quoteShell(big)}")
     let (info, err) = encodeForVision(big, work / "out", 2, fidelity = true)
     check err == ""
     check info.format == "png"
@@ -89,7 +96,7 @@ suite "images: no resizer installed":
     defer: removeDir(work)
     let big = work / "big.png"
     discard execCmdEx(
-      &"magick -size 1400x1400 xc:gray +noise Random {quoteShell(big)}")
+      &"{resizer} -size 1400x1400 xc:gray +noise Random {quoteShell(big)}")
     let savedPath = getEnv("PATH")
     putEnv("PATH", "")
     defer: putEnv("PATH", savedPath)
