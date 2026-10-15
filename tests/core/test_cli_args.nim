@@ -243,12 +243,23 @@ suite "cli resume value forms":
     ## session-id line, then close stdin and reap.
     let lockPath = dirLockPathFor(tmp)
     try: removeFile(lockPath) except OSError: discard
-    let env = newStringTable({"XDG_DATA_HOME": tmp / "d",
+    # startProcess(env=...) REPLACES the environment. TMPDIR must ride
+    # along: the child derives the dir-lock path from its own tempDir(),
+    # and on macOS (per-user TMPDIR, always set) a stripped env moves
+    # the child's lock to /tmp while this side watches $TMPDIR - the
+    # lock never appears where the test looks (#62 never ran on mac
+    # before the static-ssl CI run).
+    var env = newStringTable({"XDG_DATA_HOME": tmp / "d",
                               "XDG_CONFIG_HOME": tmp / "c"})
+    if getEnv("TMPDIR").len > 0: env["TMPDIR"] = getEnv("TMPDIR")
     let p = startProcess(binPath(), args = flags.splitWhitespace(),
                          workingDir = tmp, env = env,
                          options = {poStdErrToStdOut, poUsePath})
-    for i in 0 ..< 100:
+    # 30s cap: the debug test binary with static OpenSSL is ~60MB;
+    # its cold start under testament load can be slow on a 3-core
+    # runner. The window only stretches on failure - the loop exits
+    # the moment the lock appears.
+    for i in 0 ..< 600:
       if fileExists(lockPath): break
       sleep 50
     result = try: readFile(lockPath).strip.splitLines[^1] except CatchableError: ""
