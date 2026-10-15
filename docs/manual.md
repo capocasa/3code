@@ -1081,6 +1081,22 @@ the model can read and route around. The tradeoff is that the policy needs
 setting up first: a couple of minutes once per project, and after that it
 does not stop on trivialities.
 
+The one exception is the `ask` verb. An `ask` rule denies exactly like
+`deny`, but when a sandboxed bash command is blocked on an ask-protected
+path, 3code puts one question in the tool output view:
+
+    sandbox ask: ~/vault/notes/x.md is ask-protected.  [f] ~/vault  [d] ~  [n]o  (60s)
+
+One key answers it: `f` allows the ask-protected path (the `ask` rule's
+own target), `d` the directory around it (the grant is written into the
+active policy file, so it sticks
+for the session and beyond), `n` keeps the denial. No answer within 60
+seconds counts as `n`, and the failed command is never retried without an
+explicit grant. Use `ask` for the gray zone: paths you would probably
+allow if you were watching, like a browser profile or a notes vault, where
+`deny` would cost a manual policy edit and `allow` feels too broad
+unattended.
+
 In practice:
 
 - The project directory is writable out of the box (`allow ./` is in the

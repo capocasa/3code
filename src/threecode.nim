@@ -169,9 +169,12 @@ proc initSandbox(cwd: string) =
   # tests drive REPL rendering, not enforcement, and `active=true` plus the
   # startup probe shift the wall-clock timing the spinner/SIGWINCH
   # assertions depend on. Enforcement is covered by the cli_args `box`
-  # suite and by production.
+  # suite and by production. THREECODE_STUB_SANDBOX=1 opts a stub run back
+  # in (the sandbox-ask tty tests need a live policy with the harness's
+  # deterministic timing).
   when defined(providerStub):
-    return
+    if getEnv("THREECODE_STUB_SANDBOX") != "1":
+      return
   if not sandboxEnabled:
     return
   sandbox.hiddenRules = sandbox.guardRules(cwd)

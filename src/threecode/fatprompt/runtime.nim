@@ -259,6 +259,81 @@ initLock(wizardRequestLock)
 var inputThread: Thread[void]
 var inputThreadRunning* = false
 
+# --- Sandbox ask gate.
+#
+# When a sandboxed bash command is denied on an `ask` rule, the
+# controller (main thread) arms this gate and paints the question into
+# the tool viewport (runBashWithViewport). The input thread, which owns
+# stdin inside its persistent poll loop, then diverts the next keypress
+# to the gate instead of the editor: f = allow (narrow), d = allow
+# (broad), n / Enter / Ctrl-C = deny. No second reader of stdin
+# ever exists, so nothing races. While armed the gate is modal: it
+# consumes every byte, so stray typing never lands in the prompt draft.
+# The controller waits with a timeout (default 60s, override with
+# THREECODE_ASK_TIMEOUT_MS) and treats silence as deny.
+var
+  askGatePending: Atomic[bool]
+  askGateAnswer: Atomic[int]
+  askGateAnswered: Atomic[bool]
+
+const DefaultAskTimeoutMs = 60_000
+
+proc askTimeoutMs*(): int =
+  ## The ask-gate wait cap, overridable for tests and trials.
+  try:
+    let v = parseInt(getEnv("THREECODE_ASK_TIMEOUT_MS"))
+    if v > 0: v else: DefaultAskTimeoutMs
+  except ValueError:
+    DefaultAskTimeoutMs
+
+proc askGateAvailable*(): bool =
+  ## Whether an ask can be answered in this session: the input thread
+  ## must be the active stdin reader on a real tty. Headless sessions
+  ## (no input thread, piped stdin) never ask; the denial stands as-is.
+  when defined(posix):
+    inputThreadRunning and isatty(STDIN_FILENO) == 1
+  else:
+    false
+
+proc requestAskKey*(timeoutMs = -1): char =
+  ## Arm the ask gate and block for one decisive keypress. Returns
+  ## 'f', 'd', or 'n'; '\0' when the gate is unavailable (headless) or
+  ## the wait timed out. Both map to "deny, do not retry" at the call
+  ## site, so callers may treat '\0' as n.
+  if not askGateAvailable(): return '\0'
+  let cap = if timeoutMs > 0: timeoutMs else: askTimeoutMs()
+  askGateAnswered.store(false, moRelease)
+  askGateAnswer.store(0, moRelaxed)
+  askGatePending.store(true, moRelease)
+  let deadline = epochTime() + cap.float / 1000.0
+  while epochTime() < deadline:
+    if askGateAnswered.load(moAcquire): break
+    if not inputThreadRunning: break
+    sleep(20)
+  askGatePending.store(false, moRelease)
+  if not askGateAnswered.load(moAcquire): return '\0'
+  char(askGateAnswer.load(moRelaxed))
+
+proc askGateConsume(b: int): bool =
+  ## Input-thread side: called for each stdin byte while the gate is
+  ## armed. Always consumes the byte (returns true); decisive keys also
+  ## post the answer, non-decisive ones are swallowed so the editor
+  ## draft stays clean. Runs inside the persistent getCh loop, before
+  ## the editor sees anything. ESC is deliberately not decisive: an
+  ## arrow key's lead byte would otherwise deny the ask.
+  case b
+  of 'f'.ord, 'F'.ord:
+    askGateAnswer.store('f'.ord, moRelaxed)
+    askGateAnswered.store(true, moRelease)
+  of 'd'.ord, 'D'.ord:
+    askGateAnswer.store('d'.ord, moRelaxed)
+    askGateAnswered.store(true, moRelease)
+  of 'n'.ord, 'N'.ord, 0x03, 0x0d, 0x0a:
+    askGateAnswer.store('n'.ord, moRelaxed)
+    askGateAnswered.store(true, moRelease)
+  else: discard
+  true
+
 func structuralTailByte(b: int): bool =
   ## Structural tail bytes of CSI / OSC replies that can land before the
   ## first prompt: `ESC [ A` (arrow), `ESC [ 6 n` (DSR), `ESC ] 11 ;
@@ -2261,6 +2336,14 @@ proc inputThreadProc() {.thread.} =
                 continue
               break
             startupDrainDone = true
+          # The ask gate outranks the idle-submit park: a sandbox ask is
+          # modal, and its 60s window must not be eaten by a parked
+          # prompt waiting for the controller to drain a queued submit.
+          if askGatePending.load(moAcquire) and
+              (pendingInput.len > 0 or fillPending(200.cint)):
+            discard askGateConsume(pendingInput[0])
+            pendingInput.delete(0)
+            continue
           # Park the persistent prompt (not the wizard) on a stale
           # idle-submit; see the protocol header for the lifecycle.
           if inputIdleLinePending.load(moAcquire) and
