@@ -544,13 +544,13 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `select-all`, `select-buffer-start`, `select-buffer-end`, `cut`, `copy`,
 `paste`, `yank`, `transpose-chars`.
 
-Key names look like `Ctrl+C`, `Alt+F`, `ShiftTab`, `Home`, `End`, `Up`,
+Key names look like `CtrlC`, `AltF`, `ShiftTab`, `Home`, `End`, `Up`,
 `Down`, `Left`, `Right`, `Backspace`, `Delete`, `Insert`, `Tab`, or `ESC`.
 Modified navigation keys take a prefix: `ShiftLeft`, `ShiftHome`,
 `CtrlLeft`, `CtrlRight`, `CtrlDelete`, `CtrlShiftLeft`, `CtrlShiftEnd`,
-and so on across the arrows, Home, End, and Delete. `Ctrl` chords are
-case-insensitive (`CtrlC` and `ctrl+c` are the same key),
-and `Double` requires two quick presses, as in `DoubleESC` or `DoubleCtrlC`.
+and so on across the arrows, Home, End, and Delete. Names are
+case-insensitive (`ctrlc` is `CtrlC`) and never contain `+`. `Double`
+requires two quick presses, as in `DoubleESC` or `DoubleCtrlC`.
 
 `:help` always shows the bindings currently in effect.
 
@@ -917,6 +917,31 @@ Print the current registry with:
 ```
 
 For combinations outside the registry, `--experimental` opens the gate.
+
+## System prompt override
+
+Each model family's system prompt is compiled in, but a file override
+can replace it wholesale. Place a `<family>.txt` in one of these (first
+match wins):
+
+1. `.3code/<family>.txt` in the project
+2. `.agents/<family>.txt` in the project (the vendor-neutral name)
+3. `<family>.txt` in the user config root (`~/.config/3code/` on Linux,
+   `~/Library/Application Support/3code/` on macOS,
+   `%APPDATA%\3code` on Windows)
+
+The family name is the branch the prompt selection takes (`glm`, `gpt`,
+`claude`, and so on). `3code --good` shows each combo's family, and the
+experimental `family` provider setting picks one for combos off the
+registry. When an override matches, startup announces it on stderr, and
+`:prompt` shows the exact prompt in effect.
+
+Two placeholders are substituted into the file: `{{credit}}` (the
+provider credit line) and `{{skills}}` (the discovered skill catalog).
+A file without them runs without those sections.
+
+An override takes effect in new sessions; a running session keeps its
+prompt until restart or profile change.
 
 ## Sessions
 

@@ -38,7 +38,7 @@
 <table border="1" class="docutils"><tr><th>switch</th><th>effect</th></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-m</span></tt>, <tt class="docutils literal"><span class="pre">--model PROVIDER[.MODEL]</span></tt></td><td>pick a model from the config, overriding <tt class="docutils literal"><span class="pre">[settings] current</span></tt></td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-c</span></tt>, <tt class="docutils literal"><span class="pre">--config FILE</span></tt></td><td>read providers and settings from FILE for this run, instead of the default config path</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">-r</span></tt>, <tt class="docutils literal"><span class="pre">--resume[=ID]</span></tt></td><td>resume the latest session from this directory, or a specific one by ID</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">-r</span></tt>, <tt class="docutils literal"><span class="pre">--resume[=ID]</span></tt></td><td>resume the latest session from this directory, or a specific one by ID (<tt class="docutils literal"><span class="pre">-r ID</span></tt>, <tt class="docutils literal"><span class="pre">-rID</span></tt>, <tt class="docutils literal"><span class="pre">-r=ID</span></tt>, <tt class="docutils literal"><span class="pre">-r:ID</span></tt>, <tt class="docutils literal"><span class="pre">--resume=ID</span></tt>; every value option takes these forms)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-i</span></tt>, <tt class="docutils literal"><span class="pre">--interactive</span></tt></td><td>drop into the REPL after running an initial prompt; without it, a prompt argument runs once and exits</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-l</span></tt>, <tt class="docutils literal"><span class="pre">--list</span></tt></td><td>list recent sessions for this directory (max 20) and exit</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-a</span></tt>, <tt class="docutils literal"><span class="pre">--all</span></tt></td><td>with <tt class="docutils literal"><span class="pre">-l</span></tt> / <tt class="docutils literal"><span class="pre">-f</span></tt>: every directory, not just this one</td></tr>
@@ -82,11 +82,12 @@
 <tr><td><tt class="docutils literal"><span class="pre">:private</span></tt></td><td>show private mode and trusted providers</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:private on/off</span></tt></td><td>toggle private mode for this session (bar recolors)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:private allow X [M]</span></tt></td><td>trust provider X, optionally one model, with private data</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">:prompt</span></tt></td><td>show the active system prompt</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:prompt</span></tt></td><td>show the active system prompt (compiled-in, or the <a class="reference external" href="manual.html#system-prompt-override">file override</a> if one matched)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:show [N]</span></tt></td><td>show the full output of tool call N (default: last)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:log</span></tt></td><td>list all tool calls this session</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sessions</span></tt></td><td>list recent sessions saved in this directory (max 20)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:session</span></tt></td><td>show this session's ID (for <tt class="docutils literal"><span class="pre">--resume=ID</span></tt>)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:resume</span></tt></td><td>list this directory's sessions; <tt class="docutils literal"><span class="pre">:resume ID</span></tt> swaps the running 3code onto that session</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:summarize</span></tt></td><td>collapse old turns into a synthetic recap</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:version</span></tt></td><td>show the running 3code version</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox</span></tt> / <tt class="docutils literal"><span class="pre">:sb</span></tt></td><td>show the active filesystem sandbox rules</td></tr>
@@ -98,7 +99,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox edit</span></tt></td><td>open the policy file in <tt class="docutils literal"><span class="pre">$VISUAL</span></tt>/<tt class="docutils literal"><span class="pre">$EDITOR</span></tt>, reload on quit</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:plugins</span></tt></td><td>list loaded plugin libraries, hooks, call counts, registered tools</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:plugin debug on/off</span></tt></td><td>trace every plugin call to <tt class="docutils literal"><span class="pre">THREECODE_DEBUG_LOG</span></tt> (or stderr)</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">:! CMD</span></tt></td><td>run a shell command yourself, output to scrollback only</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:! CMD</span></tt></td><td>run a shell command yourself, output streamed live to scrollback only</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:quit</span></tt> / <tt class="docutils literal"><span class="pre">:q</span></tt> / <tt class="docutils literal"><span class="pre">:exit</span></tt></td><td>leave</td></tr>
 </table>
 <h2 id="config-file">Config file</h2><p>Location: <tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt> on Linux, <tt class="docutils literal"><span class="pre">~/Library/Application Support/3code/config</span></tt> on macOS, <tt class="docutils literal"><span class="pre">%APPDATA%\3code\config</span></tt> on Windows; <tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt> overrides the base directory on every platform. <tt class="docutils literal"><span class="pre">-c FILE</span></tt> / <tt class="docutils literal"><span class="pre">--config FILE</span></tt> reads a different file for a single run; it is rewritten by 3code itself whenever providers or models change, same as the default. Annotated example: <tt class="docutils literal"><span class="pre">docs/config.example</span></tt> in the repository.</p>
@@ -136,7 +137,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <tr><td><tt class="docutils literal"><span class="pre">models</span></tt></td><td>space-separated model IDs offered by <tt class="docutils literal"><span class="pre">:model</span></tt></td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">current_model</span></tt></td><td>the model <tt class="docutils literal"><span class="pre">:model</span></tt> last picked here; switching back to the provider returns to it. Written automatically</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">auth</span></tt></td><td><tt class="docutils literal"><span class="pre">oauth</span></tt> for browser-OAuth subscription logins (<tt class="docutils literal"><span class="pre">supergrok</span></tt>, <tt class="docutils literal"><span class="pre">chatgpt</span></tt>)</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">family</span></tt></td><td>experimental-only override that picks the system-prompt branch by family name, for combos off the known-good list</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">family</span></tt></td><td>experimental-only override that picks the system-prompt branch by family name, for combos off the known-good list. The same name drives the <a class="reference external" href="manual.html#system-prompt-override">prompt-file override</a></td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">model_prefix</span></tt></td><td>legacy: prepended to bare <tt class="docutils literal"><span class="pre">models</span></tt> names; expanded on load, never written back</td></tr>
 </table>
 <h3 id="params">params</h3><p><tt class="docutils literal"><span class="pre">[params]</span></tt> sections override the known-good request parameters per (provider, model). <tt class="docutils literal"><span class="pre">provider</span></tt> scopes to one provider; <tt class="docutils literal"><span class="pre">model</span></tt> is optional: omit it (or leave it empty) and the entry covers every model of that provider. A model-scoped entry beats a provider-wide one; among equals the last section in the file wins. Unset keys keep the known-good value.</p>
@@ -193,7 +194,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-15 08:33:42 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-15 10:14:18 UTC</small>
       </div>
     </div>
   </div>
