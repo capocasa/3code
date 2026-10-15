@@ -207,9 +207,12 @@ proc setupTlsEnv() =
   ## CA bundle: bundled OpenSSL on both platforms has its OPENSSLDIR
   ## baked to a build-runner path that doesn't exist on user systems,
   ## so verifyMode=CVerifyPeer can't scan default locations. Code that
-  ## opens a TLS context calls `bundledCaFile()` (in util.nim) to feed
-  ## the bundled `cacert.pem` directly to `newContext(caFile = ...)`.
-  ## Linux uses the system trust store and needs nothing here.
+  ## opens a TLS context calls `bundledCaFile()` (in util.nim), which
+  ## prefers an adjacent `cacert.pem` and falls back to the bundle
+  ## embedded at compile time (release builds pass
+  ## `-d:embeddedCaCertPath=...`; it is written to the data dir on
+  ## first use). Linux uses the system trust store and needs nothing
+  ## here.
   ## Termux's openssl libs are found via DT_RUNPATH baked in at link
   ## time (see config.nims); LD_LIBRARY_PATH can't help because the
   ## openssl wrapper dlopens at module init, before main runs.

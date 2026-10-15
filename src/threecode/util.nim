@@ -1,4 +1,4 @@
-import std/[json, locks, net, os, sequtils, strformat, strutils, tables, unicode, times]
+import std/[json, hashes, locks, net, os, sequtils, strformat, strutils, tables, unicode, times]
 import streamhttp
 import types
 import threecode/unicodewidth
@@ -454,17 +454,72 @@ proc debugOut*(msg, tag: string) =
     stderr.writeLine BlueFg & "[dbg " & t & "] " & BoldOn & tag &
       Reset & BlueFg & " " & msg & Reset
 
-proc bundledCaFile*(): string =
-  ## Path to the `cacert.pem` we ship alongside the binary on macOS /
-  ## Windows (see `release.yml`). Returns "" when not present (Linux
-  ## release tarball, dev builds) — `newContext` will scan default
-  ## system cert locations in that case, which works on every Linux
-  ## distro.
-  when defined(macosx) or defined(windows):
-    let p = parentDir(getAppFilename()) / "cacert.pem"
-    if fileExists(p): p else: ""
+proc userDataRoot*(): string =
+  ## XDG data root for 3code: `~/.local/share/3code/` on Linux,
+  ## `~/.config/3code/` on macOS, `%APPDATA%/3code/` on Windows (collapses
+  ## with config-root there — fine, the split is a Linux convention). Holds
+  ## app-managed state: sessions, history, extracted built-in skills.
+  ##
+  ## `XDG_DATA_HOME` overrides the platform default on all POSIX platforms.
+  ## Honoring it on macOS (not just Linux) matches the spec and makes the
+  ## data root redirectable for tests; the platform default is unchanged
+  ## when the variable is unset.
+  let xdg = getEnv("XDG_DATA_HOME")
+  when defined(windows):
+    # Windows default is %APPDATA% (collapses with config-root there —
+    # fine, the split is a Linux convention). XDG_DATA_HOME overrides it
+    # for the same test-redirectability reason as the POSIX branches.
+    let base = if xdg.len > 0: xdg else: getConfigDir()
+  elif defined(macosx):
+    let base = if xdg.len > 0: xdg else: getConfigDir()
   else:
-    ""
+    let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
+  base / "3code"
+
+const embeddedCaCertPath {.strdefine.}: string = ""
+  ## Build-time path to a PEM bundle baked into the binary. Release CI
+  ## passes `-d:embeddedCaCertPath=<pinned cacert.pem>`; dev builds leave it
+  ## empty and the system trust store applies.
+
+const embeddedCaCert* =
+  when embeddedCaCertPath.len > 0: staticRead(embeddedCaCertPath) else: ""
+
+proc materializeCa*(dir, pem: string): string =
+  ## Write `pem` into `dir` under a content-derived name (first use
+  ## only) and return the path, "" when the write fails. Staging through
+  ## a per-pid temp plus rename means a concurrent 3code never sees a
+  ## torn bundle; the name carries the content hash so a rotated bundle
+  ## in a new binary never collides with the old file.
+  let p = dir / ("cacert-" & $hash(pem) & ".pem")
+  if fileExists(p): return p
+  try:
+    createDir(dir)
+    let tmp = p & "." & $getCurrentProcessId() & ".tmp"
+    writeFile(tmp, pem)
+    moveFile(tmp, p)
+  except CatchableError:
+    # Another process may have won the race (moveFile fails when the
+    # destination exists on Windows); a real write failure degrades to
+    # "", which callers treat exactly like a missing bundle.
+    if not fileExists(p): return ""
+  p
+
+proc bundledCaFile*(): string =
+  ## CA bundle path for `newContext(caFile = ...)`, or "" to scan
+  ## default system cert locations. Release macOS/Windows builds link
+  ## OpenSSL statically with OPENSSLDIR baked to a build-runner path
+  ## that doesn't exist on user systems, so those platforms need an
+  ## explicit bundle: a `cacert.pem` next to the binary wins (manual
+  ## override, pre-embed installs), then the compile-time-embedded
+  ## bundle written out to the data dir on first use. Linux and dev
+  ## builds return "" and use the system trust store, which works on
+  ## every distro.
+  when defined(macosx) or defined(windows):
+    let adjacent = parentDir(getAppFilename()) / "cacert.pem"
+    if fileExists(adjacent): return adjacent
+    when embeddedCaCert.len > 0:
+      return materializeCa(userDataRoot(), embeddedCaCert)
+  ""
 
 when defined(ssl):
   import std/openssl except raiseException, newContext
@@ -478,9 +533,10 @@ proc bundledSslContext*(): SslContext {.gcsafe.} =
   ## anywhere else a TLS context is consumed. macOS/Windows ship
   ## OpenSSL whose `OPENSSLDIR` is baked to a build-runner path that
   ## doesn't exist on user systems, so `verifyMode = CVerifyPeer`
-  ## can't scan the default location — we feed `cacert.pem` from
-  ## next to the binary. Linux passes `caFile = ""` and falls
-  ## through to the system trust store. The `streamhttp` SSE path
+  ## can't scan the default location — `bundledCaFile()` feeds an
+  ## adjacent `cacert.pem` or the compile-time-embedded bundle. Linux
+  ## passes `caFile = ""` and falls through to the system trust
+  ## store. The `streamhttp` SSE path
   ## takes `bundledCaFile()` directly (it builds its own context
   ## internally), so the bundle wiring lives in one place either way.
   ##
@@ -616,28 +672,6 @@ proc userConfigRoot*(): string =
   ## the platform default is unchanged when the variable is unset.
   let xdg = getEnv("XDG_CONFIG_HOME")
   let base = if xdg.len > 0: xdg else: getConfigDir()
-  base / "3code"
-
-proc userDataRoot*(): string =
-  ## XDG data root for 3code: `~/.local/share/3code/` on Linux,
-  ## `~/.config/3code/` on macOS, `%APPDATA%/3code/` on Windows (collapses
-  ## with config-root there — fine, the split is a Linux convention). Holds
-  ## app-managed state: sessions, history, extracted built-in skills.
-  ##
-  ## `XDG_DATA_HOME` overrides the platform default on all POSIX platforms.
-  ## Honoring it on macOS (not just Linux) matches the spec and makes the
-  ## data root redirectable for tests; the platform default is unchanged
-  ## when the variable is unset.
-  let xdg = getEnv("XDG_DATA_HOME")
-  when defined(windows):
-    # Windows default is %APPDATA% (collapses with config-root there —
-    # fine, the split is a Linux convention). XDG_DATA_HOME overrides it
-    # for the same test-redirectability reason as the POSIX branches.
-    let base = if xdg.len > 0: xdg else: getConfigDir()
-  elif defined(macosx):
-    let base = if xdg.len > 0: xdg else: getConfigDir()
-  else:
-    let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
   base / "3code"
 
 proc resolvePath*(path: string): string =

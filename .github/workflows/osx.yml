@@ -91,13 +91,25 @@ jobs:
               echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV" ;;
           esac
 
+      - name: Fetch pinned cacert.pem for embedding
+        # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
+        # refresh must be a conscious pin bump, not silent drift. The
+        # bundle is embedded into the binary at compile time
+        # (-d:embeddedCaCertPath), so neither slice build nor the tarball
+        # ships it as a file anymore.
+        run: |
+          CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            https://curl.se/ca/cacert.pem -o cacert.pem
+          echo "${CACERT_SHA256}  cacert.pem" | shasum -a 256 -c -
+
       - name: Build
         run: |
           case "${GITHUB_REF}" in
             refs/tags/*) [ -n "${BUILD_FLAGS:-}" ] || {
               echo "BUILD_FLAGS empty on a tag build" >&2; exit 1; } ;;
           esac
-          OPENSSL_STATIC=$PWD/openssl-static/darwin64-arm64 nimble build -y -d:release -d:staticSsl ${{ env.BUILD_FLAGS }}
+          OPENSSL_STATIC=$PWD/openssl-static/darwin64-arm64 nimble build -y -d:release -d:staticSsl -d:embeddedCaCertPath=$PWD/cacert.pem ${{ env.BUILD_FLAGS }}
 
       - name: Verify sandbox matrix (seatbelt + wall proxy)
         # End-to-end enforcement check of the shipped binary, mirroring
@@ -173,7 +185,7 @@ jobs:
         run: |
           mv 3code "$SLICE_DIR/3code-arm64"
           rm -rf ~/.cache/nim/threecode_r
-          OPENSSL_STATIC=$PWD/openssl-static/darwin64-x86_64 nim c -d:release -d:staticSsl ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:"$SLICE_DIR/3code-x86_64" src/threecode.nim
+          OPENSSL_STATIC=$PWD/openssl-static/darwin64-x86_64 nim c -d:release -d:staticSsl -d:embeddedCaCertPath=$PWD/cacert.pem ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:"$SLICE_DIR/3code-x86_64" src/threecode.nim
           # Sign each thin slice BEFORE lipo: codesign cannot grow a
           # slice that lacks a signature once it is embedded in a fat
           # archive (it fails the re-sign with ESRCH and verify reports
@@ -255,12 +267,6 @@ jobs:
           # without running the binary on its target OS (its native arm64
           # slice does run here).
           ./3code-macos-universal/3code -v > 3code-macos-universal/VERSION
-          # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
-          # refresh must be a conscious pin bump, not silent drift.
-          CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
-          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-            https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
-          echo "${CACERT_SHA256}  3code-macos-universal/cacert.pem" | shasum -a 256 -c -
           {
             nim --version | head -1
             cc --version | head -1
@@ -292,10 +298,11 @@ jobs:
           pack() { python3 /tmp/mktar.py 3code-macos-universal 3code-macos-universal.tar.gz "$SOURCE_DATE_EPOCH"; }
           pack
           h1=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)
-          # files-only layout, like the windows zip: 6 members
-          # (3code BUILD_INFO cacert.pem LICENSE README.md VERSION)
+          # files-only layout, like the windows zip: 5 members
+          # (3code BUILD_INFO LICENSE README.md VERSION); the CA bundle
+          # is embedded in the binary, not shipped as a file
           members=$(tar -tzf 3code-macos-universal.tar.gz | wc -l)
-          [ "$members" -ge 6 ] || { echo "archive has only $members members" >&2; exit 1; }
+          [ "$members" -ge 5 ] || { echo "archive has only $members members" >&2; exit 1; }
           find 3code-macos-universal ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
           pack
           h2=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)

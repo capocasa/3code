@@ -1,4 +1,4 @@
-import std/[json, strutils, unicode, unittest]
+import std/[json, hashes, os, strutils, unicode, unittest]
 import threecode/util
 
 suite "util: utf8ByteCut":
@@ -389,3 +389,44 @@ suite "util: plainHttpHost":
     for h in ["", "999.999.999.999", "192.168", "192.168.1.1.",
               "192.168.0.256"]:
       check not plainHttpHost(h)
+
+suite "util: materializeCa":
+  let dir = getTempDir() / ("test_ca_" & $getCurrentProcessId())
+  let pem = "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n"
+
+  setup:
+    removeDir(dir)
+
+  teardown:
+    removeDir(dir)
+
+  test "writes bundle on first use":
+    let p = materializeCa(dir, pem)
+    check p == dir / ("cacert-" & $hash(pem) & ".pem")
+    check readFile(p) == pem
+
+  test "reuses existing file without rewriting":
+    let p1 = materializeCa(dir, pem)
+    writeFile(p1, "sentinel")
+    let p2 = materializeCa(dir, pem)
+    check p1 == p2
+    check readFile(p2) == "sentinel"
+
+  test "different content gets a different file":
+    discard materializeCa(dir, pem)
+    let p2 = materializeCa(dir, pem & "more")
+    check p2 != dir / ("cacert-" & $hash(pem) & ".pem")
+    check readFile(p2) == pem & "more"
+
+  test "unwritable location degrades to empty string":
+    let blocker = getTempDir() / ("test_ca_blocker_" & $getCurrentProcessId())
+    writeFile(blocker, "x")
+    check materializeCa(blocker / "sub", pem) == ""
+    removeFile(blocker)
+
+suite "util: embeddedCaCert":
+  test "empty unless -d:embeddedCaCert is passed at build time":
+    when embeddedCaCert.len > 0:
+      check embeddedCaCert.startsWith "-----BEGIN CERTIFICATE-----"
+    else:
+      check embeddedCaCert == ""
