@@ -71,8 +71,8 @@ if [ ! -f version ]; then
        inblk&&body==1&&/^=/{next}
        inblk&&body==1{print}' pubkeys.asc > pubkeys.b64
   # BSD base64 (macOS) wants -D; GNU (linux, msys2, git-bash) wants -d.
-  echo aGk= | base64 -d >/dev/null 2>&1 && b64d="base64 -d" || b64d="base64 -D"
-  "$b64d" < pubkeys.b64 > pubkeys.gpg
+  echo aGk= | base64 -d >/dev/null 2>&1 && b64f=-d || b64f=-D
+  base64 "$b64f" < pubkeys.b64 > pubkeys.gpg
   gpgv="${GPGV:-gpgv}"
   command -v "$gpgv" >/dev/null 2>&1 \
     || { echo "$gpgv not found; cannot verify the openssl tarball" >&2; exit 1; }
