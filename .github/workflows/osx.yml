@@ -163,13 +163,17 @@ jobs:
           # world (the macos image ships Temurin JDKs; JAVA_HOME_21 is
           # the default).
           command -v javac >/dev/null || fail "macos image no longer ships javac"
-          cat > Hello.java <<'EOF'
-public class Hello {
-  public static void main(String[] args) {
-    System.out.println("jvm-ok");
-  }
-}
-EOF
+          # printf, not a heredoc: a column-1 heredoc body (or its
+          # terminator) breaks out of the YAML block scalar and
+          # invalidates the whole workflow file - push runs then fail
+          # "workflow file issue" and workflow_dispatch 422s (exactly
+          # what run 38571243045 showed until this fix).
+          printf '%s\n' \
+            'public class Hello {' \
+            '  public static void main(String[] args) {' \
+            '    System.out.println("jvm-ok");' \
+            '  }' \
+            '}' > Hello.java
           "$BIN" sandbox --policy .sandbox restrict -- javac Hello.java \
             || fail "javac under the sandbox"
           out=$("$BIN" sandbox --policy .sandbox restrict -- java Hello) \
