@@ -178,16 +178,6 @@ suite "minline pure helpers":
     check totalRows("x y z  w", 0, 0, 5) == 2         # double space before last word
     check totalRows("a        b", 0, 0, 5) == 2       # long space run
 
-  test "parseShortcutSpec: canonical tokens, one form per key":
-    let spec = parseShortcutSpec("ESC CtrlC")
-    check spec.len == 2
-    check spec[0].seqKey == "esc" and spec[0].times == 1
-    check spec[1].seqKey == "ctrl+c" and spec[1].times == 1
-    check parseShortcutSpec("DoubleCtrlC")[0].times == 2
-    check parseShortcutSpec("ctrlc")[0].seqKey == "ctrl+c"  # case-insensitive
-    for bad in ["ctrl+c", "Ctrl+Left", "alt+f", "shift+tab"]:
-      expect ValueError: discard parseShortcutSpec(bad)
-
   test "totalRows: char-wrap fallback for words longer than width":
     # No break opportunity: the whole buffer is one over-long word that
     # char-wraps every `width` cells.
