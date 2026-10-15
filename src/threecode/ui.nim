@@ -1871,7 +1871,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           respErr msg
         else:
           resp msg
-      of "allow", "readonly", "deny":
+      of "allow", "readonly", "deny", "ask":
         if parts.len < 2:
           ok = false
           respErr ":sandbox " & verb & " needs a path"
@@ -1881,6 +1881,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             case verb
             of "allow": akWritable
             of "readonly": akReadOnly
+            of "ask": akAsk
             else: akDeny
           let sf = sandbox.sandboxPathInCwd()
           if sandbox.appendRule(sf, argPath, access):
@@ -1891,7 +1892,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         ok = false
         respErr "unknown :sandbox verb: " & verb &
-          "  (show, on, off, allow, readonly, deny, edit)"
+          "  (show, on, off, allow, readonly, deny, ask, edit)"
     of ":show":
       body.add showToolS(arg, session.toolLog)
     of ":log":

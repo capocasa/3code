@@ -45,6 +45,7 @@ import sandwall/wall as sandwallWall
 import defaults
 import types
 import util
+from shell import bashMutationPath
 
 export sandwall.AccessKind, sandwall.Rule,
        sandwall.RuleKind, sandwall.parsePolicy, sandwall.checkPath,
@@ -82,7 +83,12 @@ proc repoPolicyPath*(projectDir: string): string =
 proc systemPolicyPath*(): string =
   getConfigDir() / "3code" / UserPolicyFile
 
-export Policy, defaultPolicyText, repoPolicyPath, systemPolicyPath,
+# defaultPolicyText stays off this list deliberately: the module's
+# own proc is visible to importers anyway, and re-exporting the name
+# makes it ambiguous against the imported defaults.defaultPolicyText
+# (an ambiguity Nim only surfaced once AccessKind grew its fourth
+# value).
+export Policy, repoPolicyPath, systemPolicyPath,
        PolicyFile, UserPolicyFile
 
 var
@@ -517,7 +523,9 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
     if not needsWrite: (true, "")
     else:
       (false, "sandbox: " & shown & " is read-only (" & policyHint() & ")")
-  of akDeny:
+  of akDeny, akAsk:
+    # akAsk denies identically here; only the bash tool's ask flow
+    # redeems it (see the ask-gate section below).
     (false, "sandbox: " & shown & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureRepoPolicy*(dir: string): bool =
@@ -546,6 +554,100 @@ proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
     getCurrentDir())
   if result:
     current = loadPolicy(getCurrentDir())
+
+# ------------------------------------------------------------- ask gate
+#
+# An `ask` rule denies like `deny`, but a denied bash command whose
+# target falls under one can be redeemed: the user approves once, the
+# path (or its whole directory) is appended to the active policy file
+# as `allow`, and the command is retried. These helpers decide whether
+# a path is ask-covered, find the denied path in a failed command, and
+# persist the grant. The prompt itself lives in the turn loop
+# (runBashWithViewport), which owns the tool viewport the question
+# renders into.
+
+proc askCoveredPath*(rawPath: string): bool =
+  ## Whether `rawPath`'s effective access is `ask` (not a plain deny):
+  ## the ask flow must only fire for paths the policy explicitly marked
+  ## ask, never for hard denies or the deny-by-default fallthrough.
+  if not active or not sandboxEnabled: return false
+  let resolved = resolveRawPath(rawPath)
+  if resolved.len == 0: return false
+  canonicalRules(current).checkPath(resolved) == akAsk
+
+proc askRuleRoot*(rawPath: string): string =
+  ## The ask rule root that denies `rawPath`: the last `ask` path rule
+  ## covering the canonical path (last-match-wins, like checkPath).
+  ## Grants must target the root, not the denied file: on Linux an ask
+  ## DIRECTORY under an allowed root is enforced with a mount mask over
+  ## the whole subtree, and no subpath allow can pierce a mask, so the
+  ## narrowest grant that can actually take effect is the root itself.
+  ## Empty when nothing covers the path.
+  let resolved = resolveRawPath(rawPath)
+  if resolved.len == 0: return ""
+  for r in canonicalRules(current):
+    if r.kind == rkPath and r.access == akAsk and isPathUnder(resolved, r.path):
+      result = r.path
+
+proc askPathDisplay*(rawPath: string): string =
+  ## The user-facing form of an ask candidate: canonical, then
+  ## contracted (`./x`, `~/y`).
+  contractPolicyPath(resolveRawPath(rawPath))
+
+proc askCanonical*(rawPath: string): string =
+  ## The canonical absolute form of an ask candidate. Grants must pass
+  ## THIS to appendRule: a raw relative token like `dir/file.txt` does
+  ## not classify as a path target (leading `d`) and would be appended
+  ## as a bogus host rule.
+  resolveRawPath(rawPath)
+
+
+proc pathLike(s: string): bool =
+  ## Loose predicate for tokens scraped from an error line. Over-matching
+  ## is harmless: candidates are then verified against the policy, and
+  ## only ask-covered ones survive.
+  s.len > 1 and (s[0] == '/' or s[0] == '~' or s[0] == '.' or
+    '/' in s)
+
+proc deniedAskPath*(cmd, rawOut: string): string =
+  ## The path whose sandbox denial failed a bash command, when that path
+  ## is ask-covered. The parsed mutation target (shell.bashMutationPath)
+  ## wins: it is static and quote-aware. Otherwise error lines are
+  ## scraped for path-shaped tokens (`touch: cannot touch '/x':
+  ## Permission denied`, `tee: /x: Permission denied`, `sh: 1: cannot
+  ## create /x: Permission denied`). "" when nothing ask-covered turns
+  ## up, which includes every hard-deny denial.
+  let mut = bashMutationPath(cmd)
+  if mut.len > 0 and askCoveredPath(mut): return mut
+  for line in rawOut.splitLines():
+    if "Permission denied" notin line and
+        "Operation not permitted" notin line:
+      continue
+    for tok in line.split(Whitespace):
+      var t = tok
+      if t.len > 1 and t[0] == '\'' and t[^1] == '\'': t = t[1 .. ^2]
+      elif t.len > 1 and t[0] == '"' and t[^1] == '"': t = t[1 .. ^2]
+      else:
+        if t.len > 0 and t[0] in {'\'', '"'}: t = t[1 .. ^1]
+        while t.len > 0 and t[^1] in {':', ',', '.', '\'', '"'}:
+          t.setLen(t.len - 1)
+      if not pathLike(t): continue
+      if askCoveredPath(t): return t
+  ""
+
+proc grantAskAllow*(target: string): bool =
+  ## Persist `allow <target>` into the active policy file and reload, so
+  ## the grant outlives the session and the retried bash child (which
+  ## re-reads the file at launch) enforces it. Ask rules only ever come
+  ## from a policy file, so a missing file here is the can't-happen
+  ## guard; false means "no grant, treat as denied".
+  let f = activePolicyPath(getCurrentDir())
+  if not fileExists(f): return false
+  result = sandwall.appendRule(f, target, akWritable, getCurrentDir())
+  if result:
+    current = loadPolicy(getCurrentDir())
+    when defined(posix):
+      syncWallProxyPolicy(getCurrentDir())
 
 proc editPolicy*(sandboxFile: string): string =
   ## Open the repo policy file in $VISUAL/$EDITOR (falling back to vi
