@@ -2060,13 +2060,13 @@ proc editBufferInExternalEditor(ed: var minline.LineEditor) =
     var raw: Termios
     discard tcGetAttr(STDIN_FILENO.cint, addr raw)
     restoreInputTermios()
-    termui.writeRaw("\x1b[?2004l\x1b[?25h")
+    termui.writeRaw("\x1b[?2004l\x1b[?25h" & minline.kittyKeyboardOff)
     discard execShellCmd(editor & " " & quoteShell(tmpFile))
     discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr raw)
     inputOrigTermios = raw
     inputOrigTermiosValid = true
     recordRawMode()
-    termui.writeRaw("\x1b[?2004h\x1b[?25l")
+    termui.writeRaw("\x1b[?2004h\x1b[?25l" & minline.kittyKeyboardOn)
   else:
     let h = getStdHandle(STD_INPUT_HANDLE)
     var rawMode: int32 = 0
@@ -2409,7 +2409,7 @@ proc inputThreadProc() {.thread.} =
         # its original state on clean exit. Hosts that don't support
         # bracketed paste (older `xterm`, some `screen` configs)
         # ignore the sequence silently.
-        termui.writeRaw("\x1b[?2004h")
+        termui.writeRaw("\x1b[?2004h" & minline.kittyKeyboardOn)
 
     when defined(windows):
       # Raw input: clear line/echo so keystrokes are delivered to `_getch`

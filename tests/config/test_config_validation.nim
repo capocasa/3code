@@ -314,6 +314,11 @@ suite "config validation: [shortcuts] schema (in-process)":
                     ("shortcuts", "edit-in-editor", "AltE CtrlX>CtrlE", 5)]
     check validateConfig(P, entries) == ""
 
+  test "shortcuts Cmd and Super key names accepted":
+    let entries = @[("settings", "current", "p.m", 2),
+                    ("shortcuts", "end", "CmdRight SuperLeft", 5)]
+    check validateConfig(P, entries) == ""
+
   test "shortcuts chord with a bad member rejected":
     let entries = @[("settings", "current", "p.m", 2),
                     ("shortcuts", "cancel", "CtrlX>MetaX", 5)]
