@@ -34,6 +34,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   toolstream, turns, transcript, sandbox, box, wall,
                   auth_xai, auth_openai, auth_google, auth_anthropic,
                   streamexec, cli, search, tabtitle, plugins]
+import threecode/acp
 when not defined(android):
   import tinotify
 else:
@@ -305,6 +306,12 @@ proc main() =
     quit(setupMain(rawParams[1 .. ^1]))
   if rawParams.len > 0 and rawParams[0] == "unsetup":
     quit(unsetupMain(rawParams[1 .. ^1]))
+  # ACP frontend: `3code --acp` speaks Agent Client Protocol v1 over
+  # stdio (editors, custom clients). Early dispatch like the subcommands
+  # above: piped stdio, no terminal setup may run.
+  if rawParams.len > 0 and rawParams[0] == "--acp":
+    minline.terminalRestoreSuppressed = true
+    quit(acpMain(rawParams[1 .. ^1]))
   # -v/-h must not pay for TLS env, stale-binary walk, or sandbox
   # sweep. On Windows a debug 3code.exe is tens of MB and those
   # walks dominate `--version`.

@@ -289,7 +289,7 @@ proc prompt*(s: AgentSession; text: string): string =
   var promptText = text
   pluginOnPrompt(promptText, s.state.savePath, s.profile.name, s.profile.model)
   s.messages.add %*{"role": "user",
-                    "content": buildUserMessage(s.messages, promptText)}
+                    "content": buildUserMessage(s.messages, promptText, s.state.cwd)}
   refreshSystemPrompt(s.messages, s.profile, s.state.promptState)
   clearDraft(s.state)
   let interrupted = runTurnsInteractive(s.profile, s.messages, s.state)

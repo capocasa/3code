@@ -666,6 +666,14 @@ tone = &quot;light&quot;</pre></p>
 <p>Only one <tt class="docutils literal"><span class="pre">AgentSession</span></tt> may be active in a process, and calls on it are not thread-safe. In an asynchronous server, keep the session on one worker thread and pass prompts and events through queues. This avoids sharing session state across threads.</p>
 <p><tt class="docutils literal"><span class="pre">example/webserve.nim</span></tt> is the complete example: a web frontend that serves a chat page, keeps the session on a worker thread, and streams replies to the browser over server-sent events. <tt class="docutils literal"><span class="pre">nim c -r example/webserve.nim</span></tt> and open <a class="reference external" href="http://localhost:8501">http://localhost:8501</a>.</p>
 
+<h2 id="agent-client-protocol">Agent Client Protocol</h2><p><tt class="docutils literal"><span class="pre">3code --acp</span></tt> turns the binary into an <a class="reference external" href="https://agentclientprotocol.com">ACP</a> v1 agent: newline-delimited JSON-RPC on stdin/stdout, the protocol Zed, JetBrains, Neovim plugins, and a growing pile of custom clients speak. Your editor launches 3code like any other ACP agent:</p>
+<p><pre class="listing"># Zed: agent settings, &quot;Add custom agent&quot;
+Command: 3code
+Arguments: --acp</pre></p>
+<p>One session per process. The session id is the <tt class="docutils literal"><span class="pre">.3log</span></tt> id, so <tt class="docutils literal"><span class="pre">session/load</span></tt> resumes any past 3code conversation and <tt class="docutils literal"><span class="pre">session/resume</span></tt> reconnects without replaying it. Prompt turns stream as <tt class="docutils literal"><span class="pre">session/update</span></tt> notifications (message and reasoning chunks, tool activity, token usage when the context window is known); <tt class="docutils literal"><span class="pre">session/cancel</span></tt> is Ctrl-C over the wire and answers the prompt with <tt class="docutils literal"><span class="pre">cancelled</span></tt>. Model and provider come from the normal config (<tt class="docutils literal"><span class="pre">-m</span></tt> picks, <tt class="docutils literal"><span class="pre">:model</span></tt> philosophy otherwise); the sandbox and loop guard run exactly as in the terminal.</p>
+<p>Not advertised (because 3code does not do them over ACP yet): MCP servers, client-side filesystem and terminal execution, permission requests, elicitation, modes, and authentication.</p>
+<p>Diagnostics go to stderr; stdout is protocol records only, so the stream stays parseable.</p>
+
 <h2 id="build-from-source">Build from source</h2><p><pre class="listing">nimble install https://github.com/capocasa/3code</pre></p>
 <p>Requires <a class="reference external" href="https://nim-lang.org">Nim</a> &gt;= 2.0 and <tt class="docutils literal"><span class="pre">curl</span></tt> on <tt class="docutils literal"><span class="pre">PATH</span></tt>.</p>
 
@@ -685,7 +693,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-12 09:26:13 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-15 08:13:20 UTC</small>
       </div>
     </div>
   </div>
