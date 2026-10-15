@@ -489,6 +489,29 @@ of submitting on the first embedded newline, so you can paste a code block,
 edit it, and submit with Enter. `:!` and `@file` prefixes still work inside
 a pasted draft.
 
+The defaults are the same readline-style Ctrl keys everywhere, including
+macOS. If you want the Mac editing keys instead, bind the `Cmd` names in
+the config; they arrive through the kitty keyboard protocol (kitty,
+Ghostty, iTerm2, WezTerm, foot, Warp), which 3code enables automatically
+where available:
+
+```
+[shortcuts]
+edit-in-editor   = AltE CmdE CtrlX>CtrlE
+home             = Home CtrlA CmdLeft
+end              = End CtrlE CmdRight
+word-left        = AltB CtrlLeft AltLeft
+word-right       = AltF CtrlRight AltRight
+delete-to-bol    = CmdBackspace
+delete-word-left = CtrlW AltBackspace
+```
+
+Terminals without the protocol ignore the handshake, and unbound Cmd keys
+simply do nothing. This is what makes the Command key usable on macOS:
+Option composes characters there (a dead accent on German layouts, so
+Alt+E and friends cannot arrive as keystrokes), while Cmd chords are
+reported as-is through the protocol.
+
 ### Selecting text
 
 The input buffer is a real text widget: hold Shift with the arrows (or
@@ -544,9 +567,27 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `select-all`, `select-buffer-start`, `select-buffer-end`, `cut`, `copy`,
 `paste`, `yank`, `transpose-chars`.
 
-Key names look like `CtrlC`, `AltF`, `ShiftTab`, `Home`, `End`, `Up`,
-`Down`, `Left`, `Right`, `Backspace`, `Delete`, `Insert`, `Tab`, or `ESC`.
-Modified navigation keys take a prefix: `ShiftLeft`, `ShiftHome`,
+Keys joined by `>` form a chord: pressed in sequence, they run the
+command once. The default `edit-in-editor` binding is exactly that:
+
+```
+[shortcuts]
+edit-in-editor = AltE CtrlX>CtrlE
+```
+
+Alt+E opens the editor directly, and so does Ctrl+X followed by Ctrl+E
+(the emacs `edit-and-execute-command` chord). While a chord is half
+pressed, the first key is reserved for the chord: its own single-key
+commands wait (Ctrl+X cuts only when a selection exists), a key that
+completes no chord is swallowed, and Esc abandons the chord without
+touching the line. A space still means alternatives, so `Home End`
+binds two keys, while `CtrlX>CtrlE` binds one chord.
+
+Key names look like `CtrlC`, `AltF`, `CmdE`, `ShiftTab`, `Home`, `End`,
+`Up`, `Down`, `Left`, `Right`, `Backspace`, `Delete`, `Insert`, `Tab`, or
+`ESC`. `CmdX` (alias `SuperX`) is the macOS Command key, delivered by
+terminals with the kitty keyboard protocol. Modified navigation keys take
+a prefix: `ShiftLeft`, `ShiftHome`,
 `CtrlLeft`, `CtrlRight`, `CtrlDelete`, `CtrlShiftLeft`, `CtrlShiftEnd`,
 and so on across the arrows, Home, End, and Delete. Names are
 case-insensitive (`ctrlc` is `CtrlC`). `Double` requires two quick

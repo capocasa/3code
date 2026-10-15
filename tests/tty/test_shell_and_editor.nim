@@ -181,6 +181,64 @@ suite "shell command and edit-in-editor":
     tty.expect "\u276f"
     echo "  PASS: Alt+E edit-in-editor"
 
+  test "Cmd+E edits the buffer in $VISUAL (kitty protocol)":
+    let root = newFixture("cmd_e_editor")
+    writeConfiguredProvider(root)
+    # Cmd bindings are opt-in, not defaults.
+    let cfg = root / "xdg" / "3code" / "config"
+    writeFile(cfg, readFile(cfg) & "\n[shortcuts]\nedit-in-editor = CmdE\n")
+    writeStubResponses(root)
+    let marker = root / "cmde_marker"
+    let editor = editorScript(root, marker)
+    let tty = startStub(root, editor)
+    defer: tty.close()
+
+    tty.expect "\u276f"
+
+    tty.typeText "base text"
+    tty.drain(100)
+    # Cmd+E on a kitty-protocol terminal: CSI 101;9 u (super modifier)
+    tty.sendBytes "\x1b[101;9u"
+
+    require waitForFile(marker)
+    tty.drain(300)
+    tty.expectInHistory "edited line"
+
+    tty.send "\n"
+    tty.expectInHistory "ok."
+    tty.drain(200)
+    tty.expect "\u276f"
+    echo "  PASS: Cmd+E edit-in-editor"
+
+  test "plain Ctrl+E is end-of-line, not the editor":
+    let root = newFixture("ctrl_e_alone")
+    writeConfiguredProvider(root)
+    writeStubResponses(root)
+    let marker = root / "ce_marker"
+    let editor = editorScript(root, marker)
+    let tty = startStub(root, editor)
+    defer: tty.close()
+
+    tty.expect "\u276f"
+
+    tty.typeText "ab"
+    tty.drain(100)
+    tty.sendBytes "\x01"   # Ctrl+A -> start
+    tty.drain(50)
+    tty.typeText "X"        # -> "Xab"
+    tty.drain(50)
+    tty.sendBytes "\x05"   # Ctrl+E -> end
+    tty.drain(50)
+    tty.typeText "Y"        # -> "XabY"
+    tty.drain(50)
+    tty.send "\n"
+
+    tty.expectInHistory "XabY"
+    require not waitForFile(marker, 1500)
+    tty.drain(200)
+    tty.expect "\u276f"
+    echo "  PASS: plain Ctrl+E end-of-line"
+
   test "Ctrl+X Ctrl+E edits the buffer in $VISUAL":
     let root = newFixture("ctrlxe_editor")
     writeConfiguredProvider(root)

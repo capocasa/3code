@@ -1457,6 +1457,7 @@ suite "minline editor: terminal reply filtering":
 
 suite "minline editor: shortcuts":
   const CtrlG = @[7]
+  const CtrlT = @[20]
   var histFile = ""
 
   setup:
@@ -1507,6 +1508,197 @@ suite "minline editor: shortcuts":
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "> hello"
+
+  test "plain CtrlE is end-of-line, not edit-in-editor":
+    # The default spec once read "AltE CtrlX CtrlE" with no chord
+    # grammar, which bound bare Ctrl+E to the editor on top of
+    # end-of-line. Ctrl+E must only move the cursor.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push CtrlA
+    d.pushString "X"
+    d.push CtrlE
+    d.pushString "Y"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "XabY"
+
+  test "chord: two keys in sequence run one command":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts =
+      {"transpose-chars": "CtrlG>CtrlT"}.toTable
+    d.pushString "ab"
+    d.push CtrlG
+    d.push CtrlT
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ba"
+
+  test "chord prefix defers without selection, dead end swallowed":
+    var ed = initEditor()
+    let d = newDriver()
+    # Default CtrlX starts the CtrlX>CtrlE chord: with no selection it
+    # must defer, and a dead-end completion is swallowed.
+    d.pushString "ab"
+    d.push @[24]     # chord prefix
+    d.push CtrlE    # named dead end: swallowed
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abc"
+
+  test "chord abandoned by Esc and by a printable":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts =
+      {"transpose-chars": "CtrlT CtrlG>CtrlT"}.toTable
+    d.pushString "ab"
+    d.push CtrlG
+    d.pushString "z"    # printable while pending: swallowed, chord gone
+    d.push CtrlT         # no chord pending: the single-key binding runs
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ba"
+
+    var ed2 = initEditor()
+    let d2 = newDriver()
+    d2.pushString "ab"
+    d2.push CtrlG
+    d2.push Esc          # bare Esc abandons the chord, no line clear
+    expect EOFError:     # queue drained: nothing else was pushed
+      discard d2.run(ed2, prompt = "> ")
+    check not ed2.canceled
+    check ed2.line.text == "ab"
+
+  test "one input, several trigger keys: plain, chord, and cmd":
+    # A value lists alternative triggers: any one of them fires the
+    # command. Plain key, chord, and kitty-protocol Cmd key mixed.
+    minline.configuredShortcuts =
+      {"transpose-chars": "CtrlT CtrlG>CtrlT CmdT"}.toTable
+    block:
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "ab"
+      d.push CtrlT
+      d.push Enter
+      check d.run(ed, prompt = "> ") == "ba"
+    block:
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "ab"
+      d.push CtrlG
+      d.push CtrlT
+      d.push Enter
+      check d.run(ed, prompt = "> ") == "ba"
+    block:
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "ab"
+      d.push @[27, 91, 49, 49, 54, 59, 57, 117]  # CSI 116;9 u = cmd+t
+      d.push Enter
+      check d.run(ed, prompt = "> ") == "ba"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "chord with a longer alternative: exact wins over prefix":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts =
+      {"transpose-chars": "CtrlG>CtrlT", "home": "CtrlG>CtrlT>CtrlA"}.toTable
+    d.pushString "xy"
+    d.push CtrlG
+    d.push CtrlT    # exact A>B fires even though A>B>C also exists
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "yx"
+
+# ---------------- Driver: kitty keyboard protocol ----------------
+
+const
+  KittyCtrlA* = @[27, 91, 57, 55, 59, 53, 117]       # CSI 97;5 u
+  KittyCtrlE* = @[27, 91, 49, 48, 49, 59, 53, 117]   # CSI 101;5 u
+  KittyCmdT* = @[27, 91, 49, 49, 54, 59, 57, 117]    # CSI 116;9 u
+  KittyEsc* = @[27, 91, 50, 55, 117]                  # CSI 27 u
+  KittyShiftEnter* = @[27, 91, 49, 51, 59, 50, 117]  # CSI 13;2 u
+  KittyAltBackspace* = @[27, 91, 49, 50, 55, 59, 51, 117]  # CSI 127;3 u
+  KittyCmdBackspace* = @[27, 91, 49, 50, 55, 59, 57, 117]  # CSI 127;9 u
+  CmdLeftSeq* = @[27, 91, 49, 59, 57, 68]            # CSI 1;9 D
+
+suite "minline editor: kitty keyboard protocol":
+  test "CSI u ctrl+letter maps to the control key":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push KittyCtrlA   # ctrl+a -> home
+    d.pushString "X"
+    d.push KittyCtrlE   # ctrl+e -> end
+    d.pushString "Y"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "XabY"
+
+  test "CSI u cmd+letter is a bindable key":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"transpose-chars": "CmdT"}.toTable
+    d.pushString "ab"
+    d.push KittyCmdT
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ba"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "CSI 27 u behaves like the Esc key":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"clear": ""}.toTable
+    d.pushString "hello"
+    d.push KittyEsc
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "CSI 13;2 u inserts a newline (Shift+Enter)":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push KittyShiftEnter
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab\nc"
+
+  test "cmd+left is bindable (no default)":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"home": "CmdLeft"}.toTable
+    d.pushString "ab"
+    d.push CmdLeftSeq
+    d.pushString "X"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "Xab"
+    minline.configuredShortcuts = initTable[string, string]()
+
+    # Without a binding the chord is dead: the buffer is untouched.
+    var ed2 = initEditor()
+    let d2 = newDriver()
+    d2.pushString "ab"
+    d2.push CmdLeftSeq
+    d2.pushString "X"
+    d2.push Enter
+    check d2.run(ed2, prompt = "> ") == "abX"
+
+  test "alt+backspace and cmd+backspace are bindable":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts =
+      {"delete-word-left": "AltBackspace",
+       "delete-to-bol": "CmdBackspace"}.toTable
+    d.pushString "one two"
+    d.push KittyAltBackspace
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one "
+
+    var ed2 = initEditor()
+    let d2 = newDriver()
+    d2.pushString "hello"
+    d2.push KittyCmdBackspace
+    d2.push Enter
+    check d2.run(ed2, prompt = "> ") == ""
+    minline.configuredShortcuts = initTable[string, string]()
 
 # ---------------- Driver: selection ----------------
 
@@ -1598,6 +1790,20 @@ suite "minline editor: selection":
     d.push Enter
     check d.run(ed, prompt = "> ") == " world"
     check ed.lastKill == "hello"
+
+  test "chord prefix yields to cut while a selection exists":
+    # Ctrl+X starts the CtrlX>CtrlE chord by default, but with a
+    # selection it must cut immediately (the text-widget contract);
+    # only without one does it become a chord prefix.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello world"
+    d.push CtrlA
+    d.push ShiftEnd
+    d.push @[24]   # selection spans the line: cut, not chord prefix
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+    check ed.lastKill == "hello world"
 
   test "alt+w copies without deleting":
     var ed = initEditor()

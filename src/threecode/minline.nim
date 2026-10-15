@@ -92,11 +92,13 @@ const ShortcutNames* = [
   "transpose-chars"
 ]
 
-type KeySpec* = tuple[seqKey: string, times: int]
-  ## Parsed form of a single shortcut key token. `seqKey` is the internal
-  ## key name used by KEYMAP/KEYSEQS ("ctrl+c", "esc", "home", ...).
-  ## `times` is how many consecutive presses are required (1 for normal,
-  ## 2 for DoubleCtrlC / DoubleESC).
+type KeySpec* = tuple[keys: seq[string], times: int]
+  ## Parsed form of a single shortcut key token. `keys` holds the internal
+  ## key name(s) used by KEYMAP/KEYSEQS ("ctrl+c", "esc", "home", ...);
+  ## one entry is a plain key, several (joined by `>` in the spec, as in
+  ## `CtrlX>CtrlE`) form a chord pressed in sequence. `times` is how many
+  ## consecutive presses are required (1 for normal, 2 for DoubleCtrlC /
+  ## DoubleESC; single keys only).
 
 when defined(posix):
   import posix
@@ -111,6 +113,18 @@ var terminalRestoreSuppressed* = false
   ## run with a redirected or piped stdout; the exit-proc terminal
   ## restore would splice escape garbage into their output stream.
 
+when defined(posix):
+  const kittyKeyboardOn* = "\e[>1u"
+    ## Push the kitty keyboard protocol's disambiguate flag. Terminals
+    ## without the protocol ignore the push, so it is unconditionally
+    ## safe; terminals with it start reporting modifier chords that have
+    ## no legacy encoding (notably the macOS Command key, as `super`) as
+    ## `CSI <key> ; <mods> u` sequences. Every push must be balanced by
+    ## a pop before the terminal is handed to anything else (suspend,
+    ## $VISUAL, exit): a shell or editor that never opted in would see
+    ## CSI u bytes instead of Ctrl keys.
+  const kittyKeyboardOff* = "\e[<1u"
+
 proc restoreTerminal*() {.noconv.} =
   ## Single point of terminal restore. Registered once as an exit proc
   ## and called from signal handlers. Covers cursor visibility, color/style
@@ -120,6 +134,8 @@ proc restoreTerminal*() {.noconv.} =
     stdout.write "\x1b[?25h"   # show cursor
     stdout.write "\x1b[0m"     # reset attributes (colors, bold, dim, etc.)
     stdout.write "\x1b[?2004l" # disable bracketed paste
+    when defined(posix):
+      stdout.write kittyKeyboardOff
     stdout.flushFile()
   except CatchableError: discard
 
@@ -568,6 +584,7 @@ type
     escPutback*: int           ## byte stashed by `handleEscape` when an Alt chord's letter has no KEYMAP binding; drained by the readLine loop so it prints as normal input after the cancel.
     lastKeyName*: string      ## last dispatched key name (for double-press counting)
     keyCount*: int            ## consecutive presses of lastKeyName (0 after a different key)
+    chordBuf*: seq[string]    ## keys consumed so far by a chord in progress; empty when none is pending
     wizardMode*: bool         ## true while a modal provider wizard owns the editor; alters ctrl+c/ctrl+d/esc
     complPrefix*: string       ## original prefix before first completion
     complMatches*: seq[string] ## current match list
@@ -2141,6 +2158,7 @@ KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
 when defined(posix):
   KEYMAP["ctrl+z"]  = proc(ed: var LineEditor) =
     ed.write "\n\e[?2004l"
+    ed.write kittyKeyboardOff
     # The interactive app keeps the physical cursor hidden all session
     # (the caret is drawn in the editor rows); the suspended shell needs
     # a real one. Standalone callers never hid it, so they skip both.
@@ -2153,6 +2171,7 @@ when defined(posix):
     # after the shell's job-control output, not before the stop.
     requestBackground()
     ed.write "\e[?2004h"
+    ed.write kittyKeyboardOn
     if ed.painter != nil:
       ed.write "\x1b[?25l"
     ed.renderRow = 0
@@ -2170,6 +2189,11 @@ var ESCMAP* {.threadvar.}: seq[(string, int)]
   ## "esc" key binding: list of (command, times) for the bare ESC key.
 var KEYTIMES* {.threadvar.}: Table[string, int]
   ## key-name -> consecutive presses required (1 unless DoubleCtrlC etc.).
+var CHORDCMDS* {.threadvar.}: Table[seq[string], seq[string]]
+  ## chord (key names pressed in sequence) -> command names. Single-key
+  ## bindings live in DISPATCH; a key that starts a chord defers to the
+  ## chord and only runs its own DISPATCH commands while a selection
+  ## makes cut/copy meaningful (see dispatchKeyName).
 var cancelWatchSnapshot*: set[uint8] = {3'u8, 27'u8}
   ## Bytes the in-turn cancel watchers recognise. Updated by applyShortcuts
   ## so the watcher thread (which has empty thread-local DISPATCH) still
@@ -2256,12 +2280,14 @@ proc cmdTransposeChars(ed: var LineEditor) = ed.transposeChars()
 when defined(posix):
   proc cmdSuspend(ed: var LineEditor) =
     ed.write "\n\e[?2004l"
+    ed.write kittyKeyboardOff
     if ed.painter != nil:
       ed.write "\x1b[?25h"
     resetAttributes()
     stdout.flushFile()
     requestBackground()
     ed.write "\e[?2004h"
+    ed.write kittyKeyboardOn
     if ed.painter != nil:
       ed.write "\x1b[?25l"
     ed.renderRow = 0
@@ -2296,8 +2322,8 @@ var
     "suspend": "CtrlZ",
     "complete": "Tab",
     "reverse-complete": "ShiftTab",
-    "edit-in-editor": "AltE CtrlX CtrlE",
-    "insert-newline": "",
+    "edit-in-editor": "AltE CtrlX>CtrlE",
+    "insert-newline": "ShiftEnter AltEnter",
     "select-left": "ShiftLeft",
     "select-right": "ShiftRight",
     "select-up": "ShiftUp",
@@ -2360,7 +2386,17 @@ proc normalizeKeyToken(token: string): string =
   if t == "alth": return "alt+h"
   if t == "altd": return "alt+d"
   if t == "altw": return "alt+w"
+  # Cmd/Super chords (kitty keyboard protocol `super`, the macOS
+  # Command key). Cmd+letter arrives as `CSI <code> ; 9 u`.
+  for l in 'a' .. 'z':
+    if t == "cmd" & l or t == "super" & l:
+      return "cmd+" & l
   if t == "shift-tab" or t == "shifttab": return "shift-tab"
+  if t == "shiftenter": return "shift+enter"
+  if t == "altenter": return "alt+enter"
+  if t == "ctrlenter": return "ctrl+enter"
+  if t == "ctrlbackspace": return "ctrl+backspace"
+  if t == "altbackspace": return "alt+backspace"
   if t == "shiftleft": return "shift+left"
   if t == "shiftright": return "shift+right"
   if t == "shiftup": return "shift+up"
@@ -2375,6 +2411,21 @@ proc normalizeKeyToken(token: string): string =
   if t == "ctrlhome": return "ctrl+home"
   if t == "ctrlend": return "ctrl+end"
   if t == "ctrldelete": return "ctrl+delete"
+  if t == "altleft": return "alt+left"
+  if t == "altright": return "alt+right"
+  if t == "altup": return "alt+up"
+  if t == "altdown": return "alt+down"
+  if t == "althome": return "alt+home"
+  if t == "altend": return "alt+end"
+  if t == "altdelete": return "alt+delete"
+  if t == "cmdleft" or t == "superleft": return "cmd+left"
+  if t == "cmdright" or t == "superright": return "cmd+right"
+  if t == "cmdup" or t == "superup": return "cmd+up"
+  if t == "cmddown" or t == "superdown": return "cmd+down"
+  if t == "cmdhome" or t == "superhome": return "cmd+home"
+  if t == "cmdend" or t == "superend": return "cmd+end"
+  if t == "cmddelete" or t == "superdelete": return "cmd+delete"
+  if t == "cmdbackspace" or t == "superbackspace": return "cmd+backspace"
   if t == "ctrlshiftleft": return "ctrl+shift+left"
   if t == "ctrlshiftright": return "ctrl+shift+right"
   if t == "ctrlshiftup": return "ctrl+shift+up"
@@ -2394,14 +2445,22 @@ proc normalizeKeyToken(token: string): string =
   raise newException(ValueError, token)
 
 proc parseShortcutSpec*(spec: string): seq[KeySpec] =
-  ## Parse a space-separated shortcut value into internal key specs.
-  ## Empty string returns an empty sequence (unbind). Unknown tokens
-  ## raise ValueError with the offending token.
+  ## Parse a space-separated shortcut value into internal key specs:
+  ## each token is one key (alternative binding), or a chord of keys
+  ## joined by `>` (kitty-style, as in `CtrlX>CtrlE`) that must be
+  ## pressed in sequence. Empty string returns an empty sequence
+  ## (unbind). Unknown tokens raise ValueError with the offending token.
   if spec.strip.len == 0: return
   for token in strutils.splitWhitespace(spec):
     let double = token.toLowerAscii.startsWith("double")
-    let keyName = normalizeKeyToken(token)
-    result.add (seqKey: keyName, times: if double: 2 else: 1)
+    var keys: seq[string] = @[]
+    for part in token.split('>'):
+      if part.len == 0:
+        raise newException(ValueError, token)
+      keys.add normalizeKeyToken(part)
+    if double and keys.len > 1:
+      raise newException(ValueError, token)
+    result.add (keys: keys, times: if double: 2 else: 1)
 
 proc defaultBindings*(): Table[string, string] = DefaultShortcuts
 
@@ -2417,25 +2476,33 @@ proc applyShortcuts*(shortcuts: Table[string, string]) =
       merged[cmd] = spec
   DISPATCH = CritBitTree[seq[string]]()
   KEYTIMES = initTable[string, int]()
+  CHORDCMDS = initTable[seq[string], seq[string]]()
   for cmd, spec in merged:
     for ks in parseShortcutSpec(spec):
-      if DISPATCH.hasKey(ks.seqKey):
-        var cmds = DISPATCH[ks.seqKey]
+      if ks.keys.len > 1:
+        if not CHORDCMDS.hasKey(ks.keys):
+          CHORDCMDS[ks.keys] = @[cmd]
+        elif cmd notin CHORDCMDS[ks.keys]:
+          CHORDCMDS[ks.keys].add(cmd)
+        continue
+      let keyName = ks.keys[0]
+      if DISPATCH.hasKey(keyName):
+        var cmds = DISPATCH[keyName]
         if cmd notin cmds: cmds.add(cmd)
-        DISPATCH[ks.seqKey] = cmds
+        DISPATCH[keyName] = cmds
       else:
-        DISPATCH[ks.seqKey] = @[cmd]
-      KEYTIMES[ks.seqKey] = max(KEYTIMES.getOrDefault(ks.seqKey, 1), ks.times)
+        DISPATCH[keyName] = @[cmd]
+      KEYTIMES[keyName] = max(KEYTIMES.getOrDefault(keyName, 1), ks.times)
   # Build ESCMAP and SEQCMDS from DISPATCH.
   ESCMAP = @[]
   SEQCMDS = @[]
   var escTimes = 1
   if "cancel" in merged:
     for ks in parseShortcutSpec(merged["cancel"]):
-      if ks.seqKey == "esc": escTimes = max(escTimes, ks.times)
+      if ks.keys.len == 1 and ks.keys[0] == "esc": escTimes = max(escTimes, ks.times)
   if "clear" in merged:
     for ks in parseShortcutSpec(merged["clear"]):
-      if ks.seqKey == "esc": escTimes = max(escTimes, ks.times)
+      if ks.keys.len == 1 and ks.keys[0] == "esc": escTimes = max(escTimes, ks.times)
   for keyName, cmds in DISPATCH:
     if keyName == "esc":
       for cmd in cmds:
@@ -2504,24 +2571,11 @@ proc applyShortcuts*(shortcuts: Table[string, string]) =
     KEYMAP["cmd:" & cmd] = cb
   cancelWatchSnapshot = cancelWatchBytes()
 
-proc runCommandsForKey*(ed: var LineEditor, keyName: string): bool =
-  ## Run the commands bound to `keyName`. Returns true if at least one
-  ## command was dispatched. Raises InputCancelled / EOFError as the
-  ## commands dictate.
-  if not DISPATCH.hasKey(keyName): return false
-  let cmds = DISPATCH[keyName]
-  # Consecutive-press requirement: DoubleCtrlC / DoubleESC set times=2.
-  let minTimes = KEYTIMES.getOrDefault(keyName, 1)
-  if ed.lastKeyName == keyName: inc ed.keyCount
-  else: ed.keyCount = 1
-  ed.lastKeyName = keyName
-  if ed.keyCount < minTimes:
-    # Swallow the pending press; repaint so the user sees feedback.
-    fullRedraw(ed)
-    return true
-  # Deterministic order: clear before cancel so a key bound to both
-  # (ESC and CtrlC by default) clears when the line has text and cancels
-  # when empty. A key bound only to cancel always cancels.
+proc runCommandList(ed: var LineEditor, cmds: seq[string]): bool =
+  ## Run an ordered command list. Deterministic order: clear before
+  ## cancel so a key bound to both (ESC and CtrlC by default) clears
+  ## when the line has text and cancels when empty; a key bound only to
+  ## cancel always cancels. Returns true if at least one command acted.
   var ordered: seq[string] = @[]
   if "clear" in cmds: ordered.add "clear"
   if "cancel" in cmds: ordered.add "cancel"
@@ -2542,6 +2596,75 @@ proc runCommandsForKey*(ed: var LineEditor, keyName: string): bool =
       if CommandProcsAll.hasKey(cmd):
         CommandProcsAll[cmd](ed); ran = true
   result = ran
+
+proc runCommandsForKey*(ed: var LineEditor, keyName: string): bool =
+  ## Run the commands bound to `keyName`. Returns true if at least one
+  ## command was dispatched. Raises InputCancelled / EOFError as the
+  ## commands dictate.
+  if not DISPATCH.hasKey(keyName): return false
+  let cmds = DISPATCH[keyName]
+  # Consecutive-press requirement: DoubleCtrlC / DoubleESC set times=2.
+  let minTimes = KEYTIMES.getOrDefault(keyName, 1)
+  if ed.lastKeyName == keyName: inc ed.keyCount
+  else: ed.keyCount = 1
+  ed.lastKeyName = keyName
+  if ed.keyCount < minTimes:
+    # Swallow the pending press; repaint so the user sees feedback.
+    fullRedraw(ed)
+    return true
+  result = runCommandList(ed, cmds)
+
+type
+  ChordState {.pure.} = enum csNone, csPrefix, csExact
+
+proc chordState(buf: seq[string]): ChordState =
+  ## Classify `buf` against CHORDCMDS: an exact chord, a proper prefix
+  ## of one (keep waiting), or no match (dead end). Exact wins over
+  ## prefix so `A>B` fires even when `A>B>C` also exists.
+  for chord in CHORDCMDS.keys:
+    if buf.len > chord.len: continue
+    if chord[0 ..< buf.len] == buf:
+      if buf.len == chord.len: return csExact
+      result = csPrefix
+
+proc chordStarts(name: string): bool =
+  for chord in CHORDCMDS.keys:
+    if chord[0] == name: return true
+  false
+
+proc dispatchKeyName*(ed: var LineEditor, name: string): bool =
+  ## Chord-aware dispatch door for a named key. A key that starts or
+  ## continues a chord is consumed by the chord state machine: its own
+  ## single-key commands are deferred (except cut/copy, which run while
+  ## a selection exists because they are meaningless after a chord
+  ## prefix). A completion that matches no chord is swallowed, like an
+  ## emacs prefix key. Returns true when the key was consumed by a
+  ## chord step or dispatched to commands.
+  if ed.chordBuf.len > 0:
+    ed.chordBuf.add name
+    case chordState(ed.chordBuf)
+    of csExact:
+      let cmds = CHORDCMDS[ed.chordBuf]
+      ed.chordBuf = @[]
+      ed.lastKeyName = ""
+      ed.keyCount = 1
+      result = runCommandList(ed, cmds)
+    of csPrefix:
+      result = true
+    of csNone:
+      ed.chordBuf = @[]
+      result = true
+    return result
+  if chordStarts(name):
+    if ed.hasSelection() and name in DISPATCH:
+      let cmds = DISPATCH[name]
+      if "cut" in cmds or "copy" in cmds:
+        return runCommandsForKey(ed, name)
+    ed.chordBuf = @[name]
+    ed.lastKeyName = ""
+    ed.keyCount = 1
+    return true
+  runCommandsForKey(ed, name)
 
 var configuredShortcuts*: Table[string, string]
   ## Command -> spec table set by config.nim after parsing the
@@ -2697,12 +2820,14 @@ proc initKeyTables*() =
   when defined(posix):
     KEYMAP["ctrl+z"]  = proc(ed: var LineEditor) =
       ed.write "\n\e[?2004l"
+      ed.write kittyKeyboardOff
       if ed.painter != nil:
         ed.write "\x1b[?25h"
       resetAttributes()
       stdout.flushFile()
       requestBackground()
       ed.write "\e[?2004h"
+      ed.write kittyKeyboardOn
       if ed.painter != nil:
         ed.write "\x1b[?25l"
       ed.renderRow = 0
@@ -2972,6 +3097,7 @@ proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): 
   result.contPrompt = "  "
   result.escPutback = -1
   result.selAnchor = -1
+  result.chordBuf = @[]
 
 proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   if ed.prefillText.len > 0:
@@ -2998,9 +3124,62 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.complMatches = @[]
   ed.complPrefix = ""
   ed.selAnchor = -1
+  ed.chordBuf = @[]
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0: ed.width = w
+
+proc modifiedKeyName(base: string; modParam: int): string =
+  ## CSI modifier parameter (1 + bitmask) -> key name for a nav/edit
+  ## key: 2 shift, 3 alt, 5 ctrl, 6 ctrl+shift, 9 cmd (super on macOS).
+  case modParam
+  of 2: "shift+" & base
+  of 3: "alt+" & base
+  of 5: "ctrl+" & base
+  of 6: "ctrl+shift+" & base
+  of 9: "cmd+" & base
+  else: ""
+
+proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
+  ## Decode a kitty keyboard protocol `CSI <key> ; <mods> u` report into
+  ## a key name and dispatch it. Modifier bits (param minus 1): 1 shift,
+  ## 2 alt, 4 ctrl, 8 super (the Command key on macOS). Plain Enter,
+  ## Tab, text, and plain arrows keep their legacy encodings under the
+  ## disambiguate flag, so they never arrive here.
+  if nums.len == 0: return
+  let key = nums[0]
+  let bits = (if nums.len > 1: nums[1] else: 1) - 1
+  if key == 27:
+    runEscCommands(ed)
+    return
+  if key == 13:
+    var name = ""
+    if (bits and 1) != 0: name = "shift+enter"
+    elif (bits and 2) != 0: name = "alt+enter"
+    elif (bits and 4) != 0: name = "ctrl+enter"
+    if name.len > 0:
+      discard dispatchKeyName(ed, name)
+    return
+  if key == 9:
+    discard dispatchKeyName(ed,
+      if (bits and 1) != 0: "shift-tab" else: "tab")
+    return
+  var base = ""
+  case key
+  of 2: base = "insert"
+  of 3: base = "delete"
+  of 7: base = "home"
+  of 8: base = "end"
+  of 127: base = "backspace"
+  of 97..122: base = $key.char  # shift is dropped: ctrl+shift+e == ctrl+e
+  else: return                  # F-keys, keypad, keypad-enter: nothing bound
+  var prefix = ""
+  if (bits and 4) != 0: prefix.add "ctrl+"
+  if (bits and 2) != 0: prefix.add "alt+"
+  if (bits and 8) != 0: prefix.add "cmd+"
+  if prefix.len == 0 and (bits and 1) != 0:
+    prefix = "shift+"          # shift+delete and friends
+  discard dispatchKeyName(ed, prefix & base)
 
 proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## Process a single escape sequence starting just after the leading
@@ -3011,6 +3190,11 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   if c1 == 27 and not ed.hasPendingEscapeTail():
     # Bare ESC: dispatch via configured ESCMAP instead of hardcoded
     # cancel.  If ESC is unbound, fall back to historical cancel.
+    # With a chord prefix pending, ESC abandons the chord instead of
+    # clearing the line.
+    if ed.chordBuf.len > 0:
+      ed.chordBuf = @[]
+      return false
     runEscCommands(ed)
     return false
 
@@ -3036,7 +3220,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   var s = @[c1.Key, c2.Key]
   for (seq, keyName) in SEQCMDS:
     if s == seq:
-      discard runCommandsForKey(ed, keyName)
+      discard dispatchKeyName(ed, keyName)
       return false
   when defined(windows):
     if c1 == 224 or c1 == 0:
@@ -3052,7 +3236,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
         of 83: "delete"
         else: ""
       if pairName.len > 0:
-        discard runCommandsForKey(ed, pairName)
+        discard dispatchKeyName(ed, pairName)
         return false
   if s == KEYSEQS["left"]:   ed.back();             return false
   if s == KEYSEQS["right"]:  ed.forward();          return false
@@ -3067,7 +3251,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   # extensions). Windows' 0/224 prefixes have no further structure.
   if c1 != 27: return false
   if c2 == 13:
-    ed.insertNewline()
+    discard dispatchKeyName(ed, "alt+enter")
     return false
   # Alt+<key> two-byte sequences: ESC followed by the key's byte.
   # A real Alt chord arrives as a burst so `hasPendingEscapeTail` saw
@@ -3082,11 +3266,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   if c2 == 8: altName = "alt+h"        # Ctrl+Alt+H = ESC + backspace byte
   elif c2 in 32..126 and c2 notin StructuralTail:
     altName = "alt+" & c2.char.toLowerAscii
-  if altName == "alt+e" and ed.editInEditor != nil:
-    ed.editInEditor(ed)
-    return false
-  if altName.len > 0 and DISPATCH.hasKey(altName):
-    discard runCommandsForKey(ed, altName)
+  if altName.len > 0 and dispatchKeyName(ed, altName):
     return false
   if altName.len > 0 and KEYMAP.hasKey(altName):
     KEYMAP[altName](ed)
@@ -3119,7 +3299,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
     s.add c3.Key
     for (seq, keyName) in SEQCMDS:
       if s == seq:
-        discard runCommandsForKey(ed, keyName)
+        discard dispatchKeyName(ed, keyName)
         return false
     if s == KEYSEQS["right"]:  ed.forward(); return false
     if s == KEYSEQS["left"]:   ed.back();    return false
@@ -3129,39 +3309,67 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
     if s == KEYSEQS["end"]:    ed.goToEnd();   return false
     if c3 == 90:
       # Shift+Tab: reverse completion
-      ed.reverseCompleteLine()
+      discard dispatchKeyName(ed, "shift-tab")
       return false
-    if c3 == 50 or c3 == 51:
-      let c4 = escCh()
-      if c4 < 0: return false
-      if c4 == 126 and c3 == 50:
-        KEYMAP["insert"](ed); return false
-      if c4 == 126 and c3 == 51:
-        ed.deleteNext(); return false
-      if c3 == 50 and c4 == 55:
-        # XMod: xterm modifyOtherKeys, ESC [ 27 ; <mod> ; <key> ~
-        let c5 = escCh()
-        if c5 == 59:
-          var modDigits = ""
-          var ch = escCh()
-          while ch >= 48 and ch <= 57:
-            modDigits.add ch.chr
-            ch = escCh()
-          if ch == 59:
-            var keyDigits = ""
-            ch = escCh()
-            while ch >= 48 and ch <= 57:
-              keyDigits.add ch.chr
-              ch = escCh()
-            if ch == 126 and keyDigits == "13" and modDigits == "2":
-              ed.insertNewline()
-              return false
+    if c3 in 48..57:
+      # Numeric CSI: `Pm ; Pm` parameters then a final byte. Legacy `~`
+      # keys, xterm modifyOtherKeys, bracketed paste, modified arrows,
+      # and kitty CSI u reports all share this shape, so parse the
+      # parameters once and dispatch on (params, final).
+      var nums: seq[int]
+      var n = 0
+      var haveNum = false
+      var ch = c3
+      while true:
+        if ch >= 48 and ch <= 57:
+          n = n * 10 + (ch - 48)
+          haveNum = true
+        elif ch == 59:
+          nums.add(if haveNum: n else: 1)
+          n = 0
+          haveNum = false
+        else:
+          break
+        ch = escCh()
+        if ch < 0: return false
+      if haveNum: nums.add n
+      let first = if nums.len > 0: nums[0] else: -1
+      case ch
+      of 117:
+        # kitty keyboard protocol: `CSI <key> ; <mods> u`
+        dispatchKittyKey(ed, nums)
         return false
-      if c3 == 50 and c4 == 48:
-        # bracketed paste start: ESC [ 200 ~
-        let c5 = escCh()
-        let c6 = escCh()
-        if c5 == 48 and c6 == 126:
+      of 65, 66, 67, 68, 72, 70:
+        # `CSI [1 ;] <mod> <dir>`: modified (or explicit-1 plain)
+        # arrows / home / end. The bare `CSI <dir>` forms already
+        # matched the plain KEYSEQS comparisons above.
+        let dirName =
+          case ch
+          of 65: "up"
+          of 66: "down"
+          of 67: "right"
+          of 68: "left"
+          of 72: "home"
+          else: "end"
+        if first == 1 and nums.len == 1:
+          discard dispatchKeyName(ed, dirName)
+          return false
+        if first == 1 and nums.len == 2:
+          let keyName = modifiedKeyName(dirName, nums[1])
+          if keyName.len > 0:
+            discard dispatchKeyName(ed, keyName)
+            return false
+          # Unbound modified key: fall back to the plain key's binding
+          # (a terminal that reports a modifier the user never asked for
+          # should not strand the arrow).
+          discard dispatchKeyName(ed, dirName)
+          return false
+        return false
+      of 126:
+        case first
+        of 200:
+          # bracketed paste start: ESC [ 200 ~
+          ed.chordBuf = @[]  # a paste abandons any pending chord prefix
           let paste = readBracketedPaste(ed)
           if paste.len > 0:
             if ed.hidechars:
@@ -3195,60 +3403,28 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
                   clean.add ch
                 prev = ch
               ed.insertText(clean)
+          return false
+        of 2:
+          discard dispatchKeyName(ed, "insert")
+        of 3:
+          # `CSI 3 ; <mod> ~`: (modified) delete
+          if nums.len == 2:
+            let keyName = modifiedKeyName("delete", nums[1])
+            if keyName.len > 0:
+              discard dispatchKeyName(ed, keyName)
+          else:
+            discard dispatchKeyName(ed, "delete")
+        of 27:
+          # xterm modifyOtherKeys: ESC [ 27 ; <mod> ; <key> ~
+          if nums.len == 3 and nums[2] == 13:
+            let keyName = modifiedKeyName("enter", nums[1])
+            if keyName.len > 0:
+              discard dispatchKeyName(ed, keyName)
+        else: discard  # page keys, F-keys: nothing bound
         return false
-      if c3 == 51 and c4 == 59:
-        # ESC [ 3 ; <mod> ~  (modified delete)
-        let modCh = escCh()
-        let final = escCh()
-        if final == 126:
-          let keyName =
-            if modCh == 53: "ctrl+delete"
-            elif modCh == 50: "shift+delete"
-            else: ""
-          if keyName.len > 0:
-            discard runCommandsForKey(ed, keyName)
-        return false
-    elif c3 == 49:
-      # ESC [ 1 ; <mod> <dir>  (modified arrows / home / end)
-      let c4 = escCh()
-      if c4 == 59:
-        let modifier = escCh()
-        let direction = escCh()
-        if direction in {65, 66, 67, 68, 72, 70}:
-          let dirName =
-            case direction
-            of 65: "up"
-            of 66: "down"
-            of 67: "right"
-            of 68: "left"
-            of 72: "home"
-            else: "end"
-          let keyName =
-            case modifier
-            of 50: "shift+" & dirName
-            of 53: "ctrl+" & dirName
-            of 54: "ctrl+shift+" & dirName
-            of 51: "alt+" & dirName
-            else: ""
-          if keyName.len > 0:
-            discard runCommandsForKey(ed, keyName)
-            return false
-          # Unbound modified key: fall back to the plain key's binding
-          # (a terminal that reports a modifier the user never asked for
-          # should not strand the arrow).
-          discard runCommandsForKey(ed, dirName)
-      elif c4 == 51:
-        # Kitty Shift+Enter: ESC [ 1 3 ; 2 u
-        let c5 = escCh()
-        if c5 == 59:
-          var modDigits = ""
-          var ch = escCh()
-          while ch >= 48 and ch <= 57:
-            modDigits.add ch.chr
-            ch = escCh()
-          if ch == 117 and modDigits == "2":
-            ed.insertNewline()
-      return false
+      else:
+        return false  # unknown CSI: swallow
+    return false
   return false
 
 proc readLineWith*(ed: var LineEditor, prompt: string,
@@ -3387,22 +3563,29 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         ed.echoRows = totalRows(ed.line.text, ed.promptW, ed.contPromptW,
                                 max(2, ed.width))
         suffixJustCleared = true
+      if ed.chordBuf.len > 0 and (c1 == 10 or c1 == 13 or c1 in PRINTABLE):
+        # Input that can never extend a chord (printables, Enter):
+        # abandon the pending prefix and swallow the key, the way an
+        # emacs prefix key behaves.
+        ed.chordBuf = @[]
+        continue
       if c1 == 8 or c1 == 127:
         # Backspace at the buffer's left edge has nothing to delete
         # backward, but the host may hold a queued line above it:
         # backspace joins the two (deleting the newline between them,
         # file-editing style). The hook prepends the queued text, drops
         # its rows, and repaints inside the keystroke's lock window.
-        if (ed.line.text.len == 0 or ed.line.position == 0) and
+        if ed.chordBuf.len == 0 and
+            (ed.line.text.len == 0 or ed.line.position == 0) and
             ed.onBackspaceAtJoin != nil and ed.onBackspaceAtJoin(ed):
           paintIfCleared(ed, suffixJustCleared)
           continue
-        if runCommandsForKey(ed, "backspace"):
+        if dispatchKeyName(ed, "backspace"):
           paintIfCleared(ed, suffixJustCleared)
           continue
         continue
       if c1 == 9:
-        if runCommandsForKey(ed, "tab"):
+        if dispatchKeyName(ed, "tab"):
           paintIfCleared(ed, suffixJustCleared)
           continue
         continue
@@ -3418,32 +3601,11 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         discard handleEscape(ed, c1)
         paintIfCleared(ed, suffixJustCleared)
         continue
-      if c1 == 24 and ed.hasSelection() and DISPATCH.hasKey("ctrl+x") and
-          "cut" in DISPATCH["ctrl+x"]:
-        # Ctrl+X with an active selection cuts it (the standard text
-        # widget contract). Without a selection Ctrl+X stays the emacs
-        # prefix below, so Ctrl+X Ctrl+E keeps working. Only the cut
-        # command runs: the key may also carry edit-in-editor's Ctrl+X
-        # prefix binding, and running that here would hand the buffer
-        # to $VISUAL on every cut.
-        if CommandProcsAll.hasKey("cut"):
-          CommandProcsAll["cut"](ed)
-        paintIfCleared(ed, suffixJustCleared)
-        continue
-      if c1 == 24 and ed.editInEditor != nil:
-        # Ctrl+X Ctrl+E (emacs edit-and-execute-command): read the second
-        # char; Ctrl+E opens the external editor, anything else is
-        # swallowed (Ctrl+X alone is a prefix, not an error).
-        let c2 = ed.getCh()
-        if c2 == 5:
-          ed.editInEditor(ed)
-        paintIfCleared(ed, suffixJustCleared)
-        continue
       if c1 in CTRL:
         let name =
           if c1 >= 0 and c1 <= 31: KEYNAMES[c1] else: ""
         if name.len > 0:
-          if runCommandsForKey(ed, name):
+          if dispatchKeyName(ed, name):
             paintIfCleared(ed, suffixJustCleared)
             continue
           if KEYMAP.hasKey(name):
@@ -3518,7 +3680,11 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       # flows through the same path as the rest of the editor
       # output.
       write("\x1b[?2004h")
+      write(kittyKeyboardOn)
     defer:
+      when defined(posix):
+        if haveOldMode:
+          write(kittyKeyboardOff)
       if haveOldMode:
         discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
       clearRawMode()
