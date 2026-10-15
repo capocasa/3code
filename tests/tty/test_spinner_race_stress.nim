@@ -208,3 +208,73 @@ suite "spinner runs through backoff while typing":
       tty.drain(1500, recordFrame = false)
       tty.expectAlive()
     echo "  PASS: buffered-cancel reset during live ticks did not crash"
+
+  test "no SIGSEGV on resize redraw while the bash viewport streams":
+    # The input thread's resize path (getCh raises IOError ->
+    # consumeResizePending -> fullRedraw -> diffEditorFrame ->
+    # paintVolatileRegion) iterates a by-value snapshot of
+    # `engine.toolViewportRows` under the terminal write lock while the
+    # controller streams tool-output lines into the frame model and the
+    # gui tick repaints the viewport composite. Any unlocked reassign of
+    # the engine's row seqs (or of strings aliased into them) races that
+    # iteration and frees rows mid-copy: SIGSEGV in vrText at
+    # paintVolatileRegion's `cur.add vrText(row)`. Drive the exact
+    # geometry: a real streaming bash viewport, free-running gui ticks,
+    # continuous typing, and a resize churn that fires the input
+    # thread's resize fullRedraw.
+    proc liveEnv(root, responsesPath: string): seq[EnvVar] =
+      # The real bash tool needs PATH; TERM makes the pty a normal xterm
+      # for the child's terminal-width probes.
+      stubEnv(root, responsesPath, guiLive = true) &
+        @[(key: "TERM", val: "xterm-256color"),
+          (key: "PATH", val: getEnv("PATH"))]
+
+    for iteration in 1 .. 6:
+      let root = newFixture("viewport_resize_" & $iteration)
+      writeConfiguredProvider(root)
+      let watchArgs = $ %*{"command": "for i in $(seq 1 140); " &
+        "do echo 'watch line ' $i ' of the stream, padded to wrap'; " &
+        "sleep 0.04; done"}
+      let responses = %*[
+        {"role": "assistant",
+         "content": "Running the watch.",
+         "tool_calls": [
+           {"id": "c_watch", "type": "function",
+            "function": {"name": "bash", "arguments": watchArgs}}],
+         "usage": {"promptTokens": 10, "completionTokens": 6,
+                   "totalTokens": 16, "cachedTokens": 0}},
+        {"role": "assistant", "content": "done",
+         "contentChunks": ["done"],
+         "usage": {"promptTokens": 40, "completionTokens": 4,
+                   "totalTokens": 44, "cachedTokens": 0}}]
+      writeFile(root / "run" / "stub_responses.json", $responses)
+      let tty = newTtySession(ensureStubBinary(),
+                              args = ["-x", "-i"],
+                              cwd = root / "run",
+                              env = liveEnv(root,
+                                            root / "run" / "stub_responses.json"),
+                              cols = 80, rows = 24)
+      defer:
+        tty.close()
+      tty.expect "\u276f"
+      tty.send "go"
+      tty.expect "go"
+      tty.send "\n"
+      # The tool viewport is live once its banner (the wrapped command)
+      # lands; the streamed lines scroll a tail window, so no specific
+      # line number is stable to wait for.
+      tty.expect "seq 1 140"
+      for burst in 1 .. 60:
+        rawSend(tty, "typing during the stream " & $burst)
+        tty.drain(20, recordFrame = false)
+        # Width churn fires SIGWINCH; every few bursts also change height
+        # so the row geometry (not just the wrap) shifts under the painter.
+        tty.resize(60 + 40 * (burst and 1),
+                   24 - 8 * ((burst div 3) and 1))
+        tty.drain(20, recordFrame = false)
+        if burst mod 10 == 0:
+          tty.expectAlive()
+      # The turn must finish and the child survive it.
+      tty.drain(3000, recordFrame = false)
+      tty.expectAlive()
+    echo "  PASS: resize churn during viewport stream did not crash"
