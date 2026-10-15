@@ -183,6 +183,9 @@ jobs:
             '    System.out.println("jvm-ok");' \
             '  }' \
             '}' > Hello.java
+          javac -version || fail "javac broken outside the sandbox"
+          "$BIN" sandbox --policy .sandbox restrict -- javac -version \
+            || fail "javac -version under the sandbox"
           "$BIN" sandbox --policy .sandbox restrict -- javac Hello.java \
             || fail "javac under the sandbox"
           out=$("$BIN" sandbox --policy .sandbox restrict -- java Hello) \
