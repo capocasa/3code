@@ -67,12 +67,53 @@ suite "util: visibleWidth":
 
 suite "util: wrapAnsi":
   test "wraps hyperlink by visible width, spans stay whole":
-    let lines = wrapAnsi(
-      "a \x1b]8;;https://foo/bar\x1b\\doc - https://foo/bar\x1b]8;;\x1b\\ b", 12)
-    check lines == @[
-      "a \x1b]8;;https://foo/bar\x1b\\doc -",
-      "https://foo/bar\x1b]8;;\x1b\\",
-      "b"]
+    # Golden-free invariants: every row fits the width (the terminal's
+    # autowrap is never the row breaker - see the #58 regression below),
+    # no OSC span is split across rows, and no visible byte is lost.
+    # A URL wider than the width has always broken mid-text at narrow
+    # widths; only the app breaks it now, not the terminal.
+    let s = "a \x1b]8;;https://foo/bar\x1b\\doc - https://foo/bar\x1b]8;;\x1b\\ b"
+    let lines = wrapAnsi(s, 12)
+    for l in lines:
+      check visibleWidth(l) <= 12
+    let denull = proc(x: string): string =
+      x.multiReplace(("\x1b]8;;https://foo/bar\x1b\\", ""),
+                     ("\x1b]8;;\x1b\\", ""))
+        .filterIt(it notin Whitespace).join("")
+    # Spaces legitimately move (word-boundary breaks drop one, mid-URL
+    # breaks add a row seam); visible characters must not be lost.
+    check lines.join("").denull() == s.denull()
+    check lines.join("").count("\x1b]8;;https://foo/bar\x1b\\") == 1
+    check lines.join("").count("\x1b]8;;\x1b\\") == 1
+
+  test "word wider than the width char-wraps, terminal never does":
+    # Regression (#58): an overlong word used to be emitted as one row
+    # wider than the terminal, leaving the terminal's autowrap to break
+    # it. The app's row model does not count that row, so every wide
+    # word drifted screen and model apart: tails erased, output visibly
+    # scrolling away mid-stream.
+    let lines = wrapAnsi("W".repeat(81), 78)
+    check lines == @["W".repeat(78), "W".repeat(3)]
+    for l in lines:
+      check visibleWidth(l) <= 78
+
+  test "overlong word between words keeps its tail joinable":
+    let lines = wrapAnsi("aaa " & "W".repeat(79) & " tail", 78)
+    check lines == @["aaa", "W".repeat(78), "W tail"]
+
+  test "word exactly the width stays one row":
+    check wrapAnsi("X".repeat(78), 78) == @["X".repeat(78)]
+
+  test "styled overlong word wraps without breaking the escape":
+    let w = "\x1b[97m" & "Y".repeat(80) & "\x1b[0m"
+    let lines = wrapAnsi(w, 78)
+    check lines.len == 2
+    check lines[0].startsWith("\x1b[97m")
+    check lines[1].endsWith("\x1b[0m")
+    for l in lines:
+      check visibleWidth(l) <= 78
+    check lines.join("").replace("\x1b[97m", "").replace("\x1b[0m", "") ==
+      "Y".repeat(80)
 
   test "wraps long line at word boundary":
     let lines = wrapAnsi("one two three four", 9)
