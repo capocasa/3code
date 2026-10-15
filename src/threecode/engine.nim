@@ -346,6 +346,20 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   let resized = e.lastPaintedWidth > 0 and width > 0 and
     width != e.lastPaintedWidth
 
+  # The row params arrive as uncounted borrows: every call site passes
+  # `e.liveContentRows` / `e.toolViewportRows` straight in, and the
+  # compiler ships a bitcopy of the (len, p) header without incref'ing
+  # the payload. The resize branch below DESTROYS those same fields,
+  # freeing the borrowed payload mid-proc — the `cur` loops then iterate
+  # freed memory (usually silently: freed blocks still hold the old
+  # strings until the allocator recycles them, and a streaming tool
+  # viewport recycles fast), and the tail assignments write the dangling
+  # pointer back into the engine, detonating on a later paint. That was
+  # the vrText SIGSEGV on resize churn during a live viewport stream.
+  # Materialize counted copies before anything destroys the fields.
+  let liveRows = @(newLiveRows)
+  let viewportRows = @(newViewportRows)
+
   # Physical caret row at entry: every paint parks the cursor at the
   # editor's caret (editor top + `renderRow`), the same invariant the
   # commit walk-ups (`walkUp`, `redrawBytes`) count from. `renderRow`
@@ -379,9 +393,9 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
       e.paintedPinnedRows.len +
       (if entryCaretRow >= 0: min(entryCaretRow, prevEdRows - 1)
        else: prevEdRows - 1)
-    let newAbove = newLiveRows.len + newViewportRows.len +
-      (if newLiveRows.len > 0 and newLiveGap: 1 else: 0) +
-      (if newViewportRows.len > 0 and newViewportGap: 1 else: 0) +
+    let newAbove = liveRows.len + viewportRows.len +
+      (if liveRows.len > 0 and newLiveGap: 1 else: 0) +
+      (if viewportRows.len > 0 and newViewportGap: 1 else: 0) +
       e.pinnedEchoBlockRows(width).len +
       (if edPtr != nil: sections.len - 1 + edPtr[].freshCaretRowAbove()
        else: sections.len)
@@ -450,13 +464,13 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   var prevH = physH
   # New block, top-down.
   var cur: seq[VolatileRow]
-  if newLiveRows.len > 0 and newLiveGap:
+  if liveRows.len > 0 and newLiveGap:
     cur.add vrText("")
-  for row in newLiveRows:
+  for row in liveRows:
     cur.add vrText(row)
-  if newViewportRows.len > 0 and newViewportGap:
+  if viewportRows.len > 0 and newViewportGap:
     cur.add vrText("")
-  for row in newViewportRows:
+  for row in viewportRows:
     cur.add vrText(row)
   # The pinned queue rides at the block's bottom, above the footer: new
   # live/viewport rows stack above it, so streaming growth never buries
@@ -661,9 +675,9 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   for i in max(0, footerTop) ..< min(barEnd, cur.len):
     e.lastVolatileRows.add (if cur[i].kind == vrkText: cur[i].text else: "")
   e.lastVolatileRows.add newEdModel
-  e.liveContentRows = newLiveRows
+  e.liveContentRows = liveRows
   e.liveContentHasGap = newLiveGap
-  e.toolViewportRows = newViewportRows
+  e.toolViewportRows = viewportRows
   e.toolViewportHasGap = newViewportGap
   e.toolViewportBannerRows = newViewportBannerRows
   e.paintedPinnedRows = newPinnedRows
