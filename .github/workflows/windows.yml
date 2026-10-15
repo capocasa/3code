@@ -115,6 +115,22 @@ jobs:
               echo "BUILD_FLAGS=--opt:none --debugger:native" >> "$GITHUB_ENV" ;;
           esac
 
+      - name: Fetch pinned cacert.pem
+        # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
+        # refresh must be a conscious bump, not silent drift. Serves two
+        # masters: embedded into the binary at compile time below
+        # (-d:embeddedCaCertPath), and staged into build/ plus
+        # SSL_CERT_FILE for the tty tests' local-TLS stub provider path
+        # (statically linked OpenSSL has no default cert store on stock
+        # Windows).
+        run: |
+          CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            https://curl.se/ca/cacert.pem -o cacert.pem
+          echo "${CACERT_SHA256}  cacert.pem" | sha256sum -c -
+          mkdir -p build && cp cacert.pem build/
+          echo "SSL_CERT_FILE=$PWD/cacert.pem" >> "$GITHUB_ENV"
+
       - name: Build
         run: |
           # Both Compute branches set BUILD_FLAGS; empty here means the
@@ -122,7 +138,7 @@ jobs:
           # without auto-update (issue #49).
           [ -n "${BUILD_FLAGS:-}" ] || {
             echo "BUILD_FLAGS empty" >&2; exit 1; }
-          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") nimble build -y -d:staticSsl ${{ env.BUILD_FLAGS }}
+          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") nimble build -y -d:staticSsl -d:embeddedCaCertPath=$(cygpath -m "$PWD/cacert.pem") ${{ env.BUILD_FLAGS }}
 
       - name: Generate nimble.paths for direct nim invocations
         # nim disables its pkgs2 package scan whenever a nimble.lock is
@@ -144,30 +160,16 @@ jobs:
           } > nimble.paths
           cat nimble.paths
 
-      - name: Stage cacert.pem for tests
-        # The statically linked OpenSSL has no default cert store on stock
-        # Windows, so the tty tests' local-TLS stub provider path needs
-        # SSL_CERT_FILE pointed at a bundle. Same pinned cacert.pem the
-        # package ships (curl.se, mutable URL: pinned by sha256 so an
-        # upstream refresh is a conscious bump, not silent drift).
-        run: |
-          CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
-          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-            https://curl.se/ca/cacert.pem -o cacert.pem
-          echo "${CACERT_SHA256}  cacert.pem" | sha256sum -c -
-          mkdir -p build && cp cacert.pem build/
-          echo "SSL_CERT_FILE=$PWD/cacert.pem" >> "$GITHUB_ENV"
-
       - name: Package (Windows) - single exe, no DLLs
-        # OpenSSL is compiled into 3code.exe (static archives from the
-        # fetch_openssl.sh step), so the zip carries no libssl/libcrypto
-        # DLLs anymore; only the exe, docs, and the CA bundle ship.
+        # OpenSSL and the CA bundle are compiled into 3code.exe (static
+        # archives from fetch_openssl.sh, embedded cacert.pem), so the
+        # zip carries no libssl/libcrypto DLLs and no cert file; only
+        # the exe and docs ship.
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-windows-amd64
           cp 3code.exe 3code-windows-amd64/
           cp README.md LICENSE 3code-windows-amd64/
-          cp cacert.pem 3code-windows-amd64/
           # Capture the version from the staged binary so it can be checked
           # without running the binary on its target OS.
           ./3code-windows-amd64/3code.exe -v > 3code-windows-amd64/VERSION
