@@ -84,15 +84,17 @@ jobs:
           # perl (msys2 ships neither until installed; pacman itself is
           # not on the inherited PATH, only at its absolute location),
           # with the pinned mingw after it: msys2 has no gcc, so Configure
-          # still compiles with nim's toolchain. gpg is pointed at
-          # git-bash's via the GPG env override (msys2's gpg --import
-          # exits 2 without a word). pacman's install-info hook can exit
-          # 2 on a fresh prefix, so its exit is not trusted; the
-          # command -v checks gate the tools the script needs.
+          # still compiles with nim's toolchain. gpgv is pointed at
+          # git-bash's via the GPGV env override (both local gpg
+          # --import paths are unusable: msys2's exits 2 silently,
+          # git-bash's hangs under msys2 bash). pacman's install-info
+          # hook can exit 2 on a fresh prefix, so its exit is not
+          # trusted; the command -v checks gate the tools the script
+          # needs.
           /c/msys64/usr/bin/bash -c "
             set -x
             export PATH='/c/msys64/usr/bin:$MINGW_BIN:'\$PATH
-            export GPG='/c/Program Files/Git/usr/bin/gpg'
+            export GPGV='/c/Program Files/Git/usr/bin/gpgv'
             pacman -Sy --noconfirm perl make || true
             command -v perl make
             bash -x tests/tools/fetch_openssl.sh 3.5 mingw64"
