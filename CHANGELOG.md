@@ -2,6 +2,52 @@ Changelog
 
 Unreleased
 
+- **Own your line breaks; wrap in-app, not by terminal luck (#58).**
+  3code no longer relies on the terminal's autowrap to fit its output:
+  overlong words are character-wrapped by 3code itself, so a frame
+  renders identically on terminals whose wrap semantics disagree with
+  the app's model. And a single newline in model output is now a line
+  break, not a paragraph: consecutive lines stay consecutive instead of
+  collapsing into one wrapped blob.
+- **`:resume` swaps sessions without a restart (#62).** `--resume`/`-r`
+  takes its value attached, `=`/`:`-separated, or space-separated
+  (`3code -r abc123`, `-rabc123`, `-r=abc123`), and every other
+  value-taking option (`-m`, `-c`, ...) accepts the same forms - before,
+  a `-mVAL` cluster died as `unknown option: -V...`. From inside a
+  running 3code, `:resume` lists this directory's sessions and
+  `:resume abc123` moves the running REPL onto that session; state,
+  locks, and profile move with it (the scrollback is not replayed,
+  scroll up or `:show` for old turns).
+- **Truncated tool output keeps a linked full copy (#64).** When a tool
+  call's output is elided, the full text is dumped to
+  `$TMPDIR/3code_out_<pid>/T<N>.log` and the elision row both names the
+  dump file and is a terminal hyperlink (OSC 8) to it, so link-capable
+  terminals open it in the `file:` handler (e.g. `$VISUAL`) on a click.
+  `:show N` prints the whole capture; diffs are painted green/red and
+  clipped the same linked way rather than flooding the screen. Failed
+  tools mark their banner, so a red `Ø`/`✕` scan finds where a turn
+  went wrong without reading anything.
+- **`:!` streams through the live bash viewport.** A `:!` command's
+  output streams into the viewport while it runs and folds into the
+  scrollback when it ends, through the same sandbox policy and executor
+  as model-run commands; the model never sees it. The fenced-network
+  docs now state the fence honestly: it is REST over HTTP(S) only -
+  `ping` (ICMP) and `host`/`dig` (own DNS) ignore the proxy vars and
+  fail, because the fenced namespace has no route off the machine.
+- **`javac` compiles under the macOS seatbelt by default (#66).** JDK
+  homes under your home (`~/Library/Java`, `~/.jdks`,
+  `~/.sdkman/candidates`) are read-only inside the fence, and the JVM's
+  own startup needs (a `kern.grade_cputype` sysctl the kernel classifies
+  as a write, plus opendirectoryd user lookups) ride the sandbox
+  profile, so Java builds need no policy edits. Token-bearing files stay
+  fenced. Sandwall is pinned at 0.5.10.
+- **Packaging: OpenSSL static-linked at 3.5-LTS on mac/win.** The
+  bundled dylibs/DLLs are gone; release builds link OpenSSL statically
+  (with the CA bundle still shipped), and CI builds it from source on
+  both platforms (fetch script under `tests/tools/`).
+- **Small edges:** tab completion appends a space after a unique command
+  so arguments can be typed without a manual separator; `/help` works
+  as a synonym for `:help`.
 - **Sandbox `ask`: one-key approval for the gray zone.** `:sandbox ask
   P` denies exactly like `:sandbox deny P`, but when a sandboxed bash
   command is blocked on an ask-protected path, 3code puts one question
