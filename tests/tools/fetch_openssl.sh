@@ -64,6 +64,7 @@ if [ ! -f version ]; then
   printf '%s\n' "$have" | grep -qix "$release_fp" \
     || { echo "openssl release key fingerprint mismatch" >&2; exit 1; }
   "$gpg" --verify "openssl-$ver.tar.gz.asc" "openssl-$ver.tar.gz"
+  echo "fetch_openssl: $ver signature verified $(date +%T)" >&2
 
   tar -xzf "openssl-$ver.tar.gz"
   cd ..
@@ -102,8 +103,11 @@ if [ ! -f "$target/lib/libssl.a" ]; then
   # Invoked through `perl` (not the shebang) so the PATH fix above holds.
   perl ../../src/openssl-$ver/Configure "$conf" no-shared no-tests no-docs \
     --prefix="$here/$root/$target" --libdir=lib
+  echo "fetch_openssl: Configure done, make starting $(date +%T)" >&2
   make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+  echo "fetch_openssl: make done $(date +%T)" >&2
   make install_sw
+  echo "fetch_openssl: install_sw done $(date +%T)" >&2
 fi
 
 echo "openssl $ver static libs: $root/$target/lib"
