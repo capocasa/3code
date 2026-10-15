@@ -217,6 +217,17 @@ proc requireRowBelow(s: TtySession; above, below: string) =
     ("expected " & below & " (row " & $belowRow & ") below " & above &
       " (row " & $aboveRow & ")\n") & s.dumpFramesAround(below)
 
+proc requireRowWithOneBlankBetween(s: TtySession; above, below: string) =
+  ## Assert `below` renders exactly one blank row below `above`: the
+  ## one-newline separator every scrollback item (queued prompts included)
+  ## must carry, never zero, never two.
+  let aboveRow = s.rowContaining(above)
+  let belowRow = s.rowContaining(below)
+  doAssert aboveRow >= 0 and belowRow == aboveRow + 2,
+    ("expected " & below & " (row " & $belowRow & ") exactly one blank " &
+      "below " & above & " (row " & $aboveRow & ")\n") &
+      s.dumpFramesAround(below)
+
 proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   # Drain until the child goes quiet so the checked frame is the settled
   # repaint, not a transient mid-paint state captured between two sync
@@ -388,9 +399,9 @@ suite "terminal visual contract":
     tty.send ":provider add\n"
     tty.drain 50
     # Mutating/modal commands are no longer refused mid-turn: they queue
-    # with the hourglass exactly like a prompt and the drain runs them
-    # once the turn yields.
-    tty.expectInHistory "⧖ :provider add"
+    # with the prompt marker plus trailing hourglass exactly like a
+    # prompt, and the drain runs them once the turn yields.
+    tty.expectInHistory "❯ :provider add ⧖"
     tty.continueStubApi()
     tty.expectInHistory "Active command turn complete."
     # The queued wizard runs at the next opportunity; cancel it.
@@ -2402,11 +2413,12 @@ max-tokens = "8192"
     tty.requireVisibleEditorCaret("queued line two")
     tty.send "\n"
     tty.drain 50
-    # The queue-time echo is committed immediately: an hourglass prompt
-    # item in scrollback, editor cleared for the next line, caret drawn on
-    # the empty prompt row.
-    tty.expectInHistory "⧖ queued line one"
-    tty.expectInHistory "  queued line two"
+    # The queue-time echo paints immediately: a prompt item with the
+    # hourglass appended after the message's last row, pinned above the
+    # editor, which clears for the next line with the caret drawn on the
+    # empty prompt row.
+    tty.expectInHistory "❯ queued line one"
+    tty.expectInHistory "  queued line two ⧖"
     tty.advanceTicker()
     tty.requireVisibleEditorCaret("❯")
     tty.advanceTicker()
@@ -2415,7 +2427,8 @@ max-tokens = "8192"
     tty.expectInHistory "❯ first line"
     tty.expectInHistory "  second line"
     tty.expectInHistory "First multiline response."
-    tty.expectInHistory "⧖ queued line one"
+    # Sent means normal prompt in scrollback: the hourglass is gone.
+    tty.expectInHistory "❯ queued line one"
     tty.expectInHistory "  queued line two"
     tty.expectInHistory "Queued multiline response."
     # Each reply streamed exactly once (not duplicated, not dropped).
@@ -2490,43 +2503,66 @@ max-tokens = "8192"
       tty.expect "❯"
       tty.send "initial prompt\n"
       tty.expect "initial prompt"
-      # Turn is held open. Queue two prompts; each Enter commits an hourglass
-      # echo and leaves a fresh editor for the next line.
+      # Turn is held open. Queue two prompts; each Enter pins an echo and
+      # leaves a fresh editor for the next line. Each queued item keeps the
+      # ordinary prompt marker with the hourglass appended after the
+      # message, and carries the standard one-blank separator both before
+      # the first item and between items.
       tty.send "queued alpha\n"
       tty.expect "queued alpha"
       tty.requireVisibleEditorCaret("❯")
       tty.drain 50
+      tty.expect "❯ queued alpha ⧖"
+      tty.requireRowWithOneBlankBetween("❯ initial prompt", "❯ queued alpha ⧖")
       tty.send "queued beta\n"
       tty.expect "queued beta"
       tty.drain 50
+      tty.expect "❯ queued beta ⧖"
+      tty.requireRowWithOneBlankBetween("❯ queued alpha ⧖", "❯ queued beta ⧖")
       tty.advanceTicker()
       tty.continueStubApi()
 
       # The first reply commits while both prompts wait: it lands above
-      # both hourglass rows, which stay glued above the bar. The drain
-      # then sends alpha; its echo keeps its place (below the reply),
-      # while beta stays pinned through alpha's turn.
+      # both pinned rows, which stay glued above the bar. The drain
+      # then sends alpha; its echo keeps its place (below the reply) and
+      # drops the hourglass the moment it runs, while beta stays pinned
+      # through alpha's turn.
       tty.expect "First reply."
-      tty.expect "⧖ queued beta"
+      tty.expect "❯ queued beta ⧖"
       tty.drain 50
-      tty.requireRowBelow("First reply.", "⧖ queued alpha")
-      tty.requireRowBelow("⧖ queued alpha", "⧖ queued beta")
+      # (the reply's flush receipt row sits between reply and separator,
+      # so anchor the blank-count on the receipt; the drain may already
+      # have sent alpha, so match its row with or without the hourglass)
+      tty.requireRowWithOneBlankBetween("↑120  ↓24", "❯ queued alpha")
+      tty.requireRowWithOneBlankBetween("❯ queued alpha", "❯ queued beta")
       tty.continueStubApi()
 
       # Alpha's reply commits between alpha's echo and beta's still-pinned
-      # hourglass row: appends never bury the waiting queue.
+      # row: appends never bury the waiting queue.
       tty.expect "Reply to queued alpha."
       tty.drain 50
-      tty.requireRowBelow("⧖ queued alpha", "Reply to queued alpha.")
-      tty.requireRowBelow("Reply to queued alpha.", "⧖ queued beta")
+      tty.requireRowWithOneBlankBetween("❯ queued alpha", "Reply to queued alpha.")
+      tty.requireRowWithOneBlankBetween("↑150  ↓20", "❯ queued beta")
+      block sentDropsHourglass:
+        let alphaRow = tty.rowContaining("❯ queued alpha")
+        doAssert alphaRow >= 0 and "⧖" notin tty.rows()[alphaRow],
+          "sent queued prompt kept its hourglass: '" &
+          tty.rows()[alphaRow] & "'\n" & tty.dumpFramesAround("queued alpha")
       tty.continueStubApi()
 
       tty.expectInHistory "❯ initial prompt"
       tty.expectInHistory "First reply."
-      tty.expectInHistory "⧖ queued alpha"
       tty.expectInHistory "Reply to queued alpha."
-      tty.expectInHistory "⧖ queued beta"
       tty.expectInHistory "Reply to queued beta."
+      # Everything has drained: sent items are ordinary prompts, so no
+      # hourglass may remain anywhere on the live screen.
+      tty.expect "Reply to queued beta."
+      tty.drain 50
+      block noHourglassLeft:
+        for row in tty.rows():
+          doAssert "⧖" notin row,
+            "hourglass survived the drain: '" & row & "'\n" &
+            tty.dumpFramesAround("queued")
 
   test "mutating command queued mid-turn runs at the next opportunity":
     # `:sandbox allow ./foo` used to be refused outright mid-turn ("cannot
@@ -2571,15 +2607,16 @@ max-tokens = "8192"
     tty.send "start turn\n"
     tty.expect "start turn"
     tty.drain 50
-    # Turn is held open: the command queues with the hourglass, no denial.
+    # Turn is held open: the command queues like a prompt (ordinary
+    # prompt marker, hourglass appended), no denial.
     tty.send ":sandbox allow ./foo\n"
     tty.drain 50
-    tty.expectInHistory "⧖ :sandbox allow ./foo"
+    tty.expectInHistory "❯ :sandbox allow ./foo ⧖"
     tty.expectNeverInHistory "cannot run"
     # A prompt queued behind it sends only after the command ran.
     tty.send "next prompt\n"
     tty.drain 50
-    tty.expectInHistory "⧖ next prompt"
+    tty.expectInHistory "❯ next prompt ⧖"
     tty.advanceTicker()
     tty.continueStubApi()
 
@@ -2641,7 +2678,7 @@ max-tokens = "8192"
     tty.expect "hello world"
     tty.send "\n"
     tty.drain 50
-    tty.expectInHistory "⧖ hello world"
+    tty.expectInHistory "❯ hello world ⧖"
     tty.send "\x7f"           # backspace on empty buffer: pop the queue
     tty.expect "hello world"  # text is back in the editor
     tty.requireVisibleEditorCaret("hello world")
@@ -2649,7 +2686,7 @@ max-tokens = "8192"
     # pre-pop frame stays in the captured history, so assert on the
     # live screen, not on historyText).
     tty.drain 50
-    doAssert tty.rowContaining("⧖ hello world") < 0,
+    doAssert tty.rowContaining("❯ hello world ⧖") < 0,
       "popped echo still on screen\n" & tty.dumpFramesAround("hello world")
     tty.send "\x7f"           # ordinary backspace: delete the 'd'
     tty.send " edited"         # buffer now reads "hello worl edited"
@@ -2661,14 +2698,18 @@ max-tokens = "8192"
     tty.continueStubApi()
 
     tty.expectInHistory "❯ start turn"
-    tty.expectInHistory "⧖ hello worl edited"
     tty.expectInHistory "Reply to edited prompt."
-    # The send itself commits no second echo: the hourglass item is the
-    # prompt's only row on the final screen.
+    # The send adds no second row: the queue-time item is the prompt's
+    # only row on the final screen, now committed as an ordinary prompt.
     tty.drain 100
-    doAssert tty.rowContaining("❯ hello") < 0,
-      "second echo committed at send time\n" & tty.dumpFramesAround("hello")
-    doAssert tty.rowContaining("⧖ hello world") < 0,
+    block singleEcho:
+      var hits = 0
+      for row in tty.rows():
+        if "hello worl edited" in row: inc hits
+      doAssert hits == 1,
+        "queued item echoed more than once at send time\n" &
+        tty.dumpFramesAround("hello")
+    doAssert tty.rowContaining("❯ hello world ⧖") < 0,
       "popped echo resurrected\n" & tty.dumpFramesAround("hello")
 
   test "backspace at the start of a draft prepends the last queued prompt":
@@ -2723,7 +2764,7 @@ max-tokens = "8192"
       tty.expect "hello world"
       tty.send "\n"
       tty.drain 50
-      tty.expectInHistory "⧖ hello world"
+      tty.expectInHistory "❯ hello world ⧖"
       tty.send " and more"          # new draft, caret at its end
       tty.expect " and more"
       tty.send "\x1b[H"            # Home: caret to position 0
@@ -2735,7 +2776,7 @@ max-tokens = "8192"
       doAssert tty.frames[^1].drawnCaretCol(tty.frames[^1].cursorRow) == 13,
         "caret not at the join\n" & tty.dumpFramesAround("hello world")
       # The popped item's hourglass rows left the screen with it.
-      doAssert tty.rowContaining("⧖ hello world") < 0,
+      doAssert tty.rowContaining("❯ hello world ⧖") < 0,
         "popped echo still on screen\n" & tty.dumpFramesAround("hello world")
       tty.send "\n"                # queue the joined text again
       tty.drain 50
@@ -2743,11 +2784,15 @@ max-tokens = "8192"
       tty.continueStubApi()
 
       tty.expectInHistory "❯ start turn"
-      tty.expectInHistory "⧖ hello world and more"
       tty.expectInHistory "Reply to joined prompt."
       tty.drain 100
-      doAssert tty.rowContaining("❯ hello") < 0,
-        "second echo committed at send time\n" & tty.dumpFramesAround("hello")
+      block singleEcho:
+        var hits = 0
+        for row in tty.rows():
+          if "hello world and more" in row: inc hits
+        doAssert hits == 1,
+          "queued item echoed more than once at send time\n" &
+          tty.dumpFramesAround("hello")
 
   test "queued prompt typed during a turn keeps the line on a multi-row footer":
     # Regression: editing a queued mid-turn prompt. On a narrow terminal the
@@ -2808,7 +2853,7 @@ max-tokens = "8192"
     tty.continueStubApi()
     # The queue drains after the turn: "hello" sends and its reply lands,
     # with the draft still sitting in the editor.
-    tty.expectInHistory "⧖ hello"
+    tty.expectInHistory "❯ hello ⧖"
     tty.expectInHistory "Second reply."
     tty.requireVisibleEditorCaret("world")
 
@@ -2953,25 +2998,37 @@ max-tokens = "8192"
     # Mid-turn submit of the same wrapped command: it queues for the
     # next opportunity, and the queue-time echo commit must consume the
     # whole buffered editor block, leaving no `❯ :...` remnant on screen
-    # and a clean blank above the hourglass echo.
+    # (a stale editor head would duplicate the echo head row), a clean
+    # blank above the echo, and the hourglass at the echo block's end.
     tty.send "hold turn open\n"
     tty.drain(500) # stream held open: bar + buffered editor are live
     tty.send ":sandbox allow " & repeat('v', 120) & "\n"
     tty.drain(400)
     block:
       let rows = tty.rows()
-      var echoRow = -1
+      # The echo wraps at the space, so its head row is the bare
+      # `❯ :sandbox allow` with the v-filler on continuation rows below;
+      # a stale editor remnant instead carries v's on its own head row
+      # (the editor wraps the long word across full-width rows).
+      var echoHead = -1
+      var staleHeads = 0
+      var markerRows = 0
       for i, r in rows:
-        if r.startsWith("⧖ :sandbox allow"): echoRow = i
-      doAssert echoRow >= 1,
+        if r.startsWith("❯ :sandbox allow"): echoHead = i
+        if r.startsWith("❯ :sandbox allow v"): inc staleHeads
+        if r.endsWith("⧖"): inc markerRows
+      doAssert echoHead >= 1,
         "queue-time echo head row missing\n" &
         tty.dumpFramesAround(":sandbox allow")
-      for r in rows:
-        # 'v' filler only exists in the mid-turn command; the idle echo
-        # above (w's) is legitimate committed scrollback.
-        doAssert not r.startsWith("❯ :sandbox allow v"),
-          "stale command editor row lingered: '" & r & "'\n" &
-          tty.dumpFramesAround(":sandbox allow")
+      doAssert staleHeads == 0,
+        "stale command editor row lingered\n" &
+        tty.dumpFramesAround(":sandbox allow")
+      doAssert rows[echoHead - 1].strip.len == 0,
+        "row above the queue echo head is not the separator blank: '" &
+        rows[echoHead - 1] & "'\n" & tty.dumpFramesAround(":sandbox allow")
+      doAssert markerRows == 1,
+        "queued command echo must carry exactly one trailing hourglass\n" &
+        tty.dumpFramesAround(":sandbox allow")
     tty.continueStubApi()
     # The drain runs the queued command once the turn yields.
     tty.expectInHistory "sandbox updated: allow vvv"
@@ -3022,11 +3079,13 @@ max-tokens = "8192"
     tty.expect "❯"
     tty.send "start turn\n"
     tty.expect "start turn"
-    # Turn is held open. Queue a prompt and confirm the hourglass appears.
+    # Turn is held open. Queue a prompt and confirm the pinned item
+    # carries the prompt marker with the trailing hourglass.
     tty.send "queued prompt"
     tty.expect "queued prompt"
     tty.send "\n"
     tty.drain 50
+    tty.expectInHistory "❯ queued prompt ⧖"
     # Interrupt the current turn. The queued prompt must survive and be sent
     # as the next user turn, not dropped.
     tty.send "\x03"
@@ -3035,8 +3094,14 @@ max-tokens = "8192"
     tty.expectInHistory "❯ queued prompt"
     tty.expectInHistory "Reply to queued prompt."
     # The queued turn was sent exactly once: its reply reached scrollback
-    # once (not dropped by the cancel, not double-sent).
+    # once (not dropped by the cancel, not double-sent), and the sent
+    # prompt is an ordinary prompt item: the hourglass is gone for good.
     tty.expectCount("Reply to queued prompt.", 1, where = "screen")
+    tty.drain 50
+    for row in tty.rows():
+      doAssert "⧖" notin row,
+        "hourglass survived the send: '" & row & "'\n" &
+        tty.dumpFramesAround("queued prompt")
 
   test "bare escape during a queued mid-turn prompt sends the queue next":
     # Same contract as the Ctrl-C variant above, exercised with a bare Esc.
