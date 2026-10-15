@@ -18,7 +18,7 @@ suite "prompt cache stability":
     setCurrentDir(root)
     putEnv("XDG_CONFIG_HOME", root / "config")
     putEnv("XDG_DATA_HOME", root / "data")
-    experimentalEnabled = true
+    experimentalEnabled = false  # prompt overrides work in regular mode
     writeFile(root / ".3code" / "glm.txt", "Original {{credit}}\n{{skills}}")
     writeFile(root / ".3code" / "skills" / "first.md", "FIRST SKILL CONTENT")
     p = Profile(name: "zai.glm", model: "glm-5.3", family: "glm", version: "5", variant: "3")
