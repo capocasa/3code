@@ -202,7 +202,9 @@ jobs:
           # set, and setup-java's JDK lives under hostedtoolcache,
           # outside the baseline (/usr, /Library, ...); a dev mac with
           # java under /Library needs no grant.
-          printf 'readonly %s\n' "$JAVA_HOME" > .sandbox-java
+          # Bare `allow` = the project dir writable (the JVM needs cwd
+          # readable to bootstrap user.dir).
+          printf 'allow\nreadonly %s\n' "$JAVA_HOME" > .sandbox-java
           "$BIN" sandbox --policy .sandbox-java restrict -- javac Hello.java \
             || fail "javac under the sandbox"
           out=$("$BIN" sandbox --policy .sandbox-java restrict -- java Hello) \
