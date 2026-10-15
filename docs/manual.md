@@ -544,6 +544,22 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `select-all`, `select-buffer-start`, `select-buffer-end`, `cut`, `copy`,
 `paste`, `yank`, `transpose-chars`.
 
+Keys joined by `>` form a chord: pressed in sequence, they run the
+command once. The default `edit-in-editor` binding is exactly that:
+
+```
+[shortcuts]
+edit-in-editor = AltE CtrlX>CtrlE
+```
+
+Alt+E opens the editor directly, and so does Ctrl+X followed by Ctrl+E
+(the emacs `edit-and-execute-command` chord). While a chord is half
+pressed, the first key is reserved for the chord: its own single-key
+commands wait (Ctrl+X cuts only when a selection exists), a key that
+completes no chord is swallowed, and Esc abandons the chord without
+touching the line. A space still means alternatives, so `Home End`
+binds two keys, while `CtrlX>CtrlE` binds one chord.
+
 Key names look like `Ctrl+C`, `Alt+F`, `ShiftTab`, `Home`, `End`, `Up`,
 `Down`, `Left`, `Right`, `Backspace`, `Delete`, `Insert`, `Tab`, or `ESC`.
 Modified navigation keys take a prefix: `ShiftLeft`, `ShiftHome`,
