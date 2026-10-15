@@ -11,6 +11,13 @@ let resizer = block:
   elif findExe("convert").len > 0: "convert"
   else: ""
 
+proc genImage(spec, dest: string) =
+  # Fixture generator: the tool must actually run; a silent failure
+  # surfaces later as a misleading "dest does not exist" from
+  # encodeForVision, so fail here with the tool's own output.
+  let (outp, code) = execCmdEx(&"{resizer} {spec} {quoteShell(dest)}")
+  doAssert code == 0, resizer & " failed: " & outp
+
 suite "images: dimension sniffing":
   test "fixtures parse (png, jpeg, gif, webp)":
     check imageDimensions(Images / "tiny.png") == (16, 12)
@@ -41,7 +48,7 @@ suite "images: encodeForVision":
   test "fits 1280 box and budget":
     if not hasResizer: skip()
     let big = work / "big.png"
-    discard execCmdEx(&"{resizer} -size 2000x1200 gradient:red-blue {quoteShell(big)}")
+    genImage("-size 2000x1200 gradient:red-blue", big)
     let (info, err) = encodeForVision(big, work / "out", 1)
     check err == ""
     check info.format == "jpeg"
@@ -56,8 +63,7 @@ suite "images: encodeForVision":
     # Random noise defeats JPEG compression, forcing the quality/downscale
     # ladder to actually run.
     let noise = work / "noise.png"
-    discard execCmdEx(
-      &"{resizer} -size 1600x1200 xc:gray +noise Random {quoteShell(noise)}")
+    genImage("-size 1600x1200 xc:gray +noise Random", noise)
     let (info, err) = encodeForVision(noise, work / "out", 7)
     check err == ""
     check max(info.deliveredWidth, info.deliveredHeight) <= 1280
@@ -67,7 +73,7 @@ suite "images: encodeForVision":
   test "deterministic: same source, same flags, same bytes":
     if not hasResizer: skip()
     let big = work / "big.png"
-    discard execCmdEx(&"{resizer} -size 1800x900 gradient:green-blue {quoteShell(big)}")
+    genImage("-size 1800x900 gradient:green-blue", big)
     let (a, ea) = encodeForVision(big, work / "a", 3)
     let (b, eb) = encodeForVision(big, work / "b", 3)
     check ea == "" and eb == ""
@@ -77,7 +83,7 @@ suite "images: encodeForVision":
   test "fidelity delivers png":
     if not hasResizer: skip()
     let big = work / "big.png"
-    discard execCmdEx(&"{resizer} -size 2000x1200 gradient:red-blue {quoteShell(big)}")
+    genImage("-size 2000x1200 gradient:red-blue", big)
     let (info, err) = encodeForVision(big, work / "out", 2, fidelity = true)
     check err == ""
     check info.format == "png"
@@ -95,8 +101,7 @@ suite "images: no resizer installed":
     createDir(work)
     defer: removeDir(work)
     let big = work / "big.png"
-    discard execCmdEx(
-      &"{resizer} -size 1400x1400 xc:gray +noise Random {quoteShell(big)}")
+    genImage("-size 1400x1400 xc:gray +noise Random", big)
     let savedPath = getEnv("PATH")
     putEnv("PATH", "")
     defer: putEnv("PATH", savedPath)

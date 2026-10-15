@@ -309,11 +309,17 @@ suite "cli resume value forms":
   test "-m attached form reaches the wizard like -m VALUE":
     # No provider under the isolated config: both forms abort at the
     # first-run wizard with identical output; before the fix `-mVAL`
-    # died as "unknown option: -V...".
+    # died as "unknown option: -V...". Compare only the deterministic
+    # head: past the first cursor-hide escape the wizard races stdin
+    # EOF (prompt row vs `aborted`), a timing difference, not a parsing
+    # one.
+    proc head(o: string): string =
+      let i = o.find("\x1b[?25l")
+      if i >= 0: o[0 ..< i] else: o
     let expect = runIn("-m zai.glm-5.3").o
     let r = runIn("-mzai.glm-5.3")
     check r.code == 3
-    check r.o == expect
+    check head(r.o) == head(expect)
 
 suite "cli --config switch":
   # -c/--config redirects the config file. The observable used here: a

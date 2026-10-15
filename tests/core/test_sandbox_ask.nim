@@ -103,9 +103,11 @@ suite "ask rule root":
     defer: removeDir(base)
     withPolicy(proj):
       check sandbox.askRuleRoot(proj / "vault" / "k.txt") ==
-        (proj / "vault")
-      # relative form resolves the same
-      check sandbox.askRuleRoot("vault/sub/deep.txt") == proj / "vault"
+        expandFilename(proj / "vault")
+      # relative form resolves the same (expandFilename: macOS temp dirs
+      # live behind a /var -> /private/var symlink the rule walk resolves)
+      check sandbox.askRuleRoot("vault/sub/deep.txt") ==
+        expandFilename(proj / "vault")
 
 suite "grant":
   test "grant appends allow to the active file and flips the gate":
