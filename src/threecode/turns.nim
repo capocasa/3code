@@ -1572,8 +1572,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # running without feedback, note it in the receipt, retry at the
         # next boundary. goal.md is untouched, so the goal is still on.
         debugOut "goal check failed: " & check.err
+        # First line only: an ApiError msg can span lines, a receipt is one.
+        let why = check.err.strip.splitLines[0]
         commitTranscriptBytes(
-          receiptBytes("goal check unavailable, retrying next turn"), true)
+          receiptBytes(
+            (if why.len > 0: "goal check unavailable (" & why & ")"
+             else: "goal check unavailable") & ", retrying next turn"),
+          true)
       elif check.verdict.kind == gvkSatisfied:
         if completeGoal():
           session.goalNotified = false
