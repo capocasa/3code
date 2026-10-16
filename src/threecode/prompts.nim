@@ -3693,10 +3693,15 @@ commands:
   :private allow X    trust provider X (optionally one model: allow X M) with
                       private data; persists as [params] allow-private
   :goal               show the active goal (goal.md in this directory)
-  :goal TEXT          write goal.md and arm goal mode: a read-only verifier
-                      keeps the session on the goal until it is satisfied
-                      (file retired to goal-confirmed.md)
-  :goal! TEXT         replace an active goal
+  :goal TEXT          write goal.md and immediately start working toward
+                      it: a read-only verifier keeps the session on the
+                      goal until it is satisfied (file retired to
+                      goal-confirmed.md)
+  :goal new TEXT      same, but bawks when a goal is already active
+  :goal edit          revise goal.md in $VISUAL/$EDITOR (changed text
+                      restarts goal work immediately)
+  :goal cancel        cancel the active goal (same as :goal!)
+  :goal! TEXT         replace an active goal and restart toward it
   :goal!              cancel the active goal (retires to goal-cancelled.md;
                       interrupt only skips one satisfaction check)
   :prompt             show the active system prompt

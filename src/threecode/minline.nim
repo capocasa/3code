@@ -66,6 +66,7 @@ const ShortcutNames* = [
   "suspend",
   "complete",
   "reverse-complete",
+  "retry-request",
   "edit-in-editor",
   "insert-newline",
   "select-left",
@@ -550,6 +551,11 @@ type
     editInEditor*: proc(ed: var LineEditor) {.closure.}
       ## Invoked on Alt+E / Ctrl+X Ctrl+E when set; the callback owns
       ## terminal suspend/restore and buffer replacement.
+    onRetryRequest*: proc() {.closure, gcsafe.}
+      ## Invoked on Ctrl+R when set: the host decides by turn state what a
+      ## retry means (cancel and resend a data-less in-flight request,
+      ## skip a retry backoff, ignore at idle). Nil in standalone use, so
+      ## the key falls through to the unbound-key no-op.
     redrawWrappedExternally*: bool
     submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
     renderSuffix*: string ## Transient suffix rendered after the buffer, not part of submitted text.
@@ -2255,6 +2261,9 @@ proc cmdComplete(ed: var LineEditor) =
 proc cmdReverseComplete(ed: var LineEditor) = ed.reverseCompleteLine()
 proc cmdEditInEditor(ed: var LineEditor) =
   if ed.editInEditor != nil: ed.editInEditor(ed)
+
+proc cmdRetryRequest(ed: var LineEditor) =
+  if ed.onRetryRequest != nil: ed.onRetryRequest()
 proc cmdSelectLeft(ed: var LineEditor) = ed.selectLeft()
 proc cmdSelectRight(ed: var LineEditor) = ed.selectRight()
 proc cmdSelectUp(ed: var LineEditor) = ed.selectUp()
@@ -2322,6 +2331,7 @@ var
     "suspend": "CtrlZ",
     "complete": "Tab",
     "reverse-complete": "ShiftTab",
+    "retry-request": "CtrlR",
     "edit-in-editor": "AltE CtrlX>CtrlE",
     "insert-newline": "ShiftEnter AltEnter",
     "select-left": "ShiftLeft",
@@ -2373,6 +2383,7 @@ proc normalizeKeyToken(token: string): string =
   if t == "ctrlm": return "ctrl+m"
   if t == "ctrln": return "ctrl+n"
   if t == "ctrlp": return "ctrl+p"
+  if t == "ctrlr": return "ctrl+r"
   if t == "ctrlu": return "ctrl+u"
   if t == "ctrlv": return "ctrl+v"
   if t == "ctrlw": return "ctrl+w"
@@ -2539,6 +2550,7 @@ proc applyShortcuts*(shortcuts: Table[string, string]) =
     CommandProcs["clear-screen"] = cmdClearScreen
     CommandProcs["complete"] = cmdComplete
     CommandProcs["reverse-complete"] = cmdReverseComplete
+    CommandProcs["retry-request"] = cmdRetryRequest
     CommandProcs["edit-in-editor"] = cmdEditInEditor
     CommandProcs["insert-newline"] = proc(ed: var LineEditor) =
       ed.insertNewline()

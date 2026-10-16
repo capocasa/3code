@@ -331,6 +331,12 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         if isInterrupted():
           hookRetryWaitClear()
           raise newException(ApiError, "interrupted by user during retry backoff")
+        if isRetryNow():
+          # Ctrl+R: retry now. Same contract as the real callModel — the
+          # level inc below runs exactly as after a full wait, so the
+          # backoff times for later failures are kept.
+          clearRetryNow()
+          break
         let step = min(100, waitMs)
         sleep(step)
         waitMs -= step

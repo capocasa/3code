@@ -214,6 +214,12 @@ type
       ## never dials (connection cache reuse, a transport retry that stays on
       ## the old socket) can pass its deadline and exit instead of blocking
       ## forever: the joinThread-after-it hang (1442s CI kill).
+    served*: Atomic[int]
+      ## Connections fully served. Incremented by the retry-now serve
+      ## variants so a test can prove a Ctrl+R did (or did not) resend.
+    secondResponse*: string
+      ## Second connection's body (the retry-now variants); `response` is
+      ## always the first connection's.
     done*: Atomic[bool]
       ## Flipped by the test right before joinThread. Only serveRetryable
       ## reads it: it re-checks the flag on every 200ms accept wake so a
@@ -269,6 +275,7 @@ proc newSseServer(response: string): SseServer =
   result.socket.listen()
   result.socket.setSocketTimeoutMs(200)
   result.done.store(false, moRelaxed)
+  result.served.store(0, moRelaxed)
   let (_, p) = result.socket.getLocalAddr()
   result.port = p
 
@@ -503,6 +510,113 @@ suite "streaming SSE tool-call accumulation":
     check body.hasKey("tool_stream")
     check body{"tool_stream"}.getBool == true
 
+
+proc serveTwoDelayedFirst(server: SseServer) {.thread.} =
+  ## Two sequential connections: the first holds the response head for
+  ## 2400ms (a request that shipped nothing), the second answers
+  ## immediately. A Ctrl+R press that lands inside the delay aborts the
+  ## first attempt; the resend takes the second connection.
+  const delayMs = 2400
+  for round in 0 ..< 2:
+    var client: Socket
+    if not server.acceptWithinDeadline(client): return
+    let contentLength = client.readRequestHead()
+    if round == 0: sleep(delayMs)
+    let body = if round == 0: server.response else: server.secondResponse
+    let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+    try:
+      client.send(resp)
+      let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
+      client.send(chunk)
+      client.send("0\r\n\r\n")
+      client.drainRequestBody(contentLength)
+      server.served.store(round + 1, moRelease)
+    except CatchableError:
+      discard  # the aborted first client: expected on a Ctrl+R resend
+    client.close()
+
+proc serveContentPauseContent(server: SseServer) {.thread.} =
+  ## One connection: head + a first content delta, a 1500ms pause, then
+  ## the rest of the stream. Model data HAS shipped during the pause, so
+  ## a Ctrl+R press there must be ignored (retrying would duplicate
+  ## visible output): the stream continues on the same connection.
+  const pauseMs = 1500
+  var client: Socket
+  if not server.acceptWithinDeadline(client): return
+  let contentLength = client.readRequestHead()
+  let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+  try:
+    client.send(resp)
+    let first = toHex(server.response.len).toLowerAscii() & "\r\n" &
+      server.response & "\r\n"
+    client.send(first)
+    sleep(pauseMs)
+    let rest = toHex(server.secondResponse.len).toLowerAscii() & "\r\n" &
+      server.secondResponse & "\r\n"
+    client.send(rest)
+    client.send("0\r\n\r\n")
+    client.drainRequestBody(contentLength)
+    server.served.store(1, moRelease)
+  except CatchableError:
+    discard
+  client.close()
+
+suite "streaming SSE: ctrl-r retry (retry-now)":
+  # The streaming side of the Ctrl+R contract: a request that has shipped
+  # nothing (head still pending) is cancelled and resent; a request that
+  # has shipped model data ignores the press entirely.
+  proc retryAfter(ms: int) {.thread.} =
+    sleep ms
+    requestTurnRetry("test-timer")
+
+  test "press while only headers pending: cancel and resend":
+    let server = newSseServer(makeSseCompleteContent("FIRST_ATTEMPT", "id-cr1"))
+    server.secondResponse = makeSseCompleteContent("SECOND_ATTEMPT", "id-cr2")
+    var srv: Thread[SseServer]
+    createThread(srv, serveTwoDelayedFirst, server)
+    defer:
+      joinThread(srv)
+      server.socket.close()
+      closeCachedStreamConn()
+      clearRetryNow()
+    var timer: Thread[int]
+    createThread(timer, retryAfter, 800)
+    defer: joinThread(timer)
+    var usage = Usage()
+    let result = callModel(testProfile(server),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr() == "SECOND_ATTEMPT"
+    check server.served.load(moAcquire) == 2
+    check not isRetryNow()
+
+  test "press after content shipped: ignored, stream completes":
+    # The first chunk is ONLY a content delta — no finish_reason, no
+    # [DONE] — so the stream is genuinely incomplete when the press
+    # lands mid-pause.
+    let server = newSseServer(
+      "data: " & $(%*{"choices":[{"index":0,
+        "delta":{"content":"PART1_"}}],"id":"id-cr3"}) & "\n\n")
+    server.secondResponse =
+      "data: " & $(%*{"choices":[{"index":0,
+        "delta":{"content":"PART2_"},"finish_reason":"stop"}],
+        "id":"id-cr4"}) & "\n\n" & "data: [DONE]\n\n"
+    var srv: Thread[SseServer]
+    createThread(srv, serveContentPauseContent, server)
+    defer:
+      joinThread(srv)
+      server.socket.close()
+      closeCachedStreamConn()
+      clearRetryNow()
+    var timer: Thread[int]
+    createThread(timer, retryAfter, 700)
+    defer: joinThread(timer)
+    var usage = Usage()
+    let result = callModel(testProfile(server),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr() == "PART1_PART2_"
+    check server.served.load(moAcquire) == 1
 
 suite "streaming SSE: slow response head":
   # Regression: readResponseHead used the same QuietRecvWakeMs-bounded recv

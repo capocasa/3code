@@ -33,7 +33,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
                   auth_xai, auth_openai, auth_google, auth_anthropic,
-                  streamexec, cli, search, tabtitle, plugins]
+                  streamexec, cli, search, tabtitle, plugins, goal]
 import threecode/acp
 when not defined(android):
   import tinotify
@@ -782,6 +782,10 @@ proc main() =
                               clearEditor = true)
   )
 
+  proc runGoalKickoff(): bool
+    ## Forward: defined after runTurnWithSafetyNet, used by the command
+    ## paths below (runDeferredCommand, the idle loop).
+
   proc runDeferredCommand(cmd: string) =
     ## Execute one command deferred from mid-turn. Identical to the idle
     ## loop's command path except there is no prompt echo to commit: the
@@ -814,12 +818,15 @@ proc main() =
       if res.clearFooter:
         emitFatPromptEvent clearPendingHintEvent()
         emitFatPromptEvent clearBarEvent()
-    if res.body.len == 0:
-      return
-    commitTranscriptBytes(plainCommandBodyBytes(res.body),
-                          restoreEditor = true,
-                          beforeRepaint = clearSubmittedCommandFooter,
-                          reserveFooter = true)
+    if res.body.len > 0:
+      commitTranscriptBytes(plainCommandBodyBytes(res.body),
+                            restoreEditor = true,
+                            beforeRepaint = clearSubmittedCommandFooter,
+                            reserveFooter = true)
+    if res.startGoalTurn:
+      # A mid-turn :goal arm: goal achievement starts as soon as the
+      # turn has yielded (now).
+      discard runGoalKickoff()
 
   proc handleBufferedAfterTurn(): bool =
     ## Drain the queue in order once the turn yields: each queued prompt
@@ -907,6 +914,24 @@ proc main() =
       stderr.writeLine "3code: session saved at " & session.savePath &
         ". Please open an issue with the lines above."
       result = true
+
+  # The immediate start that follows arming `goal.md` (`:goal TEXT`,
+  # `:goal new`, `:goal edit`, `:goal! TEXT`): append the harness-autosent
+  # kickoff prompt, commit its receipt + `»` item, and run the turn now —
+  # goal achievement begins the moment the file is written, not at the
+  # next turn boundary. Returns true if a buffered quit/interrupt should
+  # end the session. No refreshSystemPrompt: the kickoff rides the
+  # existing system prompt exactly like the in-turn feedback
+  # continuation in turns.nim.
+  proc runGoalKickoff(): bool =
+    let goalText = readGoalText()
+    messages.add goalKickoffMessage(goalText)
+    saveSession(session, messages)
+    commitTranscriptBytes(
+      receiptBytes("auto: goal armed - starting toward " & GoalFileName), true)
+    commitTranscriptBytes(
+      formatItem(agentPromptItem(goalText.strip)), true)
+    runTurnWithSafetyNet()
 
   # Run a prompt that arrived on the command line (or was queued during
   # startup) through the exact same sequence as a typed submit in the
@@ -1049,6 +1074,9 @@ proc main() =
           reserveFooter = true,
           clearEditor = true)
         releaseIdleSubmittedInput()
+        if commandResult.startGoalTurn:
+          if runGoalKickoff():
+            break
         continue
       if prof.name == "":
         commitTranscriptBytes(

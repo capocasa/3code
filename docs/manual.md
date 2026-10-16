@@ -478,6 +478,7 @@ Useful input keys:
 | Ctrl+L | clear the screen |
 | Alt+E | edit the input buffer in $VISUAL/$EDITOR |
 | Ctrl+X Ctrl+E | same (emacs edit-and-execute-command) |
+| Ctrl+R | retry the in-flight request (ignored once output is streaming) |
 | Ctrl+C | clear current input; cancel the turn when it is empty |
 | Esc | same as Ctrl+C |
 | Ctrl+D | exit |
@@ -735,6 +736,11 @@ Even with patient retry off, 3code gives transient failures about a minute
 before returning to the interactive prompt. The setting is stored as
 `patient_retry` in `[settings]` ([settings in the
 reference](reference.html#settings)). Press Esc to cancel the wait.
+Press Ctrl+R to cut the wait short and retry now: the backoff schedule is
+kept as it was, so later failures back off exactly as they would have.
+Ctrl+R also cancels and resends a request that has not shipped any output
+yet (still connecting, or headers only); once model output is streaming,
+or at the idle prompt, it does nothing.
 A stream that stalls network-quiet or arrives truncated mid-response is
 detected and retried on its own, regardless of the setting.
 
@@ -1176,10 +1182,13 @@ satisfied, the agent is sent back in with the verifier's feedback. Satisfied,
 the harness renames the file to `goal-confirmed.md` (the record of the run)
 and idles.
 
-The file is the whole interface. Edit `goal.md` mid-run to steer (the next
-check reads it fresh), delete it to end goal mode silently, interrupt to
-pause. `:goal!` cancels the active goal, retiring the file to
-`goal-cancelled.md` (`:goal <text>` writes a new one, `:goal! <text>`
+The file is the whole interface. Edit `goal.md` mid-run to steer (`:goal
+edit` opens it in `$VISUAL/$EDITOR`; the next check reads it fresh), delete
+it to end goal mode silently, interrupt to pause. Arming starts work
+immediately: `:goal <text>` writes the file and sends the agent off in the
+same breath, no extra prompt needed. `:goal cancel` (or `:goal!`) cancels
+the active goal, retiring the file to `goal-cancelled.md` (`:goal new
+<text>` is the balking synonym that refuses a live goal, `:goal! <text>`
 replaces it, bare `:goal` shows it). A failing verifier call is retried at
 the next turn end; the harness does not give up on its own, but if it ever
 does the record lands in `goal-given-up.md`. Retired files accumulate
