@@ -1559,6 +1559,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         commitTranscriptBytes(
           receiptBytes("goal mode: " & GoalFileName &
             " detected (interrupt to pause, :goal! to cancel)"), true)
+      # Verifier steps land in scrollback as they happen: same commit
+      # path as the receipts around them, one dim indented tier below
+      # the agent's items so the check can never read as agent work.
+      goalStepHook = proc (step: GoalStep) =
+        commitTranscriptBytes(goalStepBytes(step), true)
+      defer: goalStepHook = nil
       let check = runGoalCheck(p, readGoalText(), buildGoalEvidence(messages))
       # The side call ran the bar/spinner hooks again; its usage is not
       # this turn's and must not leak into the next receipt.

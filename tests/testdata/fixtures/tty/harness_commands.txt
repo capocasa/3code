@@ -1,7 +1,9 @@
 ===== 571 =====
   :notify on|off    toggle turn-end desktop notification
-  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
-  :retry on|off     toggle patient retry of 429/5xx/network errors
+  :retry              retry now: cut a retry backoff or resend a data-less
+                      in-flight request (same as ctrl-r)
+  :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off       toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
@@ -41,8 +43,10 @@ input:
 ❯
 ===== 950 =====
   :notify on|off    toggle turn-end desktop notification
-  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
-  :retry on|off     toggle patient retry of 429/5xx/network errors
+  :retry              retry now: cut a retry backoff or resend a data-less
+                      in-flight request (same as ctrl-r)
+  :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off       toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
