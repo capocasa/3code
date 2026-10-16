@@ -13,13 +13,27 @@ import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
   auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins,
-  images
+  images, goal
 
-const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
+const CommandNames* = [":help", ":tokens", ":clear", ":goal", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
                       ":version", ":sandbox", ":sb", ":retry", ":private",
                       ":q", ":quit", ":exit"]
+
+proc canonicalCommandName*(name: string): tuple[canon, ambig: string] =
+  ## Vim-style name resolution: an exact match wins, otherwise the input
+  ## must be a prefix of exactly one known command (`:g` -> `:goal`, `:v`
+  ## -> `:version`). Unmatched input is returned unchanged (`ambig` lists
+  ## the candidates when more than one command matches).
+  if name.startsWith(":!") or name in CommandNames:
+    return (name, "")
+  var hits: seq[string]
+  for cand in CommandNames:
+    if cand.startsWith(name): hits.add cand
+  if hits.len == 1: return (hits[0], "")
+  if hits.len > 1: return (name, hits.join(" "))
+  (name, "")
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
                                 noHistory: bool): string {.closure.}
@@ -66,14 +80,22 @@ proc classifyCommand*(cmd: string): CommandKind =
   if c.len == 0 or c[0] != ':':
     return ckUnknown
   let sp = c.find({' ', '\t'})
-  let name = if sp < 0: c else: c[0 ..< sp]
+  var name = if sp < 0: c else: c[0 ..< sp]
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   let parts = arg.splitWhitespace()
   if name.startsWith(":!"):
     return ckMutating
-  case name
+  # A trailing `!` is the vim force marker (`:goal!`, `:q!`); commands
+  # without a force variant accept and ignore it.
+  if name.endsWith("!"): name = name[0 ..< ^1]
+  let (canon, ambig) = canonicalCommandName(name)
+  if ambig.len > 0:
+    return ckUnknown
+  case canon
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
+  of ":goal":
+    if parts.len == 0: ckSafeImmediate else: ckMutating
   of ":plugins":
     ckSafeImmediate
   of ":plugin":
@@ -1761,9 +1783,19 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   if c.len == 0 or c[0] != ':':
     return CommandResult(recognized: false)
   let sp = c.find({' ', '\t'})
-  let name = if sp < 0: c else: c[0 ..< sp]
+  var name = if sp < 0: c else: c[0 ..< sp]
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   let parts = arg.splitWhitespace()
+  # Same force-marker and prefix rules `classifyCommand` applies; the
+  # dispatcher needs the resolved name and the bang, not just a kind.
+  let forced = not name.startsWith(":!") and name.endsWith("!")
+  if forced: name = name[0 ..< ^1]
+  let (canon, ambig) = canonicalCommandName(name)
+  if ambig.len > 0:
+    return CommandResult(recognized: true, ok: false, name: "command",
+      body: cmdErrorS("ambiguous command: " & name & " is " & ambig &
+        "  (try :help)"), disposition: cdTranscriptResult)
+  name = canon
   let kind = classifyCommand(c)
   if kind == ckModal:
     stdout.write "\r\n"
@@ -1836,6 +1868,22 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         body.add toolResultBytes(akBash, output, code, session.toolLog.len)
         if code != 0:
           ok = false
+    of ":goal":
+      if parts.len == 0:
+        if goalModeActive():
+          resp readGoalText().strip
+        else:
+          ok = false
+          respErr "no goal active; arm one with :goal <text>"
+      else:
+        let (gok, gerr) = startGoal(arg, force = forced)
+        if not gok:
+          ok = false
+          respErr gerr
+        else:
+          resp (if forced: GoalFileName & " replaced"
+                else: GoalFileName & " written") &
+            "; goal mode arms at the end of the next turn"
     of ":help", ":?":
       body.add renderHelpS()
     of ":tokens":

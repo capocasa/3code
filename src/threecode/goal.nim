@@ -85,6 +85,23 @@ proc goalFeedbackMessage*(feedback: string): JsonNode =
        "\n\nAddress it and keep working toward the goal; the " &
        "satisfaction check runs again when this turn ends."}
 
+proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
+    err: string] =
+  ## The arming path behind `:goal`: write `goal.md` with the command-line
+  ## text. A live goal refuses without `force` (`:goal!` carries the same
+  ## force-past-the-guardrail meaning as `:q!`). The file is the whole
+  ## protocol, bare existence arms goal mode at the next turn boundary,
+  ## so there is nothing else to do here.
+  if text.strip.len == 0:
+    return (false, "usage: :goal <text>")
+  if goalModeActive(dir) and not force:
+    return (false, GoalFileName & " is already active; use :goal! to replace it")
+  try:
+    writeFile(dir / GoalFileName, text.strip & "\n")
+    (true, "")
+  except OSError, IOError:
+    (false, getCurrentExceptionMsg())
+
 proc completeGoal*(dir = "."): bool =
   ## The retirement path: `mv goal.md goal-completed.md`. On SATISFIED the
   ## completed file stays as the record; no session in this repo is in

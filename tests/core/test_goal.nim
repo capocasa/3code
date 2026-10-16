@@ -155,6 +155,33 @@ suite "goal mode":
     check "bash: ran tests" in p
     check GoalFileName in p
 
+suite "startGoal (the :goal writer)":
+  test "empty text is a usage error":
+    withGoalDir proc (dir: string) =
+      let r = startGoal("   ")
+      check not r.ok
+      check r.err.startsWith("usage")
+      check not fileExists(GoalFileName)
+
+  test "writes goal.md, text stripped and newline-terminated":
+    withGoalDir proc (dir: string) =
+      check startGoal("  make it so  ").ok
+      check readFile(GoalFileName) == "make it so\n"
+
+  test "refuses to clobber a live goal without force":
+    withGoalDir proc (dir: string) =
+      discard startGoal("first")
+      let r = startGoal("second")
+      check not r.ok
+      check ":goal!" in r.err
+      check readFile(GoalFileName).strip == "first"
+
+  test "force replaces the live goal":
+    withGoalDir proc (dir: string) =
+      discard startGoal("first")
+      check startGoal("second", force = true).ok
+      check readFile(GoalFileName).strip == "second"
+
 suite "goal check loop (canned verdicts, no provider)":
   let prof = Profile(name: "stub", family: "glm", model: "stub-model")
 

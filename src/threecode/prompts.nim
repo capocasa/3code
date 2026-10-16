@@ -3692,6 +3692,10 @@ commands:
   :private on|off     toggle private mode for this session (bar recolors)
   :private allow X    trust provider X (optionally one model: allow X M) with
                       private data; persists as [params] allow-private
+  :goal               show the active goal (goal.md in this directory)
+  :goal TEXT          write goal.md and arm goal mode: a read-only verifier
+                      keeps the session on the goal until it is satisfied
+  :goal! TEXT         replace an active goal
   :prompt             show the active system prompt
   :show [N]           show full output of tool call N (default: last)
   :log                list all tool calls this session
@@ -3721,6 +3725,8 @@ commands:
   :plugin             plugin subcommands: debug on|off toggles the
                       per-call plugin trace (calls, verdicts, mutation diffs)
   :q :quit            exit (also Ctrl-D)
+  (every command accepts its shortest unambiguous prefix: :g = :goal,
+  :mo = :model; a trailing ! is the force marker where one exists)
 
 input:
   single-line   just type and press Enter
