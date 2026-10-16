@@ -8,7 +8,7 @@
 import std/[os, unittest]
 import threecode/update
 when defined(live):
-  import std/osproc
+  import std/[osproc, strutils]
 
 suite "update: semver":
   test "greater patch":
