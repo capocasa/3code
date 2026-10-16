@@ -1558,7 +1558,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         session.goalNotified = true
         commitTranscriptBytes(
           receiptBytes("goal mode: " & GoalFileName &
-            " detected (interrupt to stop)"), true)
+            " detected (interrupt to pause, :goal! to cancel)"), true)
       let check = runGoalCheck(p, readGoalText(), buildGoalEvidence(messages))
       # The side call ran the bar/spinner hooks again; its usage is not
       # this turn's and must not leak into the next receipt.
@@ -1582,11 +1582,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       elif check.verdict.kind == gvkSatisfied:
         if completeGoal():
           session.goalNotified = false
-          commitTranscriptBytes(receiptBytes("goal complete"), true)
+          commitTranscriptBytes(
+            receiptBytes("goal confirmed (" & GoalFileName & " renamed to " &
+              GoalConfirmedName & ")"), true)
         else:
           commitTranscriptBytes(
             errLnS("goal satisfied but " & GoalFileName & " could not be " &
-              "renamed to " & GoalCompletedName), true)
+              "renamed to " & GoalConfirmedName), true)
       elif check.verdict.kind == gvkFeedback:
         commitTranscriptBytes(receiptBytes("goal check: feedback"), true)
         messages.add goalFeedbackMessage(check.verdict.feedback)

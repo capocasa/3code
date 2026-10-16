@@ -3695,7 +3695,10 @@ commands:
   :goal               show the active goal (goal.md in this directory)
   :goal TEXT          write goal.md and arm goal mode: a read-only verifier
                       keeps the session on the goal until it is satisfied
+                      (file retired to goal-confirmed.md)
   :goal! TEXT         replace an active goal
+  :goal!              cancel the active goal (retires to goal-cancelled.md;
+                      interrupt only skips one satisfaction check)
   :prompt             show the active system prompt
   :show [N]           show full output of tool call N (default: last)
   :log                list all tool calls this session

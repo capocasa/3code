@@ -1173,13 +1173,17 @@ side conversation with the same model, given the goal text and a summary of
 what the turn actually did (files, patches, commands — never the agent's own
 claims), verifies the repository itself and answers with a verdict. Not
 satisfied, the agent is sent back in with the verifier's feedback. Satisfied,
-the harness renames the file to `goal-completed.md` (the record of the run)
+the harness renames the file to `goal-confirmed.md` (the record of the run)
 and idles.
 
 The file is the whole interface. Edit `goal.md` mid-run to steer (the next
 check reads it fresh), delete it to end goal mode silently, interrupt to
-pause. `goal-completed.md` accumulation is harmless; delete or archive it
-whenever.
+pause. `:goal!` cancels the active goal, retiring the file to
+`goal-cancelled.md` (`:goal <text>` writes a new one, `:goal! <text>`
+replaces it, bare `:goal` shows it). A failing verifier call is retried at
+the next turn end; the harness does not give up on its own, but if it ever
+does the record lands in `goal-given-up.md`. Retired files accumulate
+harmlessly; delete or archive them whenever.
 
 ## No sub-agents
 

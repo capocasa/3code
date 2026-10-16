@@ -8,7 +8,8 @@
 ## model, fresh conversation, minimal preamble, read-only roster) judges
 ## the goal text against harness-built evidence from the just-finished
 ## turn. FEEDBACK sends the agent back in; SATISFIED renames the file to
-## `goal-completed.md` and the session idles normally. No session-start
+## `goal-confirmed.md` and the session idles normally. Bare `:goal!`
+## cancels into `goal-cancelled.md`. No session-start
 ## check, no per-tool-call checks, no system-prompt changes: the
 ## continuation message carries everything.
 ##
@@ -20,7 +21,11 @@ import types, util, prompts, api, actions
 
 const
   GoalFileName* = "goal.md"                 ## existence activates goal mode
-  GoalCompletedName* = "goal-completed.md"  ## the retired record
+  GoalConfirmedName* = "goal-confirmed.md"   ## the satisfied record
+  GoalCancelledName* = "goal-cancelled.md"  ## the user-cancelled record
+  GoalGivenUpName* = "goal-given-up.md"      ## reserved: nothing writes it
+                                             ## yet; a failing harness retries
+                                             ## instead of giving up
   MaxVerifierRounds* = 16   ## tool rounds before the side call gives up
   EvidenceCapBytes* = 6000  ## evidence summary ceiling
   EvidenceBriefCap* = 160   ## per-call argument digest ceiling
@@ -103,14 +108,26 @@ proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
     (false, getCurrentExceptionMsg())
 
 proc completeGoal*(dir = "."): bool =
-  ## The retirement path: `mv goal.md goal-completed.md`. On SATISFIED the
-  ## completed file stays as the record; no session in this repo is in
+  ## The retirement path: `mv goal.md goal-confirmed.md`. On SATISFIED the
+  ## confirmed file stays as the record; no session in this repo is in
   ## goal mode again unless a new `goal.md` appears.
   try:
-    moveFile(dir / GoalFileName, dir / GoalCompletedName)
+    moveFile(dir / GoalFileName, dir / GoalConfirmedName)
     true
   except OSError, IOError:
     false
+
+proc cancelGoal*(dir = "."): tuple[ok: bool, err: string] =
+  ## The user exit behind bare `:goal!`: `mv goal.md goal-cancelled.md`.
+  ## Interrupt only skips one satisfaction check; this ends goal mode,
+  ## keeping the text as the record.
+  if not goalModeActive(dir):
+    return (false, "no goal active")
+  try:
+    moveFile(dir / GoalFileName, dir / GoalCancelledName)
+    (true, "")
+  except OSError, IOError:
+    (false, getCurrentExceptionMsg())
 
 # ---------- evidence ----------
 

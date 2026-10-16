@@ -19,7 +19,7 @@ const CommandNames* = [":help", ":tokens", ":clear", ":goal", ":model", ":provid
                       ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
                       ":version", ":sandbox", ":sb", ":retry", ":private",
-                      ":q", ":quit", ":exit"]
+                      ":quit", ":exit"]
 
 proc canonicalCommandName*(name: string): tuple[canon, ambig: string] =
   ## Vim-style name resolution: an exact match wins, otherwise the input
@@ -85,9 +85,10 @@ proc classifyCommand*(cmd: string): CommandKind =
   let parts = arg.splitWhitespace()
   if name.startsWith(":!"):
     return ckMutating
-  # A trailing `!` is the vim force marker (`:goal!`, `:q!`); commands
+  # A trailing `!` is the vim force marker (`:goal!`); commands
   # without a force variant accept and ignore it.
-  if name.endsWith("!"): name = name[0 ..< ^1]
+  let forced = name.endsWith("!")
+  if forced: name = name[0 ..< ^1]
   let (canon, ambig) = canonicalCommandName(name)
   if ambig.len > 0:
     return ckUnknown
@@ -95,7 +96,9 @@ proc classifyCommand*(cmd: string): CommandKind =
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
   of ":goal":
-    if parts.len == 0: ckSafeImmediate else: ckMutating
+    # Bare `:goal` shows the goal; bare `:goal!` cancels (a rename), and
+    # any text arms or replaces (a write).
+    if parts.len == 0 and not forced: ckSafeImmediate else: ckMutating
   of ":plugins":
     ckSafeImmediate
   of ":plugin":
@@ -129,7 +132,7 @@ proc classifyCommand*(cmd: string): CommandKind =
     else: ckMutating
   of ":clear", ":resume", ":summarize":
     ckMutating
-  of ":quit", ":q", ":exit":
+  of ":quit", ":exit":
     ckQuit
   else:
     ckUnknown
@@ -1869,12 +1872,20 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         if code != 0:
           ok = false
     of ":goal":
-      if parts.len == 0:
+      if parts.len == 0 and not forced:
         if goalModeActive():
           resp readGoalText().strip
         else:
           ok = false
           respErr "no goal active; arm one with :goal <text>"
+      elif parts.len == 0:
+        let (cok, cerr) = cancelGoal()
+        if not cok:
+          ok = false
+          respErr cerr
+        else:
+          resp "goal cancelled (" & GoalFileName & " renamed to " &
+            GoalCancelledName & ")"
       else:
         let (gok, gerr) = startGoal(arg, force = forced)
         if not gok:

@@ -28,9 +28,10 @@ suite "goal mode":
       check goalModeActive()
       check readGoalText() == "# anything\n"
 
-  test "activation ignores goal-completed.md":
+  test "activation ignores retired goal files":
     withGoalDir proc (dir: string) =
-      writeFile(GoalCompletedName, "done\n")
+      for retired in [GoalConfirmedName, GoalCancelledName, GoalGivenUpName]:
+        writeFile(retired, "done\n")
       check not goalModeActive()
 
   test "verdict contract: final non-empty line decides":
@@ -58,12 +59,12 @@ suite "goal mode":
     check parseVerdict("VERDICT: FEEDBACK:  ").kind == gvkNone
     check parseVerdict("VERDICT: FEEDBACK:").kind == gvkNone
 
-  test "completion renames goal.md to goal-completed.md":
+  test "completion renames goal.md to goal-confirmed.md":
     withGoalDir proc (dir: string) =
       writeFile(GoalFileName, "the goal\n")
       check completeGoal()
       check not goalModeActive()
-      check readFile(GoalCompletedName) == "the goal\n"
+      check readFile(GoalConfirmedName) == "the goal\n"
       check not completeGoal()
 
   test "completion rename fails cleanly when goal.md is gone":
@@ -181,6 +182,21 @@ suite "startGoal (the :goal writer)":
       discard startGoal("first")
       check startGoal("second", force = true).ok
       check readFile(GoalFileName).strip == "second"
+
+suite "cancelGoal (the :goal! exit)":
+  test "cancel retires goal.md to goal-cancelled.md":
+    withGoalDir proc (dir: string) =
+      discard startGoal("doomed")
+      check cancelGoal().ok
+      check not goalModeActive()
+      check not fileExists(GoalFileName)
+      check readFile(GoalCancelledName).strip == "doomed"
+
+  test "cancel without a live goal is an error":
+    withGoalDir proc (dir: string) =
+      let r = cancelGoal()
+      check not r.ok
+      check r.err == "no goal active"
 
 suite "goal check loop (canned verdicts, no provider)":
   let prof = Profile(name: "stub", family: "glm", model: "stub-model")

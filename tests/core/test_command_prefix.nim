@@ -24,6 +24,8 @@ suite "command prefix resolution":
   test "canonical names: exact, prefix, ambiguous, unknown":
     check canonicalCommandName(":goal") == (":goal", "")
     check canonicalCommandName(":g") == (":goal", "")
+    # `:q` is :quit's own prefix, not a separate alias command.
+    check canonicalCommandName(":q") == (":quit", "")
     check canonicalCommandName(":qu") == (":quit", "")
     check canonicalCommandName(":se") == (":se", ":sessions :session")
     check canonicalCommandName(":compact") == (":compact", "")
@@ -64,6 +66,20 @@ suite "command prefix resolution":
       check replace.recognized and replace.ok
       check readFile(GoalFileName).strip == "second"
 
+  test "bare :goal! cancels the live goal":
+    withCommandDir:
+      discard handleCommandResult(":g doomed", messages, session, prof,
+                                  editor)
+      check classifyCommand(":g!") == ckMutating
+      let r = handleCommandResult(":g!", messages, session, prof, editor)
+      check r.recognized and r.ok
+      check GoalCancelledName in r.body
+      check not fileExists(GoalFileName)
+      check readFile(GoalCancelledName).strip == "doomed"
+      let none = handleCommandResult(":g!", messages, session, prof, editor)
+      check none.recognized and not none.ok
+      check "no goal active" in none.body
+
   test "bare :goal shows the live goal text":
     withCommandDir:
       discard handleCommandResult(":goal make it so", messages, session,
@@ -74,6 +90,7 @@ suite "command prefix resolution":
 
   test "other commands accept and ignore the bang":
     check classifyCommand(":q!") == ckQuit
+    check classifyCommand(":q") == ckQuit
     check classifyCommand(":sandbox!") == ckSafeImmediate
 
   test ":! keeps its special-case (no prefix or bang mangling)":
