@@ -1982,8 +1982,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
               else:
                 emitFatPromptEvent clearBarEvent()
                 emitFatPromptEvent setRestingLabelEvent("")
-              pluginOnSessionStart(session.savePath, session.cwd,
-                                   prof.name, prof.model, true, messages.len)
               resp "resumed " & sessionIdFromPath(session.savePath) &
                 " (" & $messages.len & " messages)"
     of ":summarize":
