@@ -322,8 +322,10 @@ jobs:
           cat > /tmp/mktar.py <<'PY'
           import gzip, os, sys, tarfile
           src, out, epoch = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          # flat archive: members at the root, no wrapper dir, so
+          # installers need no --strip-components
           names = sorted(
-              os.path.join(r, n).replace(os.sep, "/")
+              os.path.relpath(os.path.join(r, n), src).replace(os.sep, "/")
               for r, ds, fs in os.walk(src)
               for n in ds + fs)
           # GzipFile with filename='' and mtime=0: no name, no timestamp
@@ -331,12 +333,12 @@ jobs:
               gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz, \
               tarfile.open(fileobj=gz, mode="w") as t:
               for n in names:
-                  ti = t.gettarinfo(n)
+                  ti = t.gettarinfo(os.path.join(src, n), arcname=n)
                   ti.mtime = epoch
                   ti.uid = ti.gid = 0
                   ti.uname = ti.gname = ""
                   if ti.isfile():
-                      t.addfile(ti, open(n, "rb"))
+                      t.addfile(ti, open(os.path.join(src, n), "rb"))
                   else:
                       t.addfile(ti)
           PY
