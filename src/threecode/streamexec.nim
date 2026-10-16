@@ -462,6 +462,9 @@ when defined(posix):
   proc setToolStdinWatcherEnabled*(enabled: bool) {.gcsafe.} =
     toolStdinWatcherEnabled.store(enabled, moRelease)
 
+  proc toolStdinWatcherOn*(): bool {.gcsafe.} =
+    toolStdinWatcherEnabled.load(moAcquire)
+
   proc restoreToolCancelTermios() =
     if toolCancelOrigValid:
       discard tcSetAttr(0.cint, TCSANOW, addr toolCancelOrig)
@@ -609,6 +612,8 @@ else:
       discard terminateJobObject(toolJobHandle, 1'i32)
 
   proc setToolStdinWatcherEnabled*(enabled: bool) = discard
+
+  proc toolStdinWatcherOn*(): bool = false
 
   proc startToolCancelWatcher(pid: int) =
     # Arm the job for the freshly spawned tool process. The process handle

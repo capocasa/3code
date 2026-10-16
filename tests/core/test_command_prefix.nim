@@ -5,6 +5,7 @@
 ## ignore it (`:q!` quits like `:q`).
 import std/[json, os, strutils, tempfiles, unittest]
 import threecode/[minline, types, ui]
+import threecode/api except callModel
 import threecode/goal
 
 proc withCommandDir(body: proc ()) =
@@ -200,3 +201,26 @@ suite "goal command verbs":
         check not r.startGoalTurn
         check "unchanged" in r.body
         check readFile(GoalFileName).strip == "stable text"
+
+suite ":retry command":
+  var messages = %* []
+  var session = Session()
+  var prof = Profile()
+  var editor: LineEditor
+
+  test "bare :retry is the ctrl-r command form":
+    clearRetryNow()
+    check classifyCommand(":retry") == ckSafeImmediate
+    let r = handleCommandResult(":retry", messages, session, prof, editor)
+    check r.recognized and r.ok
+    check "ctrl-r" in r.body
+    check isRetryNow()
+    clearRetryNow()
+
+  test ":retry list still shows the patient-retry setting":
+    clearRetryNow()
+    let r = handleCommandResult(":retry list", messages, session, prof,
+                                editor)
+    check r.recognized and r.ok
+    check "patient retry" in r.body
+    check not isRetryNow()

@@ -3686,7 +3686,9 @@ commands:
   :notify on|off      toggle turn-end desktop notification
   :tab-title          show tab-title mode (on = 3 brand + spinner glyph in the tab)
   :tab-title on|off   toggle the terminal tab title
-  :retry              show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry              retry now: cut a retry backoff or resend a data-less
+                      in-flight request (same as ctrl-r)
+  :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :private            show private mode (off by default; on = allow-private only)
   :private on|off     toggle private mode for this session (bar recolors)

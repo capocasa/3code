@@ -20,7 +20,7 @@
 ## separate: its own message list, no session mutation, its own roster.
 
 import std/[json, os, strutils, tables]
-import types, util, prompts, api, actions
+import types, util, prompts, api, actions, streamexec
 
 const
   GoalFileName* = "goal.md"                 ## existence activates goal mode
@@ -48,6 +48,16 @@ type
     ok*: bool      ## the side call itself succeeded
     err*: string   ## failure reason when not ok
     verdict*: GoalVerdict
+
+  GoalStep* = object
+    ## One visible verifier step: a round of prose ("" when the round
+    ## went straight to tool calls), a tool call digest, or a roster
+    ## refusal (brief set, no output). Everything the side call does is
+    ## scrollback material - the check must never look silent.
+    prose*: string   ## verifier prose emitted this round
+    brief*: string   ## one-line call digest ("bash: nim r tests")
+    output*: string  ## result head for executed calls
+    code*: int       ## exit code for executed calls (-1 otherwise)
 
 const VerifierPreamble* = """You are verifying progress toward a goal. You get the goal text and
 an evidence summary of the agent's last turn: files written, patches
@@ -246,6 +256,38 @@ var goalCheckHook*: proc (p: Profile, goalText, evidence: string):
   ## of the wire. The verdict contract being a text line is what makes
   ## the loop testable without a provider.
 
+var goalStepHook*: proc (step: GoalStep) = nil
+  ## Scrollback seam: the interactive controller installs this to commit
+  ## verifier steps as they happen (dim, indented, clearly not the
+  ## agent's work). Nil in tests and headless use, so a step is data,
+  ## never a paint obligation.
+
+const
+  GoalStepHeadLines = 8   ## verifier-step result head: lines kept per call
+  GoalStepHeadBytes = 800  ## and the byte ceiling on the same head
+
+proc stepOutputHead*(res: string): string =
+  ## Compact-but-honest result head for a verifier step: the first lines
+  ## of the call's output, with an elision note when more followed. The
+  ## verifier's full output went to the model; scrollback keeps the head.
+  let all = res.splitLines
+  var lines: seq[string]
+  for i, line in all:
+    if i == all.len - 1 and line.len == 0: break  # trailing \n phantom
+    if lines.len >= GoalStepHeadLines: break
+    lines.add line
+  result = lines.join("\n")
+  if result.len > GoalStepHeadBytes:
+    result = utf8ByteCut(result, GoalStepHeadBytes)
+  let total = all.len - (if all.len > 0 and all[^1].len == 0: 1 else: 0)
+  if total > lines.len:
+    if result.len > 0: result.add "\n"
+    result.add "(… " & $(total - lines.len) & " more lines)"
+
+proc stepProse(text: string) =
+  if goalStepHook != nil and text.strip.len > 0:
+    goalStepHook(GoalStep(prose: text))
+
 proc runVerifierSideCall(p: Profile, goalText, evidence: string):
     tuple[ok: bool, text: string, err: string] =
   ## One-shot verifier: a fresh conversation (its own message list, the
@@ -254,6 +296,16 @@ proc runVerifierSideCall(p: Profile, goalText, evidence: string):
   ## `sideCallMode` so its prose never paints as a live reply.
   sideCallMode = true
   defer: sideCallMode = false
+  # The side call's bash rounds must not arm the tool stdin watcher: in
+  # an interactive session the editor owns stdin (the model-run tool path
+  # disables the watcher for exactly this reason), and an armed watcher
+  # flips fd 0 to nonblocking under the input thread's blocking read,
+  # then eats every keystroke that lands during the check - Ctrl-Z,
+  # Ctrl-R, typed-ahead text, all of it. Restore the ambient flag after:
+  # the value is process state owned by the tool-call path.
+  let watcherWasOn = toolStdinWatcherOn()
+  setToolStdinWatcherEnabled(false)
+  defer: setToolStdinWatcherEnabled(watcherWasOn)
   var convo = newJArray()
   convo.add %*{"role": "system", "content": VerifierPreamble}
   convo.add %*{"role": "user", "content": verifierPrompt(goalText, evidence)}
@@ -269,6 +321,7 @@ proc runVerifierSideCall(p: Profile, goalText, evidence: string):
       return (false, "", e.msg)
     lastPrompt = usage.promptTokens
     convo.add msg
+    stepProse(msg{"content"}.getStr(""))
     let tcs = msg{"tool_calls"}
     if tcs == nil or tcs.kind != JArray or tcs.len == 0:
       return (true, msg{"content"}.getStr(""), "")
@@ -281,6 +334,9 @@ proc runVerifierSideCall(p: Profile, goalText, evidence: string):
       let name = if lt > 0: rawName[0 ..< lt] else: rawName
       let argsStr = if fn != nil and fn.kind == JObject:
                       fn{"arguments"}.getStr("") else: ""
+      let args =
+        try: parseJson(if argsStr == "": "{}" else: argsStr)
+        except CatchableError: newJObject()
       if name notin ["bash", "shell", "read"]:
         # The roster is the lock: an unoffered tool name (training
         # leakage, a write attempt) is refused structurally, not by
@@ -288,13 +344,16 @@ proc runVerifierSideCall(p: Profile, goalText, evidence: string):
         convo.add %*{"role": "tool", "tool_call_id": id,
           "content": "ERROR: not in the verifier roster; use bash " &
             "(checks and search) or read."}
+        if goalStepHook != nil:
+          goalStepHook(GoalStep(brief: name & ": refused (not in the " &
+            "verifier roster)", code: -1))
         continue
-      let args =
-        try: parseJson(if argsStr == "": "{}" else: argsStr)
-        except CatchableError: newJObject()
       let act = if name == "read": readAction(args) else: bashAction(args)
-      let (outp, _, _) = runAction(act, cache)
+      let (outp, code, _) = runAction(act, cache)
       convo.add %*{"role": "tool", "tool_call_id": id, "content": outp}
+      if goalStepHook != nil:
+        goalStepHook(GoalStep(brief: briefFor(name, args),
+          output: stepOutputHead(outp), code: code))
   (false, "", "verifier exceeded " & $MaxVerifierRounds & " tool rounds")
 
 proc runGoalCheck*(p: Profile, goalText, evidence: string): GoalCheckResult =

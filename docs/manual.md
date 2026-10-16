@@ -727,10 +727,12 @@ Usage limit reached for the past 5 hours. (code 429). retry 42/64 in 2048s
 Use these commands to inspect or change the setting:
 
 ```
-:retry
+:retry list
 :retry off
 :retry on
 ```
+
+`:retry` with no argument is the command form of Ctrl+R: retry now.
 
 Even with patient retry off, 3code gives transient failures about a minute
 before returning to the interactive prompt. The setting is stored as
@@ -740,7 +742,8 @@ Press Ctrl+R to cut the wait short and retry now: the backoff schedule is
 kept as it was, so later failures back off exactly as they would have.
 Ctrl+R also cancels and resends a request that has not shipped any output
 yet (still connecting, or headers only); once model output is streaming,
-or at the idle prompt, it does nothing.
+or at the idle prompt, it does nothing. Bare `:retry` does the same
+thing from the command line.
 A stream that stalls network-quiet or arrives truncated mid-response is
 detected and retried on its own, regardless of the setting.
 
@@ -1180,7 +1183,10 @@ what the turn actually did (files, patches, commands — never the agent's own
 claims), verifies the repository itself and answers with a verdict. Not
 satisfied, the agent is sent back in with the verifier's feedback. Satisfied,
 the harness renames the file to `goal-confirmed.md` (the record of the run)
-and idles.
+and idles. The check shows its work as it goes: every verifier step (its
+prose, its reads and checks, each result head) lands in scrollback as a dim,
+indented `· verify` item, a visual tier clearly below the agent's own items.
+Nothing the harness runs is ever silent.
 
 The file is the whole interface. Edit `goal.md` mid-run to steer (`:goal
 edit` opens it in `$VISUAL/$EDITOR`; the next check reads it fresh), delete

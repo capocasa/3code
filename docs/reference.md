@@ -73,7 +73,8 @@ names, model names, and paths where supported.
 | `:streaming on/off` | toggle SSE streaming; off is the reliable fallback for flaky SSE |
 | `:notify` | show notify mode |
 | `:notify on/off` | toggle the desktop notification that fires when a turn ends |
-| `:retry` | show patient-retry mode |
+| `:retry` | retry now: cut a retry backoff or resend a data-less in-flight request (same as ctrl-r) |
+| `:retry list` | show patient-retry mode |
 | `:retry on/off` | toggle patient retry of 429/5xx/network errors |
 | `:private` | show private mode and trusted providers |
 | `:private on/off` | toggle private mode for this session (bar recolors) |

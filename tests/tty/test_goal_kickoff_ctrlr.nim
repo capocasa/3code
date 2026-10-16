@@ -143,3 +143,125 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     check fileExists(root / "run" / "goal-confirmed.md")
     check not fileExists(root / "run" / "goal.md")
     tty.expectAlive()
+
+  test "verifier steps land in scrollback; keys typed during the check survive":
+    let root = newFixture("goal_verify_steps")
+    writeConfiguredProvider(root)
+    # Round 1: the kickoff reply. Round 2: a fast verifier bash whose
+    # step row lands in scrollback immediately (ARMING). Round 3: a slow
+    # verifier bash; keystrokes typed right after ARMING land inside its
+    # run. Round 4: the satisfied verdict. Round 5: the reply to the
+    # user's next prompt, submitted AFTER the check: the text typed
+    # mid-check must still be in the editor, proving the side call's
+    # bash runs never ate the keys (the tool stdin watcher used to arm
+    # for them and swallow everything).
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "content": newJNull(),
+       "tool_calls": [{"id": "v1", "type": "function",
+         "function": {"name": "bash",
+           "arguments": "{\"command\":\"echo ARMING\"}"}}],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "content": newJNull(),
+       "tool_calls": [{"id": "v2", "type": "function",
+         "function": {"name": "bash",
+           "arguments": "{\"command\":\"sleep 3; echo VERIFY_RAN\"}"}}],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "checked the tree.\nVERDICT: SATISFIED",
+       "contentChunks": ["checked the tree.\nVERDICT: SATISFIED"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "NEXT_TURN_OK", "contentChunks": ["NEXT_TURN_OK"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}}
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send ":goal make the tree say VERIFY_RAN"
+    tty.send "\n"
+    tty.expectInHistory "starting toward it now"
+    tty.expectInHistory "GOAL_WORK_DONE"
+    # The receipt commits before the side call; the verifier's bash round
+    # is running by the moment it lands, so these keystrokes must ride
+    # out the whole check in the editor buffer.
+    tty.expectInHistory "goal mode: goal.md detected"
+    # ARMING's step row means the verifier's next bash is the sleep:
+    # keystrokes sent now are inside the watcher's old arming window.
+    tty.expectInHistory "ARMING"
+    # The tier marker itself: dim, indented `· verify`, never flush-left
+    # agent items.
+    tty.expectInHistory "· verify"
+    tty.send "SURVIVED_KEYS"
+    tty.drain(300)
+    # The check shows its work: each step row and its result head are in
+    # scrollback, dim and indented, before the verdict lands.
+    tty.expectInHistory "VERIFY_RAN"
+    tty.expectInHistory "goal confirmed"
+    check fileExists(root / "run" / "goal-confirmed.md")
+    check not fileExists(root / "run" / "goal.md")
+    # Submit the buffer that lived through the check: the echoed prompt
+    # only appears if every keystroke survived the side call's bash runs.
+    tty.send "\n"
+    tty.expectInHistory "SURVIVED_KEYS"
+    tty.expectInHistory "NEXT_TURN_OK"
+    tty.expectAlive()
+
+  test "ctrl-c during the verifier round interrupts the check, goal stays":
+    let root = newFixture("goal_verify_interrupt")
+    writeConfiguredProvider(root)
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "content": newJNull(),
+       "tool_calls": [{"id": "v1", "type": "function",
+         "function": {"name": "bash",
+           "arguments": "{\"command\":\"sleep 8\"}"}}],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "never reached\nVERDICT: SATISFIED",
+       "contentChunks": ["never reached\nVERDICT: SATISFIED"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}}
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send ":goal work toward it"
+    tty.send "\n"
+    tty.expectInHistory "GOAL_WORK_DONE"
+    tty.expectInHistory "goal mode: goal.md detected"
+    # Ctrl-C while the verifier's bash runs: with the watcher disarmed
+    # the key reaches the editor, interrupts the turn, kills the tool
+    # child, and skips the satisfaction check. goal.md survives.
+    tty.drain(400)
+    tty.send "\x03"
+    tty.expectInHistory "interrupted by user"
+    tty.drain(300)
+    check fileExists(root / "run" / "goal.md")
+    check not fileExists(root / "run" / "goal-confirmed.md")
+    tty.expectAlive()
