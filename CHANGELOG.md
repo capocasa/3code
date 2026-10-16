@@ -1,5 +1,55 @@
 Changelog
 
+0.8.4  macOS startup crash fixed (ad-hoc signing), OpenSSL static-linked
+       with the CA bundle embedded, javac compiles in the macOS sandbox,
+       output wraps in-app instead of relying on terminal luck, kitty
+       Cmd keys, :resume, linked full tool output, gemini-4-argon
+
+- **The macOS binary starts again (#50, #56).** Release binaries are
+  ad-hoc signed (`codesign --force --sign -`, every slice before
+  lipo); the unsigned x86_64 slice was the startup crash. OpenSSL is
+  now static-linked at 3.5-LTS on mac/win, the bundled dylibs/DLLs
+  are gone, and the CA bundle is embedded in the binary - nothing to
+  re-sign, nothing to mismatch with Homebrew.
+- **`javac` compiles under the macOS seatbelt by default (#66).** JDK
+  homes under your home (`~/Library/Java`, `~/.jdks`,
+  `~/.sdkman/candidates`) are read-only inside the fence, and the JVM's
+  own startup needs (a `kern.grade_cputype` sysctl the kernel classifies
+  as a write, plus opendirectoryd user lookups) ride the sandbox
+  profile, so Java builds need no policy edits. Token-bearing files
+  stay fenced.
+- **Own your line breaks; wrap in-app, not by terminal luck (#58).**
+  Overlong words are character-wrapped by 3code itself, so a frame
+  renders identically on terminals whose wrap semantics disagree with
+  the app's model, and a single newline in model output is a line
+  break, not a paragraph - the initial-setup output no longer scrolls
+  up and partly vanishes (kitty).
+- **Kitty-protocol keys for Mac keyboards (#61).** On kitty-protocol
+  terminals (kitty, Ghostty, iTerm2, WezTerm, foot) 3code enables the
+  protocol automatically: Cmd/Super chords (`CmdE`, `CmdLeft`,
+  `AltBackspace`, ...) become bindable keys for keyboards whose
+  Option key composes characters. Defaults stay Ctrl everywhere; the
+  manual ships the Mac block to paste. Shortcut values now mix plain
+  keys and `A>B` chords.
+- **`:resume` swaps sessions without a restart (#62).** `--resume`/`-r`
+  takes its value attached, `=`/`:`-separated, or space-separated
+  (`3code -r abc123`, `-rabc123`, `-r=abc123`), and every other
+  value-taking option accepts the same forms. `:resume` lists this
+  directory's sessions; `:resume abc123` moves the running REPL onto
+  that session (scrollback is not replayed, scroll up or `:show`).
+- **Truncated tool output keeps a linked full copy (#64).** The full
+  text is dumped to `$TMPDIR/3code_out_<pid>/T<N>.log` and the elision
+  row names the file and hyperlinks it (OSC 8); `:show N` prints the
+  whole capture.
+- **`:!` streams through the live bash viewport** instead of looking
+  hung: output appears while the command runs. The fenced-network
+  docs now state the fence honestly - REST over HTTP(S) only, `ping`
+  (ICMP) and `host`/`dig` (own DNS) ignore the proxy vars and fail.
+- **Fixed:** resize-paint use-after-free during a live viewport stream;
+  tab completion appends the space after a unique command; `/help`
+  works as a synonym for `:help`; gemini-4-argon joins the known-good
+  combos (google, openrouter, zen, nanogpt).
+
 0.8.3  flail guard cuts wedged thinking mid-stream and arms for every
        family, sandbox defaults keep git and toolchains working, oauth
        re-login, gpt-5.3-codex / 5.6 pro / haiku-5.5 rows, auto-update
