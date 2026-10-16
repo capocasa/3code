@@ -5,10 +5,8 @@
 ## extracts and exec's it in /tmp):
 ##   nim c -d:live -d:ssl -r tests/test_update.nim
 
-import std/[os, unittest]
+import std/[os, osproc, strutils, unittest]
 import threecode/update
-when defined(live):
-  import std/osproc
 
 suite "update: semver":
   test "greater patch":
@@ -54,6 +52,41 @@ suite "update: swapInstall skip list":
     check not fileExists(dst / "LICENSE")
     check not fileExists(dst / "VERSION")
     removeDir(src); removeDir(dst)
+
+when not defined(windows):
+  suite "update: flat release archive":
+    ## Release archives are flat since e938c59: members sit at the
+    ## archive root, no `3code-<platform>/` wrapper dir. The extractor
+    ## must locate the binary there and `swapInstall` must install from
+    ## the archive root. Members mirror the linux CI pack list.
+    test "extracts flat tarball, installs from archive root":
+      let tmp = getTempDir() / "3code-update-flat"
+      removeDir(tmp)
+      let stage = tmp / "stage"
+      let outDir = tmp / "out"
+      createDir(stage)
+      createDir(outDir)
+      writeFile(stage / "3code", "fake-flat-bin")
+      writeFile(stage / "VERSION", "0.8.5\n")
+      writeFile(stage / "BUILD_INFO", "build")
+      writeFile(stage / "LICENSE", "lic")
+      writeFile(stage / "README.md", "readme")
+      let tarball = tmp / "3code-linux-amd64.tar.gz"
+      let cmd = "tar -C " & stage.quoteShell & " -czf " & tarball.quoteShell &
+                " 3code VERSION BUILD_INFO LICENSE README.md"
+      check execCmdEx(cmd).exitCode == 0
+      let extractDir = tmp / "extract"
+      let srcDir = extractArchive(tarball, extractDir)
+      check srcDir == extractDir  # binary at the archive root, not nested
+      check fileExists(extractDir / "3code")
+      let dest = outDir / "3code"
+      check swapInstall(srcDir, dest)
+      check readFile(dest) == "fake-flat-bin"
+      check fpUserExec in getFilePermissions(dest)
+      check not fileExists(outDir / "README.md")
+      check not fileExists(outDir / "LICENSE")
+      check not fileExists(outDir / "VERSION")
+      removeDir(tmp)
 
 suite "update: config gate":
   ## Exercise `autoUpdateEnabled` against a temp HOME so we don't

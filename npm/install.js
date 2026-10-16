@@ -41,9 +41,9 @@ async function main() {
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(archive, Buffer.from(await res.arrayBuffer()));
 
-  // Archives nest everything under <asset-stem>/; flatten into bin/.
+  // Archives are flat: members sit at the archive root, no wrapper dir.
   // tar -xf reads the zip too on Windows, where tar is bsdtar.
-  execFileSync('tar', ['-xf', archive, '-C', binDir, '--strip-components=1'], { stdio: 'inherit' });
+  execFileSync('tar', ['-xf', archive, '-C', binDir], { stdio: 'inherit' });
   fs.unlinkSync(archive);
   if (process.platform !== 'win32') {
     fs.chmodSync(path.join(binDir, '3code'), 0o755);

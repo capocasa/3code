@@ -121,7 +121,7 @@ proc downloadAsset(tag, asset, dest: string): bool =
     debugOut "downloadAsset failed: " & e.msg
     false
 
-proc extractArchive(archive, workDir: string): string =
+proc extractArchive*(archive, workDir: string): string =
   ## Extract `archive` into `workDir` (wiped first). Returns the path to
   ## the directory containing the extracted binary (and any bundled
   ## sibling libs), or "" on failure. Tarballs on Linux/macOS use
