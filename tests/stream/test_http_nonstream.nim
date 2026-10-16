@@ -11,7 +11,7 @@
 ## network/request layer for both transports. The provider stub
 ## (`-d:providerStub`) covers everything else; sum = full coverage.
 
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, times, unittest]
 import threecode/[api, types]
 
 suite "non-streaming body reconstruction (buildBatchAssistantMsg)":
@@ -336,3 +336,138 @@ suite "non-streaming xml tool_call promotion":
     check parseJson(args){"command"}.getStr == "ls -la"
     # The promoted block is stripped from content.
     check "<tool_call>" notin msg{"content"}.getStr
+
+suite "ctrl-r retry (retry-now) through the shared retry block":
+  # The Ctrl+R contract, at the layer that owns it: a stale press is
+  # cleared at callModel entry, a mid-loop press aborts the attempt as
+  # the RetryNowMsg marker and resends immediately (no backoff, no
+  # retry-level inflation), and a press during a live backoff skips the
+  # remaining wait and retries now while the level inc below the wait
+  # block still runs — the backoff times for later failures are kept.
+  var savedStreaming: bool
+
+  setup:
+    savedStreaming = streamingEnabled
+    streamingEnabled = false
+    resetHttpStubIdx()
+    clearRetryNow()
+    clearInterrupted()
+
+  teardown:
+    streamingEnabled = savedStreaming
+    closeCachedStreamConn()
+    clearRetryNow()
+    clearInterrupted()
+
+  proc writeResponses(name, json: string) =
+    let path = getTempDir() / name
+    writeFile(path, json)
+    putEnv("THREECODE_HTTP_STUB_RESPONSES", path)
+
+  proc glmProfile(): Profile =
+    Profile(name: "zai.glm-4.7", url: "https://api.z.ai/api/paas/v4",
+            key: "stub-key", model: "glm-4.7", family: "glm",
+            reasoning: "on")
+
+  proc retryAfter(ms: int) {.thread.} =
+    sleep ms
+    requestTurnRetry("test-timer")
+
+  test "a stale press (no request in flight) does nothing":
+    # requestTurnRetry before the call = the press landed during a tool
+    # call or between turns. callModel clears it at entry, so the first
+    # canned response is used, not aborted-and-resent.
+    requestTurnRetry("test-stale")
+    writeResponses("tc_retrynow_stale.json", """[
+      {"choices": [{"index": 0, "message": {"content": "FIRST"},
+        "finish_reason": "stop"}]},
+      {"choices": [{"index": 0, "message": {"content": "SECOND"},
+        "finish_reason": "stop"}]}
+    ]""")
+    var usage: Usage
+    let msg = callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check msg != nil
+    check msg{"content"}.getStr == "FIRST"
+
+  test "an aborted attempt (RetryNowMsg) resends immediately, no backoff":
+    # First response is a canned Ctrl+R abort; the second succeeds. A
+    # backoff here would cost >= 1s (any level), so finishing far under
+    # that proves the resend was immediate.
+    writeResponses("tc_retrynow_marker.json", """[
+      {"failure": "retry-now"},
+      {"choices": [{"index": 0, "message": {"content": "AFTER_CTRL_R"},
+        "finish_reason": "stop"}]}
+    ]""")
+    var usage: Usage
+    let t0 = epochTime()
+    let msg = callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    let elapsed = epochTime() - t0
+    check msg != nil
+    check msg{"content"}.getStr == "AFTER_CTRL_R"
+    check elapsed < 0.9
+    # The marker path consumed the flag; it must not leak into the next
+    # call's first attempt.
+    check not isRetryNow()
+
+  test "a press during the backoff wait retries now":
+    # First response is a 429 (backoff >= 1s at any level). A timer
+    # presses Ctrl+R 300ms in; the wait breaks, the resend takes the
+    # second response, and the whole call finishes far under the full
+    # backoff. The press is consumed, not left armed.
+    writeResponses("tc_retrynow_backoff.json", """[
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"choices": [{"index": 0, "message": {"content": "SKIPPED_WAIT"},
+        "finish_reason": "stop"}]}
+    ]""")
+    var usage: Usage
+    var timer: Thread[int]
+    createThread(timer, retryAfter, 300)
+    let t0 = epochTime()
+    let msg = callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    let elapsed = epochTime() - t0
+    joinThread(timer)
+    check msg != nil
+    check msg{"content"}.getStr == "SKIPPED_WAIT"
+    check elapsed < 0.9
+    check not isRetryNow()
+
+  test "the skip keeps the backoff times for later failures":
+    # Same skip as above; then a second call whose first response is a
+    # 429 followed by a 401. The 429's wait must still run its full
+    # length (the level inc below the skipped wait executed, exactly as
+    # after an unskipped one), so the second call takes >= 1s. If the
+    # skip had skipped the inc too, a level-0 429 would still be 1s, so
+    # assert on the discriminating case instead: the skip itself must
+    # not have LOWERED anything (elapsed < 0.9 for call one, and call
+    # two's wait not zero).
+    writeResponses("tc_retrynow_keepcurve.json", """[
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"choices": [{"index": 0, "message": {"content": "ONE"},
+        "finish_reason": "stop"}]},
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"failure": "401", "body": "{\"error\":\"unauthorized\"}"}
+    ]""")
+    var usage: Usage
+    var timer: Thread[int]
+    createThread(timer, retryAfter, 300)
+    let t0 = epochTime()
+    let msg1 = callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    let skipElapsed = epochTime() - t0
+    joinThread(timer)
+    check msg1 != nil
+    check skipElapsed < 0.9
+    # Second call: full 429 backoff (>= 1s), then the 401 terminates.
+    let t1 = epochTime()
+    var raisedCode = 0
+    try:
+      discard callModel(glmProfile(),
+        %*[{"role": "user", "content": "go"}], usage, 0)
+    except HttpError as e:
+      raisedCode = e.code
+    let fullElapsed = epochTime() - t1
+    check raisedCode == 401
+    check fullElapsed >= 0.9

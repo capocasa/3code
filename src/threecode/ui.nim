@@ -66,6 +66,10 @@ type
     plainBody*: bool
     clearFooter*: bool
     disposition*: CommandDisposition
+    startGoalTurn*: bool
+      ## Set by every :goal path that armed or re-armed `goal.md`: the
+      ## controller answers by immediately running a goal-kickoff turn
+      ## instead of waiting for the next turn boundary.
 
 var wizardReadLineHook*: WizardReadLineHook
 var wizardVerifyCancelHook*: WizardVerifyCancelHook
@@ -1835,6 +1839,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                          disposition: cdModal)
   var ok = true
   var body = ""
+  var armGoal = false
   template resp(b: string) = body.add cmdResponseS(b)
   template respErr(b: string) = body.add cmdErrorS(b)
   block dispatch:
@@ -1872,29 +1877,79 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         if code != 0:
           ok = false
     of ":goal":
+      # Verb grammar: bare = status, bare with `!` or `cancel` = retire,
+      # `new TEXT` / bare TEXT = arm (balking at a live goal without `!`),
+      # `edit` = revise the live goal in $VISUAL/$EDITOR. Every arm sets
+      # `startGoalTurn` so the controller kicks goal achievement off
+      # immediately instead of waiting for the next turn boundary.
       if parts.len == 0 and not forced:
         if goalModeActive():
           resp readGoalText().strip
         else:
           ok = false
           respErr "no goal active; arm one with :goal <text>"
-      elif parts.len == 0:
-        let (cok, cerr) = cancelGoal()
-        if not cok:
+      elif parts.len == 0 or parts[0] == "cancel":
+        if parts.len > 1:
           ok = false
-          respErr cerr
+          respErr ":goal cancel takes no argument (a goal is text, not a path)"
         else:
-          resp "goal cancelled (" & GoalFileName & " renamed to " &
-            GoalCancelledName & ")"
+          let (cok, cerr) = cancelGoal()
+          if not cok:
+            ok = false
+            respErr cerr
+          else:
+            resp "goal cancelled (" & GoalFileName & " renamed to " &
+              GoalCancelledName & ")"
+      elif parts[0] == "new":
+        if parts.len == 1:
+          ok = false
+          respErr "usage: :goal new <text>"
+        else:
+          let text = arg[parts[0].len .. ^1].strip
+          let (gok, gerr) = startGoal(text, force = forced)
+          if not gok:
+            ok = false
+            respErr gerr
+          else:
+            armGoal = true
+            resp (if forced: GoalFileName & " replaced"
+                  else: GoalFileName & " written") & "; starting toward it now"
+      elif parts[0] == "edit" and parts.len == 1:
+        if not goalModeActive():
+          ok = false
+          respErr "no goal active; arm one with :goal new <text>"
+        else:
+          let before = readGoalText()
+          let editor = getEnv("VISUAL", getEnv("EDITOR",
+            when defined(windows): "notepad" else: "vi"))
+          let code = execShellCmd(editor & " " & quoteShell(GoalFileName))
+          if code != 0:
+            ok = false
+            respErr "editor exited with status " & $code
+          elif not goalModeActive():
+            resp "goal cancelled (" & GoalFileName & " removed in the editor)"
+          elif readGoalText().strip.len == 0:
+            let (cok, cerr) = cancelGoal()
+            if not cok:
+              ok = false
+              respErr cerr
+            else:
+              resp "goal cleared (" & GoalFileName & " renamed to " &
+                GoalCancelledName & ")"
+          elif readGoalText() != before:
+            armGoal = true
+            resp GoalFileName & " edited; starting toward it now"
+          else:
+            resp GoalFileName & " unchanged"
       else:
         let (gok, gerr) = startGoal(arg, force = forced)
         if not gok:
           ok = false
           respErr gerr
         else:
+          armGoal = true
           resp (if forced: GoalFileName & " replaced"
-                else: GoalFileName & " written") &
-            "; goal mode arms at the end of the next turn"
+                else: GoalFileName & " written") & "; starting toward it now"
     of ":help", ":?":
       body.add renderHelpS()
     of ":tokens":
@@ -2143,4 +2198,5 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                 body: body,
                 plainBody: ok,
                 clearFooter: ok and title == "profile",
-                disposition: disposition)
+                disposition: disposition,
+                startGoalTurn: armGoal)

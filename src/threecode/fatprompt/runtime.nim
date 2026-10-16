@@ -33,7 +33,8 @@ import rendering
 from ../toolstream import StreamMaxLines, initStreamingView, addLine,
   viewportRowsAt, bannerRowCountAt
 from ../api import ApiStreamHooks, requestTurnInterrupt, requestQuietShutdown,
-  setApiStreamHooks, setInterrupted, QuietTooLongMs, clearNetworkQuiet
+  requestTurnRetry, setApiStreamHooks, setInterrupted, QuietTooLongMs,
+  clearNetworkQuiet
 
 
 when defined(windows):
@@ -2552,6 +2553,14 @@ proc inputThreadProc() {.thread.} =
     edPtr[].editInEditor = proc(ed: var minline.LineEditor) =
       if inputModalActive.load(moAcquire): return
       editBufferInExternalEditor(ed)
+    edPtr[].onRetryRequest = proc() {.gcsafe.} =
+      # Ctrl+R: only a live turn can have something to retry. At idle the
+      # press is swallowed (no draft edit, no cancel); whether it does
+      # anything mid-turn is decided in api.nim by request state (data
+      # shipped or not, backoff wait or not).
+      if inputModalActive.load(moAcquire): return
+      if inputTurnActive.load(moAcquire):
+        requestTurnRetry("ctrl-r")
 
     when defined(posix):
       if isatty(fd) != 0 and fd.tcGetAttr(addr inputOrigTermios) == 0:
@@ -2902,6 +2911,7 @@ proc inputThreadProc() {.thread.} =
     edPtr[].postRedraw = nil
     edPtr[].painter = nil
     edPtr[].editInEditor = nil
+    edPtr[].onRetryRequest = nil
     edPtr[].getCh = nil
     edPtr[].write = nil
     edPtr[].getWidth = nil

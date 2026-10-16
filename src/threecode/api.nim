@@ -313,6 +313,12 @@ proc networkQuietMsg*(quietMs = QuietTooLongMs): string =
   ## text (and the quiet budget that fired) without drift.
   NetworkQuietPrefix & " " & $(quietMs div 1000) & "s"
 
+const RetryNowMsg* = "retry requested by user"
+  ## Canonical marker for a user-requested retry (Ctrl+R). A transport
+  ## that has shipped no model data writes it into `StreamOutcome.errMsg`
+  ## instead of `InterruptedByUserMsg`; `callModel` maps it to an
+  ## immediate resend with no backoff and no retry-level inflation.
+
 proc longestStringLeaf(j: JsonNode): string =
   ## Longest string value in the tree. Ids, codes, types and urls are short;
   ## the human-readable sentence is the longest field. Used as the fallback
@@ -583,6 +589,36 @@ proc requestTurnInterrupt*(source = "unspecified") {.gcsafe.} =
   setInterrupted(true)
   shutdownCachedStreamFd()
   cancelActiveTool()
+
+var retryNowFlag: Atomic[bool]
+  ## Set by Ctrl+R (the input thread's `onRetryRequest` hook). Consumed by
+  ## `callModel`: a retry backoff skips its remaining wait, and a transport
+  ## that has not shipped model data aborts and resends. Cleared at every
+  ## `callModel` entry, so a press that lands between requests (during a
+  ## tool call, after the stream completed) does nothing, per the Ctrl+R
+  ## contract.
+
+proc isRetryNow*(): bool {.gcsafe.} =
+  retryNowFlag.load(moAcquire)
+
+proc clearRetryNow*() {.gcsafe.} =
+  retryNowFlag.store(false, moRelease)
+
+proc requestTurnRetry*(source = "unspecified") {.gcsafe.} =
+  ## Ctrl+R's whole payload: set the flag. No fd shutdown, unlike
+  ## `requestTurnInterrupt` — shutting the socket down would kill a
+  ## stream that shipped data and is SUPPOSED to ignore the press. The
+  ## transports' recv loops already wake every `QuietRecvWakeMs` (500ms)
+  ## to re-check flags, so the press lands within one wake window without
+  ## touching the connection. It also never sets `interruptedFlag` (the
+  ## turn must keep running) and never cancels an active tool (a tool call
+  ## is model data already shipped). Whether the press has any effect is
+  ## decided where the state is known: transports ignore it once model
+  ## data shipped, `callModel` clears a stale flag at entry, and the
+  ## backoff wait consumes it by skipping the remaining sleep without
+  ## touching the retry levels.
+  debugOut("retry-now flag set", source)
+  retryNowFlag.store(true, moRelease)
 
 proc requestQuietShutdown*() {.gcsafe.} =
   ## Wakes a blocked HTTP read because the provider has been quiet too long,
@@ -1058,6 +1094,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       closeCachedStreamConn()
       result.errMsg = InterruptedByUserMsg
       return
+    if isRetryNow() and not isInterrupted():
+      # Ctrl+R landed before this attempt sent anything: nothing to
+      # cancel, just resend now.
+      result.errMsg = RetryNowMsg
+      return
     inc attempt
     try:
       conn = acquireStreamConn(host, port, plainHttp)
@@ -1078,6 +1119,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           resp = conn.readResponseHead()
           break
         except StreamTimeoutError:
+          if isRetryNow() and not isInterrupted():
+            # Ctrl+R while only headers (or nothing) had arrived: cancel
+            # and let callModel resend immediately.
+            closeCachedStreamConn()
+            result.errMsg = RetryNowMsg
+            return
           if isInterrupted() or isNetworkQuiet() or headStall.quietTooLong():
             closeCachedStreamConn()
             break
@@ -1156,6 +1203,16 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       var hasLine = false
       try: hasLine = conn.readLine(line)
       except StreamTimeoutError:
+        if isRetryNow() and not isInterrupted() and
+            accContent.len == 0 and accReasoning.len == 0 and
+            accTools.len == 0:
+          # Ctrl+R after the head but before any model data shipped
+          # (keepalive comments do not count): cancel and resend. Once
+          # content, reasoning or tool deltas exist, the press is ignored
+          # here — retrying would duplicate visible output.
+          closeCachedStreamConn()
+          result.errMsg = RetryNowMsg
+          return
         if isInterrupted() or isNetworkQuiet() or bodyStall.quietTooLong():
           closeCachedStreamConn()
           break
@@ -1637,6 +1694,11 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
       closeCachedStreamConn()
       result.errMsg = InterruptedByUserMsg
       return
+    if isRetryNow() and not isInterrupted():
+      # Ctrl+R landed before this attempt sent anything: nothing to
+      # cancel, just resend now.
+      result.errMsg = RetryNowMsg
+      return
     inc attempt
     try:
       conn = acquireStreamConn(host, port, plainHttp)
@@ -1657,6 +1719,10 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
           resp = conn.readResponseHead()
           break
         except StreamTimeoutError:
+          if isRetryNow() and not isInterrupted():
+            closeCachedStreamConn()
+            result.errMsg = RetryNowMsg
+            return
           if isInterrupted() or isNetworkQuiet() or headStall.quietTooLong():
             closeCachedStreamConn()
             break
@@ -1693,6 +1759,13 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
     var hasLine = false
     try: hasLine = conn.readLine(line)
     except StreamTimeoutError:
+      if isRetryNow() and not isInterrupted() and
+          accContent.len == 0 and accTools.len == 0:
+        # Ctrl+R before any model data shipped (Ctrl+R contract; see
+        # streamHttp's body-loop wake for the reasoning caveat).
+        closeCachedStreamConn()
+        result.errMsg = RetryNowMsg
+        return
       if isInterrupted() or isNetworkQuiet() or bodyStall.quietTooLong():
         closeCachedStreamConn()
         break
@@ -1912,6 +1985,11 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
       closeCachedStreamConn()
       result.errMsg = InterruptedByUserMsg
       return
+    if isRetryNow() and not isInterrupted():
+      # Ctrl+R landed before this attempt sent anything: nothing to
+      # cancel, just resend now.
+      result.errMsg = RetryNowMsg
+      return
     inc attempt
     try:
       conn = acquireStreamConn(host, port, plainHttp)
@@ -1933,6 +2011,12 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           resp = conn.readResponseHead()
           break
         except StreamTimeoutError:
+          if isRetryNow() and not isInterrupted():
+            # Nothing is painted until the whole body arrives, so a
+            # Ctrl+R cancel is always duplication-free here.
+            closeCachedStreamConn()
+            result.errMsg = RetryNowMsg
+            return
           if isInterrupted() or isNetworkQuiet():
             closeCachedStreamConn()
             break
@@ -1984,6 +2068,10 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
         body = readFullBody(conn)
         break readLoop
       except StreamTimeoutError:
+        if isRetryNow() and not isInterrupted():
+          closeCachedStreamConn()
+          result.errMsg = RetryNowMsg
+          return
         if isInterrupted() or isNetworkQuiet():
           closeCachedStreamConn()
           break readLoop
@@ -2158,6 +2246,11 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
       closeCachedStreamConn()
       result.errMsg = InterruptedByUserMsg
       return
+    if isRetryNow() and not isInterrupted():
+      # Ctrl+R landed before this attempt sent anything: nothing to
+      # cancel, just resend now.
+      result.errMsg = RetryNowMsg
+      return
     inc attempt
     try:
       conn = acquireStreamConn(host, port, plainHttp)
@@ -2179,6 +2272,10 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
           resp = conn.readResponseHead()
           break
         except StreamTimeoutError:
+          if isRetryNow() and not isInterrupted():
+            closeCachedStreamConn()
+            result.errMsg = RetryNowMsg
+            return
           if isInterrupted() or isNetworkQuiet():
             closeCachedStreamConn()
             break
@@ -2221,6 +2318,10 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
         body = readFullBody(conn)
         break readLoop
       except StreamTimeoutError:
+        if isRetryNow() and not isInterrupted():
+          closeCachedStreamConn()
+          result.errMsg = RetryNowMsg
+          return
         if isInterrupted() or isNetworkQuiet():
           closeCachedStreamConn()
           break readLoop
@@ -3237,6 +3338,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
+  # A Ctrl+R press only ever refers to the request in flight; one that
+  # landed while no request ran (tool call, between turns) is stale and
+  # must not abort this call's first attempt.
+  clearRetryNow()
   # Context window for the token bar: known-good table first, then the
   # heuristic. Kept inline (not compact.contextWindowFor) so api does
   # not import compact; compact imports nothing from api either.
@@ -3342,21 +3447,30 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     #     head arrived). All share the shape `statusCode == 200`,
     #     `assistantMsg == nil`, `errMsg != ""`; `retryCategory` would not
     #     retry any of them.
-    try:
-      if isNetworkQuietMsg(outcome.errMsg) or
-         (outcome.statusCode == 200 and outcome.assistantMsg == nil and
-          outcome.errMsg.len > 0):
-        raise newException(NetworkHealthError, outcome.errMsg)
-      code = outcome.statusCode
-      category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
-      errMsg = outcome.errMsg
-    except NetworkHealthError as e:
-      # Network quiet or 200 transport anomaly: treat as a retryable server
-      # error, same as a 5xx. Sets the shared decision vars and falls into
-      # the single backoff block below; no second retry loop.
+    if outcome.errMsg == RetryNowMsg:
+      # A Ctrl+R-aborted attempt (or a press that raced the loop head):
+      # resend now, no backoff taken, no retry-level inflation — the
+      # curve resumes where it was, so "keep the backoff times the
+      # same" holds for later failures.
       code = 0
-      category = "server"
-      errMsg = e.msg
+      category = "retry-now"
+      errMsg = outcome.errMsg
+    else:
+      try:
+        if isNetworkQuietMsg(outcome.errMsg) or
+           (outcome.statusCode == 200 and outcome.assistantMsg == nil and
+            outcome.errMsg.len > 0):
+          raise newException(NetworkHealthError, outcome.errMsg)
+        code = outcome.statusCode
+        category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
+        errMsg = outcome.errMsg
+      except NetworkHealthError as e:
+        # Network quiet or 200 transport anomaly: treat as a retryable
+        # server error, same as a 5xx. Sets the shared decision vars and
+        # falls into the single backoff block below; no second retry loop.
+        code = 0
+        category = "server"
+        errMsg = e.msg
     let retryable = category != ""
     if not retryable:
       hookStopSpinner()
@@ -3396,6 +3510,14 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         raise newException(NetworkHealthError,
           formatApiDetail(errMsg, outcome.errBody, code))
       raise newHttpError(code, errMsg, outcome.errBody)
+    if category == "retry-now":
+      # Ctrl+R asked for this resend: no backoff, no notice row, no
+      # retry-level inflation. Attempt counting still applies, so a
+      # Ctrl+R storm stays bounded by MaxAttempts like any other retry.
+      clearRetryNow()
+      clearNetworkQuiet()
+      hookProviderActivity()
+      continue
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0
     # One shared backoff curve for every retryable category (429, 5xx,
     # network-health). Power-of-2 off the category's own level, capped at
@@ -3433,6 +3555,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       var lastShown = backoff
       while remaining > 0:
         if isInterrupted(): break wait
+        if isRetryNow():
+          # Ctrl+R during the wait: retry immediately. The level inc
+          # below runs exactly as it would have after a full wait, so
+          # the backoff times for later failures stay the same.
+          clearRetryNow()
+          break wait
         let step = min(100, remaining)
         sleep(step)
         remaining -= step

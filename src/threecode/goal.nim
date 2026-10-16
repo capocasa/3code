@@ -1,6 +1,9 @@
 ## Goal mode: the file on disk is the protocol.
 ##
-## `goal.md` in the project root keeps a session on one goal. The only
+## `goal.md` in the project root keeps a session on one goal. Arming is
+## immediate: every `:goal` write path (TEXT, `new`, `edit`, force
+## replace) appends a harness-autosent kickoff prompt and runs the turn
+## at once instead of waiting for the next turn boundary. The only other
 ## hook is the end-call boundary in `turns.nim`: when the turn's final
 ## model call completes and the harness is about to hand the prompt back
 ## to the user, it stats `goal.md`; bare existence activates (v1 waives
@@ -89,6 +92,18 @@ proc goalFeedbackMessage*(feedback: string): JsonNode =
        "satisfied. Verifier feedback:\n\n" & feedback &
        "\n\nAddress it and keep working toward the goal; the " &
        "satisfaction check runs again when this turn ends."}
+
+proc goalKickoffMessage*(goalText: string): JsonNode =
+  ## The harness-autosent prompt that starts goal achievement immediately
+  ## after `goal.md` is written, instead of waiting for the next turn
+  ## boundary. Same `agentSent` marking as the feedback continuation, so
+  ## replay renders it as a `»` item and no provider sees the marker.
+  %*{"role": "user", "agentSent": true,
+     "content": "Goal armed: " & GoalFileName & " in this repository now " &
+       "states the session's goal:\n\n" & goalText.strip &
+       "\n\nStart working toward it now. A satisfaction check runs when " &
+       "each turn ends and sends you back in with feedback until the " &
+       "goal is met."}
 
 proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
     err: string] =

@@ -84,6 +84,17 @@ suite "goal mode":
     var session: Session
     check "user +agent" in renderSession(session, %*[msg])
 
+  test "kickoff prompt carries the goal and the same autosent marking":
+    let msg = goalKickoffMessage("ship the feature")
+    check msg{"role"}.getStr == "user"
+    check msg{"agentSent"}.getBool(false)
+    check "ship the feature" in msg{"content"}.getStr
+    check "Start working toward it now" in msg{"content"}.getStr
+    let wire = stripInternalFields(%*[msg])
+    check "agentSent" notin $wire
+    var session: Session
+    check "user +agent" in renderSession(session, %*[msg])
+
   test "evidence builder: last turn's tool calls, no model prose":
     let msgs = %*[
       {"role": "system", "content": "sys"},

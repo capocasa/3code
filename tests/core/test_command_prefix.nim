@@ -87,6 +87,7 @@ suite "command prefix resolution":
       let r = handleCommandResult(":g", messages, session, prof, editor)
       check r.recognized and r.ok
       check "make it so" in r.body
+      check not r.startGoalTurn
 
   test "other commands accept and ignore the bang":
     check classifyCommand(":q!") == ckQuit
@@ -96,3 +97,106 @@ suite "command prefix resolution":
   test ":! keeps its special-case (no prefix or bang mangling)":
     check classifyCommand(":! echo hi") == ckMutating
     check classifyCommand(":!echo hi") == ckMutating
+
+suite "goal command verbs":
+  var messages = %* []
+  var session = Session()
+  var prof = Profile()
+  var editor: LineEditor
+
+  test ":goal TEXT arms and flags the immediate kickoff":
+    withCommandDir:
+      let r = handleCommandResult(":goal make it so", messages, session,
+                                  prof, editor)
+      check r.recognized and r.ok
+      check r.startGoalTurn
+      check "starting toward it now" in r.body
+      check readFile(GoalFileName).strip == "make it so"
+
+  test ":goal new is the balking synonym":
+    withCommandDir:
+      let r = handleCommandResult(":goal new first goal", messages, session,
+                                  prof, editor)
+      check r.recognized and r.ok
+      check r.startGoalTurn
+      check readFile(GoalFileName).strip == "first goal"
+      let balk = handleCommandResult(":goal new second goal", messages,
+                                     session, prof, editor)
+      check balk.recognized and not balk.ok
+      check not balk.startGoalTurn
+      check ":goal!" in balk.body
+      check readFile(GoalFileName).strip == "first goal"
+      let usage = handleCommandResult(":goal new", messages, session, prof,
+                                      editor)
+      check usage.recognized and not usage.ok
+      check "usage" in usage.body
+
+  test ":goal cancel retires like bare :goal!":
+    withCommandDir:
+      discard handleCommandResult(":goal doomed", messages, session, prof,
+                                  editor)
+      check classifyCommand(":goal cancel") == ckMutating
+      let r = handleCommandResult(":goal cancel", messages, session, prof,
+                                  editor)
+      check r.recognized and r.ok
+      check not r.startGoalTurn
+      check GoalCancelledName in r.body
+      check readFile(GoalCancelledName).strip == "doomed"
+      let none = handleCommandResult(":goal cancel", messages, session, prof,
+                                      editor)
+      check none.recognized and not none.ok
+      check "no goal active" in none.body
+
+  test ":goal edit without a live goal is an error":
+    withCommandDir:
+      let r = handleCommandResult(":goal edit", messages, session, prof,
+                                  editor)
+      check r.recognized and not r.ok
+      check "no goal active" in r.body
+
+  when defined(posix):
+    test ":goal edit rewrites the live goal in $EDITOR":
+      withCommandDir:
+        discard handleCommandResult(":goal original text", messages, session,
+                                    prof, editor)
+        # `cp <src>` + appended target = `cp <src> goal.md`.
+        let src = getTempDir() / "goal_edit_src.txt"
+        writeFile(src, "edited text\n")
+        putEnv("EDITOR", "cp " & src)
+        defer: delEnv("EDITOR")
+        let r = handleCommandResult(":goal edit", messages, session, prof,
+                                    editor)
+        check r.recognized and r.ok
+        check r.startGoalTurn
+        check "edited" in r.body
+        check readFile(GoalFileName).strip == "edited text"
+
+    test ":goal edit with an emptied file cancels the goal":
+      withCommandDir:
+        discard handleCommandResult(":goal original text", messages, session,
+                                    prof, editor)
+        let src = getTempDir() / "goal_edit_empty.txt"
+        writeFile(src, "\n")
+        putEnv("EDITOR", "cp " & src)
+        defer: delEnv("EDITOR")
+        let r = handleCommandResult(":goal edit", messages, session, prof,
+                                    editor)
+        check r.recognized and r.ok
+        check not r.startGoalTurn
+        check GoalCancelledName in r.body
+        check not fileExists(GoalFileName)
+
+    test ":goal edit with unchanged text does not re-kick":
+      withCommandDir:
+        discard handleCommandResult(":goal stable text", messages, session,
+                                    prof, editor)
+        let src = getTempDir() / "goal_edit_same.txt"
+        writeFile(src, "stable text\n")
+        putEnv("EDITOR", "cp " & src)
+        defer: delEnv("EDITOR")
+        let r = handleCommandResult(":goal edit", messages, session, prof,
+                                    editor)
+        check r.recognized and r.ok
+        check not r.startGoalTurn
+        check "unchanged" in r.body
+        check readFile(GoalFileName).strip == "stable text"

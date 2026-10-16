@@ -1509,6 +1509,26 @@ suite "minline editor: shortcuts":
       discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "> hello"
 
+  test "CtrlR fires the retry-request hook and inserts nothing":
+    var fired = 0
+    var ed = initEditor()
+    ed.onRetryRequest = proc() = inc fired
+    let d = newDriver()
+    d.pushString "ab"
+    d.push @[18]     # Ctrl+R, default binding of retry-request
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abc"
+    check fired == 1
+    # Unset hook: the key is a swallowed no-op, never a literal character.
+    var ed2 = initEditor()
+    let d2 = newDriver()
+    d2.pushString "ab"
+    d2.push @[18]
+    d2.pushString "c"
+    d2.push Enter
+    check d2.run(ed2, prompt = "> ") == "abc"
+
   test "plain CtrlE is end-of-line, not edit-in-editor":
     # The default spec once read "AltE CtrlX CtrlE" with no chord
     # grammar, which bound bare Ctrl+E to the editor on top of
