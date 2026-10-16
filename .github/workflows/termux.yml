@@ -121,8 +121,11 @@ jobs:
           } > 3code-termux-arm64/BUILD_INFO
           cp README.md LICENSE 3code-termux-arm64/
           pack() {
+            # flat archive: the binary sits at the root, so installers and
+            # the site one-liner need no --strip-components
             tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
-              -cf - 3code-termux-arm64 | gzip -n > 3code-termux-arm64.tar.gz
+              -C 3code-termux-arm64 -cf - 3code tlscheck VERSION BUILD_INFO LICENSE README.md \
+              | gzip -n > 3code-termux-arm64.tar.gz
           }
           pack
           h1=$(sha256sum 3code-termux-arm64.tar.gz | cut -d' ' -f1)
@@ -164,7 +167,7 @@ jobs:
           docker start $CID >/dev/null
           trap 'docker rm -f $CID >/dev/null 2>&1 || true' EXIT
           docker exec $CID mkdir -p /data/data/com.termux/files/usr/tmp
-          docker cp 3code-termux-arm64/3code $CID:/data/data/com.termux/files/usr/tmp/3code
+          docker cp 3code $CID:/data/data/com.termux/files/usr/tmp/3code
           docker exec -t -e THREECODE_ALLOW_ROOT=1 $CID \
             /data/data/com.termux/files/usr/tmp/3code --version
           # --help exits 2 (ExitUsage) by design; assert it runs at all.
@@ -177,7 +180,7 @@ jobs:
           # Termux lib dir. A bare --version doesn't touch TLS; the
           # cross-compiled tlscheck does a verified handshake the same way
           # api.nim does. No -t: output must pipe into grep.
-          docker cp 3code-termux-arm64/tlscheck $CID:/data/data/com.termux/files/usr/tmp/tlscheck
+          docker cp tlscheck $CID:/data/data/com.termux/files/usr/tmp/tlscheck
           docker exec $CID /data/data/com.termux/files/usr/tmp/tlscheck \
             | grep -q 'tls handshake ok'
 

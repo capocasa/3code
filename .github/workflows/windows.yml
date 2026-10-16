@@ -198,15 +198,17 @@ jobs:
           from datetime import datetime, timezone
           src, out, epoch = sys.argv[1], sys.argv[2], int(sys.argv[3])
           dt = datetime.fromtimestamp(epoch, timezone.utc).timetuple()[:6]
+          # flat archive: members at the root, no wrapper dir, so
+          # installers need no --strip-components
           names = sorted(
-              os.path.join(r, n).replace(os.sep, "/")
+              os.path.relpath(os.path.join(r, n), src).replace(os.sep, "/")
               for r, ds, fs in os.walk(src)
               for n in ds + fs)
           with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
               for n in names:
                   zi = zipfile.ZipInfo(n, dt)
-                  zi.external_attr = (os.stat(n).st_mode & 0xFFFF) << 16
-                  z.writestr(zi, open(n, "rb").read())
+                  zi.external_attr = (os.stat(os.path.join(src, n)).st_mode & 0xFFFF) << 16
+                  z.writestr(zi, open(os.path.join(src, n), "rb").read())
           PY
           pack() { python /tmp/mkzip.py 3code-windows-amd64 3code-windows-amd64.zip "$SOURCE_DATE_EPOCH"; }
           pack

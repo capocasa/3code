@@ -10,7 +10,8 @@ Changelog
   lipo); the unsigned x86_64 slice was the startup crash. OpenSSL is
   now static-linked at 3.5-LTS on mac/win, the bundled dylibs/DLLs
   are gone, and the CA bundle is embedded in the binary - nothing to
-  re-sign, nothing to mismatch with Homebrew.
+  re-sign, nothing to mismatch with Homebrew. Release archives extract
+  flat: no wrapper directory inside the tarballs or the zip.
 - **`javac` compiles under the macOS seatbelt by default (#66).** JDK
   homes under your home (`~/Library/Java`, `~/.jdks`,
   `~/.sdkman/candidates`) are read-only inside the fence, and the JVM's

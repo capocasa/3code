@@ -137,8 +137,11 @@ jobs:
           } > 3code-linux-arm64/BUILD_INFO
           cp README.md LICENSE 3code-linux-arm64/
           pack() {
+            # flat archive: the binary sits at the root, so installers and
+            # the site one-liner need no --strip-components
             tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
-              -cf - 3code-linux-arm64 | gzip -n > 3code-linux-arm64.tar.gz
+              -C 3code-linux-arm64 -cf - 3code VERSION BUILD_INFO LICENSE README.md \
+              | gzip -n > 3code-linux-arm64.tar.gz
           }
           pack
           h1=$(sha256sum 3code-linux-arm64.tar.gz | cut -d' ' -f1)
