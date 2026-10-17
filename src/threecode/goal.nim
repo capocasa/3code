@@ -10,7 +10,8 @@
 ## marker sniff and name-collision handling). A side-call verifier (same
 ## model, fresh conversation, minimal preamble, read-only roster) judges
 ## the goal text against harness-built evidence from the just-finished
-## turn. FEEDBACK sends the agent back in; SATISFIED renames the file to
+## turn plus the harness-captured working-tree diff. FEEDBACK sends
+## the agent back in; SATISFIED renames the file to
 ## `goal-confirmed.md` and the session idles normally. Bare `:goal!`
 ## cancels into `goal-cancelled.md`. No session-start
 ## check, no per-tool-call checks, no system-prompt changes: the
@@ -19,7 +20,7 @@
 ## The side call is also the future subagent primitive, so it is kept
 ## separate: its own message list, no session mutation, its own roster.
 
-import std/[json, os, strutils, tables]
+import std/[json, os, osproc, strutils, tables]
 import types, util, prompts, api, actions, streamexec
 
 const
@@ -33,6 +34,8 @@ const
   EvidenceCapBytes* = 6000  ## evidence summary ceiling
   EvidenceBriefCap* = 160   ## per-call argument digest ceiling
   EvidenceResultCap* = 240  ## per-call result head ceiling
+  GoalDiffCapBytes* = 8000  ## working-tree diff feed ceiling
+  GoalDiffMaxUntracked* = 24  ## untracked files diffed before the elision note
 
 type
   GoalVerdictKind* = enum
@@ -59,15 +62,16 @@ type
     output*: string  ## result head for executed calls
     code*: int       ## exit code for executed calls (-1 otherwise)
 
-const VerifierPreamble* = """You are verifying progress toward a goal. You get the goal text and
-an evidence summary of the agent's last turn: files written, patches
-applied, commands and their results. Reconstruct what you need
-yourself: read the repo, run the checks. The agent's claims are not
-evidence. Read-only: read, search, and bash for checks only. Do not
-fix anything. Judge whether the goal as stated is fully satisfied by
-the actual state of the repo. End with exactly one line: VERDICT:
-SATISFIED, or VERDICT: FEEDBACK: <what is missing or what to do
-next>."""
+const VerifierPreamble* = """You are verifying progress toward a goal. You get the goal text, an
+evidence summary of the agent's last turn (files written, patches
+applied, commands and their results), and the harness-captured
+working-tree diff. Reconstruct what you need yourself: read the repo,
+run the checks. The agent's claims are not evidence. Read-only: read,
+search, and bash for checks only. Do not fix anything. Judge whether
+the goal as stated is fully satisfied by the actual state of the
+repo. Report exactly what you checked and how; never overstate how
+deeply you verified. End with exactly one line: VERDICT: SATISFIED,
+or VERDICT: FEEDBACK: <what is missing or what to do next>."""
 
 proc goalModeActive*(dir = "."): bool =
   fileExists(dir / GoalFileName)
@@ -242,11 +246,59 @@ proc buildGoalEvidence*(messages: JsonNode): string =
     result.add "(" & $(calls.len - shown) & " of " & $calls.len &
       " tool calls omitted, evidence cap reached)"
 
-proc verifierPrompt*(goalText, evidence: string): string =
-  "Goal (from " & GoalFileName & " in the repo root):\n\n" & goalText.strip &
+proc buildGoalDiff*(dir = "."): string =
+  ## Harness-captured working-tree delta fed to the verifier: porcelain
+  ## status, the tracked changes (`git diff HEAD`), and the untracked
+  ## files that diff cannot see, appended as new-file diffs. Capped hard:
+  ## this is orientation so the verifier's tool rounds go into checking
+  ## the work instead of discovering it. Empty outside a git repo.
+  let git = "git -C " & quoteShell(dir) & " --no-optional-locks "
+  let (status, code) = execCmdEx(git & "status --porcelain")
+  if code != 0: return ""
+  # Trailing-only trim: porcelain's leading column is meaningful
+  # (" M" is worktree-dirty, "M " is staged).
+  var parts = @[status.strip(leading = false)]
+  # Exit code matters: a repo with no commits yet fails `diff HEAD`
+  # with a fatal message that must not become feed content.
+  let (tracked, tcode) = execCmdEx(git & "diff HEAD")
+  if tcode == 0 and tracked.strip.len > 0: parts.add tracked.strip
+  # Line list, not -z: execCmdEx is line-based (it re-appends the
+  # newline per line), which would corrupt NUL-terminated output and
+  # invent a phantom "\n" path. Newline-split is faithful here; git
+  # C-quotes exotic names so they stay on one line.
+  let (others, _) = execCmdEx(
+    git & "ls-files --others --exclude-standard")
+  var shown = 0
+  for path in others.splitLines:
+    if path.strip.len == 0: continue
+    if shown >= GoalDiffMaxUntracked:
+      parts.add "(" & $shown & " untracked files shown, more omitted)"
+      break
+    inc shown
+    let (d, dcode) = execCmdEx(git & "diff --no-index -- /dev/null " &
+      quoteShell(path))
+    # Exit 1 is "files differ"; above that (missing file, a platform
+    # refusing /dev/null) the header alone still names the file.
+    if dcode > 1:
+      parts.add "new file: " & path
+    else:
+      parts.add "new file: " & path & "\n" & d.strip
+  result = parts.join("\n")
+  if result.len > GoalDiffCapBytes:
+    result = utf8ByteCut(result, GoalDiffCapBytes) &
+      "\n(diff truncated at " & $GoalDiffCapBytes &
+      " bytes; run git yourself for the rest)"
+
+proc verifierPrompt*(goalText, evidence: string; diff = ""): string =
+  result = "Goal (from " & GoalFileName & " in the repo root):\n\n" &
+    goalText.strip &
     "\n\nEvidence from the agent's just-finished turn (harness-built from " &
-    "the transcript; the agent's prose is excluded):\n\n" & evidence &
-    "\n\nVerify the actual state of the repo and end with the verdict line."
+    "the transcript; the agent's prose is excluded):\n\n" & evidence
+  if diff.strip.len > 0:
+    result.add "\n\nWorking-tree diff vs HEAD captured by the harness " &
+      "(tracked changes plus untracked files, capped):\n\n" & diff.strip
+  result.add "\n\nVerify the actual state of the repo and end with the " &
+    "verdict line."
 
 # ---------- side call ----------
 
@@ -308,7 +360,10 @@ proc runVerifierSideCall(p: Profile, goalText, evidence: string):
   defer: setToolStdinWatcherEnabled(watcherWasOn)
   var convo = newJArray()
   convo.add %*{"role": "system", "content": VerifierPreamble}
-  convo.add %*{"role": "user", "content": verifierPrompt(goalText, evidence)}
+  # The diff is captured here, at check time, so it reflects exactly the
+  # state the verdict is about.
+  convo.add %*{"role": "user",
+    "content": verifierPrompt(goalText, evidence, buildGoalDiff())}
   let tools = verifierTools()
   var cache = newReadCache()
   var lastPrompt = 0
