@@ -3572,19 +3572,6 @@ proc withoutShellTools(tools: JsonNode): JsonNode =
     if t["function"]["name"].getStr in ["bash", "shell"]: continue
     result.add t
 
-proc verifierTools*(): JsonNode =
-  ## The goal-mode side-call verifier's roster: read and bash (search rides
-  ## bash), nothing that can mutate the repo from the tool surface. The
-  ## roster is the lock — a preamble-only "do not write" would be a fake
-  ## one. Filtered from the canonical glm/qwen schema so descriptions
-  ## live in one place, and shaped by `bashToolDisabled` like the agent
-  ## surface.
-  result = newJArray()
-  for t in glmAndQwenTools:
-    let n = t{"function"}{"name"}.getStr
-    if n == "read" or (n == "bash" and not bashToolDisabled):
-      result.add t
-
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## (prompt, tools) for the active family. Unknown family dies — every
   ## entry in `KnownGoodCombos` and every experimental override must

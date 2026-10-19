@@ -1178,15 +1178,16 @@ how to verify it. Anyone can write the file — you directly, or the model when
 you ask for multi-part work.
 
 While `goal.md` exists, every turn end runs a satisfaction check: a fresh
-side conversation with the same model, given the goal text and a summary of
+side conversation with the same model, given the goal text, a summary of
 what the turn actually did (files, patches, commands — never the agent's own
-claims), verifies the repository itself and answers with a verdict. Not
-satisfied, the agent is sent back in with the verifier's feedback. Satisfied,
-the harness renames the file to `goal-confirmed.md` (the record of the run)
-and idles. The check shows its work as it goes: every verifier step (its
-prose, its reads and checks, each result head) lands in scrollback as a dim,
-indented `· verify` item, a visual tier clearly below the agent's own items.
-Nothing the harness runs is ever silent.
+claims), and the working-tree diff, judges from those inputs alone and
+answers with a verdict. Not satisfied, the agent is sent back in with the
+verifier's feedback. Satisfied, the harness renames the file to
+`goal-confirmed.md` (the record of the run) and idles. The check has no
+tools and no rounds: orientation is the harness's job, so the check is one
+model call. And it shows its work: the verifier's reply lands in scrollback
+as a dim, indented tier clearly below the agent's own items. Nothing the
+harness runs is ever silent.
 
 The file is the whole interface. Edit `goal.md` mid-run to steer (`:goal
 edit` opens it in `$VISUAL/$EDITOR`; the next check reads it fresh), delete

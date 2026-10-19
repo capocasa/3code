@@ -851,25 +851,13 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
 proc goalStepBytes*(step: GoalStep): string =
   ## A verifier step in scrollback. Deliberately a different visual tier
   ## from the agent's tool items (which are flush-left white banners over
-  ## grey output): everything here is dim, indented, and marked `verify`,
-  ## so goal-check traffic can never read as agent work. Prose and
-  ## refusals render body-only; executed calls render digest + result
-  ## head.
+  ## grey output): everything here is dim and indented, so goal-check
+  ## traffic can never read as agent work.
   let termW = try: terminalWidth() except CatchableError: 80
-  if step.prose.strip.len > 0:
-    for line in step.prose.splitLines:
-      if line.strip.len == 0: continue
-      for chunk in wrapAnsi(line, max(20, termW - 4)):
-        result.add GreyFg & "  " & chunk & Reset & "\r\n"
-  if step.brief.len == 0: return
-  let mark =
-    if step.code > 0: "· verify ✗ "
-    else: "· verify   "
-  result.add GreyFg & "  " & mark & step.brief & Reset & "\r\n"
-  for line in step.output.splitLines:
+  for line in step.prose.splitLines:
     if line.strip.len == 0: continue
-    for chunk in wrapAnsi(line, max(20, termW - 6)):
-      result.add GreyFg & "    " & chunk & Reset & "\r\n"
+    for chunk in wrapAnsi(line, max(20, termW - 4)):
+      result.add GreyFg & "  " & chunk & Reset & "\r\n"
 
 proc receiptBytes*(label: string): string =
   ## The single canonical styling for a token receipt row (two-space

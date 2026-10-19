@@ -144,35 +144,23 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     check not fileExists(root / "run" / "goal.md")
     tty.expectAlive()
 
-  test "verifier steps land in scrollback; keys typed during the check survive":
-    let root = newFixture("goal_verify_steps")
+  test "verifier reply lands in scrollback; keys typed during the check survive":
+    let root = newFixture("goal_verify_reply")
     writeConfiguredProvider(root)
-    # Round 1: the kickoff reply. Round 2: a fast verifier bash whose
-    # step row lands in scrollback immediately (ARMING). Round 3: a slow
-    # verifier bash; keystrokes typed right after ARMING land inside its
-    # run. Round 4: the satisfied verdict. Round 5: the reply to the
-    # user's next prompt, submitted AFTER the check: the text typed
-    # mid-check must still be in the editor, proving the side call's
-    # bash runs never ate the keys (the tool stdin watcher used to arm
-    # for them and swallow everything).
+    # Response 1: the kickoff reply. Response 2: a slow toolless verifier
+    # call (one reply, no tool rounds) whose prose lands as a dim step in
+    # scrollback; keystrokes typed right after the turn receipt ride out
+    # the whole check in the editor. Response 3: the reply to the user's
+    # next prompt, submitted AFTER the check: the text typed mid-check
+    # must still be in the editor, proving the side call never ate keys
+    # (the tool stdin watcher used to arm for its bash rounds and
+    # swallow everything).
     writeFile(root / "run" / "stub_responses.json", $(%*[
       {"role": "assistant", "preStreamDelayMs": 50,
        "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
        "usage": {"promptTokens": 5, "completionTokens": 2,
                   "totalTokens": 7, "cachedTokens": 0}},
-      {"role": "assistant", "content": newJNull(),
-       "tool_calls": [{"id": "v1", "type": "function",
-         "function": {"name": "bash",
-           "arguments": "{\"command\":\"echo ARMING\"}"}}],
-       "usage": {"promptTokens": 5, "completionTokens": 2,
-                  "totalTokens": 7, "cachedTokens": 0}},
-      {"role": "assistant", "content": newJNull(),
-       "tool_calls": [{"id": "v2", "type": "function",
-         "function": {"name": "bash",
-           "arguments": "{\"command\":\"sleep 3; echo VERIFY_RAN\"}"}}],
-       "usage": {"promptTokens": 5, "completionTokens": 2,
-                  "totalTokens": 7, "cachedTokens": 0}},
-      {"role": "assistant", "preStreamDelayMs": 50,
+      {"role": "assistant", "preStreamDelayMs": 1500,
        "content": "checked the tree.\nVERDICT: SATISFIED",
        "contentChunks": ["checked the tree.\nVERDICT: SATISFIED"],
        "usage": {"promptTokens": 5, "completionTokens": 2,
@@ -192,36 +180,30 @@ suite "ctrl-r retry and goal kickoff (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    tty.send ":goal make the tree say VERIFY_RAN"
+    tty.send ":goal make the stub say GOAL_WORK_DONE"
     tty.send "\n"
     tty.expectInHistory "starting toward it now"
     tty.expectInHistory "GOAL_WORK_DONE"
-    # The receipt commits before the side call; the verifier's bash round
-    # is running by the moment it lands, so these keystrokes must ride
-    # out the whole check in the editor buffer.
+    # The receipt commits before the side call; the verifier's slow model
+    # call is running by the moment it lands, so these keystrokes must
+    # ride out the whole check in the editor buffer.
     tty.expectInHistory "goal mode: goal.md detected"
-    # ARMING's step row means the verifier's next bash is the sleep:
-    # keystrokes sent now are inside the watcher's old arming window.
-    tty.expectInHistory "ARMING"
-    # The tier marker itself: dim, indented `· verify`, never flush-left
-    # agent items.
-    tty.expectInHistory "· verify"
     tty.send "SURVIVED_KEYS"
     tty.drain(300)
-    # The check shows its work: each step row and its result head are in
-    # scrollback, dim and indented, before the verdict lands.
-    tty.expectInHistory "VERIFY_RAN"
+    # The check shows its work: the verifier's reply prose lands in
+    # scrollback, dim and indented, before the verdict is honored.
+    tty.expectInHistory "checked the tree."
     tty.expectInHistory "goal confirmed"
     check fileExists(root / "run" / "goal-confirmed.md")
     check not fileExists(root / "run" / "goal.md")
     # Submit the buffer that lived through the check: the echoed prompt
-    # only appears if every keystroke survived the side call's bash runs.
+    # only appears if every keystroke survived the side call.
     tty.send "\n"
     tty.expectInHistory "SURVIVED_KEYS"
     tty.expectInHistory "NEXT_TURN_OK"
     tty.expectAlive()
 
-  test "ctrl-c during the verifier round interrupts the check, goal stays":
+  test "ctrl-c during the verifier call interrupts the check, goal stays":
     let root = newFixture("goal_verify_interrupt")
     writeConfiguredProvider(root)
     writeFile(root / "run" / "stub_responses.json", $(%*[
@@ -229,13 +211,7 @@ suite "ctrl-r retry and goal kickoff (interactive)":
        "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
        "usage": {"promptTokens": 5, "completionTokens": 2,
                   "totalTokens": 7, "cachedTokens": 0}},
-      {"role": "assistant", "content": newJNull(),
-       "tool_calls": [{"id": "v1", "type": "function",
-         "function": {"name": "bash",
-           "arguments": "{\"command\":\"sleep 8\"}"}}],
-       "usage": {"promptTokens": 5, "completionTokens": 2,
-                  "totalTokens": 7, "cachedTokens": 0}},
-      {"role": "assistant", "preStreamDelayMs": 50,
+      {"role": "assistant", "preStreamDelayMs": 8000,
        "content": "never reached\nVERDICT: SATISFIED",
        "contentChunks": ["never reached\nVERDICT: SATISFIED"],
        "usage": {"promptTokens": 5, "completionTokens": 2,
@@ -255,9 +231,9 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     tty.send "\n"
     tty.expectInHistory "GOAL_WORK_DONE"
     tty.expectInHistory "goal mode: goal.md detected"
-    # Ctrl-C while the verifier's bash runs: with the watcher disarmed
-    # the key reaches the editor, interrupts the turn, kills the tool
-    # child, and skips the satisfaction check. goal.md survives.
+    # Ctrl-C while the verifier's slow model call runs: the interrupt is
+    # honored after the side call returns, skips the satisfaction check,
+    # and ends the turn. goal.md survives.
     tty.drain(400)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"

@@ -8,8 +8,8 @@
 ## model call completes and the harness is about to hand the prompt back
 ## to the user, it stats `goal.md`; bare existence activates (v1 waives
 ## marker sniff and name-collision handling). A side-call verifier (same
-## model, fresh conversation, minimal preamble, read-only roster) judges
-## the goal text against harness-built evidence from the just-finished
+## model, fresh conversation, minimal preamble, no tools) judges the
+## goal text against harness-built evidence from the just-finished
 ## turn plus the harness-captured working-tree diff. FEEDBACK sends
 ## the agent back in; SATISFIED renames the file to
 ## `goal-confirmed.md` and the session idles normally. Bare `:goal!`
@@ -18,10 +18,10 @@
 ## continuation message carries everything.
 ##
 ## The side call is also the future subagent primitive, so it is kept
-## separate: its own message list, no session mutation, its own roster.
+## separate: its own message list, no session mutation, no tools.
 
 import std/[json, os, osproc, strutils, tables]
-import types, util, prompts, api, actions, streamexec
+import types, util, prompts, api, streamexec
 
 const
   GoalFileName* = "goal.md"                 ## existence activates goal mode
@@ -30,7 +30,6 @@ const
   GoalGivenUpName* = "goal-given-up.md"      ## reserved: nothing writes it
                                              ## yet; a failing harness retries
                                              ## instead of giving up
-  MaxVerifierRounds* = 16   ## tool rounds before the side call gives up
   EvidenceCapBytes* = 6000  ## evidence summary ceiling
   EvidenceBriefCap* = 160   ## per-call argument digest ceiling
   EvidenceResultCap* = 240  ## per-call result head ceiling
@@ -53,25 +52,27 @@ type
     verdict*: GoalVerdict
 
   GoalStep* = object
-    ## One visible verifier step: a round of prose ("" when the round
-    ## went straight to tool calls), a tool call digest, or a roster
-    ## refusal (brief set, no output). Everything the side call does is
-    ## scrollback material - the check must never look silent.
-    prose*: string   ## verifier prose emitted this round
-    brief*: string   ## one-line call digest ("bash: nim r tests")
-    output*: string  ## result head for executed calls
-    code*: int       ## exit code for executed calls (-1 otherwise)
+    ## One visible verifier step. The toolless verifier produces exactly
+    ## one: its reply, whose final line is the verdict. Everything the
+    ## check says is scrollback material - the check must never look
+    ## silent.
+    prose*: string  ## the verifier's reply
 
 const VerifierPreamble* = """You are verifying progress toward a goal. You get the goal text, an
-evidence summary of the agent's last turn (files written, patches
-applied, commands and their results), and the harness-captured
-working-tree diff. Reconstruct what you need yourself: read the repo,
-run the checks. The agent's claims are not evidence. Read-only: read,
-search, and bash for checks only. Do not fix anything. Judge whether
-the goal as stated is fully satisfied by the actual state of the
-repo. Report exactly what you checked and how; never overstate how
-deeply you verified. End with exactly one line: VERDICT: SATISFIED,
-or VERDICT: FEEDBACK: <what is missing or what to do next>."""
+evidence summary of the agent's last turn (harness-built from the
+transcript's tool calls and their recorded results; the agent's prose
+is excluded), and the harness-captured working-tree diff. You have no
+tools and exactly one reply: judge from these inputs alone, briefly.
+The recorded results are real harness captures, but they can be stale
+if the agent changed things after the check they show. The agent's
+claims are never evidence. If the goal requires runtime behavior
+these inputs cannot confirm (tests passing, a build succeeding), do
+not infer it: name the unconfirmed check in your feedback. Judge
+whether the goal as stated is fully satisfied by what the inputs
+actually show. Report exactly what you verified and how; never
+overstate how deeply you verified. End with exactly one line: VERDICT:
+SATISFIED, or VERDICT: FEEDBACK: <what is missing or what to do
+next>."""
 
 proc goalModeActive*(dir = "."): bool =
   fileExists(dir / GoalFileName)
@@ -297,8 +298,7 @@ proc verifierPrompt*(goalText, evidence: string; diff = ""): string =
   if diff.strip.len > 0:
     result.add "\n\nWorking-tree diff vs HEAD captured by the harness " &
       "(tracked changes plus untracked files, capped):\n\n" & diff.strip
-  result.add "\n\nVerify the actual state of the repo and end with the " &
-    "verdict line."
+  result.add "\n\nJudge from these inputs and end with the verdict line."
 
 # ---------- side call ----------
 
@@ -314,107 +314,41 @@ var goalStepHook*: proc (step: GoalStep) = nil
   ## agent's work). Nil in tests and headless use, so a step is data,
   ## never a paint obligation.
 
-const
-  GoalStepHeadLines = 8   ## verifier-step result head: lines kept per call
-  GoalStepHeadBytes = 800  ## and the byte ceiling on the same head
-
-proc stepOutputHead*(res: string): string =
-  ## Compact-but-honest result head for a verifier step: the first lines
-  ## of the call's output, with an elision note when more followed. The
-  ## verifier's full output went to the model; scrollback keeps the head.
-  let all = res.splitLines
-  var lines: seq[string]
-  for i, line in all:
-    if i == all.len - 1 and line.len == 0: break  # trailing \n phantom
-    if lines.len >= GoalStepHeadLines: break
-    lines.add line
-  result = lines.join("\n")
-  if result.len > GoalStepHeadBytes:
-    result = utf8ByteCut(result, GoalStepHeadBytes)
-  let total = all.len - (if all.len > 0 and all[^1].len == 0: 1 else: 0)
-  if total > lines.len:
-    if result.len > 0: result.add "\n"
-    result.add "(… " & $(total - lines.len) & " more lines)"
-
 proc stepProse(text: string) =
   if goalStepHook != nil and text.strip.len > 0:
     goalStepHook(GoalStep(prose: text))
 
 proc runVerifierSideCall(p: Profile, goalText, evidence: string):
     tuple[ok: bool, text: string, err: string] =
-  ## One-shot verifier: a fresh conversation (its own message list, the
-  ## minimal preamble, the read-only roster), a bounded round of tool use,
-  ## no session mutation. Same model as the agent: accepted trade. Runs in
-  ## `sideCallMode` so its prose never paints as a live reply.
+  ## Toolless verifier: a fresh conversation (its own message list, the
+  ## judge preamble, an empty roster so the provider offers nothing),
+  ## one model call, no session mutation. Orientation is the harness's
+  ## job - the goal text, the evidence digest, and the check-time diff
+  ## are all in the opening message - so there are no tool rounds to
+  ## bound or go astray in. Runs in `sideCallMode` so its prose never
+  ## paints as a live reply.
   sideCallMode = true
   defer: sideCallMode = false
-  # The side call's bash rounds must not arm the tool stdin watcher: in
-  # an interactive session the editor owns stdin (the model-run tool path
-  # disables the watcher for exactly this reason), and an armed watcher
-  # flips fd 0 to nonblocking under the input thread's blocking read,
-  # then eats every keystroke that lands during the check - Ctrl-Z,
-  # Ctrl-R, typed-ahead text, all of it. Restore the ambient flag after:
-  # the value is process state owned by the tool-call path.
-  let watcherWasOn = toolStdinWatcherOn()
-  setToolStdinWatcherEnabled(false)
-  defer: setToolStdinWatcherEnabled(watcherWasOn)
   var convo = newJArray()
   convo.add %*{"role": "system", "content": VerifierPreamble}
   # The diff is captured here, at check time, so it reflects exactly the
   # state the verdict is about.
   convo.add %*{"role": "user",
     "content": verifierPrompt(goalText, evidence, buildGoalDiff())}
-  let tools = verifierTools()
-  var cache = newReadCache()
-  var lastPrompt = 0
-  for round in 1 .. MaxVerifierRounds:
-    var usage: Usage
-    var msg: JsonNode
-    try:
-      msg = callModel(p, convo, usage, lastPrompt, toolsOverride = tools)
-    except ApiError as e:
-      return (false, "", e.msg)
-    lastPrompt = usage.promptTokens
-    convo.add msg
-    stepProse(msg{"content"}.getStr(""))
-    let tcs = msg{"tool_calls"}
-    if tcs == nil or tcs.kind != JArray or tcs.len == 0:
-      return (true, msg{"content"}.getStr(""), "")
-    for tc in tcs:
-      let id = tc{"id"}.getStr
-      let fn = tc{"function"}
-      let rawName = if fn != nil and fn.kind == JObject:
-                      fn{"name"}.getStr("") else: ""
-      let lt = rawName.find("<|")  # gpt-oss harmony channel suffix
-      let name = if lt > 0: rawName[0 ..< lt] else: rawName
-      let argsStr = if fn != nil and fn.kind == JObject:
-                      fn{"arguments"}.getStr("") else: ""
-      let args =
-        try: parseJson(if argsStr == "": "{}" else: argsStr)
-        except CatchableError: newJObject()
-      if name notin ["bash", "shell", "read"]:
-        # The roster is the lock: an unoffered tool name (training
-        # leakage, a write attempt) is refused structurally, not by
-        # prompt.
-        convo.add %*{"role": "tool", "tool_call_id": id,
-          "content": "ERROR: not in the verifier roster; use bash " &
-            "(checks and search) or read."}
-        if goalStepHook != nil:
-          goalStepHook(GoalStep(brief: name & ": refused (not in the " &
-            "verifier roster)", code: -1))
-        continue
-      let act = if name == "read": readAction(args) else: bashAction(args)
-      let (outp, code, _) = runAction(act, cache)
-      convo.add %*{"role": "tool", "tool_call_id": id, "content": outp}
-      if goalStepHook != nil:
-        goalStepHook(GoalStep(brief: briefFor(name, args),
-          output: stepOutputHead(outp), code: code))
-  (false, "", "verifier exceeded " & $MaxVerifierRounds & " tool rounds")
+  var usage: Usage
+  var msg: JsonNode
+  try:
+    msg = callModel(p, convo, usage, 0, toolsOverride = newJArray())
+  except ApiError as e:
+    return (false, "", e.msg)
+  let text = msg{"content"}.getStr("")
+  stepProse(text)
+  (true, text, "")
 
 proc runGoalCheck*(p: Profile, goalText, evidence: string): GoalCheckResult =
   ## Fire the side call and parse its verdict. `ok=false` means the call
-  ## itself failed (network, provider, rounds exhausted): the caller keeps
-  ## running without feedback and retries at the next boundary.
+  ## itself failed (network, provider): the caller keeps running without
+  ## feedback and retries at the next boundary.
   let call = if goalCheckHook != nil: goalCheckHook else: runVerifierSideCall
   let (ok, text, err) = call(p, goalText, evidence)
   if not ok:
