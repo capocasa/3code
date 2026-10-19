@@ -2,6 +2,33 @@ Changelog
 
 Unreleased
 
+- **Goal mode: `goal.md` keeps a session on one goal.** Drop a `goal.md`
+  into the project root stating what must be true when the work is done,
+  and the harness takes over from there: `:goal <text>` writes the file
+  and sends the agent off in the same breath, no extra prompt needed.
+  Every turn end runs a satisfaction check: a fresh side conversation
+  with the same model judges the goal text against a harness-built
+  evidence summary of the turn (tool calls and their recorded results,
+  never the agent's own claims) plus the check-time working-tree diff.
+  The verifier has no tools and answers in one call - orientation is the
+  harness's job - and whatever it cannot confirm from runtime behavior
+  it must name in its feedback instead of inferring. Its reply lands in
+  scrollback as a dim, indented tier clearly below the agent's items.
+  Not satisfied, the agent is sent back in with the verifier's words;
+  satisfied, the file is renamed `goal-confirmed.md` and the session
+  idles. `:goal` shows the goal, `:goal edit` opens it in
+  `$VISUAL/$EDITOR`, `:goal!` replaces it and bare `:goal!` cancels
+  into `goal-cancelled.md`; interrupt pauses the check, deleting the
+  file ends goal mode silently. A failing check retries at the next
+  turn end; the harness never gives up on its own.
+- **Ctrl+R retries now; `:retry` is the command form.** During a
+  patient-retry backoff, Ctrl+R cuts the wait short and resends while
+  keeping the backoff schedule intact, so later failures back off
+  exactly as they would have. Ctrl+R also cancels and resends a request
+  that has not shipped any output yet; once model output is streaming,
+  or at the idle prompt, it does nothing. Bare `:retry` does the same
+  from the command line; `:retry on`, `:retry off`, and `:retry list`
+  manage the patient-retry setting itself.
 - **Sandbox `ask`: one-key approval for the gray zone.** `:sandbox ask
   P` denies exactly like `:sandbox deny P`, but when a sandboxed bash
   command is blocked on an ask-protected path, 3code puts one question
