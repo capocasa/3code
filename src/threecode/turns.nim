@@ -1543,12 +1543,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     # call completed, the reply is committed, nothing is queued, and the
     # harness is about to hand the prompt back. goal.md in the project root
     # keeps the session on its goal: a fresh-context side-call verifier
-    # (same model, own message list, read-only roster) judges the goal text
-    # against harness-built evidence from this turn. FEEDBACK sends the
-    # agent back in with the verifier's words; SATISFIED renames the file
-    # and idles normally. No session-start check, no per-tool-call checks.
-    # Interrupt is the pause lever: it skips the check and ends the turn;
-    # on resume the file is still there, so the goal is still on.
+    # (same model, own message list, no tools) judges the goal text
+    # against harness-built evidence from this turn plus the check-time
+    # working-tree diff. FEEDBACK sends the agent back in with the
+    # verifier's words; SATISFIED renames the file and idles normally.
+    # No session-start check, no per-tool-call checks. Interrupt is the
+    # pause lever: it skips the check and ends the turn; on resume the
+    # file is still there, so the goal is still on.
     if goalModeActive():
       if isInterrupted():
         onTurnInterrupted()
@@ -1574,7 +1575,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         turnEnded = true
         return true
       if not check.ok:
-        # Verifier call failed (network, provider, rounds exhausted): keep
+        # Verifier call failed (network, provider): keep
         # running without feedback, note it in the receipt, retry at the
         # next boundary. goal.md is untouched, so the goal is still on.
         debugOut "goal check failed: " & check.err

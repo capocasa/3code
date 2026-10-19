@@ -326,43 +326,22 @@ suite "goal check loop (canned verdicts, no provider)":
     check r.verdict.kind == gvkNone
 
 suite "verifier steps in scrollback":
-  test "step result head keeps first lines, elides the rest":
-    let short = "one\ntwo\n"
-    check stepOutputHead(short) == "one\ntwo"
-    var long = ""
-    for i in 1 .. 12:
-      long.add "line " & $i & "\n"
-    let head = stepOutputHead(long)
-    check "line 1" in head
-    check "line 8" in head
-    check "line 9" notin head
-    check "(… 4 more lines)" in head
-
-  test "goalStepBytes is a dim, indented tier with the verify marker":
-    let b = goalStepBytes(
-      GoalStep(brief: "bash: nim r tests", output: "ok\n", code: 0))
-    check b.contains("· verify")
-    check b.contains("bash: nim r tests")
-    check b.contains("ok")
+  test "the verifier reply renders as a dim, indented tier":
+    let b = goalStepBytes(GoalStep(prose: "checked the diff.\nVERDICT: SATISFIED"))
+    check b.contains("checked the diff.")
+    check b.contains("VERDICT: SATISFIED")
     # Every row is dim grey and at least two columns in: nothing in a
     # step renders flush left, so the tier can never read as agent work.
     for row in b.splitLines:
       if row.strip.len == 0: continue
       check row.startsWith(GreyFg)
       check row.startsWith(GreyFg & "  ")
-    # A failed check carries the marker.
-    let bad = goalStepBytes(
-      GoalStep(brief: "bash: rg goal", output: "no match", code: 1))
-    check bad.contains("· verify ✗")
-
-  test "prose steps render without a call digest":
-    let p = goalStepBytes(GoalStep(prose: "checking the tests now"))
-    check p.contains("checking the tests now")
-    check "verify" notin p
-
-  test "refusal steps are data too":
-    let r = goalStepBytes(
-      GoalStep(brief: "write: refused (not in the verifier roster)",
-               code: -1))
-    check r.contains("· verify")
-    check "refused (not in the verifier roster)" in r
+    # Long prose wraps inside the tier instead of running to the margin.
+    let wide = goalStepBytes(
+      GoalStep(prose: "word ".repeat(200).strip & "\nVERDICT: FEEDBACK: wrap"))
+    var wideRows = 0
+    for row in wide.splitLines:
+      if row.strip.len == 0: continue
+      check row.startsWith(GreyFg & "  ")
+      inc wideRows
+    check wideRows > 1

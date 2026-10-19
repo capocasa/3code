@@ -1556,7 +1556,7 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode,
   ## Request body for POST /responses. Mirrors the completions body built
   ## in `callModel` (same generation defaults, same tools) with the
   ## Responses field naming. `toolsOverride`, when non-nil, replaces the
-  ## profile's advertised roster (the goal-mode verifier's read-only set).
+  ## profile's advertised roster.
   result = %*{
     "model": p.model,
     "input": responsesInput(wireMessages),
@@ -1566,9 +1566,14 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode,
   # pro slug ships as the base model plus `reasoning.mode: pro`.
   let proBase = proModeBase(p)
   if proBase != "": result["model"] = %proBase
-  result["tools"] = responsesTools(
+  let effTools = responsesTools(
     if toolsOverride != nil: toolsOverride else: setup(p).tools)
-  result["tool_choice"] = %"auto"
+  # An empty effective roster (the toolless goal verifier) omits the
+  # fields entirely: sending `"tools": []` needlessly dares strict
+  # backends to 400.
+  if effTools == nil or effTools.len > 0:
+    result["tools"] = effTools
+    result["tool_choice"] = %"auto"
   let d = knownGoodGeneration(p)
   # The Codex backend rejects `max_output_tokens` outright (400
   # "Unsupported parameter"); first-party codex never sends it.
@@ -3301,9 +3306,14 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         # both streaming and provider.
         if streamingEnabled and providerOf(p) != "fireworks":
           body["stream_options"] = %*{"include_usage": true}
-        body["tools"] =
+        # An empty effective roster (the toolless goal verifier) omits
+        # the fields entirely: sending `"tools": []` needlessly dares
+        # strict backends to 400.
+        let effTools =
           if toolsOverride != nil: toolsOverride else: setup(p).tools
-        body["tool_choice"] = %"auto"
+        if effTools == nil or effTools.len > 0:
+          body["tools"] = effTools
+          body["tool_choice"] = %"auto"
         applyStreamingOptions(p, body)
         applyGenerationDefaults(p, body)
         if maxTokensOverride > 0:
