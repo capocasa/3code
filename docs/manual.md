@@ -504,6 +504,7 @@ home             = Home CtrlA CmdLeft
 end              = End CtrlE CmdRight
 word-left        = AltB CtrlLeft AltLeft
 word-right       = AltF CtrlRight AltRight
+select-all       = CmdA
 delete-to-bol    = CmdBackspace
 delete-word-left = CtrlW AltBackspace
 ```
@@ -518,7 +519,8 @@ reported as-is through the protocol.
 
 The input buffer is a real text widget: hold Shift with the arrows (or
 Home/End, Ctrl+Arrow for words, Ctrl+Shift+Home/End for the whole buffer)
-and the range highlights in reverse video. Then:
+and the range highlights in reverse video. `select-all` has no default
+key; on macOS bind it to `CmdA` for the usual Command-A meaning. Then:
 
 | key | action |
 | --- | --- |

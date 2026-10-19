@@ -113,11 +113,28 @@ proc cmdError*(body: string) =
   if not body.endsWith("\n"): stdout.write "\n"
   stdout.flushFile
 
+proc renderBindingsS*(): string =
+  ## The live key-binding table for `:help`, straight from
+  ## `effectiveShortcuts()` so it can never drift from what the
+  ## dispatcher actually runs. Commands with no key in effect are
+  ## listed as unbound: a bindable command the user cannot see (like
+  ## `select-all` before #57) is one they cannot bind.
+  const Indent = "  "
+  let eff = minline.effectiveShortcuts()
+  var width = 0
+  for cmd in minline.ShortcutNames:
+    width = max(width, cmd.len)
+  result = "bindings in effect ([shortcuts] remaps them):\n"
+  for cmd in minline.ShortcutNames:
+    let spec = eff.getOrDefault(cmd, "")
+    result.add Indent & cmd.align(width + 2) &
+      (if spec.strip.len == 0: "(unbound)" else: spec) & "\n"
+
 proc renderHelpS*(): string =
   ## :help body in default terminal color: content lines only, no spacing.
   ## `3code` highlighted bright white; `:command` tokens highlighted
   ## bright white. Inter-item spacing is owned by the scrollback engine.
-  for line in HelpText.splitLines:
+  for line in (HelpText & "\n" & renderBindingsS()).splitLines:
     var i = 0
     while i < line.len:
       if i + 5 <= line.len and line[i ..< i + 5] == "3code":

@@ -1,6 +1,22 @@
 import std/[os, strutils, times, unittest]
 import threecode/display
 import threecode/util
+import threecode/minline
+
+suite "display: :help live bindings table":
+  test "every command listed; unbound ones marked (#57)":
+    let s = renderBindingsS()
+    check "bindings in effect" in s
+    for cmd in minline.ShortcutNames:
+      check cmd in s
+    # A bindable command with no default key must still be visible,
+    # or the user cannot know they can bind it (issue #57).
+    check "select-all" in s
+    check "(unbound)" in s
+    check "cancel" in s and "ESC CtrlC" in s
+
+  test "renderHelpS carries the live table":
+    check "select-all" in renderHelpS()
 
 suite "display: assistant rendering":
   test "assistant reply text is bright white across lines":

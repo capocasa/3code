@@ -2,6 +2,26 @@ Changelog
 
 Unreleased
 
+- **Cmd-A select all: discoverable in `:help`, documented, tested
+  (#57).** The `select-all` command and the `CmdX` key names both
+  existed, but nothing told a macOS user the one line they need - and
+  `:help` could not either, because it printed a static text while the
+  manual promised it "shows the bindings currently in effect"; a
+  bindable command with no default key (like `select-all`) was
+  invisible everywhere. `:help` now appends a live bindings table
+  built from the same merge the dispatcher uses (new
+  `mergeShortcuts`/`effectiveShortcuts` in minline, `renderBindingsS`
+  in display), listing every command with its keys in effect and
+  marking the unbound ones. The manual's Mac-bindings example now
+  includes `select-all = CmdA`, the "Selecting text" section names it,
+  and `config.example`'s key-syntax list mentions `CmdX`. Locked in
+  with tests at both levels: a minline test drives the kitty-protocol
+  `CSI 97;9 u` report through a `CmdA` binding and checks the whole
+  buffer reverses (across wraps, prompt excluded) and typing replaces
+  it; a display test pins the `:help` table; a tty test does both
+  against the real binary - binding set through the config file,
+  reverse-video asserted on the raw output bytes, and `:help` showing
+  `select-all` unbound by default and `CmdA` once configured.
 - **Goal mode: `goal.md` keeps a session on one goal.** Drop a `goal.md`
   into the project root stating what must be true when the work is done,
   and the harness takes over from there: `:goal <text>` writes the file

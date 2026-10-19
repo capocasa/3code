@@ -1634,11 +1634,19 @@ const
   KittyCtrlA* = @[27, 91, 57, 55, 59, 53, 117]       # CSI 97;5 u
   KittyCtrlE* = @[27, 91, 49, 48, 49, 59, 53, 117]   # CSI 101;5 u
   KittyCmdT* = @[27, 91, 49, 49, 54, 59, 57, 117]    # CSI 116;9 u
+  KittyCmdA* = @[27, 91, 57, 55, 59, 57, 117]       # CSI 97;9 u
   KittyEsc* = @[27, 91, 50, 55, 117]                  # CSI 27 u
   KittyShiftEnter* = @[27, 91, 49, 51, 59, 50, 117]  # CSI 13;2 u
   KittyAltBackspace* = @[27, 91, 49, 50, 55, 59, 51, 117]  # CSI 127;3 u
   KittyCmdBackspace* = @[27, 91, 49, 50, 55, 59, 57, 117]  # CSI 127;9 u
   CmdLeftSeq* = @[27, 91, 49, 59, 57, 68]            # CSI 1;9 D
+
+proc selCells*(g: Grid, r: int): int =
+  ## Count reverse-video cells on row `r` (the selection highlight).
+  var c = 0
+  while c < g.width:
+    if g.cellAttr(r, c).hasAttr(saReverse): inc result
+    inc c
 
 suite "minline editor: kitty keyboard protocol":
   test "CSI u ctrl+letter maps to the control key":
@@ -1660,6 +1668,33 @@ suite "minline editor: kitty keyboard protocol":
     d.push KittyCmdT
     d.push Enter
     check d.run(ed, prompt = "> ") == "ba"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "select-all bound to CmdA selects the whole buffer":
+    minline.configuredShortcuts = {"select-all": "CmdA"}.toTable
+    block:
+      var ed = initEditor()
+      let d = newDriver(width = 10)
+      d.pushString "abcdefghij"
+      d.push KittyCmdA
+      expect EOFError:
+        discard d.run(ed, prompt = "> ")
+      check ed.selAnchor == 0
+      check ed.line.position == "abcdefghij".len
+      check ed.selectionText() == "abcdefghij"
+      # Every content cell is reversed, across the wrap; the prompt
+      # itself is never part of a selection.
+      check selCells(d.grid, 0) == 8
+      check selCells(d.grid, 1) == 2
+    block:
+      # The selection is live: typing replaces the whole buffer.
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "hello world"
+      d.push KittyCmdA
+      d.pushString "Z"
+      d.push Enter
+      check d.run(ed, prompt = "> ") == "Z"
     minline.configuredShortcuts = initTable[string, string]()
 
   test "CSI 27 u behaves like the Esc key":
@@ -1734,13 +1769,6 @@ const
   CtrlY* = @[25]
   AltD* = @[27, 100]
   AltW* = @[27, 119]
-
-proc selCells*(g: Grid, r: int): int =
-  ## Count reverse-video cells on row `r` (the selection highlight).
-  var c = 0
-  while c < g.width:
-    if g.cellAttr(r, c).hasAttr(saReverse): inc result
-    inc c
 
 suite "minline editor: selection":
   test "shift+left selects the previous char":

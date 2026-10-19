@@ -2475,16 +2475,32 @@ proc parseShortcutSpec*(spec: string): seq[KeySpec] =
 
 proc defaultBindings*(): Table[string, string] = DefaultShortcuts
 
+var configuredShortcuts*: Table[string, string]
+  ## Command -> spec table set by config.nim after parsing the
+  ## [shortcuts] section. Read-only after startup; every thread that
+  ## calls initKeyTables() picks it up, so the input thread and wizard
+  ## share the same bindings without locks.
+
+proc mergeShortcuts*(overrides: Table[string, string]): Table[string, string] =
+  ## `DefaultShortcuts` with `overrides` applied (empty spec = unbind).
+  result = DefaultShortcuts
+  for cmd, spec in overrides:
+    if spec.strip.len == 0:
+      if result.hasKey(cmd): result.del(cmd)
+    else:
+      result[cmd] = spec
+
+proc effectiveShortcuts*(): Table[string, string] =
+  ## The bindings in effect right now. Single source for `applyShortcuts`
+  ## and the `:help` bindings list, so what :help prints cannot drift
+  ## from what the dispatcher runs.
+  mergeShortcuts(configuredShortcuts)
+
 proc applyShortcuts*(shortcuts: Table[string, string]) =
   ## Build DISPATCH/SEQCMDS/ESCMAP from a command -> spec table.
   ## Start from the built-in defaults, then apply overrides/unbinds.
   ## Must be called after `initKeyTables()`.
-  var merged = DefaultShortcuts
-  for cmd, spec in shortcuts:
-    if spec.strip.len == 0:
-      if merged.hasKey(cmd): merged.del(cmd)
-    else:
-      merged[cmd] = spec
+  var merged = mergeShortcuts(shortcuts)
   DISPATCH = CritBitTree[seq[string]]()
   KEYTIMES = initTable[string, int]()
   CHORDCMDS = initTable[seq[string], seq[string]]()
@@ -2677,12 +2693,6 @@ proc dispatchKeyName*(ed: var LineEditor, name: string): bool =
     ed.keyCount = 1
     return true
   runCommandsForKey(ed, name)
-
-var configuredShortcuts*: Table[string, string]
-  ## Command -> spec table set by config.nim after parsing the
-  ## [shortcuts] section. Read-only after startup; every thread that
-  ## calls initKeyTables() picks it up, so the input thread and wizard
-  ## share the same bindings without locks.
 
 proc runEscCommands(ed: var LineEditor) =
   ## Run ESCMAP commands. Default: ESC clears a non-empty line (adding

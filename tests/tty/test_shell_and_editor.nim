@@ -210,6 +210,81 @@ suite "shell command and edit-in-editor":
     tty.expect "\u276f"
     echo "  PASS: Cmd+E edit-in-editor"
 
+  test "Cmd+A selects the whole buffer (kitty protocol, #57)":
+    let root = newFixture("cmd_a_select_all")
+    writeConfiguredProvider(root)
+    # Cmd bindings are opt-in: the mac select-all gesture is a config
+    # line, exactly what issue #57 asks for.
+    let cfg = root / "xdg" / "3code" / "config"
+    writeFile(cfg, readFile(cfg) & "\n[shortcuts]\nselect-all = CmdA\n")
+    writeStubResponses(root)
+    let tty = startStub(root, "")
+    defer: tty.close()
+
+    tty.expect "\u276f"
+
+    tty.typeText "hello world"
+    tty.drain(100)
+    # Cmd+A on a kitty-protocol terminal: CSI 97;9 u (super modifier).
+    # The repaint must carry the reverse-video selection SGR around the
+    # whole buffer - checked on the raw bytes the app emits, not on a
+    # re-modelled grid.
+    let repaintFrom = tty.raw.len
+    tty.sendBytes "\x1b[97;9u"
+    tty.drain(200)
+    let repaint = tty.raw[repaintFrom ..^ 1]
+    check "\x1b[7mhello world" in repaint
+
+    # Typing replaces the selection, the mac Cmd-A meaning.
+    tty.typeText "Z"
+    tty.drain(100)
+    tty.send "\n"
+
+    tty.expectInHistory "Z"
+    tty.drain(200)
+    tty.expect "\u276f"
+    echo "  PASS: Cmd+A select-all"
+
+  test ":help lists the live bindings, unbound commands included (#57)":
+    let root = newFixture("help_bindings")
+    writeConfiguredProvider(root)
+    writeStubResponses(root)
+    let tty = startStub(root, "")
+    defer: tty.close()
+
+    tty.expect "\u276f"
+
+    tty.typeText ":help"
+    tty.send "\n"
+    tty.drain(300)
+    # The static help never mentioned select-all (it has no default
+    # key), so a user could not discover the command to bind Cmd-A to.
+    # The live table lists it, marked unbound.
+    tty.expectInHistory "bindings in effect"
+    tty.expectInHistory "select-all"
+    tty.expectInHistory "(unbound)"
+    tty.drain(200)
+    tty.expect "\u276f"
+
+    # With the binding configured, the same table shows the live keys.
+    let root2 = newFixture("help_bindings_cmda")
+    writeConfiguredProvider(root2)
+    let cfg2 = root2 / "xdg" / "3code" / "config"
+    writeFile(cfg2, readFile(cfg2) & "\n[shortcuts]\nselect-all = CmdA\n")
+    writeStubResponses(root2)
+    let tty2 = startStub(root2, "")
+    defer: tty2.close()
+
+    tty2.expect "\u276f"
+    tty2.typeText ":help"
+    tty2.send "\n"
+    tty2.drain(300)
+    tty2.expectInHistory "bindings in effect"
+    tty2.expectInHistory "CmdA"
+    tty2.drain(200)
+    tty2.expect "\u276f"
+    echo "  PASS: :help live bindings"
+
   test "plain Ctrl+E is end-of-line, not the editor":
     let root = newFixture("ctrl_e_alone")
     writeConfiguredProvider(root)
