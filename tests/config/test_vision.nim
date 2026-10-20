@@ -47,7 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 7
+    check visionRows == 5
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
@@ -58,11 +58,11 @@ suite "vision: known-good curation":
     check not knownGoodVision("novita", "zai-org/glm-5.3-flash")
 
   test "the deepseek vision-exp hostings are curated":
+    # novita and the zen gateways dropped vision-exp (live 404s / no
+    # longer listed); openrouter and nano-gpt still serve it.
     check knownGoodVision("deepseek", "deepseek-flash")
     check knownGoodVision("openrouter", "deepseek/deepseek-v4-flash-vision-exp")
-    check knownGoodVision("novita", "deepseek/deepseek-v4-flash-vision-exp")
     check knownGoodVision("nanogpt", "deepseek/deepseek-v4-flash-vision-exp")
-    check knownGoodVision("opencodego", "deepseek-v4-flash-vision-exp")
 
   test "text-only combos are not vision":
     check not knownGoodVision("zai", "glm-5.3")

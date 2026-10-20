@@ -112,8 +112,10 @@ suite "api request shaping":
 
   test "gpt-oss family keeps plain max_tokens":
     var body = %*{"stream": true}
-    let p = Profile(name: "openai.gpt-oss-120b", family: "gpt-oss",
-                    model: "gpt-oss-120b")
+    # openai itself no longer serves gpt-oss (registry rows dropped
+    # after a live 404); groq still lists and serves it.
+    let p = Profile(name: "groq.openai/gpt-oss-120b", family: "gpt-oss",
+                    model: "openai/gpt-oss-120b")
 
     applyGenerationDefaults(p, body)
 

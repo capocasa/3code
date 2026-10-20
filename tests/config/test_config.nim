@@ -551,10 +551,10 @@ models = "m1 m2"
     # Regression: normalizing the whole "provider.model" string used to
     # strip everything before the model's last slash, losing the provider.
     var a = ProviderRec(name: "baseten", url: "https://b/v1", key: "k",
-                        models: @["zai-org/GLM-4.7"],
-                        currentModel: "zai-org/GLM-4.7")
-    writeConfigFile(tmp, "baseten.zai-org/GLM-4.7", @[a])
-    check readFile(tmp).contains("current = \"baseten.glm-4.7\"")
+                        models: @["zai-org/GLM-5.2"],
+                        currentModel: "zai-org/GLM-5.2")
+    writeConfigFile(tmp, "baseten.zai-org/GLM-5.2", @[a])
+    check readFile(tmp).contains("current = \"baseten.glm-5.2\"")
 
   test "rememberedModel prefers the stored selection and survives staleness":
     let a = ProviderRec(name: "a", models: @["m1", "m2"],
@@ -593,7 +593,7 @@ suite "config: sticky model across provider switches":
       ProviderRec(name: "zai", url: "https://api.z.ai/v1", key: "k",
                   models: @["glm-5.2", "glm-5.3"]),
       ProviderRec(name: "baseten", url: "https://inference.baseten.co/v1",
-                  key: "k", models: @["zai-org/GLM-4.7"])]
+                  key: "k", models: @["zai-org/GLM-5.2"])]
     activeCurrent = "zai.glm-5.2"
 
   teardown:
@@ -620,7 +620,7 @@ suite "config: sticky model across provider switches":
     discard run(":model glm-5.3")
     check prof.model == "glm-5.3"
     discard run(":provider baseten")
-    check prof.name == "baseten.zai-org/GLM-4.7"
+    check prof.name == "baseten.zai-org/GLM-5.2"
     discard run(":provider zai")
     check prof.model == "glm-5.3"
 
@@ -631,16 +631,16 @@ suite "config: sticky model across provider switches":
     let cfg = readFile(configPath())
     check cfg.contains("current_model = \"glm-5.3\"")
     # writeConfigFile stores normalized ids; buildProfile maps back to wire.
-    check cfg.contains("current = \"baseten.glm-4.7\"")
+    check cfg.contains("current = \"baseten.glm-5.2\"")
 
   test "provider without a recorded selection lands on its first model":
     prof = buildProfile(activeCurrent, activeProviders, "")
     discard run(":provider baseten")
-    check prof.model == "zai-org/GLM-4.7"
+    check prof.model == "zai-org/GLM-5.2"
     # and the switch records it (normalized), so a reload keeps the state
     let (_, providers, _, _, _, _) = parseConfigFile(configPath())
-    check providers[1].currentModel == "glm-4.7"
-    check rememberedModel(providers[1]) == "glm-4.7"
+    check providers[1].currentModel == "glm-5.2"
+    check rememberedModel(providers[1]) == "glm-5.2"
 
 suite "config: :resume":
   # #62: `:resume` swaps a running REPL onto another saved session. The
@@ -664,7 +664,7 @@ suite "config: :resume":
       ProviderRec(name: "zai", url: "https://api.z.ai/v1", key: "k",
                   models: @["glm-5.2", "glm-5.3"]),
       ProviderRec(name: "baseten", url: "https://inference.baseten.co/v1",
-                  key: "k", models: @["zai-org/GLM-4.7"])]
+                  key: "k", models: @["zai-org/GLM-5.2"])]
     seeded = @[]
 
   teardown:
@@ -723,7 +723,7 @@ suite "config: :resume":
     acquireSessionLock(session.savePath)
     var prof = buildProfile(activeCurrent, activeProviders, "baseten")
     var editor: LineEditor
-    check prof.name == "baseten.zai-org/GLM-4.7"
+    check prof.name == "baseten.zai-org/GLM-5.2"
     let res = handleCommandResult(":resume 20260302T120000", messages,
                                   session, prof, editor)
     check res.ok
