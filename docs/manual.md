@@ -221,7 +221,7 @@ keep the global config default. All of this lives in the config file; see
 
 ```
 :provider nvidia
-:model gpt-oss-120b
+:model gpt-oss-20b
 ```
 
 When a provider ships new models, `:provider update <name>` re-runs just

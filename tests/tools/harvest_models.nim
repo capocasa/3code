@@ -204,10 +204,11 @@ proc renderEntry(prov, id: string, src: KnownGoodCombo): string =
     if sid.endsWith("-" & suffix) and variant != suffix and
         not variant.endsWith("-" & suffix):
       variant.add "-" & suffix
-  "(\"$1\", \"$2\", \"$3\", \"$4\", \"$5\", \"$6\", $7, $8, $9, $10, $11, $12)," % [
+  "(\"$1\", \"$2\", \"$3\", \"$4\", \"$5\", \"$6\", $7, $8, $9, $10, $11, $12, $13)," % [
     prov, id, src.family, src.version, variant, src.reasoning,
     fmtFloat(src.temperature), $src.maxTokens, $src.thinkBack,
-    $src.xmlToolCalls, fmtTokens(src.contextWindow), $src.allowPrivate]
+    $src.xmlToolCalls, fmtTokens(src.contextWindow), $src.allowPrivate,
+    $src.vision]
 
 proc syncRegistry(path: string, live: Table[string, seq[string]]): string =
   ## Returns the registry const block rewritten against the live model
@@ -260,7 +261,7 @@ proc syncRegistry(path: string, live: Table[string, seq[string]]): string =
       else: cur.add c
       inc i
     if cur.strip() != "": fields.add cur.strip()
-    if fields.len != 12 or fields[8] notin ["tbNone", "tbCurrentTurn", "tbAllTurns"]:
+    if fields.len != 13 or fields[8] notin ["tbNone", "tbCurrentTurn", "tbAllTurns"]:
       pendingComments.add raw  # unparseable: keep verbatim
       continue
     proc unq(s: string): string =
@@ -272,7 +273,8 @@ proc syncRegistry(path: string, live: Table[string, seq[string]]): string =
       thinkBack: parseEnum[ThinkBackMode](fields[8]),
       xmlToolCalls: fields[9] == "true",
       contextWindow: parseInt(fields[10].replace("_", "")),
-      allowPrivate: fields[11] == "true")
+      allowPrivate: fields[11] == "true",
+      vision: fields[12] == "true")
     let key = e.provider.toLowerAscii & "\0" & e.model.toLowerAscii
     if key in seenKey:
       inc dropped

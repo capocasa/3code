@@ -40,14 +40,16 @@ suite "prompts: knownGoodFamily":
     check knownGoodFamily("openrouter", "qwen/qwen3.8-flash") == "qwen"
 
   test "DeepSeek dated releases are known-good across providers":
+    # fireworks and nvidia dropped their dated v4 deepseek hostings
+    # (live 404s); baseten still serves both spellings.
     check knownGoodFamily("openrouter", "deepseek/deepseek-v4-flash-0731") ==
       "deepseek"
     check knownGoodFamily("openrouter", "deepseek/deepseek-v4-pro-0813") ==
       "deepseek"
-    check knownGoodFamily("fireworks",
-      "accounts/fireworks/models/deepseek-v4-flash-0731") == "deepseek"
-    check knownGoodFamily("nvidia", "deepseek-ai/deepseek-v4-flash-0731") ==
-      "deepseek"
+    check knownGoodFamily("baseten",
+      "deepseek-ai/DeepSeek-V4-Flash-0731") == "deepseek"
+    check knownGoodFamily("baseten",
+      "deepseek-ai/DeepSeek-V4-Pro-0813") == "deepseek"
     check knownGoodFamily("nanogpt", "deepseek/deepseek-v4-pro-0813") ==
       "deepseek"
 
@@ -502,14 +504,14 @@ suite "compact: contextWindowFor (known-good)":
     check contextWindowFor(p) == 400_000
 
 suite "prompts: inkling family":
-  test "known-good on baseten / together / fireworks":
-    check knownGoodFamily("baseten", "thinkingmachines/inkling") == "inkling"
+  test "known-good on together / fireworks":
+    # baseten retired inkling (live 410)
     check knownGoodFamily("together", "thinkingmachines/Inkling") == "inkling"
     check knownGoodFamily("fireworks",
       "accounts/fireworks/models/inkling") == "inkling"
 
   test "case-insensitive match":
-    check knownGoodFamily("BASETEN", "THINKINGMACHINES/INKLING") == "inkling"
+    check knownGoodFamily("TOGETHER", "THINKINGMACHINES/INKLING") == "inkling"
 
   test "version/variant tags":
     let (f, v, vr) = knownGoodTags("together", "thinkingmachines/Inkling")
@@ -539,8 +541,6 @@ suite "prompts: inkling family":
     check "patch" in names
 
   test "context windows per provider":
-    check knownGoodContextWindow("baseten",
-      "thinkingmachines/inkling") == 256_000
     check knownGoodContextWindow("together",
       "thinkingmachines/Inkling") == 1_000_000
     check knownGoodContextWindow("fireworks",

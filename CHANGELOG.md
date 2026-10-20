@@ -2,6 +2,36 @@ Changelog
 
 Unreleased
 
+- **Catalog sweep: live-checked known-good registry.** Every combo
+  was re-verified against the provider's live `/models` list plus a
+  one-token completion probe where a key allowed it, and the registry
+  now mirrors what providers actually serve. New model versions from
+  the OpenCode Zen catalog are known-good on every provider hosting
+  them: MiniMax M3.1 Flash (minimax, OpenRouter free, zen free tiers,
+  nano-gpt, tencent, venice), LongCat 2.5 Preview (longcat, nano-gpt,
+  zen free tiers), Nemotron 3.5 Lightning and Super VL back on nvidia,
+  DeepInfra, Nebius, Fireworks, Together, BaseTen, Venice, OpenRouter,
+  nano-gpt and the zen free tiers, gpt-5.4-pro (openai, zen), and
+  gpt-5.3-codex-spark (zen). The zen gateways also gained their current
+  Claude line over the Anthropic-format `/messages` route (live-probed:
+  the path speaks the Anthropic error envelope and takes `x-api-key`),
+  qwen3.8-max, mistral-large-4, gpt-6-luna (zen Go), and free tiers of
+  deepseek-v4.1-flash and glm-5.3-flash. Dead combos left the table
+  after live 404/410 probes: OpenAI first-party gpt-oss-120b/20b and
+  o1-mini, BaseTen's GLM-4.7/Kimi-K2.6/K2.7-Code/inkling/V4-Pro,
+  Fireworks' dated v4 deepseek and minimax/kimi tiers, 13 retired
+  Novita models, five deprecated OpenRouter qwen ids, OVH's qwen3-coder,
+  SambaNova MiniMax-M2.7, nvidia kimi-k3 and deepseek-v4-flash-0731,
+  deepseek vision-exp on novita and the zen gateways, aki's
+  284b flash snapshot, nano-gpt's qwen3-coder-plus, deepinfra's
+  unlisted Qwen3.8-2.4T-A95B and silently-rerouted GLM-5.1, and
+  tencent's bare deepseek-v4-flash. Delisted-but-still-serving ids
+  stayed after probing alive (anthropic's claude-haiku-4-5 alias,
+  cheaperinference's dash-spelled gemini/qwen ids, all eleven flagged
+  tensorx rows, venice glm-4.7-flash, greenpt qwen3-coder-30b).
+  `harvest_models` compiles again: its `--sync` parser still expected
+  the pre-vision 12-field tuples, so the sweep tool had been broken
+  since the vision flag landed.
 - **3code owns the tty's output discipline (gh #54).** A shell left
   `-opost` by a crashed CLI or `stty -opost` used to break every wrapped
   row: with `OPOST` off, `ONLCR` is inert, so the bare `\n` 3code writes

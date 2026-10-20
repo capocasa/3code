@@ -77,7 +77,6 @@ type
 const KnownGoodCombos*: seq[KnownGoodCombo] = @[
 
     # glm
-    ("baseten", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("nebius", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("together", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, true, false),
     ("together", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, true, false),
@@ -102,12 +101,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("zaicode", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
 
     # qwen: modern 3.x line kept here for openrouter and first-party gateways.
-    ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("deepinfra", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("novita", "zai-org/glm-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, true, false),
     ("novita", "zai-org/glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, tbAllTurns, false, 200_000, true, false),
     ("novita", "zai-org/glm-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, true, false),
-    ("novita", "zai-org/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbAllTurns, false, 200_000, true, false),
     ("novita", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, true, false),
     ("novita", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, true, false),
     ("novita", "zai-org/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
@@ -146,7 +143,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("sambanova", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
     ("deepinfra", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
     ("openrouter", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
-    ("novita", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, tbNone, false, 131_072, true, false),
     ("novita", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, true, false),
     ("groq", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, tbNone, false, 131_072, false, false),
     ("deepinfra", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, tbNone, false, 131_072, false, false),
@@ -161,10 +157,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # The chat/reasoning lineup uses the `gpt` family: same gpt-oss system
     # prompt, but the bash/read/write/patch tool surface those models were
     # trained on, and reasoning_effort as the wire knob.
-    ("openai", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
-    ("openai", "gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, tbNone, false, 131_072, false, false),
     ("openai", "o1", "gpt", "", "o1", "medium", 0.2, 8192, tbNone, false, 200_000, false, false),
-    ("openai", "o1-mini", "gpt", "", "o1-mini", "medium", 0.2, 8192, tbNone, false, 200_000, false, false),
     ("openai", "o3", "gpt", "", "o3", "medium", 0.2, 8192, tbNone, false, 200_000, false, false),
     ("openai", "o3-mini", "gpt", "", "o3-mini", "medium", 0.2, 8192, tbNone, false, 200_000, false, false),
     ("openai", "o4-mini", "gpt", "", "o4-mini", "medium", 0.2, 4096, tbNone, false, 200_000, false, false),
@@ -186,6 +179,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
     ("openai", "gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("openai", "gpt-5.4-nano", "gpt", "", "5.4-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
+    ("openai", "gpt-5.4-pro", "gpt", "", "5.4-pro", "high", 0.2, 8192, tbNone, false, 400_000, false, false),
     ("openai", "gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
     ("openai", "gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, tbNone, false, 400_000, false, false),
     ("openai", "gpt-5.6", "gpt", "", "5.6", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, false),
@@ -220,7 +214,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # on fireworks/nebius/baseten/nvidia/together/hetzner (weights are
     # a day old); add rows as they land.
     ("baseten", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
-    ("baseten", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("deepseek", "deepseek-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
     ("deepseek", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
@@ -228,8 +221,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false, false),
-    ("fireworks", "accounts/fireworks/models/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
-    ("fireworks", "accounts/fireworks/models/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, true, false),
     ("huggingface", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("huggingface", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("huggingface", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
@@ -244,9 +235,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nebius", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("novita", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
     ("novita", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
-    ("novita", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
     ("novita", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, true, false),
-    ("nvidia", "deepseek-ai/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("openrouter", "deepseek/deepseek-chat", "deepseek", "3", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false, false),
     ("openrouter", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false, false),
     ("openrouter", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
@@ -314,6 +303,18 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # credit), so it rides without the drop_block net like the earlier
     # Haikus and Sonnet 5.
 
+    # opencode zen also serves the current Claude line over its
+    # Anthropic-format /messages route (live: the path answers in
+    # the Anthropic error envelope and takes x-api-key, the header
+    # 3code's claude family sends), so these mirror the first-party
+    # rows.
+    ("opencode", "claude-opus-5-5", "claude", "opus", "5-5", "medium", -1.0, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("opencode", "claude-sonnet-5-5", "claude", "sonnet", "5-5", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("opencode", "claude-sonnet-5", "claude", "sonnet", "5", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("opencode", "claude-haiku-5-5", "claude", "haiku", "5-5", "medium", -1.0, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("opencode", "claude-fable-5-1", "claude", "fable", "5-1", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("opencodego", "claude-haiku-5-5", "claude", "haiku", "5-5", "medium", -1.0, 65536, tbAllTurns, false, 1_000_000, false, false),
+
     # Command Code provider gateway open models (api.commandcode.ai/
     # provider/v1, OpenAI chat completions; same plan/API key as their
     # CLI). Org prefixes on the wire ids are theirs.
@@ -373,9 +374,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
 
     # minimax
     ("minimax", "MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("minimax", "MiniMax-M3.1-Flash", "minimax", "3.1", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("minimax", "MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("minimax", "MiniMax-M2.7-highspeed", "minimax", "2", "7-high", "on", 0.2, 4096, tbNone, false, 204_800, false, false),
-    ("fireworks", "accounts/fireworks/models/minimax-m2p7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, true, false),
     ("together", "minimaxai/MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, true, false),
     ("novita", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, true, false),
     ("novita", "minimax/minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, true, false),
@@ -386,11 +387,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("openrouter", "minimax/minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("openrouter", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("openrouter", "minimax/minimax-m3.1-flash:free", "minimax", "3.1", "flash-free", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("openrouter", "nvidia/nemotron-3.5-lightning:free", "nemotron", "3.5", "lightning-free", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("openrouter", "nvidia/nemotron-3.5-super-vl", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("together", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
     ("nebius", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
 
     # kimi
-    ("fireworks", "accounts/fireworks/models/kimi-k2p6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, true, false),
     ("together", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, true, false),
     ("deepinfra", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("novita", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, tbAllTurns, false, 262_144, true, false),
@@ -399,10 +402,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("openrouter", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("nebius", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
-    ("baseten", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
 
     # longcat
     ("longcat", "LongCat-2.0", "longcat", "2", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("longcat", "LongCat-2.5-Preview", "longcat", "2.5", "preview", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
 
     # hy (Tencent Hunyuan v3)
     ("novita", "tencent/hy3", "hy", "3", "", "no_think", 0.2, 8192, tbNone, false, 262_144, true, false),
@@ -454,6 +457,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "deepseek/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("nanogpt", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("nanogpt", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("nanogpt", "minimax/minimax-m3.1-flash", "minimax", "3.1", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
 
     # opencode (OpenCode Zen gateway; bare model ids on the wire)
     ("opencode", "minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -479,7 +483,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("opencodego", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("opencodego", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
-    ("opencodego", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
 
     # kimi (Kimi API Platform, api.moonshot.ai; bare model ids)
     ("kimi", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
@@ -528,7 +531,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # inkling (Thinking Machines Lab, thinkingmachines/Inkling; 975B MoE,
     # 41B active, multimodal. Level-based reasoning via `reasoning_effort`
     # on the OpenAI-compatible surface; returns `reasoning_content`.)
-    ("baseten", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 256_000, false, false),
     ("together", "thinkingmachines/Inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 1_000_000, true, false),
     ("fireworks", "accounts/fireworks/models/inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 1_040_000, true, false),
 
@@ -574,6 +576,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("venice", "minimax-m25", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("venice", "minimax-m27", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
+    ("venice", "minimax-m3-1-flash", "minimax", "3.1", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("venice", "openai-gpt-54", "gpt", "", "5.4", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
     ("venice", "openai-gpt-54-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("venice", "openai-gpt-55", "gpt", "", "5.5", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
@@ -591,6 +594,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "qwen-3-8-2-4t-a95b", "qwen", "3.8", "2.4t-a95b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("venice", "qwen-3-8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("venice", "qwen-3-8-max", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("venice", "nvidia-nemotron-3-5-super-vl-120b-a12b", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("venice", "qwen3-235b-a22b-instruct-2507", "qwen", "3", "235b-a22b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
     ("venice", "qwen3-5-35b-a3b", "qwen", "3.5", "35b-a3b", "on", 0.2, 8192, tbNone, false, 256_000, false, false),
     ("venice", "qwen3-5-397b-a17b", "qwen", "3.5", "397b-a17b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
@@ -635,12 +639,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nvidia", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "thinkingmachines/inkling:free", "inkling", "1", "free", "medium", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "thinkingmachines/inkling-small:free", "inkling", "1", "small-free", "medium", 0.2, 8192, tbNone, false, 262_144, false, false),
-    ("openrouter", "z-ai/glm-5.2:free", "glm", "5", "2-free", "high", 0.2, 8192, tbAllTurns, false, 256_000, false, false),
     ("novita", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, true, false),
     ("novita", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, true, false),
     ("novita", "qwen/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, true, false),
     ("novita", "qwen/qwen3.6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
-    ("novita", "qwen/qwen3.6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("novita", "qwen/qwen3.7-max", "qwen", "3.7", "max", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("novita", "xiaomimimo/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
     ("novita", "xiaomimimo/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
@@ -680,20 +682,16 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "qwen/qwen3-30b-a3b", "qwen", "3", "30b-a3b", "on", 0.2, 8192, tbNone, false, 131_072, false, false),
     ("openrouter", "qwen/qwen3-30b-a3b-instruct-2507", "qwen", "3", "30b-a3b-instruct", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3-32b", "qwen", "3", "32b", "on", 0.2, 8192, tbNone, false, 131_072, false, false),
-    ("openrouter", "qwen/qwen3-8b", "qwen", "3", "8b", "on", 0.2, 4096, tbNone, false, 131_072, false, false),
     ("openrouter", "qwen/qwen3-coder", "qwen", "3", "coder", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3-coder-30b-a3b-instruct", "qwen", "3", "coder-30b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3-coder-flash", "qwen", "3", "coder-flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "qwen/qwen3-coder-next", "qwen", "3", "coder-next", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
-    ("openrouter", "qwen/qwen3-coder-plus", "qwen", "3", "coder-plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
-    ("openrouter", "qwen/qwen3-max", "qwen", "3", "max", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3-next-80b-a3b-instruct", "qwen", "3", "next-80b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3.5-122b-a10b", "qwen", "3.5", "122b-a10b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3.5-27b", "qwen", "3.5", "27b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3.5-35b-a3b", "qwen", "3.5", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3.5-397b-a17b", "qwen", "3.5", "397b-a17b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3.5-9b", "qwen", "3.5", "9b", "on", 0.2, 4096, tbNone, false, 262_144, false, false),
-    ("openrouter", "qwen/qwen3.6-max-preview", "qwen", "3.6", "max-preview", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
     ("openrouter", "qwen/qwen3.6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen3.6-flash", "qwen", "3.6", "flash", "on", 0.2, 4096, tbNone, false, 128_000, false, false),
@@ -707,6 +705,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "tencent/hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 256_000, false, false),
     ("fireworks", "accounts/fireworks/models/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, true, false),
+    ("fireworks", "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b", "nemotron", "3.5", "lightning", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("fireworks", "accounts/fireworks/models/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
     ("tensorx", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false, false),
     ("tensorx", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
@@ -723,7 +722,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("tensorx", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("groq", "qwen/qwen3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
     ("sambanova", "DeepSeek-V3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false, false),
-    ("sambanova", "MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("together", "Qwen/Qwen3.5-9B", "qwen", "3.5", "9b", "on", 0.2, 4096, tbNone, false, 262_144, true, false),
     ("together", "Qwen/Qwen3.6-Plus", "qwen", "3.6", "plus", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("together", "Qwen/Qwen3.7-Max", "qwen", "3.7", "max", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
@@ -747,7 +745,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # aki (AKI.IO, EU-hosted; OpenAI-compatible at aki.io/openai/v1). Wire
     # ids carry size suffixes. Only models known-good elsewhere get entries;
     # apertus/gemma4/llama3/mistral4 stay experimental.
-    ("aki", "deepseek-v4-flash-0731-284b", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("aki", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
     ("aki", "qwen3.6-chat-35b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     # lyceum (Lyceum Technology, EU; OpenAI-compatible at
@@ -773,6 +770,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("together", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, true, false),
     ("opencode", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
     ("opencode", "gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
+    ("opencode", "gpt-5.3-codex", "gpt", "", "5.3-codex", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
+    ("opencode", "gpt-5.3-codex-spark", "gpt", "", "5.3-codex-spark", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("opencode", "gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
     ("opencode", "gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("opencode", "gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
@@ -790,7 +789,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("opencode", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("opencode", "mimo-v2.6-flash-free", "mimo", "2.6", "flash-free", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
-    ("opencode", "mimo-v2.5-free", "mimo", "2.5", "free", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("opencode", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("opencode", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("nanogpt", "Qwen/Qwen3.6-35B-A3B", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -802,6 +800,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("nanogpt", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("nanogpt", "longcat-2.0", "longcat", "2", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("nanogpt", "longcat-2.5-preview", "longcat", "2.5", "preview", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
+    ("nanogpt", "nvidia/nemotron-3.5-lightning", "nemotron", "3.5", "lightning", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
+    ("nanogpt", "nvidia/nemotron-3.5-super-vl", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("opencodego", "longcat-2.0", "longcat", "2", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nanogpt", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("nanogpt", "minimax/minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
@@ -850,16 +851,23 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("tensorx", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("novita", "zai-org/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
     ("deepinfra", "zai-org/GLM-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("deepinfra", "nvidia/NVIDIA-Nemotron-3.5-Lightning", "nemotron", "3.5", "lightning", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
+    ("deepinfra", "nvidia/NVIDIA-Nemotron-3.5-Super-VL", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("openrouter", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("together", "zai-org/GLM-5.3-Flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
     ("together", "zai-org/GLM-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
+    ("together", "nvidia/NVIDIA-Nemotron-3.5-Super-VL", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, true, false),
     ("nebius", "zai-org/GLM-5.3-Flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("nebius", "nvidia/Nemotron-3_5-Lightning", "nemotron", "3.5", "lightning", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
+    ("nebius", "nvidia/Nemotron-3.5-Super-VL", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("baseten", "zai-org/GLM-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("baseten", "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("baseten", "zai-org/GLM-5.3-Flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("opencodego", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("cheaperinference", "gpt-5-mini", "gpt", "", "5-mini", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("cheaperinference", "gpt-5.4-nano", "gpt", "", "5.4-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("opencode", "gpt-5.4-nano", "gpt", "", "5.4-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
+    ("opencode", "gpt-5.4-pro", "gpt", "", "5.4-pro", "high", 0.2, 8192, tbNone, false, 400_000, false, false),
     ("nanogpt", "openai/gpt-5.4-nano", "gpt", "", "5.4-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("openrouter", "openai/gpt-5.4-nano", "gpt", "", "5.4-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false, false),
     ("opencodego", "grok-4.7", "grok", "4", "7", "high", 0.2, 8192, tbNone, false, 500_000, false, false),
@@ -872,24 +880,19 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("opencodego", "qwen3.8-max", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("opencodego", "qwen3.8-flash", "qwen", "3.8", "flash", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
-    ("opencodego", "deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
     ("cheaperinference", "deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("cheaperinference", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("venice", "deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("nanogpt", "deepseek/deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
     ("tensorx", "deepseek/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
-    ("novita", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, true, false),
-    ("novita", "deepseek/deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true, true),
     ("novita", "deepseek/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, true, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("openrouter", "deepseek/deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
-    ("fireworks", "accounts/fireworks/models/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, true, false),
     ("together", "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, true, false),
     ("nebius", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("baseten", "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("opencodego", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("opencodego", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
-    ("baseten", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("baseten", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("sambanova", "MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nebius", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
@@ -904,7 +907,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "inclusionAI/Ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("deepinfra", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("deepinfra", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
-    ("nvidia", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("deepinfra", "thinkingmachines/Inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 256_000, false, false),
     ("ovh", "Qwen3.5-9B", "qwen", "3.5", "9b", "on", 0.2, 4096, tbNone, false, 128_000, true, false),
     ("ovh", "Qwen3.6-27B", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, true, false),
@@ -919,19 +921,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("novita", "qwen/qwen3.8-2.4t-a95b", "qwen", "3.8", "2.4t-a95b", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
     ("novita", "qwen/qwen3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 128_000, true, false),
     ("novita", "qwen/qwen3.8-flash", "qwen", "3.8", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
-    ("novita", "qwen/qwen3.5-plus", "qwen", "3.5", "plus", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
     ("novita", "qwen/qwen3.5-122b-a10b", "qwen", "3.5", "122b-a10b", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("novita", "qwen/qwen3.5-27b", "qwen", "3.5", "27b", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("novita", "qwen/qwen3.5-35b-a3b", "qwen", "3.5", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("novita", "qwen/qwen3.5-397b-a17b", "qwen", "3.5", "397b-a17b", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
-    ("novita", "qwen/qwen3-coder-30b-a3b-instruct", "qwen", "3", "coder-30b-a3b", "on", 0.2, 8192, tbNone, false, 160_000, true, false),
-    ("novita", "qwen/qwen3-coder-480b-a35b-instruct", "qwen", "3", "coder-480b", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
-    ("novita", "qwen/qwen3-coder-next", "qwen", "3", "coder-next", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
-    ("novita", "qwen/qwen3-max", "qwen", "3", "max", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
-    ("novita", "qwen/qwen3-235b-a22b-instruct-2507", "qwen", "3", "235b-a22b", "on", 0.2, 8192, tbNone, false, 131_072, true, false),
-    ("novita", "qwen/qwen3-next-80b-a3b-instruct", "qwen", "3", "next-80b-a3b", "on", 0.2, 8192, tbNone, false, 131_072, true, false),
     ("deepinfra", "Qwen/Qwen3.8-Max", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
-    ("deepinfra", "Qwen/Qwen3.8-2.4T-A95B", "qwen", "3.8", "2.4t-a95b", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("deepinfra", "Qwen/Qwen3.8-27B", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
     ("deepinfra", "Qwen/Qwen3.5-9B", "qwen", "3.5", "9b", "on", 0.2, 4096, tbNone, false, 262_144, false, false),
     ("deepinfra", "Qwen/Qwen3.5-27B", "qwen", "3.5", "27b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -955,6 +949,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # xmlToolCalls fallback that the retired z-ai/glm4.7 and glm-5.2 entries
     # carried
     ("nvidia", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, true, 1_000_000, false, false),
+    ("nvidia", "nvidia/nemotron-3.5-lightning-30b-a3b", "nemotron", "3.5", "lightning", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
+    ("nvidia", "nvidia/nemotron-3.5-super-vl-120b-a12b", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("nvidia", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, true, 1_000_000, false, false),
     ("platte", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("platte", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
@@ -975,7 +971,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "poolside/laguna-s-2.1:free", "laguna", "2", "s-free", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen-plus", "qwen", "3", "plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "qwen/qwen3.8-max-0902", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
-    ("fireworks", "accounts/fireworks/models/deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("fireworks", "accounts/fireworks/routers/kimi-k3-fast", "kimi", "3", "-fast", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("tensorx", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("tensorx", "qwen/qwen3-235b-a22b-2507", "qwen", "3", "235b-a22b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -1008,7 +1003,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("together", "Qwen/Qwen3.5-35B-A3B", "qwen", "3.5", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("together", "Qwen/Qwen3.5-397B-A17B", "qwen", "3.5", "397b-a17b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("together", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
-    ("opencode", "deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("opencode", "deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("opencode", "gemini-3.5-flash", "gemini", "3", "5-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, false),
     ("opencode", "gemini-3.5-flash-lite", "gemini", "3", "5-flash-lite", "low", 0.2, 65536, tbNone, false, 1_048_576, false, false),
@@ -1020,6 +1014,18 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbCurrentTurn, false, 1_000_000, false, false),
     ("opencode", "gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, false),
     ("opencode", "qwen3.8-flash", "qwen", "3.8", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("opencode", "qwen3.8-max", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("opencode", "mistral-large-4", "mistral", "4", "large", "high", 0.2, 32768, tbNone, false, 524_288, false, false),
+    # free tiers of the current line on the zen catalog
+    ("opencode", "deepseek-v4.1-flash-free", "deepseek", "4.1", "flash-free", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("opencode", "glm-5.3-flash-free", "glm", "5", "3-flash-free", "low", 0.2, 65536, tbCurrentTurn, false, 1_000_000, false, false),
+    ("opencode", "minimax-m3.1-flash-free", "minimax", "3.1", "flash-free", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("opencode", "longcat-2.5-preview-free", "longcat", "2.5", "preview-free", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
+    ("opencode", "nemotron-3.5-lightning-free", "nemotron", "3.5", "lightning-free", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
+    ("opencode", "nemotron-3.5-super-vl-free", "nemotron", "3.5", "super-vl-free", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
+    ("opencodego", "longcat-2.5-preview-free", "longcat", "2.5", "preview-free", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
+    ("opencodego", "minimax-m3.1-flash-free", "minimax", "3.1", "flash-free", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("opencodego", "gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false, false),
     ("nanogpt", "TEE/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("nanogpt", "TEE/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("nanogpt", "TEE/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbCurrentTurn, false, 1_000_000, false, false),
@@ -1054,7 +1060,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "qwen/qwen3-coder-30b-a3b-instruct", "qwen", "3", "coder-30b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("nanogpt", "qwen/qwen3-coder-flash", "qwen", "3", "coder-flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nanogpt", "qwen/qwen3-coder-next", "qwen", "3", "coder-next", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
-    ("nanogpt", "qwen/qwen3-coder-plus", "qwen", "3", "coder-plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nanogpt", "qwen/qwen3-max", "qwen", "3", "max", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("nanogpt", "qwen/qwen3-next-80b-a3b-instruct", "qwen", "3", "next-80b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("nanogpt", "qwen/qwen3.5-122b-a10b", "qwen", "3.5", "122b-a10b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -1079,7 +1084,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("nanogpt", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("nanogpt", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
-    ("tencent", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("tencent", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("tencent", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("tencent", "deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
@@ -1099,7 +1103,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("tencent", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("tencent", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("tencent", "minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
-    ("opencodego", "deepseek-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("tencent", "minimax-m3.1-flash", "minimax", "3.1", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("opencodego", "deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("opencodego", "hy4-preview", "hy", "4", "preview", "high", 0.6, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("baseten", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
@@ -1128,7 +1132,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "google/gemini-3.1-flash-lite", "gemini", "3", "1-flash-lite", "low", 0.2, 65536, tbNone, false, 1_048_576, false, false),
     ("deepinfra", "google/gemini-3.5-flash", "gemini", "3", "5-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, false),
     ("deepinfra", "google/gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, false),
-    ("ovh", "Qwen3-Coder-30B-A3B-Instruct", "qwen", "3", "coder-30b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("ovh", "Qwen3.5-397B-A17B", "qwen", "3.5", "397b-a17b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
 
     # kolibri: Aleph Alpha's open-weight German/English MoE (78B total,

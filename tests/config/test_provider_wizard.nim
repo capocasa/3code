@@ -637,7 +637,7 @@ suite "provider wizard configuration":
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi-old", models: @["z-ai/glm-5.3"]),
       ProviderRec(name: "openai", url: "https://api.openai.com/v1",
-                  key: "sk-old", models: @["gpt-oss-120b"])
+                  key: "sk-old", models: @["gpt-5"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.3"
     var editor: LineEditor
@@ -650,7 +650,7 @@ suite "provider wizard configuration":
 
     check activeProviders[0].models.len == curatedFor("nvidia").len
     check activeProviders[1].models.len == curatedFor("openai").len
-    check activeProviders[1].models[0] == "gpt-oss-120b"
+    check activeProviders[1].models[0] == "gpt-5"
     check activeCurrent == "nvidia.z-ai/glm-5.3"
 
   test "pull with named models adds just those":
@@ -664,11 +664,11 @@ suite "provider wizard configuration":
     var messages = newJArray()
     var session = Session()
 
-    discard handleCommand(":provider pull nvidia gpt-oss-20b kimi-k3",
+    discard handleCommand(":provider pull nvidia gpt-oss-20b glm-5.3-flash",
                           messages, session, prof, editor)
 
     check activeProviders[0].models ==
-      @["z-ai/glm-5.3", "openai/gpt-oss-20b", "moonshotai/kimi-k3"]
+      @["z-ai/glm-5.3", "openai/gpt-oss-20b", "z-ai/glm-5.3-flash"]
 
   test "pull skips named models already stored":
     activeProviders = @[
@@ -1313,9 +1313,9 @@ suite "provider wizard configuration":
     check verifiedModels.len == 0
 
 suite "provider/model order":
-  # nvidia's curated order is gpt-oss-20b before kimi-k3; these providers
-  # list them reversed, so any re-ranking by KnownGoodCombos would flip
-  # the results.
+  # nvidia's curated order is gpt-oss-20b before z-ai/glm-5.3; these
+  # providers list them reversed, so any re-ranking by KnownGoodCombos
+  # would flip the results.
   var
     savedCurrent: string
     savedProviders: seq[ProviderRec]
@@ -1334,7 +1334,7 @@ suite "provider/model order":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi",
-                  models: @["openai/gpt-oss-20b", "moonshotai/kimi-k3"])
+                  models: @["openai/gpt-oss-20b", "z-ai/glm-5.3"])
     ]
     activeCurrent = "nvidia.openai/gpt-oss-20b"
 
@@ -1361,7 +1361,7 @@ suite "provider/model order":
 
   test ":model completion cycles in entered order":
     var completions = completionFor(":model ")
-    check completions == @["gpt-oss-20b", "kimi-k3"]
+    check completions == @["gpt-oss-20b", "glm-5.3"]
 
   test ":model list shows entered order":
     var editor: LineEditor
@@ -1372,5 +1372,5 @@ suite "provider/model order":
     let listing = handleCommandResult(":model", messages, session,
                                     prof, editor).body
     let i20 = listing.find("gpt-oss-20b")
-    let ik3 = listing.find("kimi-k3")
-    check i20 >= 0 and ik3 >= 0 and i20 < ik3
+    let iglm = listing.find("glm-5.3")
+    check i20 >= 0 and iglm >= 0 and i20 < iglm
