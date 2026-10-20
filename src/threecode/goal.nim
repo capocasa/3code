@@ -183,15 +183,21 @@ proc taskLine*(l: string): Option[PlanTask] =
   some PlanTask(text: s[3 ..^ 1].strip, checked: s[1] != ' ',
                 depth: indent div 2)
 
+proc isCurrentStateHeading*(l: string): bool =
+  ## A heading (any `##`+ level) whose text is exactly "current state",
+  ## case-insensitive. One matcher for the parser, the validator, and
+  ## the rollover quote so the three cannot drift apart.
+  let s = l.strip
+  s.len > 2 and s.startsWith("##") and
+    s.strip(true, true, {'#'}).strip.toLowerAscii == "current state"
+
 proc parsePlan*(body: string): CyberPlan =
   ## Extract the plan structure: every task item in file order at any
   ## nesting depth, and whether a `## Current state` section exists.
   ## Everything else (headings, phases, prose) is presentation the
   ## parser carries no opinion about.
   for l in body.splitLines:
-    let s = l.strip
-    if s.len > 2 and s.startsWith("##") and
-        s.strip(true, true, {'#'}).strip.toLowerAscii == "current state":
+    if isCurrentStateHeading(l):
       result.hasCurrentState = true
     else:
       let t = taskLine(l)
@@ -282,6 +288,23 @@ proc planFeedSection*(pre, post: string): string =
   if d.removed.len > 0:
     result.add "\n  tasks removed: " & d.removed.join("; ")
 
+proc currentStateSection*(body: string; cap = 1500): string =
+  ## The text under `## Current state`, up to the next heading, for the
+  ## rollover handoff's quote. Capped so a bloated section cannot make
+  ## the handoff itself a context problem.
+  var inSection = false
+  for l in body.splitLines:
+    if inSection and l.strip.startsWith("#"): break
+    if not inSection:
+      if isCurrentStateHeading(l): inSection = true
+      continue
+    result.add l & "\n"
+  if result.strip.len == 0: return ""
+  if result.len > cap:
+    result = utf8ByteCut(result, cap) & "\n(quoted Current state truncated)"
+  else:
+    result = result.strip & "\n"
+
 proc planTitle*(body: string): string =
   ## The plan's title: the first heading if there is one, else the
   ## first non-empty line.
@@ -355,6 +378,27 @@ proc cyberKickoffMessage*(body: string): JsonNode =
     "sends you back in with feedback until the plan is complete."
   %*{"role": "user", "agentSent": true, "content": content}
 
+proc cyberRolloverMessage*(body: string): JsonNode =
+  ## The rollover handoff: after a context collapse the fresh context
+  ## re-anchors at the plan file - the counts, the next unchecked task
+  ## by name, and the plan's own Current state section, quoted.
+  let plan = parsePlan(body)
+  let counts = planCountsLine(plan)
+  let next = nextUncheckedText(plan)
+  var content = "Context rollover: the conversation above was just " &
+    "collapsed into a summary. The plan in " & CyberFileName &
+    " is the session's ground truth"
+  if counts.len > 0: content.add " (" & counts & ")"
+  content.add "."
+  if next.len > 0:
+    content.add " Next unchecked task: \"" & next & "\"."
+  let cs = currentStateSection(body)
+  if cs.len > 0:
+    content.add "\n\nCurrent state from the plan:\n\n" & cs
+  content.add "\n\nKeep working the plan; check off tasks as they " &
+    "complete and keep ## Current state current."
+  %*{"role": "user", "agentSent": true, "content": content}
+
 proc cyberFeedbackMessage*(body, feedback: string): JsonNode =
   ## The cybernetic FEEDBACK continuation: the verifier's words plus the
   ## mode's own duties — check off what finished, record what the turn
@@ -416,6 +460,9 @@ type
       ## the mode adds none.
     judgeStepTruth*: bool
       ## Prepend `StepTruthClause` to the verifier preamble.
+    rolloverNote*: proc (body: string): JsonNode
+      ## Rollover duty: the re-anchoring continuation injected after a
+      ## context collapse. Nil = the mode has no rollover handoff.
 
 var modeRegistry* = newSeq[ModeDesc]()
   ## The mode table. goal mode is entry #1, registered at module init;
@@ -538,7 +585,8 @@ let cyberneticMode* = ModeDesc(
         "tasks this turn finished, and record what the step taught " &
         "under ## Current state."),
   verifierFeed: planFeedSection,
-  judgeStepTruth: true)
+  judgeStepTruth: true,
+  rolloverNote: cyberRolloverMessage)
 
 modeRegistry.add cyberneticMode
 

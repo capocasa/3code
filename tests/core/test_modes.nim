@@ -427,3 +427,46 @@ s
     withModeDir proc (dir: string) =
       let r = runGoalCheck(prof, goalMode, "ship it", "evidence", "")
       check r.ok
+
+suite "rollover handoff":
+  test "currentStateSection extracts under the heading, stops at the next":
+    let body = "# P\n\n- [ ] a\n\n## Current state\n\nLine one.\n\nLine two.\n\n## Next\n\nother section\n"
+    let cs = currentStateSection(body)
+    check cs == "Line one.\n\nLine two.\n"
+    check currentStateSection("- [ ] a\n\n## Current state\n") == ""
+    check currentStateSection("- [ ] a\n") == ""
+    check currentStateSection(
+      "- [ ] a\n\n## current STATE\n\nmixed case works\n") ==
+      "mixed case works\n"
+
+  test "currentStateSection caps a bloated section":
+    let big = "- [ ] a\n\n## Current state\n\n" & "x".repeat(4000) & "\n"
+    let cs = currentStateSection(big, cap = 500)
+    check cs.len < 700
+    check "truncated" in cs
+
+  test "rollover message re-anchors at the plan":
+    let body = """# Ship it
+
+- [x] registry done
+- [ ] rollover lands
+
+## Current state
+
+Phase 3 merged. Rollover next.
+"""
+    let msg = cyberRolloverMessage(body)
+    check msg{"agentSent"}.getBool(false)
+    let c = msg{"content"}.getStr
+    check c.startsWith("Context rollover:")
+    check "collapsed into a summary" in c
+    check CyberFileName in c
+    check "ground truth (2 tasks, 1 done)" in c
+    check "Next unchecked task: \"rollover lands\"" in c
+    check "Current state from the plan:" in c
+    check "Phase 3 merged. Rollover next." in c
+    check "keep ## Current state current" in c
+
+  test "rollover wiring: cybernetic yes, goal nil":
+    check cyberneticMode.rolloverNote != nil
+    check goalMode.rolloverNote == nil

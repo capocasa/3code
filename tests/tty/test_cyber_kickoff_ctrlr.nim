@@ -347,3 +347,64 @@ suite "cyber mode direction machinery (interactive)":
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
     tty.expectAlive()
+
+suite "cyber mode rollover (interactive)":
+  test "context collapse at the pressure threshold hands off to the plan":
+    let root = newFixture("cyber_rollover")
+    writeConfiguredProvider(root)
+    # Six tool rounds cross decideContextAction's message floor (12 =
+    # system + kickoff + 5 pairs + the 6th reply); the 6th reply's usage
+    # crosses the token threshold (11k of the stub's 12k window), so the
+    # harness collapses - and the summarizer meta-call is served from the
+    # same canned queue (stubNextSummarizerReply). The rollover handoff
+    # must follow the tool results (pairing settles first), then the
+    # session recovers and the verifier confirms.
+    writeFile(root / "run" / "cybernetic.md",
+      "# Plan\n\n- [x] first done\n- [ ] make the stub say RECOVERED\n\n" &
+      "## Current state\n\nPhase 3 merged. Rollover is next.\n")
+    var responses = newJArray()
+    for i in 1 .. 6:
+      let big = i == 6
+      responses.add %*{"role": "assistant", "preStreamDelayMs": 50,
+        "content": "", "tool_calls": [{"id": "c" & $i, "type": "function",
+          "function": {"name": "bash",
+            "arguments": "{\"command\": \"echo work " & $i & "\"}"}}],
+        "usage": {"promptTokens": (if big: 11000 else: 500),
+                   "completionTokens": 2, "totalTokens": 7,
+                   "cachedTokens": 0}}
+    # The summarizer meta-call's reply (consumed by the stub queue):
+    responses.add reply("did several steps of plan work")
+    # The post-collapse model reply and the turn-end verifier:
+    responses.add reply("RECOVERED")
+    responses.add reply("all done\nVERDICT: SATISFIED")
+    writeFile(root / "run" / "stub_responses.json", $responses)
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md (2 tasks, 1 done)"
+    # Six tool rounds run; the sixth crosses the threshold.
+    tty.expectInHistory "work 6"
+    # The collapse receipt, then the rollover: receipted like every
+    # harness act, with the plan's counts.
+    tty.expectInHistory "summarized"
+    tty.expectInHistory "auto: cybernetic rollover - plan at cybernetic.md (2 tasks, 1 done)"
+    # The handoff itself lands as a `»` continuation: re-anchoring at
+    # the plan file, next task by name, Current state quoted.
+    tty.expectInHistory "Context rollover:"
+    tty.expectInHistory "Next unchecked task:"
+    tty.expectInHistory "Current state from the plan:"
+    tty.expectInHistory "Phase 3 merged. Rollover is next."
+    # The fresh context answers and the verifier confirms.
+    tty.expectInHistory "RECOVERED"
+    tty.expectInHistory "cybernetic confirmed"
+    tty.drain(300)
+    check fileExists(root / "run" / "cybernetic-confirmed.md")
+    check not fileExists(root / "run" / "cybernetic.md")
+    tty.expectAlive()

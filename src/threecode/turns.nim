@@ -874,6 +874,27 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
     nextCheckpoint = 0             # id of the marker on the next assistant message
     summarizedOn400 = false       # opaque-400 recovery fired this turn (one-shot)
+    rolloverDue = false           # a context collapse happened; the mode's
+                                  # handoff waits for tool pairing to settle
+  # A context collapse is a context clear for a mode with a rollover
+  # duty: the fresh context re-anchors at the mode file. Receipted like
+  # every harness act. Deferred past the tool loop when the collapsing
+  # reply carries unanswered tool_calls (a user message between an
+  # assistant's calls and their results orphans the pairing).
+  template injectRollover() =
+    let m = activeMode(session.cwd)
+    if not noMode(m) and m.rolloverNote != nil:
+      let body = readModeText(m, session.cwd)
+      let note = m.rolloverNote(body)
+      messages.add note
+      let counts = m.taskCounts(body)
+      commitTranscriptBytes(
+        receiptBytes("auto: " & m.name & " rollover - plan at " &
+          m.fileName &
+          (if counts.len > 0: " (" & counts & ")" else: "")), true)
+      commitTranscriptBytes(
+        formatItem(agentPromptItem(note{"content"}.getStr)), true)
+      saveSession(session, messages)
   # dmail is offered only when the active profile's tool schema includes
   # it (kimi family); the marker tagging below keys off the same flag.
   var dmailEnabled = false
@@ -945,6 +966,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
               (if collapsed == 1: "" else: "s") &
               (if summarized > 0: " into a recap" else: " without a recap") &
               ", retrying"), true)
+          # The failed call's reply was never appended, so pairing is
+          # settled: the handoff rides the retry directly.
+          injectRollover()
           continue
       # Transport retry budget exhausted (or another fatal callModel error).
       # `callModel` already stopped the spinner, but the deferred `endTurn`
@@ -1172,6 +1196,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
              else:
                &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)")), true)
         saveSession(session, messages)
+        # This reply's tool_calls may still be unanswered: defer the
+        # handoff to the point just after their results land, or inject
+        # now when there are none.
+        if toolCalls.len > 0: rolloverDue = true
+        else: injectRollover()
     of caNone: discard
     if toolCalls.len > 0:
       debugOut $toolCalls.len & " tool calls"
@@ -1499,6 +1528,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add imageUserMessage(
           &"attached: {names} (image read){extraNote}", imgs)
       saveSession(session, messages)
+      if rolloverDue:
+        # The deferred handoff: tool pairing has settled, the fresh
+        # context re-anchors before the next model call.
+        rolloverDue = false
+        injectRollover()
       if isInterrupted():
         onTurnInterrupted()
         # Same contract as the callModel interrupt paths above:
