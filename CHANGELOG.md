@@ -2,6 +2,22 @@ Changelog
 
 Unreleased
 
+- **`.NET` builds work in the macOS sandbox (#55).** Writable paths
+  now carry their unix-socket rights in the seatbelt profile
+  (sandwall 0.5.12): `system-socket` for AF_UNIX creation, plus
+  `network-bind`/`network-outbound` scoped under each granted path.
+  Seatbelt gates those as network operations no file rule reaches, so
+  `allow /tmp` left MSBuild worker nodes and the dotnet diagnostic
+  server socket-dead - the same wall codex and claude-code hit
+  (openai/codex#12702, claude-code #41254). Read-only paths get
+  connect only (`readonly /var/run/docker.sock` is now the shape for
+  a service socket), denied paths lose their sockets with their
+  files, and fenced builds keep their local IPC while TCP stays
+  loopback-only. The manual ships the `dotnet` recipe (NuGet cache
+  writable, NuGet config readable), an end-to-end test drives
+  `dotnet build` through `3code sandbox` under exactly that policy,
+  and on Linux nothing changed - Landlock already granted socket
+  binds on writable paths.
 - **Goal mode: `goal.md` keeps a session on one goal.** Drop a `goal.md`
   into the project root stating what must be true when the work is done,
   and the harness takes over from there: `:goal <text>` writes the file
