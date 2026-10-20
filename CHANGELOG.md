@@ -2,6 +2,16 @@ Changelog
 
 Unreleased
 
+- **A real SIGINT at an idle prompt now quits, like `:q`.**
+  `installInterruptHook` replaces Nim's die-on-SIGINT handler with
+  the turn-interrupt hook, so `kill -INT` from outside (a supervisor
+  like mpx, or a wrapping script) while 3code sat idle was swallowed
+  whole: the process lived on and the supervisor escalated to SIGKILL,
+  which skips every terminal-restore path. The hook still means
+  "cancel the turn" while a turn runs; the controller's prompt read
+  consumes the flag afterwards so an interrupt that already cancelled
+  its turn cannot also quit the prompt that turn returns to.
+
 - **Modes: goal mode becomes entry #1 of a mode registry, and
   cybernetic mode (`:cyber`) runs a markdown plan.** A mode is a
   trigger file that arms a supervised loop, a `:` verb that writes
