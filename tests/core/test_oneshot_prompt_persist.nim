@@ -59,8 +59,11 @@ suite "oneshot prompt persistence":
       "build a castle and report back".quoteShell &
       " > " & (root / "run" / "out.txt").quoteShell &
       " 2> " & (root / "run" / "err.txt").quoteShell
+    # Fixture cwd, not the runner's: a goal.md armed in the repo root
+    # (this repo's own goal workflow) must not kick off a startup goal
+    # turn ahead of the oneshot prompt under test.
     let po = startProcess("/bin/sh", args = ["-c", cmdline], env = env,
-                          options = {})
+                          workingDir = root / "run", options = {})
     defer:
       if po.running: kill(po)
       discard waitForExit(po)

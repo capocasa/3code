@@ -12,6 +12,8 @@ discard """
 ## - Goal kickoff: `:goal TEXT` at the idle prompt must start goal
 ##   achievement immediately (a harness-autosent turn, no second prompt),
 ##   and the turn-end verifier must then confirm and retire goal.md.
+##   A goal.md already on disk at startup must arm the same way: the
+##   kickoff turn runs with no keystroke at all.
 import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
@@ -142,6 +144,58 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     tty.drain(300)
     check fileExists(root / "run" / "goal-confirmed.md")
     check not fileExists(root / "run" / "goal.md")
+    tty.expectAlive()
+
+  test "goal.md present at startup kicks off with no keystroke":
+    let root = newFixture("goal_startup_kickoff")
+    writeConfiguredProvider(root)
+    # goal.md is written before the session starts - how a user (or any
+    # other tool) arms a goal without ever touching :goal. Startup must
+    # load it and send the agent off in the same breath.
+    writeFile(root / "run" / "goal.md", "make the stub say GOAL_WORK_DONE\n")
+    # Response 1 goes to the kickoff turn; response 2 is the turn-end
+    # verifier side call (satisfied verdict retires goal.md); response 3
+    # answers the follow-up prompt that proves the session idles normally.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "all done\nVERDICT: SATISFIED",
+       "contentChunks": ["all done\nVERDICT: SATISFIED"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "NEXT_TURN_OK", "contentChunks": ["NEXT_TURN_OK"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}}
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    # Nothing is typed: the startup detection arms the goal and the
+    # kickoff turn runs on its own.
+    tty.expectInHistory "auto: goal armed - starting toward goal.md"
+    tty.expectInHistory "GOAL_WORK_DONE"
+    # Turn end: the verifier confirms and retires the file.
+    tty.expectInHistory "goal confirmed"
+    tty.drain(300)
+    check fileExists(root / "run" / "goal-confirmed.md")
+    check not fileExists(root / "run" / "goal.md")
+    # The session is back to an ordinary idle prompt: a typed prompt
+    # answers normally, and no second kickoff fires.
+    tty.send "still here"
+    tty.expect "still here"
+    tty.send "\n"
+    tty.expectInHistory "NEXT_TURN_OK"
     tty.expectAlive()
 
   test "verifier reply lands in scrollback; keys typed during the check survive":

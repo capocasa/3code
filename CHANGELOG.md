@@ -2,6 +2,16 @@ Changelog
 
 Unreleased
 
+- **A `goal.md` on disk at startup now arms goal mode by itself.** Goal
+  mode used to activate only at the first turn end: a `goal.md` written
+  by hand (or by any other tool) sat inert until something - anything -
+  ran a turn. The startup path now detects the file, loads it, and sends
+  the same harness-autosent kickoff prompt `:goal <text>` produces, so
+  work on the goal begins the moment the session opens, no keystroke
+  needed. Fresh and resumed sessions alike; the kickoff keys off the
+  session's project directory, the same authority as the turn-end
+  satisfaction check.
+
 - **3code owns the tty's output discipline (gh #54).** A shell left
   `-opost` by a crashed CLI or `stty -opost` used to break every wrapped
   row: with `OPOST` off, `ONLCR` is inert, so the bare `\n` 3code writes

@@ -1195,7 +1195,10 @@ The file is the whole interface. Edit `goal.md` mid-run to steer (`:goal
 edit` opens it in `$VISUAL/$EDITOR`; the next check reads it fresh), delete
 it to end goal mode silently, interrupt to pause. Arming starts work
 immediately: `:goal <text>` writes the file and sends the agent off in the
-same breath, no extra prompt needed. `:goal cancel` (or `:goal!`) cancels
+same breath, no extra prompt needed — and a `goal.md` that is already on
+disk when 3code starts arms identically: the session loads it and the
+kickoff turn runs at once, before the first prompt. `:goal cancel` (or
+`:goal!`) cancels
 the active goal, retiring the file to `goal-cancelled.md` (`:goal new
 <text>` is the balking synonym that refuses a live goal, `:goal! <text>`
 replaces it, bare `:goal` shows it). A failing verifier call is retried at

@@ -3,7 +3,10 @@
 ## `goal.md` in the project root keeps a session on one goal. Arming is
 ## immediate: every `:goal` write path (TEXT, `new`, `edit`, force
 ## replace) appends a harness-autosent kickoff prompt and runs the turn
-## at once instead of waiting for the next turn boundary. The only other
+## at once instead of waiting for the next turn boundary — and a
+## `goal.md` already on disk when the session opens is armed the same
+## way: startup detection sends the same kickoff turn before the first
+## prompt. The only other
 ## hook is the end-call boundary in `turns.nim`: when the turn's final
 ## model call completes and the harness is about to hand the prompt back
 ## to the user, it stats `goal.md`; bare existence activates (v1 waives
@@ -13,9 +16,8 @@
 ## turn plus the harness-captured working-tree diff. FEEDBACK sends
 ## the agent back in; SATISFIED renames the file to
 ## `goal-confirmed.md` and the session idles normally. Bare `:goal!`
-## cancels into `goal-cancelled.md`. No session-start
-## check, no per-tool-call checks, no system-prompt changes: the
-## continuation message carries everything.
+## cancels into `goal-cancelled.md`. No per-tool-call checks, no
+## system-prompt changes: the continuation message carries everything.
 ##
 ## The side call is also the future subagent primitive, so it is kept
 ## separate: its own message list, no session mutation, no tools.

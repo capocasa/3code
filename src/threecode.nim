@@ -916,15 +916,16 @@ proc main() =
       result = true
 
   # The immediate start that follows arming `goal.md` (`:goal TEXT`,
-  # `:goal new`, `:goal edit`, `:goal! TEXT`): append the harness-autosent
-  # kickoff prompt, commit its receipt + `»` item, and run the turn now —
-  # goal achievement begins the moment the file is written, not at the
-  # next turn boundary. Returns true if a buffered quit/interrupt should
-  # end the session. No refreshSystemPrompt: the kickoff rides the
-  # existing system prompt exactly like the in-turn feedback
-  # continuation in turns.nim.
+  # `:goal new`, `:goal edit`, `:goal! TEXT`) and the startup detection
+  # of a `goal.md` that was already on disk when the session opened:
+  # append the harness-autosent kickoff prompt, commit its receipt + `»`
+  # item, and run the turn now — goal achievement begins the moment the
+  # file is written (or found), not at the next turn boundary. Returns
+  # true if a buffered quit/interrupt should end the session. No
+  # refreshSystemPrompt: the kickoff rides the existing system prompt
+  # exactly like the in-turn feedback continuation in turns.nim.
   proc runGoalKickoff(): bool =
-    let goalText = readGoalText()
+    let goalText = readGoalText(session.cwd)
     messages.add goalKickoffMessage(goalText)
     saveSession(session, messages)
     commitTranscriptBytes(
@@ -1007,6 +1008,16 @@ proc main() =
     tabtitle.paintTabTitleIdle()
     emitTestFrameEvent()
     startupTrace("first-prompt-painted")
+    # A `goal.md` that is already on disk when the session opens is just
+    # as armed as one written by `:goal`: the file is the whole protocol,
+    # and whoever wrote it (the user, another tool, a previous session)
+    # meant work to happen. Load it and kick goal achievement off now —
+    # the same kickoff path `:goal TEXT` takes — instead of waiting for
+    # the first prompt to hit a turn-end boundary. Session cwd, not
+    # process cwd: same authority as the turn-end check in turns.nim.
+    if goalModeActive(session.cwd):
+      if runGoalKickoff():
+        quit(0)
     if prompt != "" and runInitialPrompt(prompt):
       # quit, not return: unwinding `editor` while the input thread still
       # holds it is the Windows oneshot SIGSEGV (illegal storage access).
