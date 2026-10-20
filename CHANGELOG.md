@@ -24,6 +24,21 @@ Unreleased
   grows a `verifier` line naming the active verifier, and a verifier
   that stops resolving falls back to the session model with a visible
   note instead of a silent skip.
+- **DeepSeek system prompt teaches the tools' real semantics (community t/9).**
+  DeepSeek 4.1 Flash kept mangling `patch` calls - mismatched `search`
+  blocks, invented failure stories about "collapsed lines", fallbacks to
+  Python one-liners, loop-detector trips - even after 0.8.3 taught the
+  harness every Frankenstein edit syntax it produced. A user rewrote the
+  prompt's Tools section at the harness level and the flailing stopped.
+  That rewrite now ships in the DeepSeek preamble, condensed to each fact
+  once: `exit=N` markers, tail-truncated output, the `read` 250-line cap
+  and 2KB line skip, first-match-only `patch` with unique context, the
+  exact/indent/whitespace ladder `fuzzyReplaceFirst` really applies (and
+  the note that names the strategy a non-exact match used), verbatim-
+  from-disk `search` text, and the all-or-nothing edit transaction. Every
+  claim is enforced code in `actions.nim`/`util.nim`; content and a
+  9.9KB terseness bound are pinned by new setup tests (+1.2KB on the old
+  preamble, not the +2.7KB of the verbatim forum version).
 - **A `goal.md` on disk at startup now arms goal mode by itself.** Goal
   mode used to activate only at the first turn end: a `goal.md` written
   by hand (or by any other tool) sat inert until something - anything -
