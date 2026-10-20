@@ -268,7 +268,7 @@ suite "cyber mode direction machinery (interactive)":
       "# Plan\n\n- [ ] make the stub say DONE\n\n" &
       "## Current state\n\nNot begun.\n")
     writeFile(root / "run" / "stub_responses.json", $(%*[
-      toolReply("bash", """{"command": "echo real work"}"""),
+      toolReply("bash", """{"command": "echo real work > work.txt"}"""),
       reply("I did the work"),
       reply("the task is not checked off\nVERDICT: FEEDBACK: check the box"),
       toolReply("write",
@@ -286,8 +286,9 @@ suite "cyber mode direction machinery (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Kickoff turn: a real tool action runs (the bash output lands), the
-    # plan file stays untouched.
+    # Kickoff turn: a real mutation runs (the bash output lands in the
+    # session change log too, powering work-happened), the plan file
+    # stays untouched. A reads-only turn would owe no update note.
     tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md"
     tty.expectInHistory "real work"
     # Turn end: FEEDBACK from the verifier AND the discipline note, one

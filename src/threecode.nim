@@ -927,9 +927,12 @@ proc main() =
   # feedback continuation in turns.nim.
   proc runModeKickoff(m: ModeDesc): bool =
     let modeText = readModeText(m, session.cwd)
-    # The discipline baseline binds at arm time: the very first turn is
-    # already compared against the file as armed.
+    # The discipline baselines bind at arm time: the very first turn is
+    # already compared against the file as armed, and work-happened
+    # starts from the change log as armed.
     session.modeSnapshot = modeText
+    if session.readCache != nil:
+      session.changeCountStart = session.readCache.changes.len
     messages.add m.kickoffMessage(modeText)
     saveSession(session, messages)
     let counts = m.taskCounts(modeText)

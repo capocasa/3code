@@ -1633,7 +1633,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         debugOut "runTurns: " & mode.name & " structure lost, continuing"
         continue
       let check = runGoalCheck(p, mode, modeText, buildGoalEvidence(messages),
-                               session.modeSnapshot)
+                               session.modeSnapshot, session.readCache)
       # The side call ran the bar/spinner hooks again; its usage is not
       # this turn's and must not leak into the next receipt.
       emitFatPromptEvent clearPendingHintEvent()
@@ -1641,13 +1641,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         onTurnInterrupted()
         turnEnded = true
         return true
-      # Duty 2, update discipline: work happened but the mode file is
-      # byte-identical to its turn-start snapshot -> the mechanical
-      # note. It rides with a verifier FEEDBACK or, when the check
-      # could not produce one, sends the agent back on its own.
-      let note = mode.updateNote(turnHadToolActions(messages),
-                                 session.modeSnapshot, modeText)
+      # Duty 2, update discipline: work happened (content-aware: the
+      # session change log grew) but the mode file is byte-identical to
+      # its turn-start snapshot -> the mechanical note. It rides with a
+      # verifier FEEDBACK or, when the check could not produce one,
+      # sends the agent back on its own.
+      let note = mode.updateNote(
+        turnDidWork(messages, session.readCache, session.changeCountStart),
+        session.modeSnapshot, modeText)
       session.modeSnapshot = modeText
+      if session.readCache != nil:
+        session.changeCountStart = session.readCache.changes.len
       template sendBack(content: string; why: string) =
         messages.add mode.feedbackMessage(modeText, content)
         saveSession(session, messages)
@@ -1676,6 +1680,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         if completeMode(mode, session.cwd):
           session.goalNotified = false
           session.modeSnapshot = ""
+          session.changeCountStart = 0
           commitTranscriptBytes(
             receiptBytes(mode.name & " confirmed (" & mode.fileName &
               " renamed to " & mode.confirmedName & ")"), true)
@@ -1701,6 +1706,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     else:
       session.goalNotified = false
       session.modeSnapshot = ""
+      session.changeCountStart = 0
     if streamedLive:
       stopTurnInputForFinalRender()
     endTurnAfterTranscriptAppend()

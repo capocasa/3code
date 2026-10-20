@@ -289,6 +289,17 @@ proc lcsOps(a, b: seq[string]): seq[DiffOp] =
   while j < m:
     result.add dopIns; inc j
 
+proc recordChange*(cache: ReadCache; path, before, after: string) =
+  ## The session change log: first touch stores the original content,
+  ## later touches overwrite only the latest, so the log holds the net
+  ## session delta per mutated path (net diffs render at check time).
+  ## Content, not rendered diff: the render belongs to the consumer.
+  if cache == nil or path.len == 0: return
+  if path notin cache.changes:
+    cache.changes[path] = (before, after)
+  else:
+    cache.changes[path].after = after
+
 proc computeDiff*(before, after, label: string): string =
   ## Native unified-diff producer. Shelling out to the external `diff`
   ## binary breaks on Windows (no `diff` on stock installs) and on systems
@@ -558,9 +569,14 @@ proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
     try:
       let dir = parentDir(path)
       if dir != "": createDir(dir)
+      let before =
+        if fileExists(path):
+          try: readFile(path) except CatchableError: ""
+        else: ""
       writeFile(path, act.body)
       if cache != nil:
         cache.state[path] = fileSig(path)
+        recordChange(cache, path, before, act.body)
       pluginOnFileWrite(act.path, act.body.len, 0)
       return (&"wrote {path} ({act.body.len} bytes)", 0, act.body)
     except CatchableError as e:
@@ -602,6 +618,7 @@ proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
       writeFile(path, content)
       if cache != nil:
         cache.state[path] = fileSig(path)
+        recordChange(cache, path, before, content)
       pluginOnFileWrite(act.path, content.len, 1)
       let diff = computeDiff(before, content, path)
       var summary = if diff.len > 0: diff else: &"patched {path} (no textual change)"
@@ -637,7 +654,9 @@ proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
           if dir != "": createDir(dir)
           let before = if fileExists(path): readFile(path) else: ""
           writeFile(path, op.body)
-          if cache != nil: cache.state[path] = fileSig(path)
+          if cache != nil:
+            cache.state[path] = fileSig(path)
+            recordChange(cache, path, before, op.body)
           pluginOnFileWrite(op.path, op.body.len, 2)
           msgs.add &"added {path} ({op.body.len} bytes)"
           let d = computeDiff(before, op.body, path)
@@ -676,7 +695,9 @@ proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
             inc applied
           if hunkOk:
             writeFile(path, content)
-            if cache != nil: cache.state[path] = fileSig(path)
+            if cache != nil:
+              cache.state[path] = fileSig(path)
+              recordChange(cache, path, before, content)
             pluginOnFileWrite(op.path, content.len, 2)
             discard applied
             let d = computeDiff(before, content, path)
@@ -690,7 +711,9 @@ proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
           if fileExists(path):
             let before = readFile(path)
             removeFile(path)
-            if cache != nil: cache.state.del(path)
+            if cache != nil:
+              cache.state.del(path)
+              recordChange(cache, path, before, "")
             pluginOnFileWrite(op.path, 0, 2)
             msgs.add &"deleted {path}"
             let d = computeDiff(before, "", path)
@@ -858,17 +881,21 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
       let p = resolvePath(mutPath)
       if fileExists(p): cache.state[p] = fileSig(p)
   var diff = ""
-  if mutPath != "" and mutPath != "." and code == 0:
+  if mutPath != "" and mutPath != ".":
     let p = resolvePath(mutPath)
-    let after =
-      if fileExists(p):
-        try: readFile(p)
+    let afterExists = fileExists(p)
+    if beforeExists or afterExists:
+      # Capture regardless of exit code: a failed or timed-out command
+      # may still have mutated. A path that existed neither before nor
+      # after (unmatched glob, a bare name in prose) captures nothing.
+      var after = ""
+      if afterExists:
+        try: after = readFile(p)
         except CatchableError as e:
           debugOut &"diff read failed (after): {e.msg}"
-          ""
-      else: ""
-    if beforeExists and beforeContent != after:
-      diff = computeDiff(beforeContent, after, p)
+      if beforeContent != after:
+        diff = computeDiff(beforeContent, after, p)
+        recordChange(cache, p, beforeContent, after)
   if body.len == 0 and code == 0:
     body = "exit 0 (no output)"
   return (body, code, diff)

@@ -4,9 +4,10 @@
 ## suite exercises the registry walks with a second, synthetic mode so
 ## exclusivity is testable before cybernetic mode exists.
 
-import std/[json, os, strutils, tempfiles, unittest]
+import std/[json, os, osproc, strutils, tempfiles, unittest]
 import threecode/goal
 import threecode/types except Usage
+import threecode/actions
 
 proc withModeDir(body: proc (dir: string)) =
   let dir = createTempDir("modes-test-", "")
@@ -470,3 +471,29 @@ Phase 3 merged. Rollover next.
   test "rollover wiring: cybernetic yes, goal nil":
     check cyberneticMode.rolloverNote != nil
     check goalMode.rolloverNote == nil
+
+suite "verifier meets the session change log":
+  test "the session diff is the primary feed; git becomes the complement":
+    let prof = Profile(name: "stub", family: "glm", model: "stub-model")
+    goalCheckHook = proc (p: Profile, preamble, prompt: string):
+        tuple[ok: bool, text: string, err: string] =
+      check "Changes this session (harness change log" in prompt
+      check "+SESSION_LOG_LINE" in prompt
+      # The git section is demoted, not dropped, and labeled as the
+      # complement.
+      check "complement; what git reports now" in prompt
+      (true, "VERDICT: SATISFIED", "")
+    defer: goalCheckHook = nil
+    withModeDir proc (dir: string) =
+      doAssert execCmdEx("git init -q .").exitCode == 0
+      doAssert execCmdEx(
+        "git -c user.email=t@t -c user.name=t commit -q --allow-empty -m b").exitCode == 0
+      writeFile("base.txt", "base\n")
+      let cache = newReadCache()
+      discard runAction(Action(kind: akWrite, path: "log.txt",
+        body: "SESSION_LOG_LINE\n"), cache)
+      # A git-tracked change too, so both sections are present.
+      writeFile("base.txt", "changed\n")
+      let r = runGoalCheck(prof, cyberneticMode,
+        "- [ ] a\n\n## Current state\n\ns", "evidence", "", cache)
+      check r.ok

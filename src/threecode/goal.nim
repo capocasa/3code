@@ -30,8 +30,8 @@
 ## The side call is also the future subagent primitive, so it is kept
 ## separate: its own message list, no session mutation, no tools.
 
-import std/[json, options, os, osproc, sequtils, strutils, tables]
-import types, util, prompts, api, streamexec
+import std/[algorithm, json, options, os, osproc, sequtils, strutils, tables]
+import types, util, prompts, api, streamexec, actions
 
 const
   GoalFileName* = "goal.md"                 ## existence activates goal mode
@@ -702,6 +702,14 @@ proc turnHadToolActions*(messages: JsonNode): bool =
       return true
   false
 
+proc turnDidWork*(messages: JsonNode; cache: ReadCache;
+                   baseline: int): bool =
+  ## Work happened, content-aware: the session change log grew past its
+  ## turn-start baseline (a real mutation, not just reads). Falls back
+  ## to any tool action when there is no log yet (nil cache).
+  if cache != nil: cache.changes.len != baseline
+  else: turnHadToolActions(messages)
+
 proc buildGoalEvidence*(messages: JsonNode): string =
   ## Harness-constructed evidence from the just-finished turn: walk the
   ## transcript's tool calls (the slice after the last user message,
@@ -788,15 +796,52 @@ proc buildGoalDiff*(dir = "."): string =
       "\n(diff truncated at " & $GoalDiffCapBytes &
       " bytes; run git yourself for the rest)"
 
+const SessionDiffPerPathCap* = 4000
+  ## One path's rendered net diff ceiling inside the session change log
+  ## feed; past it the path degrades to a name-only line.
+
+proc buildSessionDiff*(cache: ReadCache): string =
+  ## The session change log rendered as one net diff per mutated path,
+  ## path-sorted and capped: what the agent's own tool actions changed
+  ## this session, git or no git. Binary and oversize paths degrade to
+  ## name-only lines - silent omission is the only unforgivable mode.
+  if cache == nil or cache.changes.len == 0: return
+  var paths = toSeq(cache.changes.keys)
+  paths.sort
+  for p in paths:
+    let (before, after) = cache.changes[p]
+    if before == after: continue  # touched but net-identical
+    if isBinaryContent(before) or isBinaryContent(after):
+      result.add "changed (binary, content not shown): " & p & "\n"
+      continue
+    let d = computeDiff(before, after, p)
+    if d.len > SessionDiffPerPathCap:
+      result.add "changed (diff over " & $SessionDiffPerPathCap &
+        " bytes, not shown): " & p & "\n"
+      continue
+    if result.len + d.len > GoalDiffCapBytes:
+      result.add "(session diff truncated at " & $GoalDiffCapBytes &
+        " bytes; remaining changed paths omitted)\n"
+      break
+    result.add d
+    if not result.endsWith("\n"): result.add "\n"
+  result = result.strip(chars = {'\n'})
+
 proc verifierPrompt*(goalText, evidence: string; diff = "";
-                    sourceFile = GoalFileName; planFeed = ""): string =
+                    sourceFile = GoalFileName; planFeed = "";
+                    sessionDiff = ""): string =
   result = "Goal (from " & sourceFile & " in the repo root):\n\n" &
     goalText.strip &
     "\n\nEvidence from the agent's just-finished turn (harness-built from " &
     "the transcript; the agent's prose is excluded):\n\n" & evidence
+  if sessionDiff.strip.len > 0:
+    # The session change log is the primary record: the agent's own tool
+    # actions, net per path, git or no git.
+    result.add "\n\nChanges this session (harness change log, net per " &
+      "mutated path):\n\n" & sessionDiff.strip
   if diff.strip.len > 0:
     result.add "\n\nWorking-tree diff vs HEAD captured by the harness " &
-      "(tracked changes plus untracked files, capped):\n\n" & diff.strip
+      "(complement; what git reports now):\n\n" & diff.strip
   if planFeed.strip.len > 0:
     result.add "\n\n" & planFeed.strip
   result.add "\n\nJudge from these inputs and end with the verdict line."
@@ -845,7 +890,8 @@ proc runVerifierSideCall(p: Profile, preamble, prompt: string):
   (true, text, "")
 
 proc runGoalCheck*(p: Profile; m: ModeDesc; modeText, evidence,
-                   preSnapshot: string): GoalCheckResult =
+                   preSnapshot: string; cache: ReadCache = nil):
+    GoalCheckResult =
   ## Compose the side call from the mode descriptor — the preamble
   ## (step-truth judging for plan modes), the mode text, the evidence,
   ## the check-time diff, and the structural feed — then fire it and
@@ -855,7 +901,8 @@ proc runGoalCheck*(p: Profile; m: ModeDesc; modeText, evidence,
   let preamble =
     if m.judgeStepTruth: CyberVerifierPreamble else: VerifierPreamble
   let prompt = verifierPrompt(modeText, evidence, buildGoalDiff(),
-                              m.fileName, m.verifierFeed(preSnapshot, modeText))
+                              m.fileName, m.verifierFeed(preSnapshot, modeText),
+                              buildSessionDiff(cache))
   let call = if goalCheckHook != nil: goalCheckHook else: runVerifierSideCall
   let (ok, text, err) = call(p, preamble, prompt)
   if not ok:
