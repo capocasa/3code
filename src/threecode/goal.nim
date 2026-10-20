@@ -10,8 +10,10 @@
 ## hook is the end-call boundary in `turns.nim`: when the turn's final
 ## model call completes and the harness is about to hand the prompt back
 ## to the user, it stats `goal.md`; bare existence activates (v1 waives
-## marker sniff and name-collision handling). A side-call verifier (same
-## model, fresh conversation, minimal preamble, no tools) judges the
+## marker sniff and name-collision handling). A side-call verifier (the
+## session's own model by default; a dedicated verification-class model
+## when one is configured via `:verifier`, e.g. a System One decision
+## model like Jev) judges the
 ## goal text against harness-built evidence from the just-finished
 ## turn plus the harness-captured working-tree diff. FEEDBACK sends
 ## the agent back in; SATISFIED renames the file to
@@ -22,8 +24,8 @@
 ## The side call is also the future subagent primitive, so it is kept
 ## separate: its own message list, no session mutation, no tools.
 
-import std/[json, os, osproc, strutils, tables]
-import types, util, prompts, api, streamexec
+import std/[json, os, osproc, strformat, strutils, tables]
+import types, util, prompts, api, streamexec, config
 
 const
   GoalFileName* = "goal.md"                 ## existence activates goal mode
@@ -361,12 +363,158 @@ proc runVerifierSideCall(p: Profile, goalText, evidence: string):
   stepProse(text)
   (true, text, "")
 
+# ---------- decision verifier (System One) ----------
+
+const DecisionSatisfiedP* = 0.75
+  ## A `satisfied` noul probability at or above this confirms the goal.
+  ## Asymmetric by design: a wrong SATISFIED retires the goal file and
+  ## ends the loop, while a wrong FEEDBACK only costs one more turn, so
+  ## the bar sits well above a coin flip.
+
+const DecisionGapLabels*: seq[tuple[key, label: string]] = @[
+  ("implementation", "working code for some requirement is missing or incomplete"),
+  ("tests", "tests for the goal are missing or not shown passing"),
+  ("evidence", "claims are made but nothing recorded demonstrates them"),
+  ("docs", "documentation or changelog the goal asks for is missing"),
+  ("other", "something else the goal asks for is missing"),
+  ("nothing", "nothing: the goal is met"),
+]
+  ## The `gap` choice options, in wire order. The labels are what the
+  ## agent actually sees: decision models return probabilities, never
+  ## prose, so the feedback line is harness-composed from these.
+
+proc decisionQuestions*(): JsonNode =
+  ## The question set the decision verifier answers per check. Two
+  ## questions, one forward pass: the verdict itself (`satisfied`, a
+  ## noul) and the next thing to do (`gap`, a choice) so an unsatisfied
+  ## verdict still sends the agent back in with a direction instead of
+  ## a bare "no".
+  var criteria = newJObject()
+  for (k, label) in DecisionGapLabels:
+    criteria[k] = %label
+  %*{
+    "satisfied": {"type": "noul",
+      "instructions": "Every requirement of the goal in this state, " &
+        "taken as written and as a whole, is already met by the work " &
+        "and the recorded evidence shown in this state. Recorded tool " &
+        "results count; the agent's own claims do not."},
+    "gap": {"type": "choice", "instructions":
+      "The single most important thing still missing for the goal",
+      "criteria": criteria}}
+
+func decisionSatisfiedP*(answers: JsonNode): float =
+  ## The `satisfied` noul probability, -1 when the answer is absent or
+  ## not a number (a broken check, not a failed one). Integers count:
+  ## a whole `1` or `0` is valid JSON for a probability at the rails.
+  let n = answers{"satisfied", "noul"}
+  case (if n == nil: JNull else: n.kind)
+  of JFloat: n.getFloat
+  of JInt: n.getInt.float
+  else: -1.0
+
+proc decisionGap*(answers: JsonNode): string =
+  ## The label for the `gap` choice the verifier picked (highest
+  ## probability), "" when absent. Labels, not keys: this text goes
+  ## straight into the agent-facing feedback.
+  let c = answers{"gap"}
+  if c == nil: return
+  let probs = c{"probabilities"}
+  if probs != nil and probs.kind == JObject and probs.len > 0:
+    var bestK = ""
+    var bestP = -1.0
+    for k, v in probs:
+      if v.kind == JFloat and v.getFloat > bestP:
+        bestP = v.getFloat
+        bestK = k
+    if bestK != "":
+      for (key, label) in DecisionGapLabels:
+        if key == bestK: return label
+      return bestK
+  let picked = c{"choice"}
+  if picked != nil and picked.kind == JString:
+    for (key, label) in DecisionGapLabels:
+      if key == picked.getStr: return label
+    return picked.getStr
+
+proc decisionSummaryLine*(answers: JsonNode): string =
+  ## One scrollback line for the dim verifier tier: what the decision
+  ## model answered, in its own numbers.
+  let p = decisionSatisfiedP(answers)
+  let gap = decisionGap(answers)
+  if p < 0: return
+  &"verifier decision: p(satisfied)={p.formatFloat(ffDecimal, 2)}" &
+    (if gap.len > 0: "; gap: " & gap else: "")
+
+proc verdictFromDecision*(answers: JsonNode): GoalVerdict =
+  ## Decision answers -> goal verdict. `gvkNone` for a missing
+  ## `satisfied` answer: a check without a readable verdict is a failed
+  ## check, never a passing one (same rule as `parseVerdict`).
+  let p = decisionSatisfiedP(answers)
+  if p < 0: return
+  if p >= DecisionSatisfiedP:
+    result.kind = gvkSatisfied
+  else:
+    result.kind = gvkFeedback
+    let gap = decisionGap(answers)
+    result.feedback =
+      "the decision verifier puts p(satisfied)=" &
+      p.formatFloat(ffDecimal, 2) &
+      (if gap.len > 0: "; most important gap: " & gap else: "")
+
+proc runDecisionCheck(p: Profile, goalText, evidence: string):
+    GoalCheckResult =
+  ## The System One check: one decision request carrying the same
+  ## orientation the chat verifier gets (goal text, evidence digest,
+  ## check-time diff) as the `state`, no preamble needed - the
+  ## instructions live in the questions. Failure is `ok=false`, exactly
+  ## like a failed chat side call: the goal stays armed and the next
+  ## turn boundary retries.
+  sideCallMode = true
+  defer: sideCallMode = false
+  var usage: Usage
+  try:
+    let resp = callSystemOne(p, verifierPrompt(goalText, evidence,
+      buildGoalDiff()), decisionQuestions(), usage)
+    let answers = resp{"answers"}
+    stepProse(decisionSummaryLine(answers))
+    GoalCheckResult(ok: true, verdict: verdictFromDecision(answers))
+  except ApiError as e:
+    GoalCheckResult(ok: false, err: e.msg)
+
+proc verifierProfileFor*(p: Profile): Profile =
+  ## The profile the check actually runs on: the configured verifier
+  ## model when one is enabled and resolvable, else the session's own
+  ## model — the behavior goal mode had before verifier models existed.
+  ## An enabled verifier that no longer resolves (provider section gone,
+  ## key removed) falls back with a visible note instead of silently
+  ## skipping the check or killing the turn.
+  if not verifierEnabled or verifierModelSpec == "": return p
+  let (cand, err) = buildVerifierProfile(verifierModelSpec, activeProviders)
+  if err != "":
+    stepProse("verifier " & verifierModelSpec & " unavailable (" & err &
+      "), checking with the session model")
+    return p
+  if privateMode and not privateAllowed(cand):
+    # The check ships the goal text and the working-tree diff, so it is
+    # exactly the data private mode exists to fence: an untrusted
+    # verifier never sees it. The session model (already allow-private,
+    # or it would not be running) takes the check instead.
+    stepProse("verifier " & verifierModelSpec & " is not allow-private, " &
+      "checking with the session model")
+    return p
+  cand
+
 proc runGoalCheck*(p: Profile, goalText, evidence: string): GoalCheckResult =
-  ## Fire the side call and parse its verdict. `ok=false` means the call
-  ## itself failed (network, provider): the caller keeps running without
+  ## Fire the check and parse its verdict. A decision-model verifier
+  ## (System One) answers typed questions in one request; everything
+  ## else gets the chat side call. `ok=false` means the call itself
+  ## failed (network, provider): the caller keeps running without
   ## feedback and retries at the next boundary.
+  let vp = verifierProfileFor(p)
+  if goalCheckHook == nil and verifierDialect(vp.model) == "systemone":
+    return runDecisionCheck(vp, goalText, evidence)
   let call = if goalCheckHook != nil: goalCheckHook else: runVerifierSideCall
-  let (ok, text, err) = call(p, goalText, evidence)
+  let (ok, text, err) = call(vp, goalText, evidence)
   if not ok:
     return GoalCheckResult(ok: false, err: err)
   GoalCheckResult(ok: true, verdict: parseVerdict(text))

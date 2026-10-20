@@ -196,23 +196,31 @@ proc orderedModels*(prov: ProviderRec): seq[string] =
   ## Models in the order the user entered them in the provider wizard, as
   ## persisted in the config file. Completion cycling, `:model` listing and
   ## default selection all use this order; the first entry is the default
-  ## when switching providers.
-  prov.models
+  ## when switching providers. Verification-class models never appear:
+  ## decision models cannot run a turn, so ordinary lists skip them
+  ## (`:verifier` is their only surface).
+  for m in prov.models:
+    if isDecisionModel(m): continue
+    result.add m
 
 proc firstModel*(prov: ProviderRec): string =
   ## First model in wizard-entered order: the default when switching
-  ## providers or booting with a model-less `current`.
-  if prov.models.len > 0: prov.models[0]
-  else: ""
+  ## providers or booting with a model-less `current`. Decision models
+  ## are skipped (see `orderedModels`): the default must be a model that
+  ## can actually run a turn.
+  let m = orderedModels(prov)
+  if m.len > 0: m[0] else: ""
 
 proc rememberedModel*(prov: ProviderRec): string =
   ## The model `:provider <name>` lands on: the provider's persisted
   ## selection when it still resolves against its models list, else the
   ## first wizard-entered model. Stale entries (model since removed in an
-  ## edit) fall back silently.
+  ## edit) fall back silently — and so does a remembered decision model,
+  ## which is verifier-only and cannot carry ordinary turns.
   if prov.currentModel != "":
     let i = prov.findModel(prov.currentModel)
-    if i >= 0: return prov.models[i]
+    if i >= 0 and not isDecisionModel(prov.models[i]):
+      return prov.models[i]
   firstModel(prov)
 
 proc setCurrentModel*(provName, model: string) =
@@ -339,7 +347,8 @@ const
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
                   "browserfetch",
                   "tone", "mode", "bash_path", "bash-path",
-                  "bash", "auto-update", "tab-title"]
+                  "bash", "auto-update", "tab-title",
+                  "verifier", "verifier_model", "verifier-model"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -409,10 +418,17 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
     of "settings":
       if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled",
                       "patient_retry", "patient-retry",
-          "sandbox_wall_warn", "auto-update", "tab-title"] and
+          "sandbox_wall_warn", "auto-update", "tab-title", "verifier"] and
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
+      if ent.key in ["verifier_model", "verifier-model"]:
+        let v = ent.value.strip
+        let dot = v.find('.')
+        if dot <= 0 or dot == v.len - 1:
+          return &"{path}:{ent.line}: bad value '{v}' for '{ent.key}' " &
+                 "in [settings] (expected provider.model, e.g. " &
+                 "openrouter.typesafe/jev-latest)"
       if ent.key in ["max_timeout", "max-timeout"]:
         try: discard parseInt(ent.value.strip)
         except ValueError:
@@ -488,6 +504,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   var paramRec: ParamsRec
   var inParams = false
   var entries: seq[RawEntry]
+  var verifierExplicit = false
   let stream = newFileStream(path, fmRead)
   if stream == nil: raise newException(ValueError, "cannot open " & path)
   var p: CfgParser
@@ -579,6 +596,17 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           of "on", "true", "yes", "1": streamingEnabled = true
           of "off", "false", "no", "0": streamingEnabled = false
           else: discard
+        of "verifier":
+          # Explicit enable/disable of the selected verifier model. Absent
+          # means "on while a model is selected" so the common config
+          # carries only the selection.
+          verifierExplicit = true
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": verifierEnabled = true
+          of "off", "false", "no", "0": verifierEnabled = false
+          else: discard
+        of "verifier_model", "verifier-model":
+          if v.strip != "": verifierModelSpec = v.strip
         of "sandbox", "sandbox_enabled":
           # Same boolean dialect as `notify`/`streaming`. Default on; an
           # explicit `off` disables sandbox enforcement entirely (bash runs
@@ -687,6 +715,10 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
     of cfgError:
       raise newException(ValueError, &"{path}: {e.msg}")
   p.close
+  # A selected verifier model is an enabled one unless the file says
+  # otherwise explicitly (`verifier = off`), whatever the key order.
+  if verifierModelSpec != "" and not verifierExplicit:
+    verifierEnabled = true
   let verr = validateConfig(path, entries)
   if verr != "": raise newException(ValueError, verr)
   # Migration: older configs only kept one global `current`. Seed the
@@ -752,10 +784,10 @@ proc mergeForeignEdits(path: string; current: var string,
   # right before the buffer serializes it.
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
        savedWallWarn, savedMaxTimeout, savedColorMode, savedBash,
-       savedBashSrc, savedTabTitle) =
+       savedBashSrc, savedTabTitle, savedVerifierOn, savedVerifierSpec) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
      sandboxWallWarn, maxTimeoutSetting, colorModePref, bashPathOverride,
-     bashSourcePref, tabTitleEnabled)
+     bashSourcePref, tabTitleEnabled, verifierEnabled, verifierModelSpec)
   let savedParams = activeParams
   let (diskCurrent, diskProviders, _, _, _, _) =
     try: parseConfigFile(path)
@@ -774,6 +806,8 @@ proc mergeForeignEdits(path: string; current: var string,
   bashPathOverride = savedBash
   bashSourcePref = savedBashSrc
   tabTitleEnabled = savedTabTitle
+  verifierEnabled = savedVerifierOn
+  verifierModelSpec = savedVerifierSpec
   activeParams = savedParams
   # Same baseline-diff for the `current` line: an instance that never
   # switched in-session still holds the startup value, so a different
@@ -875,6 +909,13 @@ proc writeConfigFile*(path: string, current: string,
   # Bare number, not a quoted literal: the reader parseInts the raw value.
   if maxTimeoutSetting > 0 and maxTimeoutSetting != MaxBashTimeout:
     buf.add "max_timeout = " & $maxTimeoutSetting & "\n"
+  # Verifier selection persists as its own key; the on/off state rides
+  # along only when it disagrees with the default (selected = enabled),
+  # so an untouched config stays clean either way.
+  if verifierModelSpec != "":
+    buf.add "verifier_model = " & quoteVal(verifierModelSpec) & "\n"
+    if not verifierEnabled:
+      buf.add "verifier = " & quoteVal("off") & "\n"
   # Persist the colour tone only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "light"
@@ -1166,6 +1207,86 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
       return prof
   Profile()
 
+proc availableVerifiers*(providers: seq[ProviderRec]): seq[string] =
+  ## The curated verification-class models whose provider section is
+  ## configured, as `provider.model` specs in config order. This is the
+  ## `:verifier list` offering and the pool `:verifier on` auto-picks
+  ## from — the one place these models are ever listed.
+  for pr in providers:
+    for c in VerifierCombos:
+      if canonicalKnownGoodProvider(pr.name) == c.provider.toLowerAscii:
+        result.add pr.name & "." & c.model
+
+proc buildVerifierProfile*(spec: string,
+    providers: seq[ProviderRec]): tuple[prof: Profile, err: string] =
+  ## Resolve a `provider.model` verifier spec into a Profile for the
+  ## goal check. Never exits: an unbuildable verifier is either the
+  ## `:verifier` refusal message or the goal check's silent fallback to
+  ## the session model. A verification-class model resolves from
+  ## `VerifierCombos`, NOT the provider's `models` list — decision models
+  ## never run ordinary turns, so they are not listed there — while an
+  ## ordinary model must be in the list to serve as the verifier.
+  if providers.len == 0:
+    return (Profile(), "no provider configured")
+  let dot = spec.find('.')
+  if dot <= 0 or dot == spec.len - 1:
+    return (Profile(), &"expected provider.model, got '{spec}'")
+  let name = spec[0 ..< dot]
+  let model = spec[dot + 1 .. ^1]
+  for pr in providers:
+    if pr.name != name: continue
+    if pr.url == "":
+      return (Profile(), &"provider '{name}': url not set")
+    if pr.key == "" and pr.auth != "oauth":
+      return (Profile(), &"provider '{name}': key not set")
+    let wire = verifierWireModel(pr.name, model)
+    let fullModel =
+      if wire != "": wire
+      else:
+        let i = pr.findModel(model)
+        if i < 0:
+          return (Profile(), &"provider '{name}': '{model}' is neither a " &
+            "verifier model nor in its model list")
+        pr.models[i]
+    var prof = Profile(name: pr.name & "." & fullModel, url: pr.url,
+                       key: pr.key, model: fullModel)
+    # Decision models have no family branch to resolve into: they never
+    # see a system prompt or tool roster, only the question set.
+    prof.family =
+      if isDecisionModel(fullModel): "jev" else: resolveFamily(pr, prof)
+    let (_, ver, vrt) = knownGoodTags(pr.name, fullModel)
+    prof.version = ver
+    prof.variant = vrt
+    prof.reasoning = resolveReasoning(pr, prof)
+    prof.params = resolveParams(activeParams, pr.name, fullModel)
+    prof.vision = visionCapable(prof)
+    return (prof, "")
+  (Profile(), &"provider '{name}' is not configured")
+
+proc resolveVerifierSpec*(target: string,
+    providers: seq[ProviderRec]): tuple[spec: string, err: string] =
+  ## What the user typed at `:verifier <target>` becomes: a dotted spec
+  ## validates as-is; a bare name first matches a curated verification-
+  ## class model on any configured provider, then an ordinary model on
+  ## the current provider (a cheap chat model is a legitimate verifier).
+  ## The dotted reading needs the head to name a configured provider:
+  ## model ids carry dots of their own (`glm-5.3`), and a bare id must
+  ## fall through to the name matching, not split into provider/model.
+  let dot = target.find('.')
+  if dot > 0 and providers.anyIt(it.name == target[0 ..< dot]):
+    let (prof, err) = buildVerifierProfile(target, providers)
+    if err != "": return ("", err)
+    return (prof.name, "")
+  for spec in availableVerifiers(providers):
+    if spec.split('.', 1)[1] == target or
+        aliasExpansion(spec.split('.', 1)[1]) == aliasExpansion(target):
+      return (spec, "")
+  let prov = currentProvider()
+  let i = prov.findModel(target)
+  if i >= 0: return (prov.name & "." & prov.models[i], "")
+  (&"", &"unknown verifier: {target} (verifier list: " &
+    availableVerifiers(providers).join(" ") & ")")
+
 proc loadProfile*(wanted: string): Profile =
   let path = configPath()
   if not fileExists(path):
@@ -1381,6 +1502,8 @@ proc defaultNameFromUrl*(url: string): string =
 
 proc curatedFor*(provider: string): seq[string] =
   ## Full model ids from KnownGoodCombos for the given provider name.
+  ## Verification-class models are not curated here: they live in
+  ## `VerifierCombos` and `:verifier`, never in the turn-model catalog.
   let p = canonicalKnownGoodProvider(provider)
   for c in KnownGoodCombos:
     if c[0].toLowerAscii == p: result.add c[1]

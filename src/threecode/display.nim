@@ -878,6 +878,16 @@ proc profileLinesS*(p: Profile; bold = false): string =
   if p.reasoning != "":
     result.add labelOn & pad & "reasoning " & ansiResetCode &
       BrightWhiteFg & p.reasoning & ansiResetCode & "\r\n"
+  # Same conditional style as the reasoning row: present exactly while a
+  # dedicated verifier model is enabled, so the intro block always says
+  # which model judges goal mode (absent = the session model does, the
+  # default).
+  if verifierEnabled and verifierModelSpec != "":
+    let vdot = verifierModelSpec.rfind('.')
+    let vmodel = if vdot < 0: verifierModelSpec
+                 else: verifierModelSpec[vdot + 1 .. ^1]
+    result.add labelOn & pad & "verifier  " & ansiResetCode &
+      BrightWhiteFg & shortModel(vmodel) & ansiResetCode & "\r\n"
   # Same conditional style as the reasoning row: present exactly while
   # goal mode is on (goal.md exists in the project root), absent otherwise.
   if goalModeActive():

@@ -71,6 +71,10 @@ names, model names, and paths where supported.
 | `:reasoning X` | switch reasoning level |
 | `:streaming` | show streaming mode |
 | `:streaming on/off` | toggle SSE streaming; off is the reliable fallback for flaky SSE |
+| `:verifier` | show the goal-mode verifier (off = the session model checks) |
+| `:verifier list` | list the verification-class models available to you |
+| `:verifier X` | run goal checks on X (a listed verifier, or any model of the current provider) |
+| `:verifier on/off` | toggle the verifier without losing the selection |
 | `:notify` | show notify mode |
 | `:notify on/off` | toggle the desktop notification that fires when a turn ends |
 | `:retry` | retry now: cut a retry backoff or resend a data-less in-flight request (same as ctrl-r) |
@@ -146,6 +150,8 @@ Keys under `[settings]`:
 | `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted, and `THREECODE_MAX_TIMEOUT` (below) wins for one run |
 | `browserfetch` | `on`/`off` (default off) | when a plain `web_fetch` returns a JS shell (almost no text survives tag stripping), redo the fetch in a shared headless Chrome (one browser per machine on 127.0.0.1:9223, one tab per fetch) and return the rendered text |
 | `auto-update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit |
+| `verifier_model` | `PROVIDER.MODEL` | the model goal mode's satisfaction check runs on (see [verifier models](manual.html#verifier-models)); a decision model answers typed questions in one request. Not set = the session model checks (the default) |
+| `verifier` | `on`/`off` | enable/disable the selected verifier without clearing it; absent means on while a model is selected |
 
 ### provider
 

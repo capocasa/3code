@@ -2,6 +2,28 @@ Changelog
 
 Unreleased
 
+- **Verification-class models: goal mode can run its satisfaction check
+  on a dedicated verifier (like jev), configurable and off by
+  default.** Decision models - TypeSafe's Jev via OpenRouter is the
+  curated one - answer typed questions with calibrated probabilities in
+  a single forward pass instead of writing prose, which makes a check
+  per turn end cheap enough to always run. `:verifier jev-latest`
+  selects one, `:verifier off` returns to the exact previous behavior
+  (the session model judges in a fresh side conversation), `:verifier
+  list` shows what you can use. The check sends the same orientation
+  (goal text, evidence digest, working-tree diff) as the `state` and
+  asks two questions - is the goal satisfied, and what is the most
+  important gap - with p(satisfied) >= 0.75 confirming the goal and
+  anything else sending the agent back in with the gap as direction;
+  the numbers land in scrollback as one dim line. Verifier models never
+  appear in ordinary model lists (`:model` refuses them and points at
+  `:verifier`; the wizard and `:provider new` skip them): they cannot
+  run a turn, only judge one. Any ordinary model also works as a
+  verifier. The selection persists as `[settings] verifier_model`
+  (plus `verifier = "off"` only while disabled), the welcome block
+  grows a `verifier` line naming the active verifier, and a verifier
+  that stops resolving falls back to the session model with a visible
+  note instead of a silent skip.
 - **A `goal.md` on disk at startup now arms goal mode by itself.** Goal
   mode used to activate only at the first turn end: a `goal.md` written
   by hand (or by any other tool) sat inert until something - anything -

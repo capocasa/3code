@@ -28,6 +28,17 @@ var notifyEnabled*: bool = true
   ## When true, a native desktop notification fires when a turn ends.
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
   ## `[settings]`; an explicit `off` opts out.
+var verifierEnabled*: bool = false
+  ## When true, goal mode's end-of-turn satisfaction check runs on the
+  ## dedicated verifier model named by `verifierModelSpec` instead of the
+  ## session's own model. Default off: the check rides the session model
+  ## in a fresh-context side call, which is the only behavior goal mode
+  ## had before verifier models existed.
+var verifierModelSpec*: string = ""
+  ## The selected verification-class model as `provider.model` (e.g.
+  ## `openrouter.typesafe/jev-latest`). Kept while disabled so `:verifier
+  ## on` restores it. A selected model never appears in ordinary model
+  ## lists: decision models cannot run a turn, they only judge one.
 var tabTitleEnabled*: bool = true
   ## When true, the terminal tab title carries the `3` brand plus a live
   ## spinner glyph while a turn runs (OSC 0). Default on. Toggled at

@@ -865,6 +865,12 @@ zai.glm-5.2 is not allow-private (trust it with :private allow zai, or
 switch to a zero-training provider; :private lists)
 ```
 
+The goal-mode verifier is fenced the same way: the satisfaction check ships
+the goal text and the working-tree diff, so while private mode is on a
+verifier that is not allow-private never sees them — the check quietly
+takes the session model instead (a dim note in scrollback says so). Trust a
+verifier with `:private allow` like any other model.
+
 ### Picking a private provider
 
 Pick a provider with a zero-training policy you are satisfied with (a strict
@@ -1180,16 +1186,52 @@ how to verify it. Anyone can write the file — you directly, or the model when
 you ask for multi-part work.
 
 While `goal.md` exists, every turn end runs a satisfaction check: a fresh
-side conversation with the same model, given the goal text, a summary of
-what the turn actually did (files, patches, commands — never the agent's own
-claims), and the working-tree diff, judges from those inputs alone and
-answers with a verdict. Not satisfied, the agent is sent back in with the
-verifier's feedback. Satisfied, the harness renames the file to
+side conversation with the session's own model, given the goal text, a
+summary of what the turn actually did (files, patches, commands — never the
+agent's own claims), and the working-tree diff, judges from those inputs
+alone and answers with a verdict. Not satisfied, the agent is sent back in
+with the verifier's feedback. Satisfied, the harness renames the file to
 `goal-confirmed.md` (the record of the run) and idles. The check has no
 tools and no rounds: orientation is the harness's job, so the check is one
 model call. And it shows its work: the verifier's reply lands in scrollback
 as a dim, indented tier clearly below the agent's own items. Nothing the
 harness runs is ever silent.
+
+### Verifier models
+
+The check can also run on a dedicated verification-class model:
+
+```
+:verifier                 show the verifier setting
+:verifier list            list the verification-class models you can use
+:verifier jev-latest      run every goal check on that model
+:verifier off             back to the session model (the default)
+```
+
+Verification-class models are decision models — TypeSafe's Jev (served
+through OpenRouter, so an existing OpenRouter key covers it) is the curated
+one. A decision model does not write prose: it answers typed questions
+(yes/no with a calibrated probability, pick-one-of-N) in a single forward
+pass, which makes a check per turn end cheap enough to run always. The goal
+check asks it two questions — is the goal satisfied, and what is the most
+important gap — and turns the answers into the same verdict/feedback the
+text verifier produces: `p(satisfied)` at or above 0.75 confirms the goal,
+anything else sends the agent back in with the gap as its direction. The
+decision lands in scrollback as one dim line with the model's own numbers.
+
+These models never appear in ordinary model lists (`:model`, completion,
+the provider wizard): they cannot run a turn, they only judge one, so
+`:model jev-latest` refuses and points here. Any ordinary model works as a
+verifier too (`:verifier glm-5.3-flash` on the current provider) — that
+check is the regular text side call, just on the named model instead of the
+session's. `verifier off` is exactly the behavior from before verifier
+models existed: the session model checks itself. The selection persists in
+the config (`[settings] verifier_model = "openrouter.typesafe/jev-latest"`,
+plus `verifier = "off"` only while disabled), and the welcome block grows a
+`verifier` line naming the active verifier so the state is visible at a
+glance. A verifier that stops resolving (provider removed, key gone) is
+skipped with a visible note — the check falls back to the session model
+rather than going silent.
 
 The file is the whole interface. Edit `goal.md` mid-run to steer (`:goal
 edit` opens it in `$VISUAL/$EDITOR`; the next check reads it fresh), delete

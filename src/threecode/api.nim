@@ -3850,6 +3850,59 @@ proc fetchModels*(url, key: string): (seq[string], string) =
   except CatchableError as e:
     return (@[], e.msg)
 
+var systemOneHook*: proc (p: Profile, body: JsonNode): JsonNode {.closure.}
+  ## Test seam: when set, `callSystemOne` answers from here instead of the
+  ## network. Receives the fully-built request body so tests can assert the
+  ## question set, and returns the parsed response object.
+
+proc systemOneEndpoint*(p: Profile): string =
+  ## The System One dialect's one endpoint: the provider base plus
+  ## `/systemone`. Same base the chat path uses, so a verifier rides the
+  ## provider section's url and key unchanged.
+  requestUrl(p) & "/systemone"
+
+proc callSystemOne*(p: Profile, state: string, questions: JsonNode,
+    usage: var Usage): JsonNode =
+  ## One decision request for a System One verifier (the Jev family):
+  ## POST the state text plus a map of typed questions, get every answer
+  ## back in a single forward pass — no chat surface, no streaming, no
+  ## prose to paint. Returns the parsed response (its `answers` map is the
+  ## verdict source; `usage` fills from the billing object). Non-200 and
+  ## malformed bodies raise ApiError, which the goal check treats like any
+  ## verifier failure: retry at the next turn boundary.
+  let body = %*{"model": p.model, "state": state, "questions": questions}
+  if systemOneHook != nil:
+    return systemOneHook(p, body)
+  let url = systemOneEndpoint(p)
+  try:
+    let client = newHttpClient(timeout = 20_000,
+                               userAgent = ModelUserAgent,
+                               sslContext = bundledSslContext())
+    defer: client.close()
+    # Same header set the chat transport sends (requestHeaders): auth
+    # bearer, json content type, the 3code UA providers log.
+    for (k, v) in requestHeaders(p, bearerFor(p), "application/json"):
+      client.headers[k] = v
+    let resp = client.request(url, httpMethod = HttpPost,
+                              body = sanitizeUtf8($body))
+    if resp.code.int != 200:
+      raise newException(ApiError, "HTTP " & $resp.code.int & " — " &
+        resp.body[0 ..< min(200, resp.body.len)])
+    let j = parseJson(resp.body)
+    if j.kind != JObject or j{"answers"} == nil or
+        j{"answers"}.kind != JObject:
+      raise newException(ApiError, "response has no answers object")
+    let u = j{"usage"}
+    if u != nil and u.kind == JObject:
+      usage.promptTokens = u{"input_tokens"}.getInt
+      usage.completionTokens = u{"output_tokens"}.getInt
+      usage.totalTokens = usage.promptTokens + usage.completionTokens
+    j
+  except ApiError:
+    raise
+  except CatchableError as e:
+    raise newException(ApiError, url & ": " & e.msg)
+
 proc installInterruptHook*() =
   setControlCHook(proc() {.noconv.} =
     requestTurnInterrupt())

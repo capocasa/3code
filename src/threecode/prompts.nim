@@ -3673,6 +3673,10 @@ commands:
   :notify on|off      toggle turn-end desktop notification
   :tab-title          show tab-title mode (on = 3 brand + spinner glyph in the tab)
   :tab-title on|off   toggle the terminal tab title
+  :verifier           show the goal-mode verifier (off = the session model checks)
+  :verifier list      list verification-class models (decision models like jev)
+  :verifier X         run goal checks on X (a listed verifier or a provider model)
+  :verifier on|off    toggle the verifier without losing the selection
   :retry              retry now: cut a retry backoff or resend a data-less
                       in-flight request (same as ctrl-r)
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
@@ -3801,6 +3805,55 @@ proc canonicalKnownGoodProvider*(provider: string): string =
   elif p == "geminicli": "google"
   elif p == "alephalpha": "kolibri"  # self-host alias, same vLLM surface
   else: p
+
+# ---------------------------------------------------------------------------
+# Verification-class models.
+#
+# Decision models ("System One": typed questions in, calibrated
+# probabilities out, no generated text) exist to judge, not to code, so
+# they can never run an ordinary turn: they are absent from
+# `KnownGoodCombos`, from `:model` lists, and from every model picker.
+# Goal mode is their one consumer — the end-of-turn satisfaction check
+# becomes one decision request instead of a chat side call. The list is
+# deliberately short: an entry must be cheap and proven as a judge, not
+# merely available.
+# ---------------------------------------------------------------------------
+
+const VerifierCombos*: seq[tuple[provider, model: string]] = @[
+  # TypeSafe's Jev via OpenRouter: rides the same API key as every other
+  # OpenRouter model, answers the whole question set in one forward pass,
+  # and bills only input tokens, so a per-turn check rounds to zero.
+  # `typesafe/jev-latest` tracks the current stable Jev.
+  ("openrouter", "typesafe/jev-latest"),
+]
+
+func isDecisionModel*(model: string): bool =
+  ## True for System One decision models (the Jev family): no chat
+  ## surface, no prose — typed questions answered with probabilities over
+  ## the `/systemone` endpoint. Everything else, including ordinary chat
+  ## models picked as verifiers, speaks chat completions.
+  let m = aliasExpansion(model)
+  m == "jev" or m.startsWith("jev-")
+
+proc verifierWireModel*(provider, model: string): string =
+  ## The curated wire id when `(provider, model)` names a verification-
+  ## class model, "" otherwise. Matching is on normalized spellings, so
+  ## `jev-latest` selects the OpenRouter entry the same way
+  ## `typesafe/jev-latest` does.
+  let p = canonicalKnownGoodProvider(provider)
+  let wanted = aliasExpansion(model)
+  for c in VerifierCombos:
+    if c.provider.toLowerAscii == p and aliasExpansion(c.model) == wanted:
+      return c.model
+  ""
+
+proc isVerifierCombo*(provider, model: string): bool =
+  verifierWireModel(provider, model) != ""
+
+proc verifierDialect*(model: string): string =
+  ## "systemone" for decision models, "chat" for everything else. Picks
+  ## the call path a verifier profile uses at check time.
+  if isDecisionModel(model): "systemone" else: "chat"
 
 type WireRepairEntry = tuple[wire, wireNorm: string]
 

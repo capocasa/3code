@@ -17,6 +17,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 
 const CommandNames* = [":help", ":tokens", ":clear", ":goal", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
+                      ":verifier",
                       ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
                       ":version", ":sandbox", ":sb", ":retry", ":private",
                       ":quit", ":exit"]
@@ -110,7 +111,7 @@ proc classifyCommand*(cmd: string): CommandKind =
     # plugin state, so they go the mutating path.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "debug"): ckSafeImmediate
     else: ckMutating
-  of ":streaming", ":notify", ":retry", ":private", ":tab-title":
+  of ":streaming", ":notify", ":retry", ":private", ":tab-title", ":verifier":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
   of ":provider":
@@ -226,6 +227,13 @@ proc completionFor*(line: string): seq[string] =
   if words[0] == ":reasoning" and words.len == 2:
     if not experimentalEnabled:
       for r in ReasoningLevels: result.add r
+    return
+  if words[0] == ":verifier" and words.len == 2:
+    result.add "on"
+    result.add "off"
+    result.add "list"
+    for spec in availableVerifiers(activeProviders):
+      result.add shortModel(spec.split('.', 1)[1])
     return
   if words[0] == ":streaming" and words.len == 2:
     result.add "on"
@@ -811,7 +819,10 @@ proc offeredModels(name, url, key, label: string): seq[string] =
     errLn "unavailable — ", fetchErr
   elif available.len == 0:
     hintLn "  unavailable — enter manually", resetStyle
-  var offered = available.sorted
+  # Decision models an endpoint lists (OpenRouter serves `typesafe/jev`)
+  # stay out of the turn-model catalog: they are verifiers, reachable
+  # only through `:verifier`.
+  var offered = available.filterIt(not isDecisionModel(it)).sorted
   preferCurated(name, offered)
   dedupModels(offered)
 
@@ -1229,6 +1240,9 @@ proc cmdModelSelect(target: string, prof: var Profile): string =
   if idx < 0:
     return errLnS(&"unknown model: {target}")
   let fullModel = prov.models[idx]
+  if isDecisionModel(fullModel):
+    return errLnS(&"{shortModel(fullModel)} is a verification-class " &
+      "model: it cannot run turns. select it with :verifier instead")
   let newCurrent = prov.name & "." & fullModel
   let candidate = buildProfile(newCurrent, activeProviders, "")
   if not gateExperimental(candidate):
@@ -1313,6 +1327,63 @@ proc cmdStreamingSelect(target: string): string =
     return errLnS(&"unknown value: {target} (choose on or off)")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdStreamingList()
+
+proc cmdVerifierList(prof: Profile): string =
+  ## The one model list verification-class models appear in. Ordinary
+  ## lists (`:model`, completion, the wizard) never show them: decision
+  ## models cannot run a turn, they only judge one.
+  if verifierModelSpec != "":
+    result.add hintLnS("verifier: " & verifierModelSpec &
+      (if verifierEnabled: " (on)" else: " (off)"))
+  else:
+    result.add hintLnS("verifier: off (goal checks run on the session " &
+      "model's own side call)")
+  let avail = availableVerifiers(activeProviders)
+  if avail.len > 0:
+    for spec in avail:
+      let mark = if spec == verifierModelSpec and verifierEnabled: "*"
+                 else: " "
+      result.add hintLnS(mark & " " & spec)
+  else:
+    result.add hintLnS("no verification-class models available (a " &
+      "provider serving one, e.g. openrouter, is not configured)")
+  result.add hintLnS("any model in the current provider's list also " &
+    "works as a verifier: :verifier <model>")
+
+proc cmdVerifierPersist(prof: Profile): string =
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  profileLinesS(prof)
+
+proc cmdVerifierSelect(target: string, prof: var Profile): string =
+  let (spec, err) = resolveVerifierSpec(target, activeProviders)
+  if err != "": return errLnS(err)
+  verifierModelSpec = spec
+  verifierEnabled = true
+  cmdVerifierPersist(prof)
+
+proc cmdVerifierToggle(on: bool, prof: var Profile): string =
+  if on and verifierModelSpec == "":
+    let avail = availableVerifiers(activeProviders)
+    if avail.len == 0:
+      return errLnS("no verifier model selected and none available " &
+        "(add a provider that serves one, e.g. openrouter)")
+    verifierModelSpec = avail[0]
+  verifierEnabled = on
+  cmdVerifierPersist(prof)
+
+proc cmdVerifier(arg: string, prof: var Profile): string =
+  let parts = arg.splitWhitespace()
+  case parts.len
+  of 0:
+    cmdVerifierList(prof)
+  of 1:
+    case parts[0]
+    of "list": cmdVerifierList(prof)
+    of "on": cmdVerifierToggle(true, prof)
+    of "off": cmdVerifierToggle(false, prof)
+    else: cmdVerifierSelect(parts[0], prof)
+  else:
+    errLnS("usage: :verifier [list | on | off | <model>]")
 
 proc cmdStreaming(arg: string): string =
   let parts = arg.splitWhitespace()
@@ -1547,6 +1618,8 @@ proc commandTitle(name, arg: string; ok: bool): string =
     if arg.len == 0: "reasoning" else: "profile"
   of ":streaming":
     "streaming"
+  of ":verifier":
+    "verifier"
   of ":notify":
     "notify"
   of ":retry":
@@ -2003,6 +2076,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       body.add cmdReasoning(arg, prof)
     of ":streaming":
       body.add cmdStreaming(arg)
+    of ":verifier":
+      body.add cmdVerifier(arg, prof)
     of ":notify":
       body.add cmdNotify(arg)
     of ":tab-title":
