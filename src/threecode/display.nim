@@ -940,6 +940,7 @@ proc installEditorTweaks*() =
   CommandProcsAll["clear"] = wrapClear
 
 proc welcome*(p: Profile): minline.LineEditor =
+  termui.ensureOutputProcessing()
   termui.setSteadyCursor()
   addExitProc(termui.restoreCursorStyle)
   stdout.write "\n"

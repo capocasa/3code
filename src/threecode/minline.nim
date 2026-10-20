@@ -3674,7 +3674,6 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       var rawMode = oldMode
       rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
         INPCK or ISTRIP or IXON)
-      rawMode.c_oflag = rawMode.c_oflag and not Cflag(OPOST)
       rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
       rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or
         IEXTEN or ISIG)
