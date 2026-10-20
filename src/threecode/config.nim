@@ -1038,6 +1038,30 @@ proc applyEarlySandboxSettings*(path: string) =
   # OSError. The finalizer never ran in a short session.
   p.close()
 
+proc tryLoadStateOrEmpty*(path: string): tuple[current: string,
+    providers: seq[ProviderRec], colors: Table[string, string], err: string] =
+  ## Tolerant twin of `loadStateOrEmpty` for callers that must not die on
+  ## a malformed config (3code-app's settings server, embedding the
+  ## provider ops). Identical side effects and results; a parse failure
+  ## comes back as `err` (with current/providers/colors empty) instead of
+  ## `die`.
+  if not fileExists(path):
+    baselineCurrent = ""
+    baselineProviders = @[]
+    return ("", @[], initTable[string, string](), "")
+  let (current, providers, colors, searchKeys, searchEngine, shortcuts) =
+    try: parseConfigFile(path)
+    except ValueError as e:
+      return ("", @[], initTable[string, string](), e.msg)
+  baselineCurrent = current
+  baselineProviders = providers
+  if searchEngine != "": activeSearchEngine = searchEngine
+  activeSearchKeys = searchKeys
+  activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
+  activeShortcuts = shortcuts
+  minline.configuredShortcuts = activeShortcuts
+  (current, providers, colors, "")
+
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
   ## Returns `(current, providers, colors)` and updates `activeSearchKey` /
   ## `activeSearchEngine` / `activeSearchKeys` / `activeShortcuts` as a side
@@ -1046,20 +1070,8 @@ proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, s
   ## Also records the startup baseline (`baselineCurrent` /
   ## `baselineProviders`) that `writeConfigFile` diffs against to keep
   ## concurrent instances from clobbering each other's edits.
-  if not fileExists(path):
-    baselineCurrent = ""
-    baselineProviders = @[]
-    return ("", @[], initTable[string, string]())
-  let (current, providers, colors, searchKeys, searchEngine, shortcuts) =
-    try: parseConfigFile(path)
-    except ValueError as e: die e.msg, ExitConfig
-  baselineCurrent = current
-  baselineProviders = providers
-  if searchEngine != "": activeSearchEngine = searchEngine
-  activeSearchKeys = searchKeys
-  activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
-  activeShortcuts = shortcuts
-  minline.configuredShortcuts = activeShortcuts
+  let (current, providers, colors, err) = tryLoadStateOrEmpty(path)
+  if err != "": die err, ExitConfig
   (current, providers, colors)
 
 proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
