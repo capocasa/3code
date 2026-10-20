@@ -1055,6 +1055,14 @@ proc tryLoadStateOrEmpty*(path: string): tuple[current: string,
       return ("", @[], initTable[string, string](), e.msg)
   baselineCurrent = current
   baselineProviders = providers
+  # Also refresh the active globals: interactive callers do this
+  # themselves with the returned tuple (threecode.nim), but a
+  # non-interactive host that loads and edits through providerops in
+  # one step needs the loader to leave the globals consistent on its
+  # own — providerops' ops read and write `activeCurrent` /
+  # `activeProviders`.
+  activeCurrent = current
+  activeProviders = providers
   if searchEngine != "": activeSearchEngine = searchEngine
   activeSearchKeys = searchKeys
   activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
