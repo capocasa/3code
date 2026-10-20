@@ -223,10 +223,19 @@ type
     code*: int
     kind*: ActionKind
     plan*: seq[PlanItem]
+  SessionChange* = tuple[before, after: string]
+    ## One path's net session delta: the original content at first touch
+    ## and the latest content after the last mutation.
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
     images*: seq[ImageInfo]  ## image reads this tool batch; the turn loop
                             ## drains it into a follow-up user message
+    changes*: OrderedTable[string, SessionChange]
+      ## The session change log: first touch stores the original, later
+      ## touches overwrite only the latest, so check time renders the net
+      ## diff per mutated path. Rides the read cache because it is the
+      ## one session-scoped ref already plumbed to every action executor;
+      ## a nil cache (skill runs, some tests) simply records nothing.
   PromptState* = object
     ## Cache proof for the constructed system prompt: `identity` is the
     ## `profileIdentity` stamp of the profile that built it, `skills` the
@@ -249,6 +258,12 @@ type
     goalNotified*: bool  ## goal-mode activation receipt already shown (the
                          ## flag is per session: a resumed session announces
                          ## again at its first end-call boundary)
+    modeSnapshot*: string  ## the armed mode's file bytes at this turn's
+                           ## start: the update-discipline and delta
+                           ## baseline (transient; a resumed session starts
+                           ## from no snapshot, delta unknown one turn)
+    changeCountStart*: int  ## the change log's entry count at this turn's
+                            ## start: content-aware work-happened baseline
   ApiError* = object of CatchableError
     ## Base for all model/API failures. `callModel`'s retry loop and the
     ## turn loop catch this so every failure mode is handled uniformly.

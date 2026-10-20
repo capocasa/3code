@@ -12,6 +12,11 @@ import util
 import types
 import prompts
 import images
+when defined(providerStub):
+  # Test-only: the stub provider serves the summarizer meta-call from
+  # its canned-response queue (see stubNextSummarizerReply). api imports
+  # nothing from compact, so this stays acyclic.
+  import api
 
 proc contextWindowFor*(model: string): int =
   ## Heuristic fallback for models off the known-good table
@@ -178,6 +183,8 @@ proc collapseForSummary*(payload: JsonNode): JsonNode =
 proc callSummarizer(p: Profile, messages: JsonNode): string =
   ## Fires a single meta-call to the model with a dedicated summarizer
   ## system prompt and no tools. Returns "" on any failure.
+  when defined(providerStub):
+    return stubNextSummarizerReply(messages)
   if p.name == "" or p.url == "" or p.key == "" or p.model == "": return ""
   # Build a trimmed payload: the summarizer prompt + every non-system
   # message from the live conversation. Tool_call messages are allowed —

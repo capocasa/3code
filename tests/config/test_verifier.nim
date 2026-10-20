@@ -240,7 +240,7 @@ suite "verifier decision check":
       goalStepHook = proc (step: GoalStep) = steps.add step.prose
       defer: goalStepHook = nil
       let prof = Profile(name: "zai.glm-5.3", model: "glm-5.3")
-      let r = runGoalCheck(prof, "ship it", "evidence line")
+      let r = runGoalCheck(prof, goalMode, "ship it", "evidence line", "")
       check r.ok
       check r.verdict.kind == gvkSatisfied
       check askedModel == "typesafe/jev-latest"
@@ -255,7 +255,7 @@ suite "verifier decision check":
       systemOneHook = proc (p: Profile, body: JsonNode): JsonNode =
         raise newException(ApiError, "HTTP 429")
       defer: systemOneHook = nil
-      let r = runGoalCheck(Profile(name: "zai.glm-5.3"), "ship it", "")
+      let r = runGoalCheck(Profile(name: "zai.glm-5.3"), goalMode, "ship it", "", "")
       check not r.ok
       check "429" in r.err
       check r.verdict.kind == gvkNone
@@ -265,7 +265,7 @@ suite "verifier decision check":
       verifierModelSpec = "ghost.jev-latest"
       verifierEnabled = true
       var got = ""
-      goalCheckHook = proc (p: Profile, goalText, evidence: string):
+      goalCheckHook = proc (p: Profile, preamble, prompt: string):
           tuple[ok: bool, text: string, err: string] =
         got = p.name
         (true, "VERDICT: SATISFIED", "")
@@ -274,7 +274,7 @@ suite "verifier decision check":
       goalStepHook = proc (step: GoalStep) = steps.add step.prose
       defer: goalStepHook = nil
       let prof = Profile(name: "zai.glm-5.3", model: "glm-5.3")
-      let r = runGoalCheck(prof, "ship it", "")
+      let r = runGoalCheck(prof, goalMode, "ship it", "", "")
       check r.ok and r.verdict.kind == gvkSatisfied
       check got == "zai.glm-5.3"
       check steps.len == 1 and "unavailable" in steps[0]
@@ -285,12 +285,13 @@ suite "verifier decision check":
       verifierModelSpec = "openrouter.z-ai/glm-5.3"
       verifierEnabled = true
       var got = ""
-      goalCheckHook = proc (p: Profile, goalText, evidence: string):
+      goalCheckHook = proc (p: Profile, preamble, prompt: string):
           tuple[ok: bool, text: string, err: string] =
         got = p.name
         (true, "VERDICT: FEEDBACK: run tests", "")
       defer: goalCheckHook = nil
-      let r = runGoalCheck(Profile(name: "zai.glm-5.3"), "ship it", "")
+      let r = runGoalCheck(Profile(name: "zai.glm-5.3"), goalMode,
+          "ship it", "", "")
       check r.verdict.kind == gvkFeedback
       check got == "openrouter.z-ai/glm-5.3"
 
@@ -310,7 +311,7 @@ suite "verifier decision check":
         %*{"answers": {"satisfied": {"noul": 0.9}}}
       defer: systemOneHook = nil
       var got = ""
-      goalCheckHook = proc (p: Profile, goalText, evidence: string):
+      goalCheckHook = proc (p: Profile, preamble, prompt: string):
           tuple[ok: bool, text: string, err: string] =
         got = p.name
         (true, "VERDICT: SATISFIED", "")
@@ -318,7 +319,8 @@ suite "verifier decision check":
       var steps: seq[string]
       goalStepHook = proc (step: GoalStep) = steps.add step.prose
       defer: goalStepHook = nil
-      let r = runGoalCheck(Profile(name: "zai.glm-5.3"), "ship it", "")
+      let r = runGoalCheck(Profile(name: "zai.glm-5.3"), goalMode,
+          "ship it", "", "")
       check r.ok and r.verdict.kind == gvkSatisfied
       check used == ""                    # decision model never called
       check got == "zai.glm-5.3"          # session model took the check
@@ -328,13 +330,13 @@ suite "verifier decision check":
     withVerifierState proc () =
       verifierEnabled = false
       var got = ""
-      goalCheckHook = proc (p: Profile, goalText, evidence: string):
+      goalCheckHook = proc (p: Profile, preamble, prompt: string):
           tuple[ok: bool, text: string, err: string] =
         got = p.name
         (true, "VERDICT: SATISFIED", "")
       defer: goalCheckHook = nil
       let prof = Profile(name: "zai.glm-5.3", model: "glm-5.3")
-      let r = runGoalCheck(prof, "ship it", "")
+      let r = runGoalCheck(prof, goalMode, "ship it", "", "")
       check r.ok and r.verdict.kind == gvkSatisfied
       check got == "zai.glm-5.3"
 

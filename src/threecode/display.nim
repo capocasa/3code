@@ -889,9 +889,11 @@ proc profileLinesS*(p: Profile; bold = false): string =
     result.add labelOn & pad & "verifier  " & ansiResetCode &
       BrightWhiteFg & shortModel(vmodel) & ansiResetCode & "\r\n"
   # Same conditional style as the reasoning row: present exactly while
-  # goal mode is on (goal.md exists in the project root), absent otherwise.
-  if goalModeActive():
-    result.add labelOn & pad & "goal      " & ansiResetCode &
+  # a harness mode is on (its trigger file exists in the project root),
+  # absent otherwise.
+  let mode = activeMode()
+  if not noMode(mode):
+    result.add labelOn & pad & mode.name.alignLeft(10) & ansiResetCode &
       BrightWhiteFg & "on" & ansiResetCode & "\r\n"
   if privateMode:
     result.add labelOn & pad & "private   " & ansiResetCode &

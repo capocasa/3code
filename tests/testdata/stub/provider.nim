@@ -225,6 +225,18 @@ proc stubCallModel(messages: JsonNode): JsonNode =
   result = responses[stubResponseIdx]
   inc stubResponseIdx
 
+proc stubNextSummarizerReply*(payload: JsonNode): string =
+  ## The summarizer meta-call under the stub (test-only): the recap is
+  ## served from the same canned-response queue, so the whole collapse
+  ## path - summary, receipt, a mode's rollover handoff - is drivable
+  ## end to end. No stream hooks: the real summarizer call is a plain
+  ## HTTP request, invisible to the live chrome. A failure entry or
+  ## empty content means the summary failed, like a failed meta-call.
+  let node = stubCallModel(payload)
+  if node.kind != JObject: return ""
+  if node{"failure"}.getStr("").len > 0: return ""
+  node{"content"}.getStr("")
+
 proc stubUsage(node: JsonNode, content: string): Usage =
   # `"noUsage": true` on a response emulates a provider whose stream ends
   # without a usage object (the hookNoUsage turn-end path): all counters

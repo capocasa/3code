@@ -299,42 +299,45 @@ suite "goal check loop (canned verdicts, no provider)":
   let prof = Profile(name: "stub", family: "glm", model: "stub-model")
 
   test "satisfied verdict flows through runGoalCheck":
-    goalCheckHook = proc (p: Profile, goalText, evidence: string):
+    goalCheckHook = proc (p: Profile, preamble, prompt: string):
         tuple[ok: bool, text: string, err: string] =
-      check goalText == "ship it"
-      check "evidence line" in evidence
+      # The seam carries exactly what would go on the wire.
+      check preamble == VerifierPreamble
+      check "ship it" in prompt
+      check "evidence line" in prompt
+      check GoalFileName in prompt
       (true, "looks complete\nVERDICT: SATISFIED", "")
     defer: goalCheckHook = nil
-    let r = runGoalCheck(prof, "ship it", "evidence line")
+    let r = runGoalCheck(prof, goalMode, "ship it", "evidence line", "")
     check r.ok
     check r.verdict.kind == gvkSatisfied
 
   test "feedback verdict carries the verifier's words":
-    goalCheckHook = proc (p: Profile, goalText, evidence: string):
+    goalCheckHook = proc (p: Profile, preamble, prompt: string):
         tuple[ok: bool, text: string, err: string] =
       (true, "VERDICT: FEEDBACK: run the tests", "")
     defer: goalCheckHook = nil
-    let r = runGoalCheck(prof, "ship it", "")
+    let r = runGoalCheck(prof, goalMode, "ship it", "", "")
     check r.ok
     check r.verdict.kind == gvkFeedback
     check r.verdict.feedback == "run the tests"
 
   test "side-call failure surfaces as ok=false with the reason":
-    goalCheckHook = proc (p: Profile, goalText, evidence: string):
+    goalCheckHook = proc (p: Profile, preamble, prompt: string):
         tuple[ok: bool, text: string, err: string] =
       (false, "", "network down")
     defer: goalCheckHook = nil
-    let r = runGoalCheck(prof, "ship it", "")
+    let r = runGoalCheck(prof, goalMode, "ship it", "", "")
     check not r.ok
     check r.err == "network down"
     check r.verdict.kind == gvkNone
 
   test "junk verdict output is not satisfaction":
-    goalCheckHook = proc (p: Profile, goalText, evidence: string):
+    goalCheckHook = proc (p: Profile, preamble, prompt: string):
         tuple[ok: bool, text: string, err: string] =
       (true, "all good, no verdict line", "")
     defer: goalCheckHook = nil
-    let r = runGoalCheck(prof, "ship it", "")
+    let r = runGoalCheck(prof, goalMode, "ship it", "", "")
     check r.ok
     check r.verdict.kind == gvkNone
 

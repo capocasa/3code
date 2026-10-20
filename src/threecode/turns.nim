@@ -874,6 +874,27 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
     nextCheckpoint = 0             # id of the marker on the next assistant message
     summarizedOn400 = false       # opaque-400 recovery fired this turn (one-shot)
+    rolloverDue = false           # a context collapse happened; the mode's
+                                  # handoff waits for tool pairing to settle
+  # A context collapse is a context clear for a mode with a rollover
+  # duty: the fresh context re-anchors at the mode file. Receipted like
+  # every harness act. Deferred past the tool loop when the collapsing
+  # reply carries unanswered tool_calls (a user message between an
+  # assistant's calls and their results orphans the pairing).
+  template injectRollover() =
+    let m = activeMode(session.cwd)
+    if not noMode(m) and m.rolloverNote != nil:
+      let body = readModeText(m, session.cwd)
+      let note = m.rolloverNote(body)
+      messages.add note
+      let counts = m.taskCounts(body)
+      commitTranscriptBytes(
+        receiptBytes("auto: " & m.name & " rollover - plan at " &
+          m.fileName &
+          (if counts.len > 0: " (" & counts & ")" else: "")), true)
+      commitTranscriptBytes(
+        formatItem(agentPromptItem(note{"content"}.getStr)), true)
+      saveSession(session, messages)
   # dmail is offered only when the active profile's tool schema includes
   # it (kimi family); the marker tagging below keys off the same flag.
   var dmailEnabled = false
@@ -945,6 +966,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
               (if collapsed == 1: "" else: "s") &
               (if summarized > 0: " into a recap" else: " without a recap") &
               ", retrying"), true)
+          # The failed call's reply was never appended, so pairing is
+          # settled: the handoff rides the retry directly.
+          injectRollover()
           continue
       # Transport retry budget exhausted (or another fatal callModel error).
       # `callModel` already stopped the spinner, but the deferred `endTurn`
@@ -1172,6 +1196,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
              else:
                &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)")), true)
         saveSession(session, messages)
+        # This reply's tool_calls may still be unanswered: defer the
+        # handoff to the point just after their results land, or inject
+        # now when there are none.
+        if toolCalls.len > 0: rolloverDue = true
+        else: injectRollover()
     of caNone: discard
     if toolCalls.len > 0:
       debugOut $toolCalls.len & " tool calls"
@@ -1499,6 +1528,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add imageUserMessage(
           &"attached: {names} (image read){extraNote}", imgs)
       saveSession(session, messages)
+      if rolloverDue:
+        # The deferred handoff: tool pairing has settled, the fresh
+        # context re-anchors before the next model call.
+        rolloverDue = false
+        injectRollover()
       if isInterrupted():
         onTurnInterrupted()
         # Same contract as the callModel interrupt paths above:
@@ -1539,24 +1573,26 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       stopTurnInputForFinalRender()
       turnEnded = true
       return false
-    # Goal mode end-call boundary — the only hook. The turn's final model
-    # call completed, the reply is committed, nothing is queued, and the
-    # harness is about to hand the prompt back. goal.md in the project root
-    # keeps the session on its goal: a fresh-context side-call verifier
-    # (same model, own message list, no tools) judges the goal text
-    # against harness-built evidence from this turn plus the check-time
-    # working-tree diff. FEEDBACK sends the agent back in with the
-    # verifier's words; SATISFIED renames the file and idles normally.
-    # No session-start check, no per-tool-call checks. Interrupt is the
-    # pause lever: it skips the check and ends the turn; on resume the
-    # file is still there, so the goal is still on.
-    # The goal file is a project-root artifact: activation keys off the
+    # Harness-mode end-call boundary — the only hook. The turn's final
+    # model call completed, the reply is committed, nothing is queued,
+    # and the harness is about to hand the prompt back. The armed mode's
+    # trigger file in the project root keeps the session on its goal: a
+    # fresh-context side-call verifier (same model, own message list, no
+    # tools) judges the mode's text against harness-built evidence from
+    # this turn plus the check-time working-tree diff. FEEDBACK sends the
+    # agent back in with the verifier's words; SATISFIED retires the file
+    # and idles normally. No session-start check, no per-tool-call
+    # checks. Interrupt is the pause lever: it skips the check and ends
+    # the turn; on resume the file is still there, so the mode is still
+    # on.
+    # The mode file is a project-root artifact: activation keys off the
     # session's project dir, not the process cwd. Embedders (library,
     # ACP) run sessions against their own cwd while the process may sit
     # anywhere — e.g. a test harness parked in a repo that happens to
     # carry a goal.md must not arm goal mode for every session it runs,
     # and the end-of-turn verifier call it would fire is a real API call.
-    if goalModeActive(session.cwd):
+    let mode = activeMode(session.cwd)
+    if not noMode(mode):
       if isInterrupted():
         onTurnInterrupted()
         turnEnded = true
@@ -1564,16 +1600,40 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if not session.goalNotified:
         session.goalNotified = true
         commitTranscriptBytes(
-          receiptBytes("goal mode: " & GoalFileName &
-            " detected (interrupt to pause, :goal! to cancel)"), true)
+          receiptBytes(mode.name & " mode: " & mode.fileName &
+            " detected (interrupt to pause, " & mode.verb & "! to cancel)"),
+          true)
+        # A second mode's file on disk while one mode runs is a refused
+        # arming: say so once, right under the detection receipt.
+        let other = conflictingMode(mode, session.cwd)
+        if not noMode(other):
+          commitTranscriptBytes(
+            receiptBytes(modeConflictLabel(mode, other)), true)
       # Verifier steps land in scrollback as they happen: same commit
       # path as the receipts around them, one dim indented tier below
       # the agent's items so the check can never read as agent work.
       goalStepHook = proc (step: GoalStep) =
         commitTranscriptBytes(goalStepBytes(step), true)
       defer: goalStepHook = nil
-      let check = runGoalCheck(p, readGoalText(session.cwd),
-                               buildGoalEvidence(messages))
+      let modeText = readModeText(mode, session.cwd)
+      # Duty 1, structure guard: a plan that lost its format mid-run
+      # gets a mechanical restore-continuation and no side call (there
+      # is no task list to judge). The mode stays latched.
+      let guard = mode.structureGuard(modeText)
+      if guard.len > 0:
+        session.modeSnapshot = modeText
+        commitTranscriptBytes(
+          receiptBytes(mode.name & " check: plan structure lost"), true)
+        messages.add harnessNote(guard)
+        saveSession(session, messages)
+        commitTranscriptBytes(
+          receiptBytes("auto: " & mode.name & " check - continuing toward " &
+            mode.fileName), true)
+        commitTranscriptBytes(formatItem(agentPromptItem(guard)), true)
+        debugOut "runTurns: " & mode.name & " structure lost, continuing"
+        continue
+      let check = runGoalCheck(p, mode, modeText, buildGoalEvidence(messages),
+                               session.modeSnapshot, session.readCache)
       # The side call ran the bar/spinner hooks again; its usage is not
       # this turn's and must not leak into the next receipt.
       emitFatPromptEvent clearPendingHintEvent()
@@ -1581,44 +1641,72 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         onTurnInterrupted()
         turnEnded = true
         return true
+      # Duty 2, update discipline: work happened (content-aware: the
+      # session change log grew) but the mode file is byte-identical to
+      # its turn-start snapshot -> the mechanical note. It rides with a
+      # verifier FEEDBACK or, when the check could not produce one,
+      # sends the agent back on its own.
+      let note = mode.updateNote(
+        turnDidWork(messages, session.readCache, session.changeCountStart),
+        session.modeSnapshot, modeText)
+      session.modeSnapshot = modeText
+      if session.readCache != nil:
+        session.changeCountStart = session.readCache.changes.len
+      template sendBack(content: string; why: string) =
+        messages.add mode.feedbackMessage(modeText, content)
+        saveSession(session, messages)
+        commitTranscriptBytes(
+          receiptBytes("auto: " & mode.name & " check - continuing toward " &
+            mode.fileName), true)
+        commitTranscriptBytes(formatItem(agentPromptItem(content)), true)
+        debugOut "runTurns: " & why
       if not check.ok:
-        # Verifier call failed (network, provider): keep
-        # running without feedback, note it in the receipt, retry at the
-        # next boundary. goal.md is untouched, so the goal is still on.
-        debugOut "goal check failed: " & check.err
+        # Verifier call failed (network, provider): note it in the
+        # receipt, retry at the next boundary. The mode file is
+        # untouched, so the mode is still on; the discipline note still
+        # sends the agent back.
+        debugOut mode.name & " check failed: " & check.err
         # First line only: an ApiError msg can span lines, a receipt is one.
         let why = check.err.strip.splitLines[0]
         commitTranscriptBytes(
           receiptBytes(
-            (if why.len > 0: "goal check unavailable (" & why & ")"
-             else: "goal check unavailable") & ", retrying next turn"),
+            (if why.len > 0: mode.name & " check unavailable (" & why & ")"
+             else: mode.name & " check unavailable") & ", retrying next turn"),
           true)
+        if note.len > 0:
+          sendBack(note, mode.name & " update discipline (check unavailable)")
+          continue
       elif check.verdict.kind == gvkSatisfied:
-        if completeGoal():
+        if completeMode(mode, session.cwd):
           session.goalNotified = false
+          session.modeSnapshot = ""
+          session.changeCountStart = 0
           commitTranscriptBytes(
-            receiptBytes("goal confirmed (" & GoalFileName & " renamed to " &
-              GoalConfirmedName & ")"), true)
+            receiptBytes(mode.name & " confirmed (" & mode.fileName &
+              " renamed to " & mode.confirmedName & ")"), true)
         else:
           commitTranscriptBytes(
-            errLnS("goal satisfied but " & GoalFileName & " could not be " &
-              "renamed to " & GoalConfirmedName), true)
+            errLnS(mode.name & " satisfied but " & mode.fileName &
+              " could not be renamed to " & mode.confirmedName), true)
       elif check.verdict.kind == gvkFeedback:
-        commitTranscriptBytes(receiptBytes("goal check: feedback"), true)
-        messages.add goalFeedbackMessage(check.verdict.feedback)
-        saveSession(session, messages)
         commitTranscriptBytes(
-          receiptBytes("auto: goal check - continuing toward " & GoalFileName), true)
-        commitTranscriptBytes(
-          formatItem(agentPromptItem(check.verdict.feedback)), true)
-        debugOut "runTurns: goal check feedback, continuing"
+          receiptBytes(mode.name & " check: feedback"), true)
+        var fb = check.verdict.feedback
+        if note.len > 0: fb.add "\n\nAlso: " & note
+        sendBack(fb, mode.name & " check feedback, continuing")
         continue
       else:
         commitTranscriptBytes(
-          receiptBytes("goal check returned no verdict, retrying next turn"),
+          receiptBytes(mode.name &
+            " check returned no verdict, retrying next turn"),
           true)
+        if note.len > 0:
+          sendBack(note, mode.name & " update discipline (no verdict)")
+          continue
     else:
       session.goalNotified = false
+      session.modeSnapshot = ""
+      session.changeCountStart = 0
     if streamedLive:
       stopTurnInputForFinalRender()
     endTurnAfterTranscriptAppend()

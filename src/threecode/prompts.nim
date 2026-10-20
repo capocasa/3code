@@ -3717,6 +3717,18 @@ commands:
   :goal! TEXT         replace an active goal and restart toward it
   :goal!              cancel the active goal (retires to goal-cancelled.md;
                       interrupt only skips one satisfaction check)
+  :cyber              show the active plan (cybernetic.md in this directory)
+  :cyber TEXT         write a cybernetic.md plan skeleton and start on it
+                      at once: harness-directed checkboxes and next-step
+                      orientation in every kickoff and check (retired to
+                      cybernetic-confirmed.md)
+  :cyber new TEXT     same, but bawks when a plan is already active
+  :cyber edit         revise cybernetic.md in $VISUAL/$EDITOR
+  :cyber cancel       cancel the active plan (same as :cyber!; retires to
+                      cybernetic-cancelled.md)
+  :cyber! TEXT        replace an active plan and restart toward it
+  (goal and cybernetic modes are mutually exclusive: one mode, one
+  file, one verb)
   :prompt             show the active system prompt
   :show [N]           show full output of tool call N (default: last)
   :log                list all tool calls this session
@@ -3747,7 +3759,8 @@ commands:
                       per-call plugin trace (calls, verdicts, mutation diffs)
   :q :quit            exit (also Ctrl-D)
   (every command accepts its shortest unambiguous prefix: :g = :goal,
-  :mo = :model; a trailing ! is the force marker where one exists)
+  :cy = :cyber, :mo = :model; a trailing ! is the force marker where one
+  exists)
 
 input:
   single-line   just type and press Enter

@@ -1,4 +1,12 @@
-## Goal mode: the file on disk is the protocol.
+## Harness modes: the file on disk is the protocol.
+##
+## A harness mode is one entry in the mode registry (`ModeDesc`): a
+## trigger filename, a `:` verb, an arm-time validator, the two
+## retirement names, and the mode's kickoff/feedback continuation
+## builders. The substrate below — startup scan, kickoff/FEEDBACK
+## plumbing, receipts, the rename protocol, the verifier side call —
+## walks the registry and never names a mode itself. goal mode is
+## entry #1; `cybernetic.md` is entry #2. One mode, one file, one verb.
 ##
 ## `goal.md` in the project root keeps a session on one goal. Arming is
 ## immediate: every `:goal` write path (TEXT, `new`, `edit`, force
@@ -24,8 +32,9 @@
 ## The side call is also the future subagent primitive, so it is kept
 ## separate: its own message list, no session mutation, no tools.
 
-import std/[json, os, osproc, strformat, strutils, tables]
-import types, util, prompts, api, streamexec, config
+import std/[algorithm, json, options, os, osproc, sequtils, strformat,
+           strutils, tables]
+import types, util, prompts, api, streamexec, config, actions
 
 const
   GoalFileName* = "goal.md"                 ## existence activates goal mode
@@ -34,6 +43,10 @@ const
   GoalGivenUpName* = "goal-given-up.md"      ## reserved: nothing writes it
                                              ## yet; a failing harness retries
                                              ## instead of giving up
+  CyberFileName* = "cybernetic.md"           ## existence activates cybernetic mode
+  CyberConfirmedName* = "cybernetic-confirmed.md"
+  CyberCancelledName* = "cybernetic-cancelled.md"
+  CyberGivenUpName* = "cybernetic-given-up.md"
   EvidenceCapBytes* = 6000  ## evidence summary ceiling
   EvidenceBriefCap* = 160   ## per-call argument digest ceiling
   EvidenceResultCap* = 240  ## per-call result head ceiling
@@ -84,6 +97,16 @@ overstate how deeply you verified. End with exactly one line: VERDICT:
 SATISFIED, or VERDICT: FEEDBACK: <what is missing or what to do
 next>."""
 
+const StepTruthClause* = """The goal is a PLAN: you also get the harness-parsed task list and
+the checkbox delta for this turn. Judge step truth: a checked box
+must match the evidence and the diff; name the first box that lies
+(checked without the work it claims, or finished work left unchecked
+and unexplained). Treat newly checked boxes as claims to verify."""
+  ## Prepended to the shared preamble for plan modes; the verdict
+  ## contract stays the preamble's last instruction.
+
+const CyberVerifierPreamble* = StepTruthClause & "\n\n" & VerifierPreamble
+
 proc goalModeActive*(dir = "."): bool =
   fileExists(dir / GoalFileName)
 
@@ -130,44 +153,484 @@ proc goalKickoffMessage*(goalText: string): JsonNode =
        "each turn ends and sends you back in with feedback until the " &
        "goal is met."}
 
-proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
-    err: string] =
-  ## The arming path behind `:goal`: write `goal.md` with the command-line
-  ## text. A live goal refuses without `force` (`:goal!` carries the same
-  ## force-past-the-guardrail meaning as `:q!`). The file is the whole
-  ## protocol, bare existence arms goal mode at the next turn boundary,
-  ## so there is nothing else to do here.
+# ---------- cybernetic plan format ----------
+
+type
+  PlanTask* = object
+    ## One `- [ ]`/`[x]` item in a cybernetic plan, any list depth;
+    ## headings and phases are presentation, file order is the work order.
+    text*: string
+    checked*: bool
+    depth*: int        ## list nesting (indent / 2); presentation only
+
+  CyberPlan* = object
+    ## The parsed cybernetic.md: the task list plus the presence of the
+    ## Current state section. `valid` is false with a teaching `err`
+    ## when the format contract is broken — validation is arm-time
+    ## refusal and mid-run FEEDBACK material, never a silent mode drop.
+    valid*: bool
+    err*: string
+    tasks*: seq[PlanTask]
+    hasCurrentState*: bool
+
+proc taskLine*(l: string): Option[PlanTask] =
+  ## A markdown task item: optional indentation, a `-`/`*`/`+` bullet,
+  ## then `[ ]` or `[x]`. Only inside cybernetic.md does a checkbox mean
+  ## protocol — an unmarked goal.md stays plain text, no shape sniffing.
+  let indent = l.len - l.strip(leading = true).len
+  var s = l.strip(leading = true)
+  if s.len == 0 or s[0] notin {'-', '*', '+'}: return
+  s = s[1 ..^ 1].strip(leading = true)
+  if s.len < 3 or s[0] != '[' or s[2] != ']' or s[1] notin {' ', 'x', 'X'}:
+    return
+  some PlanTask(text: s[3 ..^ 1].strip, checked: s[1] != ' ',
+                depth: indent div 2)
+
+proc isCurrentStateHeading*(l: string): bool =
+  ## A heading (any `##`+ level) whose text is exactly "current state",
+  ## case-insensitive. One matcher for the parser, the validator, and
+  ## the rollover quote so the three cannot drift apart.
+  let s = l.strip
+  s.len > 2 and s.startsWith("##") and
+    s.strip(true, true, {'#'}).strip.toLowerAscii == "current state"
+
+proc parsePlan*(body: string): CyberPlan =
+  ## Extract the plan structure: every task item in file order at any
+  ## nesting depth, and whether a `## Current state` section exists.
+  ## Everything else (headings, phases, prose) is presentation the
+  ## parser carries no opinion about.
+  for l in body.splitLines:
+    if isCurrentStateHeading(l):
+      result.hasCurrentState = true
+    else:
+      let t = taskLine(l)
+      if t.isSome: result.tasks.add t.get
+  result.valid = result.tasks.len > 0 and result.hasCurrentState
+  if not result.valid:
+    if result.tasks.len == 0:
+      result.err = "a cybernetic plan needs at least one task item (a " &
+        "`- [ ] text` line; " & CyberFileName & " is the plan the " &
+        "harness runs, one checkbox per step)"
+    else:
+      result.err = "a cybernetic plan needs a ## Current state section " &
+        "(what is true now, what is next)"
+
+proc validatePlanBody*(body: string): string =
+  ## The cybernetic mode's arm-time validator: "" accepts, a teaching
+  ## error refuses the arm.
+  parsePlan(body).err
+
+proc nextUncheckedText*(plan: CyberPlan): string =
+  ## Orientation: the first unchecked task in file order.
+  for t in plan.tasks:
+    if not t.checked: return t.text
+
+proc planCountsLine*(plan: CyberPlan): string =
+  ## The receipt/marker counts line, e.g. `3 tasks, 1 done`.
+  if plan.tasks.len == 0: return
+  let done = plan.tasks.countIt(it.checked)
+  $plan.tasks.len & " task" & (if plan.tasks.len != 1: "s" else: "") &
+    ", " & $done & " done"
+
+type
+  PlanDelta* = object
+    ## Checkbox movement between two snapshots of cybernetic.md,
+    ## matched by task text (first match consumed, so duplicated task
+    ## texts still pair up).
+    newlyChecked*: seq[string]
+    newlyUnchecked*: seq[string]
+    added*: seq[string]
+    removed*: seq[string]
+
+proc planDelta*(pre, post: string): PlanDelta =
+  let a = parsePlan(pre).tasks
+  let b = parsePlan(post).tasks
+  var consumed = newSeq[bool](b.len)
+  for t in a:
+    var found = -1
+    for j, u in b:
+      if not consumed[j] and u.text == t.text:
+        found = j
+        break
+    if found < 0:
+      result.removed.add t.text
+    else:
+      consumed[found] = true
+      if t.checked and not b[found].checked: result.newlyUnchecked.add t.text
+      elif not t.checked and b[found].checked: result.newlyChecked.add t.text
+  for j, u in b:
+    if not consumed[j]: result.added.add u.text
+
+proc planFeedSection*(pre, post: string): string =
+  ## The structural half of the cybernetic verifier's feed: the parsed
+  ## task list plus the per-turn checkbox delta, so the side call judges
+  ## step truth (do checked boxes match evidence and diff) instead of
+  ## vibes. Empty when the post state has no task list (structure loss
+  ## is the guard's business, not the verifier's).
+  let plan = parsePlan(post)
+  if plan.tasks.len == 0: return
+  result = "Plan task list (harness-parsed from " & CyberFileName & ", " &
+    planCountsLine(plan) & "):"
+  for t in plan.tasks:
+    result.add "\n  [" & (if t.checked: "x" else: " ") & "] " & t.text
+  result.add "\n\nCheckbox delta this turn:"
+  if pre.strip.len == 0:
+    result.add "\n  (no turn-start snapshot; delta unknown)"
+    return
+  let d = planDelta(pre, post)
+  if d.newlyChecked.len == 0 and d.newlyUnchecked.len == 0 and
+      d.added.len == 0 and d.removed.len == 0:
+    result.add "\n  (no checkbox changes this turn)"
+    return
+  if d.newlyChecked.len > 0:
+    result.add "\n  newly checked: " & d.newlyChecked.join("; ")
+  if d.newlyUnchecked.len > 0:
+    result.add "\n  newly unchecked: " & d.newlyUnchecked.join("; ")
+  if d.added.len > 0:
+    result.add "\n  tasks added: " & d.added.join("; ")
+  if d.removed.len > 0:
+    result.add "\n  tasks removed: " & d.removed.join("; ")
+
+proc currentStateSection*(body: string; cap = 1500): string =
+  ## The text under `## Current state`, up to the next heading, for the
+  ## rollover handoff's quote. Capped so a bloated section cannot make
+  ## the handoff itself a context problem.
+  var inSection = false
+  for l in body.splitLines:
+    if inSection and l.strip.startsWith("#"): break
+    if not inSection:
+      if isCurrentStateHeading(l): inSection = true
+      continue
+    result.add l & "\n"
+  if result.strip.len == 0: return ""
+  if result.len > cap:
+    result = utf8ByteCut(result, cap) & "\n(quoted Current state truncated)"
+  else:
+    result = result.strip & "\n"
+
+proc planTitle*(body: string): string =
+  ## The plan's title: the first heading if there is one, else the
+  ## first non-empty line.
+  for l in body.splitLines:
+    let s = l.strip
+    if s.len == 0: continue
+    if s.startsWith("#"): return s.strip(true, false, {'#'}).strip
+    return s
+  CyberFileName
+
+proc cyberSkeleton*(text: string): string =
+  ## `:cyber <text>` authoring: the first line titles the plan (a `#`
+  ## heading if given), bulleted or checkbox lines become task items,
+  ## remaining prose lands in Current state. Prose-only input still
+  ## arms — the title line doubles as the one task — because the mode
+  ## must never refuse to start.
+  var title = ""
+  var tasks: seq[PlanTask] = @[]
+  var prose: seq[string] = @[]
+  for raw in text.strip.splitLines:
+    let l = raw.strip
+    if l.len == 0: continue
+    if title.len == 0 and l.startsWith("#"):
+      title = l.strip(true, false, {'#'}).strip
+      continue
+    let t = taskLine(l)
+    if t.isSome:
+      tasks.add t.get
+    else:
+      # A bare bullet is a task that forgot its checkbox; prose that
+      # carries no bullet marker is Current state material.
+      let bare = l.strip(leading = true)
+      if bare.len > 1 and bare[0] in {'-', '*', '+'}:
+        tasks.add PlanTask(text: bare[1 ..^ 1].strip(leading = true))
+      elif title.len == 0:
+        title = l
+      else:
+        prose.add l
+  if title.len == 0: title = "Plan"
+  if tasks.len == 0: tasks.add PlanTask(text: title)
+  result = "# " & title & "\n\n"
+  for t in tasks:
+    result.add "- [" & (if t.checked: 'x' else: ' ') & "] " & t.text & "\n"
+  result.add "\n## Current state\n\n"
+  if prose.len > 0:
+    for p in prose: result.add p & "\n"
+  else:
+    result.add "Not begun.\n"
+
+proc cyberKickoffMessage*(body: string): JsonNode =
+  ## The cybernetic kickoff: same shape and `agentSent` marking as the
+  ## goal kickoff, but plan-aware — the counts ride the header and the
+  ## orientation paragraph names the next unchecked task, so direction
+  ## comes from the harness, not model vibes.
+  let plan = parsePlan(body)
+  let counts = planCountsLine(plan)
+  let next = nextUncheckedText(plan)
+  var content = GoalKickoffPrefix & CyberFileName &
+    " in this repository now states the session's plan"
+  if counts.len > 0: content.add " (" & counts & ")"
+  content.add ":\n\n" & body.strip
+  if next.len > 0:
+    content.add "\n\nStart with the next unchecked task: \"" & next &
+      "\" (first unchecked task in file order). Check off each task " &
+      "as it completes, record what the step taught under ## Current " &
+      "state, and keep working through the plan in order."
+  elif plan.tasks.len > 0:
+    content.add "\n\nEvery task in the plan is already checked; the " &
+      "verifier confirms the work or names what still lies."
+  content.add "\n\nA satisfaction check runs when each turn ends and " &
+    "sends you back in with feedback until the plan is complete."
+  %*{"role": "user", "agentSent": true, "content": content}
+
+proc cyberRolloverMessage*(body: string): JsonNode =
+  ## The rollover handoff: after a context collapse the fresh context
+  ## re-anchors at the plan file - the counts, the next unchecked task
+  ## by name, and the plan's own Current state section, quoted.
+  let plan = parsePlan(body)
+  let counts = planCountsLine(plan)
+  let next = nextUncheckedText(plan)
+  var content = "Context rollover: the conversation above was just " &
+    "collapsed into a summary. The plan in " & CyberFileName &
+    " is the session's ground truth"
+  if counts.len > 0: content.add " (" & counts & ")"
+  content.add "."
+  if next.len > 0:
+    content.add " Next unchecked task: \"" & next & "\"."
+  let cs = currentStateSection(body)
+  if cs.len > 0:
+    content.add "\n\nCurrent state from the plan:\n\n" & cs
+  content.add "\n\nKeep working the plan; check off tasks as they " &
+    "complete and keep ## Current state current."
+  %*{"role": "user", "agentSent": true, "content": content}
+
+proc cyberFeedbackMessage*(body, feedback: string): JsonNode =
+  ## The cybernetic FEEDBACK continuation: the verifier's words plus the
+  ## mode's own duties — check off what finished, record what the turn
+  ## taught, then the next unchecked task by name.
+  let next = nextUncheckedText(parsePlan(body))
+  let orient =
+    if next.len > 0: "Next unchecked task: \"" & next & "\". "
+    else: ""
+  %*{"role": "user", "agentSent": true,
+     "content": "Cybernetic check: the plan in " & CyberFileName &
+       " is not yet complete. Verifier feedback:\n\n" & feedback &
+       "\n\n" & orient &
+       "Update " & CyberFileName & " to match reality - check off " &
+       "finished tasks, record what this turn taught under ## Current " &
+       "state - then keep working; the satisfaction check runs again " &
+       "when this turn ends."}
+
+# ---------- mode registry ----------
+
+# Defined after the goal kickoff/feedback builders so the entry can
+# reference them; the registry itself is a var so tests (and later
+# embedders) can extend it.
+type
+  ModeDesc* = object
+    ## One harness mode: the trigger file that arms it, the `:` verb
+    ## that writes that file, the retirement names, and the mode's
+    ## kickoff/feedback continuation builders. Modes are mutually
+    ## exclusive — one mode, one file, one verb.
+    name*: string          ## short name for receipts and the profile row
+    fileName*: string      ## the trigger file; bare existence arms
+    verb*: string          ## the `:` command that arms it
+    confirmedName*: string  ## rename target on a SATISFIED verdict
+    cancelledName*: string  ## rename target on user cancel
+    givenUpName*: string    ## reserved retirement name
+    validate*: proc (body: string): string
+      ## Arm-time format contract: "" accepts the body, anything else is
+      ## a teaching error that refuses the arm.
+    composeBody*: proc (text: string): string
+      ## `:<verb> <text>` -> the file body to write.
+    kickoffMessage*: proc (body: string): JsonNode
+    feedbackMessage*: proc (body, fb: string): JsonNode
+      ## The FEEDBACK continuation; takes the current file body so a
+      ## mode can orient (name the next step) on its own structure.
+    taskCounts*: proc (body: string): string
+      ## Counts line for the arm receipt and the kickoff marker, e.g.
+      ## `3 tasks, 1 done`; "" when the mode has no task structure.
+    kickoffDisplay*: proc (body: string): string
+      ## The scrollback kickoff item body under the `◎` marker.
+    structureGuard*: proc (post: string): string
+      ## Turn-boundary duty: mid-run structure loss returns the full
+      ## restore-the-plan continuation content (no side call runs);
+      ## "" lets the boundary proceed to the verifier.
+    updateNote*: proc (worked: bool; pre, post: string): string
+      ## Turn-boundary duty: update discipline. Work happened this turn
+      ## but the mode file is byte-identical to its turn-start snapshot
+      ## -> the mechanical note; "" when no note is owed.
+    verifierFeed*: proc (pre, post: string): string
+      ## Extra structural feed sections for the verifier prompt; "" when
+      ## the mode adds none.
+    judgeStepTruth*: bool
+      ## Prepend `StepTruthClause` to the verifier preamble.
+    rolloverNote*: proc (body: string): JsonNode
+      ## Rollover duty: the re-anchoring continuation injected after a
+      ## context collapse. Nil = the mode has no rollover handoff.
+
+var modeRegistry* = newSeq[ModeDesc]()
+  ## The mode table. goal mode is entry #1, registered at module init;
+  ## the shared substrate walks this and never names a mode itself.
+
+template noMode*(m: ModeDesc): bool =
+  m.name.len == 0
+
+proc activeMode*(dir = "."): ModeDesc =
+  ## The mode whose trigger file sits in `dir`, first registry hit; a
+  ## zero `ModeDesc` (`noMode`) when none is armed.
+  for m in modeRegistry:
+    if fileExists(dir / m.fileName): return m
+
+proc readModeText*(m: ModeDesc; dir = "."): string =
+  try: readFile(dir / m.fileName)
+  except CatchableError: ""
+
+proc startMode*(m: ModeDesc; text: string; force = false;
+                dir = "."): tuple[ok: bool, err: string] =
+  ## The arming path behind every mode's verb: compose the file body
+  ## from the command-line text, check the mode's format contract, and
+  ## write it. A live file of the same mode refuses without `force`
+  ## (`:goal!` carries the same force-past-the-guardrail meaning as
+  ## `:q!`). A live file of any OTHER mode refuses outright: modes are
+  ## mutually exclusive, and force replaces a mode's own file, never
+  ## another mode's session.
   if text.strip.len == 0:
-    return (false, "usage: :goal <text>")
-  if goalModeActive(dir) and not force:
-    return (false, GoalFileName & " is already active; use :goal! to replace it")
+    return (false, "usage: " & m.verb & " <text>")
+  for other in modeRegistry:
+    if other.name != m.name and fileExists(dir / other.fileName):
+      return (false, other.fileName & " (" & other.name & " mode) is " &
+        "already active; harness modes are mutually exclusive - cancel " &
+        "it first with " & other.verb & "!")
+  if fileExists(dir / m.fileName) and not force:
+    return (false, m.fileName & " is already active; use " & m.verb &
+      "! to replace it")
+  let body = m.composeBody(text)
+  let verr = m.validate(body)
+  if verr.len > 0:
+    return (false, verr)
   try:
-    writeFile(dir / GoalFileName, text.strip & "\n")
+    writeFile(dir / m.fileName, body)
     (true, "")
   except OSError, IOError:
     (false, getCurrentExceptionMsg())
 
-proc completeGoal*(dir = "."): bool =
-  ## The retirement path: `mv goal.md goal-confirmed.md`. On SATISFIED the
-  ## confirmed file stays as the record; no session in this repo is in
-  ## goal mode again unless a new `goal.md` appears.
+proc completeMode*(m: ModeDesc; dir = "."): bool =
+  ## The retirement path on SATISFIED: `mv <file> <confirmedName>`. The
+  ## confirmed file stays as the record; the mode is off until a new
+  ## trigger file appears.
   try:
-    moveFile(dir / GoalFileName, dir / GoalConfirmedName)
+    moveFile(dir / m.fileName, dir / m.confirmedName)
     true
   except OSError, IOError:
     false
 
-proc cancelGoal*(dir = "."): tuple[ok: bool, err: string] =
-  ## The user exit behind bare `:goal!`: `mv goal.md goal-cancelled.md`.
-  ## Interrupt only skips one satisfaction check; this ends goal mode,
+proc cancelMode*(m: ModeDesc; dir = "."): tuple[ok: bool, err: string] =
+  ## The user exit behind bare `:<verb>!`: `mv <file> <cancelledName>`.
+  ## Interrupt only skips one satisfaction check; this ends the mode,
   ## keeping the text as the record.
-  if not goalModeActive(dir):
-    return (false, "no goal active")
+  if not fileExists(dir / m.fileName):
+    return (false, "no " & m.name & " active")
   try:
-    moveFile(dir / GoalFileName, dir / GoalCancelledName)
+    moveFile(dir / m.fileName, dir / m.cancelledName)
     (true, "")
   except OSError, IOError:
     (false, getCurrentExceptionMsg())
+
+let goalMode* = ModeDesc(
+  name: "goal",
+  fileName: GoalFileName,
+  verb: ":goal",
+  confirmedName: GoalConfirmedName,
+  cancelledName: GoalCancelledName,
+  givenUpName: GoalGivenUpName,
+  validate: proc (body: string): string = "",
+  composeBody: proc (text: string): string = text.strip & "\n",
+  kickoffMessage: goalKickoffMessage,
+  feedbackMessage: proc (body, fb: string): JsonNode = goalFeedbackMessage(fb),
+  taskCounts: proc (body: string): string = "",
+  kickoffDisplay: proc (body: string): string = body.strip,
+  structureGuard: proc (post: string): string = "",
+  updateNote: proc (worked: bool; pre, post: string): string = "",
+  verifierFeed: proc (pre, post: string): string = "",
+  judgeStepTruth: false)
+
+modeRegistry.add goalMode
+
+let cyberneticMode* = ModeDesc(
+  name: "cybernetic",
+  fileName: CyberFileName,
+  verb: ":cyber",
+  confirmedName: CyberConfirmedName,
+  cancelledName: CyberCancelledName,
+  givenUpName: CyberGivenUpName,
+  validate: validatePlanBody,
+  composeBody: cyberSkeleton,
+  kickoffMessage: cyberKickoffMessage,
+  feedbackMessage: cyberFeedbackMessage,
+  taskCounts: proc (body: string): string = planCountsLine(parsePlan(body)),
+  kickoffDisplay: (proc (body: string): string =
+    let plan = parsePlan(body)
+    let counts = planCountsLine(plan)
+    result = planTitle(body)
+    if counts.len > 0: result.add " - " & counts
+    let next = nextUncheckedText(plan)
+    if next.len > 0: result.add "; next: " & next),
+  structureGuard: (proc (post: string): string =
+    let err = validatePlanBody(post)
+    if err.len == 0: return ""
+    result = "Plan structure lost: " & err & ". Restore the plan file now - " &
+      "the task list and the ## Current state section, keeping every " &
+      "box already earned. The mode stays armed; the next satisfaction " &
+      "check judges the restored plan."),
+  updateNote: (proc (worked: bool; pre, post: string): string =
+    if worked and post.len > 0 and pre == post:
+      result = "Work happened this turn but " & CyberFileName &
+        " is unchanged. Update the plan to match reality: check off the " &
+        "tasks this turn finished, and record what the step taught " &
+        "under ## Current state."),
+  verifierFeed: planFeedSection,
+  judgeStepTruth: true,
+  rolloverNote: cyberRolloverMessage)
+
+modeRegistry.add cyberneticMode
+
+proc harnessNote*(content: string): JsonNode =
+  ## A harness-autosent continuation carrying fully-formed content (the
+  ## structure-guard's restore note): same `agentSent` marking as every
+  ## other autosend, so replay renders it as a `»` item and no provider
+  ## ever sees the marker.
+  %*{"role": "user", "agentSent": true, "content": content}
+
+proc conflictingMode*(m: ModeDesc; dir = "."): ModeDesc =
+  ## The first OTHER registry mode whose trigger file also sits in `dir`
+  ## while `m` is the active one: a second file on disk is a refused
+  ## arming, and the refusal must reach the prompt, never pass silently.
+  for other in modeRegistry:
+    if other.name != m.name and fileExists(dir / other.fileName): return other
+
+proc modeConflictLabel*(m, other: ModeDesc): string =
+  ## The one-line receipt for that refusal, shared by the startup scan
+  ## and the turn-boundary detection so the two cannot drift apart.
+  other.fileName & " is also on disk but " & m.name & " mode is active; " &
+    "harness modes are mutually exclusive (" & m.verb & "! cancels " &
+    m.name & " mode, then " & other.verb & " arms the plan)"
+
+# The goal-mode entry points: the registry walk for entry #1.
+
+proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
+    err: string] =
+  ## The arming path behind `:goal`: write `goal.md` with the command-line
+  ## text. A live goal refuses without `force`; the file is the whole
+  ## protocol, bare existence arms goal mode at the next turn boundary,
+  ## so there is nothing else to do here.
+  startMode(goalMode, text, force, dir)
+
+proc completeGoal*(dir = "."): bool =
+  ## The retirement path: `mv goal.md goal-confirmed.md`.
+  completeMode(goalMode, dir)
+
+proc cancelGoal*(dir = "."): tuple[ok: bool, err: string] =
+  ## The user exit behind bare `:goal!`: `mv goal.md goal-cancelled.md`.
+  cancelMode(goalMode, dir)
 
 # ---------- evidence ----------
 
@@ -217,6 +680,39 @@ proc resultHead(res: string): string =
   if last == first: return first
   first & "\n  ... " & last
 
+proc lastTurnStart*(messages: JsonNode): int =
+  ## Index one past the last user message, whoever sent it: the slice
+  ## of the transcript that belongs to the just-finished turn. Shared
+  ## by the evidence builder and the tool-action probe so the two can
+  ## never disagree about where a turn begins.
+  if messages == nil or messages.kind != JArray: return 0
+  for i in countdown(messages.len - 1, 0):
+    if messages[i].kind == JObject and
+        messages[i]{"role"}.getStr == "user":
+      return i + 1
+  0
+
+proc turnHadToolActions*(messages: JsonNode): bool =
+  ## Did the just-finished turn run any tool call? The cybernetic
+  ## update-discipline heuristic: work happened = at least one tool
+  ## action in the turn's slice (v1 is tool actions only).
+  if messages == nil or messages.kind != JArray: return false
+  for i in lastTurnStart(messages) ..< messages.len:
+    let tcs = messages[i]{"tool_calls"}
+    if messages[i].kind == JObject and
+        messages[i]{"role"}.getStr == "assistant" and
+        tcs != nil and tcs.kind == JArray and tcs.len > 0:
+      return true
+  false
+
+proc turnDidWork*(messages: JsonNode; cache: ReadCache;
+                   baseline: int): bool =
+  ## Work happened, content-aware: the session change log grew past its
+  ## turn-start baseline (a real mutation, not just reads). Falls back
+  ## to any tool action when there is no log yet (nil cache).
+  if cache != nil: cache.changes.len != baseline
+  else: turnHadToolActions(messages)
+
 proc buildGoalEvidence*(messages: JsonNode): string =
   ## Harness-constructed evidence from the just-finished turn: walk the
   ## transcript's tool calls (the slice after the last user message,
@@ -224,12 +720,7 @@ proc buildGoalEvidence*(messages: JsonNode): string =
   ## Assistant prose is never included — the verifier judges artifacts,
   ## not claims — and the whole summary is capped.
   if messages == nil or messages.kind != JArray: return
-  var start = 0
-  for i in countdown(messages.len - 1, 0):
-    if messages[i].kind == JObject and
-        messages[i]{"role"}.getStr == "user":
-      start = i + 1
-      break
+  let start = lastTurnStart(messages)
   var calls: seq[tuple[id, name, brief: string]]
   var results: Table[string, string]
   for i in start ..< messages.len:
@@ -308,22 +799,63 @@ proc buildGoalDiff*(dir = "."): string =
       "\n(diff truncated at " & $GoalDiffCapBytes &
       " bytes; run git yourself for the rest)"
 
-proc verifierPrompt*(goalText, evidence: string; diff = ""): string =
-  result = "Goal (from " & GoalFileName & " in the repo root):\n\n" &
+const SessionDiffPerPathCap* = 4000
+  ## One path's rendered net diff ceiling inside the session change log
+  ## feed; past it the path degrades to a name-only line.
+
+proc buildSessionDiff*(cache: ReadCache): string =
+  ## The session change log rendered as one net diff per mutated path,
+  ## path-sorted and capped: what the agent's own tool actions changed
+  ## this session, git or no git. Binary and oversize paths degrade to
+  ## name-only lines - silent omission is the only unforgivable mode.
+  if cache == nil or cache.changes.len == 0: return
+  var paths = toSeq(cache.changes.keys)
+  paths.sort
+  for p in paths:
+    let (before, after) = cache.changes[p]
+    if before == after: continue  # touched but net-identical
+    if isBinaryContent(before) or isBinaryContent(after):
+      result.add "changed (binary, content not shown): " & p & "\n"
+      continue
+    let d = computeDiff(before, after, p)
+    if d.len > SessionDiffPerPathCap:
+      result.add "changed (diff over " & $SessionDiffPerPathCap &
+        " bytes, not shown): " & p & "\n"
+      continue
+    if result.len + d.len > GoalDiffCapBytes:
+      result.add "(session diff truncated at " & $GoalDiffCapBytes &
+        " bytes; remaining changed paths omitted)\n"
+      break
+    result.add d
+    if not result.endsWith("\n"): result.add "\n"
+  result = result.strip(chars = {'\n'})
+
+proc verifierPrompt*(goalText, evidence: string; diff = "";
+                    sourceFile = GoalFileName; planFeed = "";
+                    sessionDiff = ""): string =
+  result = "Goal (from " & sourceFile & " in the repo root):\n\n" &
     goalText.strip &
     "\n\nEvidence from the agent's just-finished turn (harness-built from " &
     "the transcript; the agent's prose is excluded):\n\n" & evidence
+  if sessionDiff.strip.len > 0:
+    # The session change log is the primary record: the agent's own tool
+    # actions, net per path, git or no git.
+    result.add "\n\nChanges this session (harness change log, net per " &
+      "mutated path):\n\n" & sessionDiff.strip
   if diff.strip.len > 0:
     result.add "\n\nWorking-tree diff vs HEAD captured by the harness " &
-      "(tracked changes plus untracked files, capped):\n\n" & diff.strip
+      "(complement; what git reports now):\n\n" & diff.strip
+  if planFeed.strip.len > 0:
+    result.add "\n\n" & planFeed.strip
   result.add "\n\nJudge from these inputs and end with the verdict line."
 
 # ---------- side call ----------
 
-var goalCheckHook*: proc (p: Profile, goalText, evidence: string):
+var goalCheckHook*: proc (p: Profile, preamble, prompt: string):
     tuple[ok: bool, text: string, err: string] = nil
-  ## Test seam: when set, `runGoalCheck` sends its side call here instead
-  ## of the wire. The verdict contract being a text line is what makes
+  ## Test seam: when set, `runGoalCheck` sends its side call here with
+  ## exactly what would go on the wire (judge preamble + opening
+  ## prompt). The verdict contract being a text line is what makes
   ## the loop testable without a provider.
 
 var goalStepHook*: proc (step: GoalStep) = nil
@@ -336,7 +868,7 @@ proc stepProse(text: string) =
   if goalStepHook != nil and text.strip.len > 0:
     goalStepHook(GoalStep(prose: text))
 
-proc runVerifierSideCall(p: Profile, goalText, evidence: string):
+proc runVerifierSideCall(p: Profile, preamble, prompt: string):
     tuple[ok: bool, text: string, err: string] =
   ## Toolless verifier: a fresh conversation (its own message list, the
   ## judge preamble, an empty roster so the provider offers nothing),
@@ -348,11 +880,8 @@ proc runVerifierSideCall(p: Profile, goalText, evidence: string):
   sideCallMode = true
   defer: sideCallMode = false
   var convo = newJArray()
-  convo.add %*{"role": "system", "content": VerifierPreamble}
-  # The diff is captured here, at check time, so it reflects exactly the
-  # state the verdict is about.
-  convo.add %*{"role": "user",
-    "content": verifierPrompt(goalText, evidence, buildGoalDiff())}
+  convo.add %*{"role": "system", "content": preamble}
+  convo.add %*{"role": "user", "content": prompt}
   var usage: Usage
   var msg: JsonNode
   try:
@@ -461,20 +990,22 @@ proc verdictFromDecision*(answers: JsonNode): GoalVerdict =
       p.formatFloat(ffDecimal, 2) &
       (if gap.len > 0: "; most important gap: " & gap else: "")
 
-proc runDecisionCheck(p: Profile, goalText, evidence: string):
+proc runDecisionCheck(p: Profile; m: ModeDesc; modeText, evidence,
+                      preSnapshot: string; cache: ReadCache):
     GoalCheckResult =
   ## The System One check: one decision request carrying the same
   ## orientation the chat verifier gets (goal text, evidence digest,
-  ## check-time diff) as the `state`, no preamble needed - the
-  ## instructions live in the questions. Failure is `ok=false`, exactly
-  ## like a failed chat side call: the goal stays armed and the next
-  ## turn boundary retries.
+  ## check-time diff, structural feed) as the `state`, no preamble
+  ## needed - the instructions live in the questions. Failure is
+  ## `ok=false`, exactly like a failed chat side call: the goal stays
+  ## armed and the next turn boundary retries.
   sideCallMode = true
   defer: sideCallMode = false
   var usage: Usage
   try:
-    let resp = callSystemOne(p, verifierPrompt(goalText, evidence,
-      buildGoalDiff()), decisionQuestions(), usage)
+    let resp = callSystemOne(p, verifierPrompt(modeText, evidence,
+      buildGoalDiff(), m.fileName, m.verifierFeed(preSnapshot, modeText),
+      buildSessionDiff(cache)), decisionQuestions(), usage)
     let answers = resp{"answers"}
     stepProse(decisionSummaryLine(answers))
     GoalCheckResult(ok: true, verdict: verdictFromDecision(answers))
@@ -504,17 +1035,27 @@ proc verifierProfileFor*(p: Profile): Profile =
     return p
   cand
 
-proc runGoalCheck*(p: Profile, goalText, evidence: string): GoalCheckResult =
-  ## Fire the check and parse its verdict. A decision-model verifier
-  ## (System One) answers typed questions in one request; everything
-  ## else gets the chat side call. `ok=false` means the call itself
-  ## failed (network, provider): the caller keeps running without
-  ## feedback and retries at the next boundary.
+proc runGoalCheck*(p: Profile; m: ModeDesc; modeText, evidence,
+                   preSnapshot: string; cache: ReadCache = nil):
+    GoalCheckResult =
+  ## Compose the side call from the mode descriptor — the preamble
+  ## (step-truth judging for plan modes), the mode text, the evidence,
+  ## the check-time diff, and the structural feed — then fire it and
+  ## parse the verdict. A decision-model verifier (System One) answers
+  ## typed questions in one request; everything else gets the chat side
+  ## call. `ok=false` means the call itself failed (network, provider):
+  ## the caller keeps running without feedback and retries at the next
+  ## boundary.
   let vp = verifierProfileFor(p)
   if goalCheckHook == nil and verifierDialect(vp.model) == "systemone":
-    return runDecisionCheck(vp, goalText, evidence)
+    return runDecisionCheck(vp, m, modeText, evidence, preSnapshot, cache)
+  let preamble =
+    if m.judgeStepTruth: CyberVerifierPreamble else: VerifierPreamble
+  let prompt = verifierPrompt(modeText, evidence, buildGoalDiff(),
+                              m.fileName, m.verifierFeed(preSnapshot, modeText),
+                              buildSessionDiff(cache))
   let call = if goalCheckHook != nil: goalCheckHook else: runVerifierSideCall
-  let (ok, text, err) = call(vp, goalText, evidence)
+  let (ok, text, err) = call(vp, preamble, prompt)
   if not ok:
     return GoalCheckResult(ok: false, err: err)
   GoalCheckResult(ok: true, verdict: parseVerdict(text))
