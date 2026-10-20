@@ -32,21 +32,24 @@ suite "actions: bannerFor":
 
   test "read shows path":
     let act = Action(kind: akRead, path: "src/main.nim")
-    check bannerFor(act) == "src/main.nim"
+    let b = bannerFor(act)
+    check b == osc8Link(fileUrl(absolutePath("src/main.nim", getCurrentDir())),
+                        "src/main.nim")
 
-  test "read with range shows line numbers":
+  test "read with range shows line numbers, range outside the link":
     let act = Action(kind: akRead, path: "foo.txt", offset: 10, limit: 5)
     let b = bannerFor(act)
     check "foo.txt" in b
     check "10" in b
+    check b.endsWith("foo.txt\x1b]8;;\x1b\\ 10-14")
 
   test "write shows path":
     let act = Action(kind: akWrite, path: "out.txt", body: "hello world!")
-    check bannerFor(act) == "out.txt"
+    check bannerFor(act).endsWith("out.txt\x1b]8;;\x1b\\")
 
   test "patch shows path":
     let act = Action(kind: akPatch, path: "fix.nim")
-    check bannerFor(act) == "fix.nim"
+    check bannerFor(act).endsWith("fix.nim\x1b]8;;\x1b\\")
 
   test "plan banner is the title, not an item count":
     let act = Action(kind: akPlan, plan: @[PlanItem(text: "a", status: "pending")])

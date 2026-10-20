@@ -28,6 +28,10 @@ import types, util, config, prompts, session, search, actions, minline,
 import goal
 import terminal as termui
 
+# `osc8Link`/`fileUrl` moved to `util` so `actions` (which cannot import
+# `display` — display imports it) can hyperlink banner paths too.
+export util.osc8Link, util.fileUrl
+
 # Three visible tiers, designed to read on both light + dark terminal
 # backgrounds:
 #   hint/note/warn = regular white   (status, help, validation — not brand)
@@ -167,25 +171,6 @@ const
   CompactTail = 0
   ReadHead = 2
   ReadTail = 5
-
-proc osc8Link*(url, text: string): string =
-  ## OSC 8 hyperlink: terminals that support it make `text` clickable and
-  ## carry `url` invisibly; others ignore the unknown OSC per ECMA-48 and
-  ## render `text` unchanged.
-  "\x1b]8;;" & url & "\x1b\\" & text & "\x1b]8;;\x1b\\"
-
-proc fileUrl*(path: string): string =
-  ## Percent-encoded `file://` URL for an absolute path (byte-wise, so
-  ## non-ASCII tmp paths stay valid URLs).
-  const Keep = {'A'..'Z', 'a'..'z', '0'..'9', '-', '.', '_', '~', '/'}
-  var p = path
-  when defined(windows):
-    p = p.replace('\\', '/')
-  result = "file://"
-  if not p.startsWith("/"): result.add "/"
-  for c in p:
-    if c in Keep: result.add c
-    else: result.add &"%{ord(c):02X}"
 
 proc toolOutDir*(): string =
   tempDir() / ("3code_out_" & $getCurrentProcessId())
@@ -354,7 +339,22 @@ proc addDiffPainted(outBytes: var string; l: string) =
     else:
       outBytes.add GreyFg & "  " & chunk & Reset & "\r\n"
 
-proc diffBytes(diff: string; idx = 0): string =
+proc diffDumpHintBytes(idx: int; diff: string): string =
+  ## The `T5.diff ↗` row (#60): a patch's full diff always lands in the
+  ## log dir as its own file, linked, so even a diff that fit in the
+  ## transcript un-truncated is one click from something you can feed
+  ## to `git apply` / `patch -R`. The long-diff path gets the same link
+  ## from its `… N lines hidden` hint instead. Nothing without a usable
+  ## tool index (the `:!` shell pass, `idx = 0`).
+  if idx <= 0: return ""
+  let url = dumpToolOutput(idx, diff, "diff")
+  if url.len == 0: return ""
+  GreyFg & "  " & osc8Link(url, &"T{idx}.diff ↗") & Reset & "\r\n"
+
+proc diffBytes(diff: string; idx = 0; skipFirst = false): string =
+  ## `skipFirst` drops the diff's first non-blank line from the painted
+  ## body (the patch banner already shows it) but never from the dump,
+  ## so `T<idx>.diff` stays a complete, appliable patch.
   const DiffHead = 15
   const DiffTail = 20
   var lines = diff.splitLines
@@ -362,33 +362,29 @@ proc diffBytes(diff: string; idx = 0): string =
     lines.setLen lines.len - 1
   if lines.len == 0:
     return ""
-  if lines.len <= DiffHead + DiffTail + 2:
-    for l in lines:
+  var painted = lines
+  if skipFirst:
+    var k = 0
+    while k < painted.len and painted[k].strip == "": inc k
+    if k < painted.len: painted.delete(k)
+  let whole = lines.join("\n")
+  if painted.len <= DiffHead + DiffTail + 2:
+    for l in painted:
       result.addDiffPainted(l)
+    result.add diffDumpHintBytes(idx, whole)
     return
   for i in 0 ..< DiffHead:
-    result.addDiffPainted(lines[i])
-  result.add hiddenHintBytes(lines.len - DiffHead - DiffTail, idx, diff,
+    result.addDiffPainted(painted[i])
+  result.add hiddenHintBytes(painted.len - DiffHead - DiffTail, idx, whole,
     " hidden", ext = "diff")
-  for i in lines.len - DiffTail ..< lines.len:
-    result.addDiffPainted(lines[i])
+  for i in painted.len - DiffTail ..< painted.len:
+    result.addDiffPainted(painted[i])
 
 proc firstDiffLine(diff: string): string =
   for line in diff.splitLines:
     if line.strip.len > 0:
       return line
   ""
-
-proc diffBytesSkippingFirst(diff: string; idx = 0): string =
-  var skipped = false
-  var rest: seq[string]
-  for line in diff.splitLines:
-    if not skipped and line.strip.len > 0:
-      skipped = true
-      continue
-    if skipped:
-      rest.add line
-  diffBytes(rest.join("\n"), idx)
 
 proc planStatusGlyph(status: string): string =
   case status
@@ -817,7 +813,7 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
     if code != 0:
       result.add toolResultBytes(act.kind, res, code, idx, diff = "")
     elif diff.len > 0:
-      result.add diffBytesSkippingFirst(diff, idx)
+      result.add diffBytes(diff, idx, skipFirst = true)
     else:
       result.add toolResultBytes(act.kind, res, code, idx, diff = "")
   of akPlan:

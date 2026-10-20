@@ -224,10 +224,32 @@ suite "util: applyInlineMd":
     check applyInlineMd("[a@b](mailto:a@b)") ==
       "\x1b]8;;mailto:a@b\x1b\\a@b - mailto:a@b\x1b]8;;\x1b\\"
 
-  test "non-uri targets pass through verbatim":
+  test "non-path targets pass through verbatim":
     check applyInlineMd("[see](#anchor)") == "[see](#anchor)"
-    check applyInlineMd("[see](foo/bar)") == "[see](foo/bar)"
+    check applyInlineMd("[see](foo:bar)") == "[see](foo:bar)"
     check applyInlineMd("[see](https://foo)") != "[see](https://foo)"
+
+  test "relative file targets link to their file:// URL (#60)":
+    let base = "/tmp/proj"
+    check applyInlineMd("Created [some-plan.md](some-plan.md).", base) ==
+      "Created " & osc8Link("file:///tmp/proj/some-plan.md", "some-plan.md") & "."
+    check applyInlineMd("[docs](docs/x.md)", base) ==
+      osc8Link("file:///tmp/proj/docs/x.md", "docs - docs/x.md")
+
+  test "absolute and home-relative file targets link without the base":
+    check applyInlineMd("[x](/var/log/app.log)", "/tmp/proj") ==
+      osc8Link("file:///var/log/app.log", "x - /var/log/app.log")
+    check applyInlineMd("[c](~/cfg)", "/tmp/proj").startsWith(
+      "\x1b]8;;file://" & getHomeDir())
+
+  test "file targets with spaces stay out (parser stops at the space)":
+    check applyInlineMd("[x](my file.txt)", "/tmp") == "[x](my file.txt)"
+
+  test "colon-bearing targets are schemes, never joined onto the base":
+    # `foo:bar` is a scheme-shaped target; `C:\cfg` is one only on
+    # windows. On posix neither may resolve into a phantom project file.
+    check applyInlineMd("[b](foo:bar)", "/tmp") == "[b](foo:bar)"
+    check applyInlineMd("[w](C:\\cfg.ini)", "/tmp") == "[w](C:\\cfg.ini)"
 
   test "malformed link shapes pass through verbatim":
     check applyInlineMd("[see] (https://foo)") == "[see] (https://foo)"
