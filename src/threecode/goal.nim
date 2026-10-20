@@ -1,4 +1,12 @@
-## Goal mode: the file on disk is the protocol.
+## Harness modes: the file on disk is the protocol.
+##
+## A harness mode is one entry in the mode registry (`ModeDesc`): a
+## trigger filename, a `:` verb, an arm-time validator, the two
+## retirement names, and the mode's kickoff/feedback continuation
+## builders. The substrate below — startup scan, kickoff/FEEDBACK
+## plumbing, receipts, the rename protocol, the verifier side call —
+## walks the registry and never names a mode itself. goal mode is
+## entry #1; `cybernetic.md` is entry #2. One mode, one file, one verb.
 ##
 ## `goal.md` in the project root keeps a session on one goal. Arming is
 ## immediate: every `:goal` write path (TEXT, `new`, `edit`, force
@@ -128,44 +136,130 @@ proc goalKickoffMessage*(goalText: string): JsonNode =
        "each turn ends and sends you back in with feedback until the " &
        "goal is met."}
 
-proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
-    err: string] =
-  ## The arming path behind `:goal`: write `goal.md` with the command-line
-  ## text. A live goal refuses without `force` (`:goal!` carries the same
-  ## force-past-the-guardrail meaning as `:q!`). The file is the whole
-  ## protocol, bare existence arms goal mode at the next turn boundary,
-  ## so there is nothing else to do here.
+# ---------- mode registry ----------
+
+# Defined after the goal kickoff/feedback builders so the entry can
+# reference them; the registry itself is a var so tests (and later
+# embedders) can extend it.
+type
+  ModeDesc* = object
+    ## One harness mode: the trigger file that arms it, the `:` verb
+    ## that writes that file, the retirement names, and the mode's
+    ## kickoff/feedback continuation builders. Modes are mutually
+    ## exclusive — one mode, one file, one verb.
+    name*: string          ## short name for receipts and the profile row
+    fileName*: string      ## the trigger file; bare existence arms
+    verb*: string          ## the `:` command that arms it
+    confirmedName*: string  ## rename target on a SATISFIED verdict
+    cancelledName*: string  ## rename target on user cancel
+    givenUpName*: string    ## reserved retirement name
+    validate*: proc (body: string): string
+      ## Arm-time format contract: "" accepts the body, anything else is
+      ## a teaching error that refuses the arm.
+    composeBody*: proc (text: string): string
+      ## `:<verb> <text>` -> the file body to write.
+    kickoffMessage*: proc (body: string): JsonNode
+    feedbackMessage*: proc (fb: string): JsonNode
+
+var modeRegistry* = newSeq[ModeDesc]()
+  ## The mode table. goal mode is entry #1, registered at module init;
+  ## the shared substrate walks this and never names a mode itself.
+
+template noMode*(m: ModeDesc): bool =
+  m.name.len == 0
+
+proc activeMode*(dir = "."): ModeDesc =
+  ## The mode whose trigger file sits in `dir`, first registry hit; a
+  ## zero `ModeDesc` (`noMode`) when none is armed.
+  for m in modeRegistry:
+    if fileExists(dir / m.fileName): return m
+
+proc readModeText*(m: ModeDesc; dir = "."): string =
+  try: readFile(dir / m.fileName)
+  except CatchableError: ""
+
+proc startMode*(m: ModeDesc; text: string; force = false;
+                dir = "."): tuple[ok: bool, err: string] =
+  ## The arming path behind every mode's verb: compose the file body
+  ## from the command-line text, check the mode's format contract, and
+  ## write it. A live file of the same mode refuses without `force`
+  ## (`:goal!` carries the same force-past-the-guardrail meaning as
+  ## `:q!`). A live file of any OTHER mode refuses outright: modes are
+  ## mutually exclusive, and force replaces a mode's own file, never
+  ## another mode's session.
   if text.strip.len == 0:
-    return (false, "usage: :goal <text>")
-  if goalModeActive(dir) and not force:
-    return (false, GoalFileName & " is already active; use :goal! to replace it")
+    return (false, "usage: " & m.verb & " <text>")
+  for other in modeRegistry:
+    if other.name != m.name and fileExists(dir / other.fileName):
+      return (false, other.fileName & " (" & other.name & " mode) is " &
+        "already active; harness modes are mutually exclusive - cancel " &
+        "it first with " & other.verb & "!")
+  if fileExists(dir / m.fileName) and not force:
+    return (false, m.fileName & " is already active; use " & m.verb &
+      "! to replace it")
+  let body = m.composeBody(text)
+  let verr = m.validate(body)
+  if verr.len > 0:
+    return (false, verr)
   try:
-    writeFile(dir / GoalFileName, text.strip & "\n")
+    writeFile(dir / m.fileName, body)
     (true, "")
   except OSError, IOError:
     (false, getCurrentExceptionMsg())
 
-proc completeGoal*(dir = "."): bool =
-  ## The retirement path: `mv goal.md goal-confirmed.md`. On SATISFIED the
-  ## confirmed file stays as the record; no session in this repo is in
-  ## goal mode again unless a new `goal.md` appears.
+proc completeMode*(m: ModeDesc; dir = "."): bool =
+  ## The retirement path on SATISFIED: `mv <file> <confirmedName>`. The
+  ## confirmed file stays as the record; the mode is off until a new
+  ## trigger file appears.
   try:
-    moveFile(dir / GoalFileName, dir / GoalConfirmedName)
+    moveFile(dir / m.fileName, dir / m.confirmedName)
     true
   except OSError, IOError:
     false
 
-proc cancelGoal*(dir = "."): tuple[ok: bool, err: string] =
-  ## The user exit behind bare `:goal!`: `mv goal.md goal-cancelled.md`.
-  ## Interrupt only skips one satisfaction check; this ends goal mode,
+proc cancelMode*(m: ModeDesc; dir = "."): tuple[ok: bool, err: string] =
+  ## The user exit behind bare `:<verb>!`: `mv <file> <cancelledName>`.
+  ## Interrupt only skips one satisfaction check; this ends the mode,
   ## keeping the text as the record.
-  if not goalModeActive(dir):
-    return (false, "no goal active")
+  if not fileExists(dir / m.fileName):
+    return (false, "no " & m.name & " active")
   try:
-    moveFile(dir / GoalFileName, dir / GoalCancelledName)
+    moveFile(dir / m.fileName, dir / m.cancelledName)
     (true, "")
   except OSError, IOError:
     (false, getCurrentExceptionMsg())
+
+let goalMode* = ModeDesc(
+  name: "goal",
+  fileName: GoalFileName,
+  verb: ":goal",
+  confirmedName: GoalConfirmedName,
+  cancelledName: GoalCancelledName,
+  givenUpName: GoalGivenUpName,
+  validate: proc (body: string): string = "",
+  composeBody: proc (text: string): string = text.strip & "\n",
+  kickoffMessage: goalKickoffMessage,
+  feedbackMessage: goalFeedbackMessage)
+
+modeRegistry.add goalMode
+
+# The goal-mode entry points: the registry walk for entry #1.
+
+proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
+    err: string] =
+  ## The arming path behind `:goal`: write `goal.md` with the command-line
+  ## text. A live goal refuses without `force`; the file is the whole
+  ## protocol, bare existence arms goal mode at the next turn boundary,
+  ## so there is nothing else to do here.
+  startMode(goalMode, text, force, dir)
+
+proc completeGoal*(dir = "."): bool =
+  ## The retirement path: `mv goal.md goal-confirmed.md`.
+  completeMode(goalMode, dir)
+
+proc cancelGoal*(dir = "."): tuple[ok: bool, err: string] =
+  ## The user exit behind bare `:goal!`: `mv goal.md goal-cancelled.md`.
+  cancelMode(goalMode, dir)
 
 # ---------- evidence ----------
 

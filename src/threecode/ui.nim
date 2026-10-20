@@ -1774,6 +1774,97 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
 
 # ---------- Command dispatcher ----------
 
+proc modeVerbResult(m: ModeDesc; parts: seq[string]; arg: string;
+                    forced: bool): tuple[ok: bool, line: string, armed: bool] =
+  ## The whole `:<verb>` grammar, one mode descriptor in, one response
+  ## line out: bare = status, bare with `!` or `cancel` = retire,
+  ## `new TEXT` / bare TEXT = arm (balking at a live mode without `!`),
+  ## `edit` = revise the live file in $VISUAL/$EDITOR. `armed` mirrors
+  ## the old `armGoal`: every arm/re-arm path sets it so the controller
+  ## kicks the mode's work off immediately instead of waiting for the
+  ## next turn boundary.
+  result.ok = true
+  if parts.len == 0 and not forced:
+    if fileExists(m.fileName):
+      result.line = readModeText(m).strip
+    else:
+      result.ok = false
+      result.line = "no " & m.name & " active; arm one with " & m.verb &
+        " <text>"
+  elif parts.len == 0 or parts[0] == "cancel":
+    if parts.len > 1:
+      result.ok = false
+      result.line = m.verb & " cancel takes no argument (a " & m.name &
+        " is text, not a path)"
+    else:
+      let (cok, cerr) = cancelMode(m)
+      if not cok:
+        result.ok = false
+        result.line = cerr
+      else:
+        result.line = m.name & " cancelled (" & m.fileName & " renamed to " &
+          m.cancelledName & ")"
+  elif parts[0] == "new":
+    if parts.len == 1:
+      result.ok = false
+      result.line = "usage: " & m.verb & " new <text>"
+    else:
+      let text = arg[parts[0].len .. ^1].strip
+      let (gok, gerr) = startMode(m, text, force = forced)
+      if not gok:
+        result.ok = false
+        result.line = gerr
+      else:
+        result.armed = true
+        result.line = (if forced: m.fileName & " replaced"
+                       else: m.fileName & " written") &
+          "; starting toward it now"
+  elif parts[0] == "edit" and parts.len == 1:
+    if not fileExists(m.fileName):
+      result.ok = false
+      result.line = "no " & m.name & " active; arm one with " & m.verb &
+        " new <text>"
+    else:
+      let before = readModeText(m)
+      let editor = getEnv("VISUAL", getEnv("EDITOR",
+        when defined(windows): "notepad" else: "vi"))
+      let code = execShellCmd(editor & " " & quoteShell(m.fileName))
+      if code != 0:
+        result.ok = false
+        result.line = "editor exited with status " & $code
+      elif not fileExists(m.fileName):
+        result.line = m.name & " cancelled (" & m.fileName &
+          " removed in the editor)"
+      elif readModeText(m).strip.len == 0:
+        let (cok, cerr) = cancelMode(m)
+        if not cok:
+          result.ok = false
+          result.line = cerr
+        else:
+          result.line = m.name & " cleared (" & m.fileName & " renamed to " &
+            m.cancelledName & ")"
+      else:
+        let after = readModeText(m)
+        let verr = m.validate(after)
+        if verr.len > 0:
+          result.ok = false
+          result.line = verr
+        elif after != before:
+          result.armed = true
+          result.line = m.fileName & " edited; starting toward it now"
+        else:
+          result.line = m.fileName & " unchanged"
+  else:
+    let (gok, gerr) = startMode(m, arg, force = forced)
+    if not gok:
+      result.ok = false
+      result.line = gerr
+    else:
+      result.armed = true
+      result.line = (if forced: m.fileName & " replaced"
+                     else: m.fileName & " written") &
+        "; starting toward it now"
+
 proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
                    prof: var Profile, editor: var minline.LineEditor): bool =
   ## returns true if the input was a recognised command
@@ -1883,79 +1974,14 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         if code != 0:
           ok = false
     of ":goal":
-      # Verb grammar: bare = status, bare with `!` or `cancel` = retire,
-      # `new TEXT` / bare TEXT = arm (balking at a live goal without `!`),
-      # `edit` = revise the live goal in $VISUAL/$EDITOR. Every arm sets
-      # `startGoalTurn` so the controller kicks goal achievement off
-      # immediately instead of waiting for the next turn boundary.
-      if parts.len == 0 and not forced:
-        if goalModeActive():
-          resp readGoalText().strip
-        else:
-          ok = false
-          respErr "no goal active; arm one with :goal <text>"
-      elif parts.len == 0 or parts[0] == "cancel":
-        if parts.len > 1:
-          ok = false
-          respErr ":goal cancel takes no argument (a goal is text, not a path)"
-        else:
-          let (cok, cerr) = cancelGoal()
-          if not cok:
-            ok = false
-            respErr cerr
-          else:
-            resp "goal cancelled (" & GoalFileName & " renamed to " &
-              GoalCancelledName & ")"
-      elif parts[0] == "new":
-        if parts.len == 1:
-          ok = false
-          respErr "usage: :goal new <text>"
-        else:
-          let text = arg[parts[0].len .. ^1].strip
-          let (gok, gerr) = startGoal(text, force = forced)
-          if not gok:
-            ok = false
-            respErr gerr
-          else:
-            armGoal = true
-            resp (if forced: GoalFileName & " replaced"
-                  else: GoalFileName & " written") & "; starting toward it now"
-      elif parts[0] == "edit" and parts.len == 1:
-        if not goalModeActive():
-          ok = false
-          respErr "no goal active; arm one with :goal new <text>"
-        else:
-          let before = readGoalText()
-          let editor = getEnv("VISUAL", getEnv("EDITOR",
-            when defined(windows): "notepad" else: "vi"))
-          let code = execShellCmd(editor & " " & quoteShell(GoalFileName))
-          if code != 0:
-            ok = false
-            respErr "editor exited with status " & $code
-          elif not goalModeActive():
-            resp "goal cancelled (" & GoalFileName & " removed in the editor)"
-          elif readGoalText().strip.len == 0:
-            let (cok, cerr) = cancelGoal()
-            if not cok:
-              ok = false
-              respErr cerr
-            else:
-              resp "goal cleared (" & GoalFileName & " renamed to " &
-                GoalCancelledName & ")"
-          elif readGoalText() != before:
-            armGoal = true
-            resp GoalFileName & " edited; starting toward it now"
-          else:
-            resp GoalFileName & " unchanged"
-      else:
-        let (gok, gerr) = startGoal(arg, force = forced)
-        if not gok:
-          ok = false
-          respErr gerr
-        else:
-          armGoal = true
-          resp (if forced: GoalFileName & " replaced"
-                else: GoalFileName & " written") & "; starting toward it now"
+      # The mode-verb grammar lives in `modeVerbResult`; `:goal` is the
+      # registry's entry #1. Every arm sets `startGoalTurn` so the
+      # controller kicks goal achievement off immediately instead of
+      # waiting for the next turn boundary.
+      let r = modeVerbResult(goalMode, parts, arg, forced)
+      if not r.ok: ok = false
+      if r.ok: resp r.line else: respErr r.line
+      armGoal = r.armed
     of ":help", ":?":
       body.add renderHelpS()
     of ":tokens":

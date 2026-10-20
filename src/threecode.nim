@@ -782,7 +782,7 @@ proc main() =
                               clearEditor = true)
   )
 
-  proc runGoalKickoff(): bool
+  proc runModeKickoff(m: ModeDesc): bool
     ## Forward: defined after runTurnWithSafetyNet, used by the command
     ## paths below (runDeferredCommand, the idle loop).
 
@@ -824,9 +824,9 @@ proc main() =
                             beforeRepaint = clearSubmittedCommandFooter,
                             reserveFooter = true)
     if res.startGoalTurn:
-      # A mid-turn :goal arm: goal achievement starts as soon as the
+      # A mid-turn mode arm (e.g. :goal): work starts as soon as the
       # turn has yielded (now).
-      discard runGoalKickoff()
+      discard runModeKickoff(activeMode(session.cwd))
 
   proc handleBufferedAfterTurn(): bool =
     ## Drain the queue in order once the turn yields: each queued prompt
@@ -915,23 +915,25 @@ proc main() =
         ". Please open an issue with the lines above."
       result = true
 
-  # The immediate start that follows arming `goal.md` (`:goal TEXT`,
-  # `:goal new`, `:goal edit`, `:goal! TEXT`) and the startup detection
-  # of a `goal.md` that was already on disk when the session opened:
-  # append the harness-autosent kickoff prompt, commit its receipt + `»`
-  # item, and run the turn now — goal achievement begins the moment the
-  # file is written (or found), not at the next turn boundary. Returns
-  # true if a buffered quit/interrupt should end the session. No
-  # refreshSystemPrompt: the kickoff rides the existing system prompt
-  # exactly like the in-turn feedback continuation in turns.nim.
-  proc runGoalKickoff(): bool =
-    let goalText = readGoalText(session.cwd)
-    messages.add goalKickoffMessage(goalText)
+  # The immediate start that follows arming a mode file (`:goal TEXT`,
+  # `:goal new`, `:goal edit`, `:goal! TEXT`, the cybernetic
+  # equivalents) and the startup detection of a trigger file that was
+  # already on disk when the session opened: append the harness-autosent
+  # kickoff prompt, commit its receipt + `»` item, and run the turn now
+  # — the mode's work begins the moment the file is written (or found),
+  # not at the next turn boundary. Returns true if a buffered
+  # quit/interrupt should end the session. No refreshSystemPrompt: the
+  # kickoff rides the existing system prompt exactly like the in-turn
+  # feedback continuation in turns.nim.
+  proc runModeKickoff(m: ModeDesc): bool =
+    let modeText = readModeText(m, session.cwd)
+    messages.add m.kickoffMessage(modeText)
     saveSession(session, messages)
     commitTranscriptBytes(
-      receiptBytes("auto: goal armed - starting toward " & GoalFileName), true)
+      receiptBytes("auto: " & m.name & " armed - starting toward " &
+        m.fileName), true)
     commitTranscriptBytes(
-      formatItem(goalPromptItem(goalText.strip)), true)
+      formatItem(goalPromptItem(modeText.strip)), true)
     runTurnWithSafetyNet()
 
   # Run a prompt that arrived on the command line (or was queued during
@@ -1008,15 +1010,17 @@ proc main() =
     tabtitle.paintTabTitleIdle()
     emitTestFrameEvent()
     startupTrace("first-prompt-painted")
-    # A `goal.md` that is already on disk when the session opens is just
-    # as armed as one written by `:goal`: the file is the whole protocol,
-    # and whoever wrote it (the user, another tool, a previous session)
-    # meant work to happen. Load it and kick goal achievement off now —
-    # the same kickoff path `:goal TEXT` takes — instead of waiting for
-    # the first prompt to hit a turn-end boundary. Session cwd, not
-    # process cwd: same authority as the turn-end check in turns.nim.
-    if goalModeActive(session.cwd):
-      if runGoalKickoff():
+    # A mode trigger file that is already on disk when the session
+    # opens is just as armed as one written by its verb: the file is the
+    # whole protocol, and whoever wrote it (the user, another tool, a
+    # previous session) meant work to happen. Load it and kick the
+    # mode's work off now — the same kickoff path `:goal TEXT` takes —
+    # instead of waiting for the first prompt to hit a turn-end boundary.
+    # Session cwd, not process cwd: same authority as the turn-end check
+    # in turns.nim.
+    let mode = activeMode(session.cwd)
+    if not noMode(mode):
+      if runModeKickoff(mode):
         quit(0)
     if prompt != "" and runInitialPrompt(prompt):
       # quit, not return: unwinding `editor` while the input thread still
@@ -1086,7 +1090,7 @@ proc main() =
           clearEditor = true)
         releaseIdleSubmittedInput()
         if commandResult.startGoalTurn:
-          if runGoalKickoff():
+          if runModeKickoff(activeMode(session.cwd)):
             break
         continue
       if prof.name == "":
