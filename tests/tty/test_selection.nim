@@ -105,3 +105,32 @@ suite "keyboard selection":
     s.send("\r")
     s.expectInHistory("hello", timeoutMs = 10000)
     s.expectInHistory("ok.", timeoutMs = 10000)
+
+  test "cmd+a selects all (kitty protocol); typing replaces the buffer":
+    let root = newFixture("selectall")
+    writeConfiguredProvider(root)
+    writeStubResponses(root)
+    var s = startStub(root)
+    defer: s.close()
+    s.expect("❯", timeoutMs = 15000)
+    s.send("hello world")
+    s.expectTypedAtPrompt("hello world")
+    # Cmd+A arrives as CSI 97;9 u under the kitty keyboard protocol.
+    s.send("\e[97;9u")
+    sleep(80)
+    check reverseCells(s.grid) >= 11
+    # Typing replaces the whole selected buffer with one character.
+    s.send("X")
+    var replaced = false
+    for _ in 0 ..< 30:
+      s.drain(100)
+      for r in 0 ..< s.grid.rows.len:
+        let t = s.grid.rowText(r)
+        if "❯ X" in t and "hello" notin t:
+          replaced = true
+          break
+      if replaced: break
+    check replaced
+    s.send("\r")
+    s.expectInHistory("❯ X", timeoutMs = 10000)
+    s.expectInHistory("ok.", timeoutMs = 10000)
