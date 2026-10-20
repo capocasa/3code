@@ -46,8 +46,11 @@ var conversationId*: string = ""
   ## (sessionIdFromPath of the `.3log`). Sent as `x-opencode-session` on
   ## OpenCode Zen/Go requests: the gateway routes/shards by that header
   ## and as of 2026-09-06 rejects headerless requests, so it must be stable
-  ## across a conversation's turns but unique per conversation. Empty for
-  ## one-shot calls (verify/summarize), which then send a per-call id.
+  ## across a conversation's turns but unique per conversation. Also the
+  ## `prompt_cache_key` on OpenAI Responses bodies and the `session_id`
+  ## header on the ChatGPT Codex backend (prompt-cache shard affinity,
+  ## gh #58). Empty for one-shot calls (verify/summarize), which then send
+  ## a per-call id (or neither, for the cache fields).
 
 var oneShotSessionIdSeed: string
   ## Memoized timestamp seed so same-microsecond one-shot ids still differ
