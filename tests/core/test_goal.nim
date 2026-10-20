@@ -132,13 +132,17 @@ suite "goal mode":
          "function": {"name": "write",
            "arguments": "{\"path\":\"src/goal.nim\",\"body\":\"x\"}"}}]},
       {"role": "tool", "tool_call_id": "c1",
-       "content": "compiled fine\nsecond line"},
+       "content": "compiled fine\nmiddle noise\ntests: 12/12 green"},
       {"role": "tool", "tool_call_id": "c2", "content": "wrote 1 bytes"},
       {"role": "assistant", "content": "All done, I promise."}
     ]
     let ev = buildGoalEvidence(msgs)
     check "nim c src/x.nim" in ev
     check "compiled fine" in ev
+    # The result tail surfaces too: verdict lines (tests, failures)
+    # live at the END of command output, and that is the line a
+    # toolless verifier must be able to see.
+    check "tests: 12/12 green" in ev
     check "write: src/goal.nim (1 bytes)" in ev
     # The turn boundary is the last user message: earlier-turn calls are
     # out of scope, and assistant prose is never evidence.
@@ -186,6 +190,15 @@ suite "goal mode":
     check GoalFileName in p
     # No diff (non-git dir): the section is absent, not an empty header.
     check "diff" notin p
+
+  test "preamble makes the sufficiency deal explicit":
+    # "Fully satisfied" plus "do not infer" leaves an honest model no
+    # path to SATISFIED on runtime goals; the preamble must state when
+    # the inputs are confirmation ENOUGH.
+    check "Accept SATISFIED" in VerifierPreamble
+    check "do not demand proof" in VerifierPreamble
+    # The verdict contract instruction survives the edit.
+    check "End with exactly one line" in VerifierPreamble
 
   test "verifier prompt embeds the diff as a third section":
     let p = verifierPrompt("ship it", "bash: ran tests\n  => ok",

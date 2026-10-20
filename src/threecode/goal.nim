@@ -67,9 +67,13 @@ The recorded results are real harness captures, but they can be stale
 if the agent changed things after the check they show. The agent's
 claims are never evidence. If the goal requires runtime behavior
 these inputs cannot confirm (tests passing, a build succeeding), do
-not infer it: name the unconfirmed check in your feedback. Judge
-whether the goal as stated is fully satisfied by what the inputs
-actually show. Report exactly what you verified and how; never
+not infer it: name the unconfirmed check in your feedback.
+Sufficiency is relative to these inputs: when the diff is consistent
+with the goal and a recorded result shows the goal's own verification
+commands (tests, build) ran and passed, that counts as confirmation.
+Accept SATISFIED then; do not demand proof these inputs cannot
+contain. Judge whether the goal as stated is fully satisfied by what
+the inputs actually show. Report exactly what you verified and how; never
 overstate how deeply you verified. End with exactly one line: VERDICT:
 SATISFIED, or VERDICT: FEEDBACK: <what is missing or what to do
 next>."""
@@ -193,11 +197,19 @@ proc briefFor(name: string, args: JsonNode): string =
     result.add name
 
 proc resultHead(res: string): string =
+  ## First and LAST non-empty lines: command verdicts (test summaries,
+  ## failures, "N of N green") land at the end of output, so a head-only
+  ## digest hides exactly the lines that decide runtime goals.
+  var first = ""
+  var last = ""
   for line in res.splitLines:
     let l = line.strip
-    if l.len > 0:
-      return utf8ByteCut(l, EvidenceResultCap)
-  "(no output)"
+    if l.len == 0: continue
+    if first.len == 0: first = utf8ByteCut(l, EvidenceResultCap)
+    last = utf8ByteCut(l, EvidenceResultCap)
+  if first.len == 0: return "(no output)"
+  if last == first: return first
+  first & "\n  ... " & last
 
 proc buildGoalEvidence*(messages: JsonNode): string =
   ## Harness-constructed evidence from the just-finished turn: walk the
