@@ -2342,7 +2342,7 @@ var
     "select-end": "ShiftEnd",
     "select-word-left": "CtrlShiftLeft",
     "select-word-right": "CtrlShiftRight",
-    "select-all": "",
+    "select-all": "CmdA",
     "select-buffer-start": "CtrlShiftHome",
     "select-buffer-end": "CtrlShiftEnd",
     "buffer-start": "",

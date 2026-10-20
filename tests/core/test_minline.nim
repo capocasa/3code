@@ -1632,6 +1632,7 @@ suite "minline editor: shortcuts":
 
 const
   KittyCtrlA* = @[27, 91, 57, 55, 59, 53, 117]       # CSI 97;5 u
+  KittyCmdA* = @[27, 91, 57, 55, 59, 57, 117]       # CSI 97;9 u
   KittyCtrlE* = @[27, 91, 49, 48, 49, 59, 53, 117]   # CSI 101;5 u
   KittyCmdT* = @[27, 91, 49, 49, 54, 59, 57, 117]    # CSI 116;9 u
   KittyEsc* = @[27, 91, 50, 55, 117]                  # CSI 27 u
@@ -1660,6 +1661,36 @@ suite "minline editor: kitty keyboard protocol":
     d.push KittyCmdT
     d.push Enter
     check d.run(ed, prompt = "> ") == "ba"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "CSI u cmd+a selects all by default":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello"
+    d.push KittyCmdA
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    check ed.selAnchor == 0
+    check ed.line.position == 5
+
+  test "CSI u cmd+a: typing replaces the whole buffer":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one two"
+    d.push KittyCmdA
+    d.pushString "X"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "X"
+
+  test "unbound cmd+a is a dead key":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"select-all": ""}.toTable
+    d.pushString "one two"
+    d.push KittyCmdA
+    d.pushString "X"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one twoX"
     minline.configuredShortcuts = initTable[string, string]()
 
   test "CSI 27 u behaves like the Esc key":

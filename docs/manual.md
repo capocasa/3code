@@ -470,6 +470,7 @@ Useful input keys:
 | Shift+Enter or Alt+Enter | insert a newline |
 | Up / Down | move through visual rows, then history |
 | Ctrl+Arrow | move by word |
+| Cmd+A | select all (kitty keyboard protocol terminals) |
 | Ctrl+U | clear the input buffer |
 | Ctrl+W | delete the previous word |
 | Ctrl+K | delete to end of line |
@@ -518,7 +519,8 @@ reported as-is through the protocol.
 
 The input buffer is a real text widget: hold Shift with the arrows (or
 Home/End, Ctrl+Arrow for words, Ctrl+Shift+Home/End for the whole buffer)
-and the range highlights in reverse video. Then:
+and the range highlights in reverse video. Cmd+A selects the whole
+buffer. Then:
 
 | key | action |
 | --- | --- |
