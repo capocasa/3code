@@ -95,10 +95,12 @@ p --- /tmp/notes.txt
   +++ /tmp/notes.txt
   -new notes
   +patched notes
+  T4.diff ↗
 
 p --- /tmp/applied.txt
   +++ /tmp/applied.txt
   +hello
+  T5.diff ↗
 
 ⌕ terminal rendering
   1. Terminal Rendering Guide
@@ -163,10 +165,12 @@ p --- /tmp/notes.txt
   +++ /tmp/notes.txt
   -new notes
   +patched notes
+  T4.diff ↗
 
 p --- /tmp/applied.txt
   +++ /tmp/applied.txt
   +hello
+  T5.diff ↗
 
 ⌕ terminal rendering
   1. Terminal Rendering Guide
@@ -231,10 +235,12 @@ p --- /tmp/notes.txt
   +++ /tmp/notes.txt
   -new notes
   +patched notes
+  T4.diff ↗
 
 p --- /tmp/applied.txt
   +++ /tmp/applied.txt
   +hello
+  T5.diff ↗
 
 ⌕ terminal rendering
   1. Terminal Rendering Guide
