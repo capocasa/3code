@@ -1441,6 +1441,20 @@ line is given when the paths move.
     Not `~/.gradle` whole: `gradle.properties` often holds
     credentials. Same JVM proxy note as maven.
 
+`dotnet` (.NET / MSBuild)::
+
+    allow ~/.nuget/packages
+    readonly ~/.nuget/NuGet
+
+    NuGet dies on an unreadable config (`~/.nuget/NuGet/NuGet.Config`
+    can hold feed tokens, so it is readable, not writable - the same
+    treatment `~/.gitconfig` gets), and the package cache is the only
+    writable dot it needs: `~/.dotnet` writes are optional. MSBuild's
+    worker nodes and the dotnet diagnostic server bind unix sockets
+    in the temp dir, which is writable by default; the socket rights
+    ride the writable grant (sandwall 0.5.12). Inside a fenced
+    network, dotnet honors `http_proxy`/`https_proxy`.
+
 `ruby` (RubyGems + Bundler)::
 
     allow ~/.gem/ruby
