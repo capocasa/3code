@@ -847,7 +847,7 @@ proc endpointUrl*(p: Profile, responses, streaming: bool): string =
   elif responses: base & "/responses"
   else: base & "/chat/completions"
 
-proc requestHeaders(p: Profile, key: string;
+proc requestHeaders*(p: Profile, key: string;
                     accept: string): seq[(string, string)] =
   ## Base headers every model request sends, plus whatever
   ## `extraHeadersHook` adds for this profile (ChatGPT Codex wants
@@ -885,6 +885,13 @@ proc requestHeaders(p: Profile, key: string;
                ("Content-Type", "application/json"),
                ("Accept", accept),
                ("User-Agent", modelUserAgent())]
+  if chatgptProfile(p) and conversationId != "":
+    # Codex-backend cache affinity (gh #58): the subscription backend
+    # serves prompt-cache hits only when consecutive requests land on
+    # the same shard; the Codex CLI pins that with this header carrying
+    # the conversation id. Same value as the body's prompt_cache_key
+    # so both affinities agree.
+    result.add ("session_id", conversationId)
   if providerOf(p) in ["opencode", "opencodego"]:
     # Zen/Go route and shard by this header; requests without it are
     # rejected as of 2026-09-06. Stable across the conversation's turns
@@ -1482,6 +1489,14 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
   if proBase != "": result["model"] = %proBase
   result["tools"] = responsesTools(setup(p).tools)
   result["tool_choice"] = %"auto"
+  # Prompt-cache affinity (gh #58): OpenAI's prompt cache is sharded and
+  # only serves hits when consecutive requests land on the same shard.
+  # A stable per-conversation key (the session id) pins that routing —
+  # the same mechanism the Codex CLI uses on both of these backends.
+  # One-shot calls (no conversation published) omit it: nothing is
+  # reused across them anyway.
+  if responsesApi(p) and conversationId != "":
+    result["prompt_cache_key"] = %conversationId
   let d = knownGoodGeneration(p)
   # The Codex backend rejects `max_output_tokens` outright (400
   # "Unsupported parameter"); first-party codex never sends it.

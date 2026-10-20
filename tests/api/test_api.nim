@@ -655,6 +655,42 @@ suite "api request shaping":
     check "max_output_tokens" notin body
     check body{"instructions"}.getStr == "sys"
 
+  test "responses requests pin prompt-cache affinity (gh #58)":
+    # OpenAI's prompt cache is sharded: without a stable per-conversation
+    # key (and the session_id header on the Codex backend) consecutive
+    # turns land on different shards and cached_tokens stays near zero —
+    # the sporadic ↻ bar the issue reports. The key is the conversation
+    # id, stable across turns and resume; one-shots send nothing.
+    let msgs = %*[{"role": "user", "content": "go"}]
+    conversationId = "20260903T101415"
+    defer: conversationId = ""
+    let cg = Profile(name: "chatgpt.gpt-5.6", family: "gpt", model: "gpt-5.6")
+    let oa = Profile(name: "openai.gpt-5.6", family: "gpt", model: "gpt-5.6")
+    let gw = Profile(name: "openrouter.openai/gpt-5.6", family: "gpt",
+                     model: "openai/gpt-5.6")
+    check buildResponsesBody(cg, msgs){"prompt_cache_key"}.getStr ==
+      "20260903T101415"
+    check buildResponsesBody(oa, msgs){"prompt_cache_key"}.getStr ==
+      "20260903T101415"
+    # Non-Responses gateways never see the field even with a live
+    # conversation (strict backends may reject unknown parameters).
+    check "prompt_cache_key" notin buildResponsesBody(gw, msgs)
+    # The Codex backend additionally shards by the session_id header the
+    # Codex CLI sends; first-party /responses needs no header.
+    check ("session_id", "20260903T101415") in
+      requestHeaders(cg, "k", "text/event-stream")
+    block:
+      var names: seq[string]
+      for kv in requestHeaders(oa, "k", "text/event-stream"): names.add kv[0]
+      check "session_id" notin names
+    # One-shot calls (no conversation published) send neither.
+    conversationId = ""
+    check "prompt_cache_key" notin buildResponsesBody(cg, msgs)
+    block:
+      var names: seq[string]
+      for kv in requestHeaders(cg, "k", "text/event-stream"): names.add kv[0]
+      check "session_id" notin names
+
   test "knownGoodReasonings for grok: 4.7/4.6 add xhigh, 4.20 adds off":
     check knownGoodReasonings("xai", "grok-4.7") == @["low", "medium", "high", "xhigh"]
     check knownGoodReasonings("xai", "grok-4.6") == @["low", "medium", "high", "xhigh"]

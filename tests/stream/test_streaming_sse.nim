@@ -281,7 +281,7 @@ proc readRequestHead(client: Socket): int =
     if s.toLowerAscii().startsWith("content-length:"):
       result = try: parseInt(s.split(":")[1].strip) except ValueError: 0
 
-proc drainRequestBody(client: Socket; contentLength: int) =
+proc drainRequestBody(client: Socket; contentLength: int): string =
   ## Consume exactly the Content-Length body bytes before close(). Reading
   ## headers alone leaves the POST body unread in the socket's receive
   ## buffer, and a close() with unread data makes the kernel send RST
@@ -297,6 +297,7 @@ proc drainRequestBody(client: Socket; contentLength: int) =
     let r = client.recv(bodyBuf, contentLength - got, timeout = 10_000)
     if r == 0: break
     got += r
+  result = bodyBuf
 
 proc serveOnce(server: SseServer) =
   var client: Socket
@@ -309,7 +310,7 @@ proc serveOnce(server: SseServer) =
     let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
     client.send(chunk)
     client.send("0\r\n\r\n")
-    client.drainRequestBody(contentLength)
+    discard client.drainRequestBody(contentLength)
   except CatchableError:
     discard  # client RST'd mid-reply: drop the connection, never spin
   client.close()
@@ -329,7 +330,7 @@ proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
     let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
     client.send(chunk)
     client.send("0\r\n\r\n")
-    client.drainRequestBody(contentLength)
+    discard client.drainRequestBody(contentLength)
   except CatchableError:
     discard  # client died while we delayed: drop it, never spin
   client.close()
@@ -356,7 +357,7 @@ proc serveRetryable(server: SseServer) {.thread.} =
       let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
       client.send(chunk)
       client.send("0\r\n\r\n")
-      client.drainRequestBody(contentLength)
+      discard client.drainRequestBody(contentLength)
     except CatchableError:
       discard  # dead re-dialing client (the RST race): serve its re-dial
     client.close()
@@ -777,13 +778,17 @@ proc serveCaptureHeaders(server: SseServer) {.thread.} =
     server.capturedHeaders.add s.toLowerAscii()
     if s.toLowerAscii().startsWith("content-length:"):
       contentLength = try: parseInt(s.split(":")[1].strip) except ValueError: 0
-  let body = makeSseCompleteContent("ok", "cap-1")
+  # Serve the server's configured response when one was set (the
+  # /responses contract test needs a Responses-shaped stream), else the
+  # historical chat-completions complete-content body.
+  let body = if server.response.len > 0: server.response
+              else: makeSseCompleteContent("ok", "cap-1")
   try:
     client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
       "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
     client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
     client.send("0\r\n\r\n")
-    client.drainRequestBody(contentLength)
+    server.capturedBody = client.drainRequestBody(contentLength)
   except CatchableError:
     discard
   client.close()
@@ -801,7 +806,7 @@ proc serveVerifyOk(server: SseServer) {.thread.} =
       "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
     client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
     client.send("0\r\n\r\n")
-    client.drainRequestBody(contentLength)
+    discard client.drainRequestBody(contentLength)
   except CatchableError:
     discard
   client.close()
@@ -927,6 +932,45 @@ suite "request headers (OpenCode Zen/Go contract)":
     check "x-opencode-session: 20260903t101415" in server.capturedHeaders.join("\n")
     closeCachedStreamConn()
 
+  test "responses wire carries prompt_cache_key and parses cached tokens (gh #58)":
+    # End-to-end over the REAL transport: an openai profile resolves to
+    # /responses, the published conversation id rides the request body as
+    # prompt_cache_key (the cache-affinity fix for the sporadic ↻ bar),
+    # and the Codex-shaped usage in response.completed feeds ↻. The
+    # first-party API-key path sends no affinity header.
+    let completed = $(%*{
+      "type": "response.completed",
+      "response": {"status": "completed",
+        "output": [{"type": "message",
+          "content": [{"type": "output_text", "text": "ok"}]}],
+        "usage": {"input_tokens": 10, "output_tokens": 2,
+          "total_tokens": 12,
+          "input_tokens_details": {"cached_tokens": 6}}}})
+    let server = newSseServer(
+      "event: response.completed\n\ndata: " & completed & "\n\n" &
+      "data: [DONE]\n\n")
+    var thr: Thread[SseServer]
+    createThread(thr, serveCaptureHeaders, server)
+    closeCachedStreamConn()
+    var usage: Usage
+    let p = Profile(name: "openai.gpt-5.6", url: server.url,
+                    key: "test-key", model: "gpt-5.6", family: "gpt")
+    conversationId = "20260903T101415"
+    defer: conversationId = ""
+    # A wire-format drift would make callModel see an empty reply; patient
+    # retry (the default) would then hang the test behind its ~36h curve.
+    # Surface such a drift in ~1min instead.
+    patientRetryEnabled = false
+    defer: patientRetryEnabled = true
+    discard callModel(p, %*[{"role": "user", "content": "hi"}], usage, 0)
+    joinThread(thr)
+    server.socket.close()
+    check server.capturedHeaders[0] == "post /v1/responses http/1.1"
+    check "\"prompt_cache_key\":\"20260903T101415\"" in server.capturedBody
+    check "session_id:" notin server.capturedHeaders.join("\n")
+    check usage.cachedTokens == 6
+    closeCachedStreamConn()
+
 # ---------------------------------------------------------------------------
 # Non-streaming transport vs the quiet watchdog
 # ---------------------------------------------------------------------------
@@ -947,7 +991,7 @@ proc serveNonStreamDelayed(server: SseServer; delayMs: int) =
   try:
     client.send("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
       "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
-    client.drainRequestBody(contentLength)
+    discard client.drainRequestBody(contentLength)
   except CatchableError:
     discard
   client.close()
