@@ -2,6 +2,22 @@ Changelog
 
 Unreleased
 
+- **Vertical cursor movement no longer repaints (and no longer crawls)
+  on a pasted multi-line draft.** Two causes stacked: Up/Down picked
+  their target with one `cursorVisual` - itself a full row-model walk -
+  per rune boundary, which is quadratic in the buffer (a 200-line
+  pasted draft spent 20+ seconds per arrow key), and every motion
+  keystroke then erased and repainted the entire editor block on top.
+  `verticalTarget` now finds the same target in one pass over the row
+  model (verified against the old scan over a fixed corpus plus 400
+  random fuzz buffers), and `moveOnlyRedraw` handles cursor-only
+  keystrokes - left/right, up/down, word, home/end, buffer start/end -
+  by walking the terminal cursor from the old cell to the new one: no
+  erase, no prompt re-emit, a handful of bytes whatever the buffer
+  size. The interactive app's drawn-caret path is unchanged (its
+  row-diff painter already rewrites only the rows whose cells
+  changed).
+
 - **A `goal.md` on disk at startup now arms goal mode by itself.** Goal
   mode used to activate only at the first turn end: a `goal.md` written
   by hand (or by any other tool) sat inert until something - anything -

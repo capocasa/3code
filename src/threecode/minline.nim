@@ -11,13 +11,23 @@
 ##   wrapped tail of a long logical line, or a previous logical line);
 ##   the column is preserved as best-effort.
 ##
-## After every keystroke the entire buffer is repainted in place. The
-## render walks the cursor back to the row where the prompt was first
-## drawn (we track the cursor's row offset from that anchor in
-## ``renderRow``), erases to end of screen, prints the prompt, the text
-## (wrapping at terminal width with the continuation prompt prefixed to
-## each logical line), and finally walks the cursor to the visual
-## position computed from the current ``position``.
+## After a keystroke that changes the text (or anything else painted:
+## selection, transient suffix, terminal width) the entire buffer is
+## repainted in place. The render walks the cursor back to the row
+## where the prompt was first drawn (we track the cursor's row offset
+## from that anchor in ``renderRow``), erases to end of screen, prints
+## the prompt, the text (wrapping at terminal width with the
+## continuation prompt prefixed to each logical line), and finally
+## walks the cursor to the visual position computed from the current
+## ``position``.
+##
+## A keystroke that moves only the cursor skips all of that: every
+## painted cell is already correct, so ``moveOnlyRedraw`` walks the
+## terminal cursor from the old visual cell to the new one and writes
+## nothing else. Vertical motion (``verticalTarget``) finds its target
+## in one pass over the row model, not one ``cursorVisual`` per rune
+## boundary — the quadratic scan is what made Up/Down crawl on a pasted
+## multi-line draft.
 ##
 ## All terminal IO goes through the ``write``/``getCh`` procs passed to
 ## ``readLineWith`` — the public ``readLine`` wires them to ``stdout`` /
@@ -884,6 +894,85 @@ proc drawnCaretVisual*(text: string; caretAt, promptW, contW,
   else:
     (r, c)
 
+proc spanColAt(text: string; sp: LineSpan; startCol, upto: int): int {.inline.} =
+  ## Column of byte offset ``upto`` on the row ``sp`` lays out: the
+  ## start column plus every cell the row's bytes occupy before it
+  ## (trailing break spaces included — the caret steps over them too).
+  result = startCol
+  var i = sp.start
+  while i < upto:
+    inc result, runeCellWidth(text.runeAt(i))
+    i += runeLenSafe(text, i)
+
+proc verticalTarget*(text: string; fromPos, promptW, contW, width,
+                     delta: int): int =
+  ## Byte offset the caret lands on when moved by ``delta`` visual rows
+  ## (−1 up, +1 down) from ``fromPos``, keeping the visual column as
+  ## close as possible. Same target the per-boundary scan used to pick
+  ## (first minimum of ``abs(col - curCol)`` in byte order), found in one
+  ## walk of the row model instead of one ``cursorVisual`` — itself a
+  ## full ``lineSpans`` pass — per rune boundary. That quadratic scan is
+  ## what made Up/Down crawl on a pasted multi-line draft. ``-1`` when
+  ## there is no visual row to move to.
+  if width <= 0: return -1
+  let spans = lineSpans(text, promptW, contW, width)
+  if spans.len == 0: return -1
+  let head = promptWrap(promptW, width).head
+  let firstCol = promptWrap(promptW, width).firstCol
+  # The caret's current row and column, read off the row model already
+  # built (the same clauses `cursorVisual` applies, without its second
+  # `lineSpans` pass).
+  let p0 = min(max(fromPos, 0), text.len)
+  var curR = 0
+  var curC = firstCol
+  block locate:
+    for si, sp in spans:
+      if si < head:
+        inc curR
+        continue
+      let startCol = if si == head: firstCol else: contW
+      if p0 <= sp.stop or (p0 <= sp.start and not (si == head and p0 == 0)) or
+          si + 1 >= spans.len or p0 < spans[si + 1].start:
+        curC = spanColAt(text, sp, startCol, p0)
+        break locate
+      inc curR
+    dec curR                 # past every span: rest on the last row
+    curC = if curR == head: firstCol else: contW
+  let targetR = curR + delta
+  if targetR < head or targetR >= spans.len:
+    return -1  # a wrapped prompt's fragment rows hold no buffer text
+  let sp = spans[targetR]
+  let startCol = if targetR == head: firstCol else: contW
+  # Candidate boundaries on the target row: every rune boundary from
+  # the span start up to (excluding) the next span's start — trailing
+  # break spaces included, and ``text.len`` itself on the last row. The
+  # span start belongs to this row only when the row above's content
+  # ended strictly before it: a char-wrapped row hands its last boundary
+  # (``start == previous stop``) to the row above via ``cursorVisual``'s
+  # ``p <= stop`` clause. Symmetrically, this row's own ``stop`` boundary
+  # belongs HERE (not to the row below) when it coincides with the next
+  # span's start — the same clause, one row down.
+  var lo = sp.start
+  if targetR > head and spans[targetR - 1].stop == sp.start: inc lo
+  var hi = if targetR + 1 < spans.len: spans[targetR + 1].start
+           else: text.len + 1
+  if targetR + 1 < spans.len and sp.stop == spans[targetR + 1].start:
+    inc hi
+  var best = -1
+  var bestDiff = high(int)
+  var col = startCol
+  var p = sp.start
+  while p < hi:
+    if p >= lo:
+      let d = abs(col - curC)
+      if d < bestDiff:
+        bestDiff = d
+        best = p
+    if p >= text.len: break
+    inc col, runeCellWidth(text.runeAt(p))
+    inc p, runeLenSafe(text, p)
+  best
+
 proc totalRows*(text: string, promptW, contW, width: int): int =
   ## Number of visual rows the rendered buffer occupies, always ``>= 1``.
   ## Content rows only: the transient caret row a margin caret adds (see
@@ -1344,6 +1433,53 @@ proc renderedRows*(ed: LineEditor): int =
   if caretAt >= 0:
     result = max(result, caretRowOf(combined, caretAt, pw, cw, width) + 1)
 
+proc moveOnlyRedraw*(ed: var LineEditor; oldPos: int; hadSel: bool): bool =
+  ## Pure-movement fast path: the keystroke changed nothing but
+  ## ``position``, so every painted cell is still correct — walk the
+  ## terminal cursor from the old visual cell to the new one and redraw
+  ## nothing else (the full erase-and-repaint every motion keystroke
+  ## used to pay is what made cursor movement crawl on a long pasted
+  ## draft). Returns false without writing when a real repaint is
+  ## needed: a selection to paint or clear, an installed painter (it
+  ## owns the drawn caret), a transient suffix on screen, or a width
+  ## change (the rows reflowed). Callers fall back to ``fullRedraw``.
+  result = false
+  if hadSel or ed.hasSelection() or ed.painter != nil or
+      ed.renderSuffix.len > 0:
+    return
+  if ed.getWidth != nil:
+    let w = ed.getWidth()
+    if w > 0:
+      if w != ed.width: return
+      ed.width = w
+  let width = max(2, ed.width)
+  let pw = if ed.promptW > 0: ed.promptW else: visualCols(ed.prompt)
+  let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
+  ed.promptW = pw
+  ed.contPromptW = cw
+  # The caret arithmetic mirrors `redrawBytes` exactly — same masked
+  # stand-in for hidden reads (the suffix path bailed above) — so the
+  # cursor lands where the full repaint would have parked it.
+  let renderedText =
+    if ed.hidechars or (ed.maskWhen != nil and ed.maskWhen(ed.line.text)):
+      repeat('*', ed.line.text.len)
+    else:
+      ed.line.text
+  let (newR, newC) = cursorVisual(renderedText, ed.line.position, pw, cw,
+                                  width)
+  let (oldR, oldC) = cursorVisual(renderedText, oldPos, pw, cw, width)
+  if oldR != newR or oldC != newC:
+    var buf = "\r"   # disarm a pending wrap before the row walk
+    if newR < oldR:
+      buf.add "\x1b[" & $(oldR - newR) & "A"
+    elif newR > oldR:
+      buf.add "\x1b[" & $(newR - oldR) & "B"
+    if newC > 0:
+      buf.add "\x1b[" & $newC & "C"
+    ed.write buf
+  ed.renderRow = newR
+  result = true
+
 proc fullRedraw*(ed: var LineEditor) =
   ## Wipe the previously rendered area, repaint prompt + buffer, place
   ## the cursor at the visual position derived from ``ed.line.position``.
@@ -1415,6 +1551,8 @@ proc deleteSelection*(ed: var LineEditor) =
 
 proc back*(ed: var LineEditor, n = 1) =
   ## Step the cursor left by ``n`` runes / newlines.
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
   for _ in 0 ..< n:
     if ed.line.position <= 0: break
@@ -1422,9 +1560,11 @@ proc back*(ed: var LineEditor, n = 1) =
       dec ed.line.position
     else:
       ed.line.position = runeStartBefore(ed.line.text, ed.line.position)
-  fullRedraw(ed)
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc forward*(ed: var LineEditor, n = 1) =
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
   for _ in 0 ..< n:
     if ed.line.position >= ed.line.text.len: break
@@ -1432,7 +1572,7 @@ proc forward*(ed: var LineEditor, n = 1) =
       inc ed.line.position
     else:
       ed.line.position += runeLenSafe(ed.line.text, ed.line.position)
-  fullRedraw(ed)
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc deletePrevious*(ed: var LineEditor) =
   if ed.hasSelection():
@@ -1543,36 +1683,46 @@ proc clearLine*(ed: var LineEditor) =
 
 proc goToStart*(ed: var LineEditor) =
   ## Move to the start of the current logical line.
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
   var p = ed.line.position
   while p > 0 and ed.line.text[p - 1] != '\n':
     dec p
   ed.line.position = p
-  fullRedraw(ed)
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc goToEnd*(ed: var LineEditor) =
   ## Move to the end of the current logical line.
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
   var p = ed.line.position
   while p < ed.line.text.len and ed.line.text[p] != '\n':
     inc p
   ed.line.position = p
-  fullRedraw(ed)
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc goToBufferStart*(ed: var LineEditor) =
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
   ed.line.position = 0
-  fullRedraw(ed)
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc goToBufferEnd*(ed: var LineEditor) =
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
   ed.line.position = ed.line.text.len
-  fullRedraw(ed)
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc isWordChar(b: char): bool {.inline.} =
   b != ' ' and b != '\t' and b != '\n'
 
 proc wordLeft*(ed: var LineEditor) =
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
   var p = ed.line.position
   while p > 0 and not isWordChar(ed.line.text[p - 1]):
@@ -1580,9 +1730,11 @@ proc wordLeft*(ed: var LineEditor) =
   while p > 0 and isWordChar(ed.line.text[p - 1]):
     dec p
   ed.line.position = p
-  fullRedraw(ed)
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc wordRight*(ed: var LineEditor) =
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
   var p = ed.line.position
   let n = ed.line.text.len
@@ -1591,7 +1743,7 @@ proc wordRight*(ed: var LineEditor) =
   while p < n and not isWordChar(ed.line.text[p]):
     inc p
   ed.line.position = p
-  fullRedraw(ed)
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc deleteWordLeft*(ed: var LineEditor) =
   if ed.hasSelection():
@@ -1643,64 +1795,25 @@ proc visualUp*(ed: var LineEditor) =
   ## Move up by one visual row, preserving the visual column as best as
   ## possible. If already on the top visual row of the buffer, fall back
   ## to ``historyPrevious`` (Emacs convention).
-
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
-  let width = max(2, ed.width)
-  let pw = ed.promptW
-  let cw = ed.contPromptW
-  let (curR, curC) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  if curR <= promptWrap(pw, width).head:
+  let target = verticalTarget(ed.line.text, oldPos, ed.promptW,
+                              ed.contPromptW, max(2, ed.width), -1)
+  if target < 0:
     return  # caller decides whether to invoke history
-  var bestP = ed.line.position
-  var bestDiff = high(int)
-  var i = 0
-  while i <= ed.line.text.len:
-    let (r, c) = cursorVisual(ed.line.text, i, pw, cw, width)
-    if r == curR - 1:
-      let d = abs(c - curC)
-      if d < bestDiff:
-        bestDiff = d
-        bestP = i
-    elif r >= curR:
-      break
-    if i < ed.line.text.len:
-      if ed.line.text[i] == '\n': inc i
-      else: i += runeLenSafe(ed.line.text, i)
-    else:
-      inc i
-  ed.line.position = bestP
-  fullRedraw(ed)
+  ed.line.position = target
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc visualDown*(ed: var LineEditor) =
+  let hadSel = ed.hasSelection()
+  let oldPos = ed.line.position
   ed.clearSelection()
-  let width = max(2, ed.width)
-  let pw = ed.promptW
-  let cw = ed.contPromptW
-  let (curR, curC) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  let total = totalRows(ed.line.text, pw, cw, width)
-  if curR >= total - 1: return
-  var bestP = ed.line.position
-  var bestDiff = high(int)
-  var seenTarget = false
-  var i = 0
-  while i <= ed.line.text.len:
-    let (r, c) = cursorVisual(ed.line.text, i, pw, cw, width)
-    if r == curR + 1:
-      seenTarget = true
-      let d = abs(c - curC)
-      if d < bestDiff:
-        bestDiff = d
-        bestP = i
-    elif r > curR + 1:
-      break
-    if i < ed.line.text.len:
-      if ed.line.text[i] == '\n': inc i
-      else: i += runeLenSafe(ed.line.text, i)
-    else:
-      inc i
-  if seenTarget:
-    ed.line.position = bestP
-    fullRedraw(ed)
+  let target = verticalTarget(ed.line.text, oldPos, ed.promptW,
+                              ed.contPromptW, max(2, ed.width), 1)
+  if target < 0: return
+  ed.line.position = target
+  if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 # ---------- Selection ops ----------
 
@@ -1767,61 +1880,19 @@ proc selectUp*(ed: var LineEditor) =
   ## Extend the selection one visual row up (no history fall-through:
   ## a selection gesture never recalls history).
   if ed.selAnchor < 0: ed.selAnchor = ed.line.position
-  let width = max(2, ed.width)
-  let pw = ed.promptW
-  let cw = ed.contPromptW
-  let (curR, curC) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  if curR > promptWrap(pw, width).head:
-    var bestP = ed.line.position
-    var bestDiff = high(int)
-    var i = 0
-    while i <= ed.line.text.len:
-      let (r, c) = cursorVisual(ed.line.text, i, pw, cw, width)
-      if r == curR - 1:
-        let d = abs(c - curC)
-        if d < bestDiff:
-          bestDiff = d
-          bestP = i
-      elif r >= curR:
-        break
-      if i < ed.line.text.len:
-        if ed.line.text[i] == '\n': inc i
-        else: i += runeLenSafe(ed.line.text, i)
-      else:
-        inc i
-    ed.line.position = bestP
+  let target = verticalTarget(ed.line.text, ed.line.position, ed.promptW,
+                              ed.contPromptW, max(2, ed.width), -1)
+  if target >= 0:
+    ed.line.position = target
   if ed.selAnchor == ed.line.position: ed.selAnchor = -1
   fullRedraw(ed)
 
 proc selectDown*(ed: var LineEditor) =
   if ed.selAnchor < 0: ed.selAnchor = ed.line.position
-  let width = max(2, ed.width)
-  let pw = ed.promptW
-  let cw = ed.contPromptW
-  let (curR, curC) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  let total = totalRows(ed.line.text, pw, cw, width)
-  if curR < total - 1:
-    var bestP = ed.line.position
-    var bestDiff = high(int)
-    var seenTarget = false
-    var i = 0
-    while i <= ed.line.text.len:
-      let (r, c) = cursorVisual(ed.line.text, i, pw, cw, width)
-      if r == curR + 1:
-        seenTarget = true
-        let d = abs(c - curC)
-        if d < bestDiff:
-          bestDiff = d
-          bestP = i
-      elif r > curR + 1:
-        break
-      if i < ed.line.text.len:
-        if ed.line.text[i] == '\n': inc i
-        else: i += runeLenSafe(ed.line.text, i)
-      else:
-        inc i
-    if seenTarget:
-      ed.line.position = bestP
+  let target = verticalTarget(ed.line.text, ed.line.position, ed.promptW,
+                              ed.contPromptW, max(2, ed.width), 1)
+  if target >= 0:
+    ed.line.position = target
   if ed.selAnchor == ed.line.position: ed.selAnchor = -1
   fullRedraw(ed)
 
@@ -2117,19 +2188,18 @@ KEYMAP["insert"]    = proc(ed: var LineEditor) =
   ed.mode = if ed.mode == mdInsert: mdReplace else: mdInsert
 KEYMAP["down"]      = proc(ed: var LineEditor) =
   ## Down — visual row first; if already at the last visual row, fall
-  ## through to history-next (matches readline / Emacs feel).
-  let pw = ed.promptW; let cw = ed.contPromptW
-  let width = max(2, ed.width)
-  let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  let total = totalRows(ed.line.text, pw, cw, width)
-  if curR >= total - 1: ed.historyNext()
-  else: ed.visualDown()
+  ## through to history-next (matches readline / Emacs feel). The
+  ## position probe is the history test: `visualDown` leaves it put
+  ## exactly when there is no visual row below (its own single
+  ## row-model pass decides; a `cursorVisual`+`totalRows` pre-pass per
+  ## keystroke used to double the cost of every arrow key).
+  let p0 = ed.line.position
+  ed.visualDown()
+  if ed.line.position == p0: ed.historyNext()
 KEYMAP["up"]        = proc(ed: var LineEditor) =
-  let pw = ed.promptW; let cw = ed.contPromptW
-  let width = max(2, ed.width)
-  let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  if curR <= promptWrap(pw, width).head: ed.historyPrevious()
-  else: ed.visualUp()
+  let p0 = ed.line.position
+  ed.visualUp()
+  if ed.line.position == p0: ed.historyPrevious()
 KEYMAP["ctrl+n"]    = proc(ed: var LineEditor) = ed.historyNext()
 KEYMAP["ctrl+p"]    = proc(ed: var LineEditor) = ed.historyPrevious()
 KEYMAP["left"]      = proc(ed: var LineEditor) = ed.back()
@@ -2230,18 +2300,13 @@ proc cmdRight(ed: var LineEditor) = ed.forward()
 proc cmdWordLeft(ed: var LineEditor) = ed.wordLeft()
 proc cmdWordRight(ed: var LineEditor) = ed.wordRight()
 proc cmdUp(ed: var LineEditor) =
-  let pw = ed.promptW; let cw = ed.contPromptW
-  let width = max(2, ed.width)
-  let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  if curR <= promptWrap(pw, width).head: ed.historyPrevious()
-  else: ed.visualUp()
+  let p0 = ed.line.position
+  ed.visualUp()
+  if ed.line.position == p0: ed.historyPrevious()
 proc cmdDown(ed: var LineEditor) =
-  let pw = ed.promptW; let cw = ed.contPromptW
-  let width = max(2, ed.width)
-  let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  let total = totalRows(ed.line.text, pw, cw, width)
-  if curR >= total - 1: ed.historyNext()
-  else: ed.visualDown()
+  let p0 = ed.line.position
+  ed.visualDown()
+  if ed.line.position == p0: ed.historyNext()
 proc cmdHistoryPrevious(ed: var LineEditor) = ed.historyPrevious()
 proc cmdHistoryNext(ed: var LineEditor) = ed.historyNext()
 proc cmdBackspace(ed: var LineEditor) = ed.deletePrevious()
@@ -2778,18 +2843,13 @@ proc initKeyTables*() =
   KEYMAP["insert"]    = proc(ed: var LineEditor) =
     ed.mode = if ed.mode == mdInsert: mdReplace else: mdInsert
   KEYMAP["down"]      = proc(ed: var LineEditor) =
-    let pw = ed.promptW; let cw = ed.contPromptW
-    let width = max(2, ed.width)
-    let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-    let total = totalRows(ed.line.text, pw, cw, width)
-    if curR >= total - 1: ed.historyNext()
-    else: ed.visualDown()
+    let p0 = ed.line.position
+    ed.visualDown()
+    if ed.line.position == p0: ed.historyNext()
   KEYMAP["up"]        = proc(ed: var LineEditor) =
-    let pw = ed.promptW; let cw = ed.contPromptW
-    let width = max(2, ed.width)
-    let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-    if curR <= promptWrap(pw, width).head: ed.historyPrevious()
-    else: ed.visualUp()
+    let p0 = ed.line.position
+    ed.visualUp()
+    if ed.line.position == p0: ed.historyPrevious()
   KEYMAP["ctrl+n"]    = proc(ed: var LineEditor) = ed.historyNext()
   KEYMAP["ctrl+p"]    = proc(ed: var LineEditor) = ed.historyPrevious()
   KEYMAP["left"]      = proc(ed: var LineEditor) = ed.back()
