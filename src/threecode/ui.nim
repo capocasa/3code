@@ -15,8 +15,8 @@ import types, util, prompts, session, config, api, compact, display, minline,
   auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins,
   images, goal
 
-const CommandNames* = [":help", ":tokens", ":clear", ":goal", ":model", ":provider",
-                      ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
+const CommandNames* = [":help", ":tokens", ":clear", ":goal", ":cyber", ":model",
+                      ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
                       ":version", ":sandbox", ":sb", ":retry", ":private",
                       ":quit", ":exit"]
@@ -99,9 +99,9 @@ proc classifyCommand*(cmd: string): CommandKind =
   case canon
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
-  of ":goal":
+  of ":goal", ":cyber":
     # Bare `:goal` shows the goal; bare `:goal!` cancels (a rename), and
-    # any text arms or replaces (a write).
+    # any text arms or replaces (a write). Same grammar for `:cyber`.
     if parts.len == 0 and not forced: ckSafeImmediate else: ckMutating
   of ":plugins":
     ckSafeImmediate
@@ -1774,7 +1774,7 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
 
 # ---------- Command dispatcher ----------
 
-proc modeVerbResult(m: ModeDesc; parts: seq[string]; arg: string;
+proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
                     forced: bool): tuple[ok: bool, line: string, armed: bool] =
   ## The whole `:<verb>` grammar, one mode descriptor in, one response
   ## line out: bare = status, bare with `!` or `cancel` = retire,
@@ -1794,8 +1794,8 @@ proc modeVerbResult(m: ModeDesc; parts: seq[string]; arg: string;
   elif parts.len == 0 or parts[0] == "cancel":
     if parts.len > 1:
       result.ok = false
-      result.line = m.verb & " cancel takes no argument (a " & m.name &
-        " is text, not a path)"
+      result.line = m.verb & " cancel takes no argument (cancel retires " &
+        "the whole " & m.fileName & ")"
     else:
       let (cok, cerr) = cancelMode(m)
       if not cok:
@@ -1973,12 +1973,13 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         body.add toolResultBytes(akBash, output, code, session.toolLog.len)
         if code != 0:
           ok = false
-    of ":goal":
-      # The mode-verb grammar lives in `modeVerbResult`; `:goal` is the
-      # registry's entry #1. Every arm sets `startGoalTurn` so the
-      # controller kicks goal achievement off immediately instead of
-      # waiting for the next turn boundary.
-      let r = modeVerbResult(goalMode, parts, arg, forced)
+    of ":goal", ":cyber":
+      # The mode-verb grammar lives in `modeVerbResult`; the command name
+      # picks the registry entry (`:goal` #1, `:cyber` #2). Every arm sets
+      # `startGoalTurn` so the controller kicks the mode's work off
+      # immediately instead of waiting for the next turn boundary.
+      let m = if name == ":cyber": cyberneticMode else: goalMode
+      let r = modeVerbResult(m, parts, arg, forced)
       if not r.ok: ok = false
       if r.ok: resp r.line else: respErr r.line
       armGoal = r.armed

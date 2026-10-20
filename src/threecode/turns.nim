@@ -1569,13 +1569,20 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           receiptBytes(mode.name & " mode: " & mode.fileName &
             " detected (interrupt to pause, " & mode.verb & "! to cancel)"),
           true)
+        # A second mode's file on disk while one mode runs is a refused
+        # arming: say so once, right under the detection receipt.
+        let other = conflictingMode(mode, session.cwd)
+        if not noMode(other):
+          commitTranscriptBytes(
+            receiptBytes(modeConflictLabel(mode, other)), true)
       # Verifier steps land in scrollback as they happen: same commit
       # path as the receipts around them, one dim indented tier below
       # the agent's items so the check can never read as agent work.
       goalStepHook = proc (step: GoalStep) =
         commitTranscriptBytes(goalStepBytes(step), true)
       defer: goalStepHook = nil
-      let check = runGoalCheck(p, readModeText(mode, session.cwd),
+      let modeText = readModeText(mode, session.cwd)
+      let check = runGoalCheck(p, mode.fileName, modeText,
                                buildGoalEvidence(messages))
       # The side call ran the bar/spinner hooks again; its usage is not
       # this turn's and must not leak into the next receipt.
@@ -1610,7 +1617,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       elif check.verdict.kind == gvkFeedback:
         commitTranscriptBytes(
           receiptBytes(mode.name & " check: feedback"), true)
-        messages.add mode.feedbackMessage(check.verdict.feedback)
+        messages.add mode.feedbackMessage(modeText, check.verdict.feedback)
         saveSession(session, messages)
         commitTranscriptBytes(
           receiptBytes("auto: " & mode.name & " check - continuing toward " &

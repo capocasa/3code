@@ -929,11 +929,13 @@ proc main() =
     let modeText = readModeText(m, session.cwd)
     messages.add m.kickoffMessage(modeText)
     saveSession(session, messages)
+    let counts = m.taskCounts(modeText)
     commitTranscriptBytes(
       receiptBytes("auto: " & m.name & " armed - starting toward " &
-        m.fileName), true)
+        m.fileName & (if counts.len > 0: " (" & counts & ")" else: "")),
+      true)
     commitTranscriptBytes(
-      formatItem(goalPromptItem(modeText.strip)), true)
+      formatItem(goalPromptItem(m.kickoffDisplay(modeText))), true)
     runTurnWithSafetyNet()
 
   # Run a prompt that arrived on the command line (or was queued during
@@ -1020,6 +1022,13 @@ proc main() =
     # in turns.nim.
     let mode = activeMode(session.cwd)
     if not noMode(mode):
+      # Both mode files on disk at startup: the registry's first entry
+      # wins and the other is a refused arming — said out loud, never
+      # dropped silently.
+      let other = conflictingMode(mode, session.cwd)
+      if not noMode(other):
+        commitTranscriptBytes(receiptBytes(modeConflictLabel(mode, other)),
+          true)
       if runModeKickoff(mode):
         quit(0)
     if prompt != "" and runInitialPrompt(prompt):
