@@ -2,6 +2,70 @@ Changelog
 
 Unreleased
 
+- **3code owns the tty's output discipline (gh #54).** A shell left
+  `-opost` by a crashed CLI or `stty -opost` used to break every wrapped
+  row: with `OPOST` off, `ONLCR` is inert, so the bare `\n` 3code writes
+  kept the previous row's column and paragraphs, tables, and the startup
+  box art drifted right into unreadability. 3code now restores
+  `OPOST|ONLCR` on the tty before the first paint and stops clearing
+  `OPOST` in the editor's raw-mode switch, so rows render at column 0
+  whatever the parent left behind - and the shell handed back at exit is
+  readable too.
+- **Quitting no longer leaves the terminal in no-echo mode after an
+  edit-in-editor round-trip.** Alt+E / Ctrl+X Ctrl+E hands the terminal
+  to `$VISUAL`/`$EDITOR` and re-applies raw mode when the editor
+  returns; it also replaced the cooked termios snapshot that exit
+  cleanup restores with that raw mode. Every quit afterwards
+  "restored" raw mode, so the shell the user landed in echoed nothing
+  until `reset`. The snapshot now survives the round-trip (gh #56).
+- **Cmd+A selects all (#57).** The `select-all` command - present
+  since the selection work but bound to no key - now ships bound to
+  `CmdA`, so on macOS the Command key gets its usual meaning with no
+  config: terminals that speak the kitty keyboard protocol (kitty,
+  Ghostty, iTerm2, WezTerm, foot, Warp) report the chord and the whole
+  buffer highlights; everywhere else the key stays inert and the
+  Ctrl/Shift defaults are untouched. `select-all = ""` unbinds it
+  like any other command.
+- **Prompt-cache affinity on OpenAI Responses (gh #58).** The ↻ slot in
+  the token bar was mostly absent on ChatGPT subscriptions because the
+  cache misses were real, not a display bug: OpenAI's prompt cache is
+  sharded and only serves hits when consecutive requests land on the
+  same shard, and 3code sent none of the affinity signals that pin that
+  routing (the Codex CLI sends a stable `prompt_cache_key` body field
+  and a `session_id` header). Every /responses request now carries the
+  conversation id (the `.3log` session id - stable across turns and
+  resume, rotating on `:clear`) as `prompt_cache_key`, and `chatgpt`
+  profiles additionally send it as the `session_id` header on the Codex
+  backend, exactly matching what the first-party client pins. One-shot
+  calls (verify, summarize) send neither; nothing is reused across
+  them. First-party openai profiles get the body field (a documented
+  public parameter); other providers never see it.
+- **Prompt-typing RangeDefect (gh #59): fixed since 0.8.1, now pinned by
+  regression tests.** The crash - `value out of range: -1 notin 0 ..
+  high` while typing after navigating a wrapped prompt - reproduces on
+  0.8.0 exactly as reported: a caret resting in a trailing space run
+  at the wrap margin draws one row below the gap, on a row whose span
+  starts past the caret and holds no whole rune, and `caretSliceBytes`
+  built `text[9 ..< 8]` from a rune length it never clamped to that
+  span. The clamp shipped in 0.8.1's caret/wrap rework; the
+  keystroke-level repro (type `cac c` plus spaces past the margin,
+  Left into the space run, End) and the span-model geometry are now
+  tests that fail with the reported RangeDefect on 0.8.0, so the
+  editor cannot regress there silently.
+- **More clickable links wherever a file is named (#60).** The `r`,
+  `w`, and `p` banners now hyperlink their path as an OSC 8 `file://`
+  URL - click a read/write/patch banner to open the file itself,
+  live viewport, transcript replay, and `:log` alike (terminals
+  without OSC 8 still show the bare path). A patch's full diff
+  always lands in the log dir as `T<n>.diff` with a linked
+  `T<n>.diff ↗` row, even when the diff fit in the transcript
+  un-truncated - one click from something `git apply` / `patch -R`
+  can consume; the dumped file is the complete diff, first banner
+  line included. And markdown links in model prose that point at
+  paths instead of URLs - `Created [some-plan.md](some-plan.md).` -
+  resolve against the project directory into working `file://`
+  links instead of printing as literal markup (`#anchors` and
+  unknown schemes still pass through verbatim).
 - **`.NET` builds work in the macOS sandbox (#55).** Writable paths
   now carry their unix-socket rights in the seatbelt profile
   (sandwall 0.5.12): `system-socket` for AF_UNIX creation, plus
