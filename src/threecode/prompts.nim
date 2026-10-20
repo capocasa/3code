@@ -3748,6 +3748,7 @@ input:
   ctrl+x ctrl+e same (emacs edit-and-execute-command)
   shift+arrows  select text (also shift+home/end, ctrl+shift+arrows,
                 ctrl+shift+home/end for the whole buffer)
+  cmd+a         select all (kitty keyboard protocol terminals)
   ctrl+x        cut the selection (without one: the emacs prefix above)
   alt+w         copy the selection
   ctrl+v        paste from the system clipboard
