@@ -1811,6 +1811,9 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
   ## ``minline.readLineWith`` path owns idle prompt input and active-turn
   ## buffered input; the controller only consumes completed lines here.
   ensureInputThreadStarted()
+  # Arriving at the prompt ends the "during a turn" window: a SIGINT from
+  # that window already cancelled its turn and must not also quit here.
+  clearSigintIdleExit()
   while true:
     if not inputThreadRunning and inputEditor != nil:
       ensureInputThreadStarted()
@@ -1841,6 +1844,12 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
       releaseIdleSubmittedInput()
       return ""
     if cmdWasQuit:
+      done = true
+      return ""
+    if consumeSigintIdleExit():
+      # SIGINT from outside while idle (kill -INT from a supervisor like
+      # mpx): exit through the same path as :q, so the terminal restore
+      # runs on the owning thread instead of dying with the tty raw.
       done = true
       return ""
     sleep 5
