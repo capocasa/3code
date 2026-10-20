@@ -170,7 +170,7 @@ proc runPromptTurn(job: PromptJob) =
       if ev.text.startsWith("● ") or ev.text.startsWith("❯ ") or
           isEmptyReplyMsg(ev.text):
         return
-      if ev.text.startsWith("» "):
+      if ev.text.startsWith("» ") or ev.text.startsWith("◎ "):
         stderr.writeLine "3code acp: " & ev.text
         return
       inc fe.toolSeq

@@ -137,6 +137,9 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     # ...and the kickoff turn runs without any further keystroke: the
     # harness-autosent receipt lands and the stub's first reply streams.
     tty.expectInHistory "auto: goal armed - starting toward goal.md"
+    # The goal itself prints under the ◎ target marker, not the » steer
+    # marker: goal mode is a tier of its own.
+    tty.expectInHistory "◎ make the stub say GOAL_WORK_DONE"
     tty.expectInHistory "GOAL_WORK_DONE"
     # Turn end: the verifier side call answers SATISFIED and retires the
     # file. The session idles with the confirmed record on disk.
@@ -182,8 +185,9 @@ suite "ctrl-r retry and goal kickoff (interactive)":
 
     tty.expect "\u276f"
     # Nothing is typed: the startup detection arms the goal and the
-    # kickoff turn runs on its own.
+    # kickoff turn runs on its own. Same ◎ target item as the :goal path.
     tty.expectInHistory "auto: goal armed - starting toward goal.md"
+    tty.expectInHistory "◎ make the stub say GOAL_WORK_DONE"
     tty.expectInHistory "GOAL_WORK_DONE"
     # Turn end: the verifier confirms and retires the file.
     tty.expectInHistory "goal confirmed"

@@ -931,7 +931,7 @@ proc main() =
     commitTranscriptBytes(
       receiptBytes("auto: goal armed - starting toward " & GoalFileName), true)
     commitTranscriptBytes(
-      formatItem(agentPromptItem(goalText.strip)), true)
+      formatItem(goalPromptItem(goalText.strip)), true)
     runTurnWithSafetyNet()
 
   # Run a prompt that arrived on the command line (or was queued during

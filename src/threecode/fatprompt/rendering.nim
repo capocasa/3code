@@ -764,10 +764,11 @@ proc formatQueuedPromptItem*(line: string): string =
   let termW = try: terminalWidth() except CatchableError: 0
   result = join(queuedEchoPlainRows(line, termW, withMarker = false), "\r\n")
 
-proc formatAgentPromptItem*(line: string): string =
+proc formatAgentPromptItem*(line: string; marker = "»"): string =
   ## Format a harness-autosent prompt (empty-reply steer, flail prod, and
   ## future matter-of-course harness turns) as a scrollback item body: a
-  ## bold `»` marker with a default-fg body, the harness-voice tier, peer
+  ## bold marker (default `»`; the goal kickoff carries `◎`) with a
+  ## default-fg body, the harness-voice tier, peer
   ## of the plain user echo. Monochrome on purpose: the color tiers stay
   ## exclusive (cyan = token bookkeeping, magenta = errors), it is
   ## palette-proof in light mode, and routine autosends must not read as
@@ -779,7 +780,7 @@ proc formatAgentPromptItem*(line: string): string =
     let chunks =
       if termW <= 0: @[l]
       else: wrapPlain(l, max(1, termW - 2))
-    result.add (if idx == 0: BoldOn & "» " & Reset else: "") & chunks[0]
+    result.add (if idx == 0: BoldOn & marker & " " & Reset else: "") & chunks[0]
     for chunk in chunks[1 ..< chunks.len]:
       result.add "\r\n  " & chunk
     if idx < lines.high:

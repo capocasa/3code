@@ -37,6 +37,8 @@ const
   EvidenceResultCap* = 240  ## per-call result head ceiling
   GoalDiffCapBytes* = 8000  ## working-tree diff feed ceiling
   GoalDiffMaxUntracked* = 24  ## untracked files diffed before the elision note
+  GoalKickoffPrefix* = "Goal armed: "  ## opens the kickoff message; replay
+                                        ## matches it to pick the `◎` marker
 
 type
   GoalVerdictKind* = enum
@@ -118,9 +120,9 @@ proc goalKickoffMessage*(goalText: string): JsonNode =
   ## The harness-autosent prompt that starts goal achievement immediately
   ## after `goal.md` is written, instead of waiting for the next turn
   ## boundary. Same `agentSent` marking as the feedback continuation, so
-  ## replay renders it as a `»` item and no provider sees the marker.
+  ## replay renders it as a `◎` item and no provider sees the marker.
   %*{"role": "user", "agentSent": true,
-     "content": "Goal armed: " & GoalFileName & " in this repository now " &
+     "content": GoalKickoffPrefix & GoalFileName & " in this repository now " &
        "states the session's goal:\n\n" & goalText.strip &
        "\n\nStart working toward it now. A satisfaction check runs when " &
        "each turn ends and sends you back in with feedback until the " &

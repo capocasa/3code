@@ -6,7 +6,7 @@
 
 import std/[json, strutils, tables]
 
-import actions, display, fatprompt, session, types, util, images
+import actions, display, fatprompt, goal, session, types, util, images
 
 export isEmptyReplyMsg
 
@@ -58,6 +58,13 @@ proc agentPromptItem*(line: string): TranscriptItem =
   TranscriptItem(kind: tiAgentPrompt, marker: "»", body: line,
                  attachSeparator: false)
 
+proc goalPromptItem*(line: string): TranscriptItem =
+  ## The goal kickoff: same harness-voice tier as a steer but a target
+  ## marker, so the goal text reads as the session's aim, not another
+  ## autosend.
+  TranscriptItem(kind: tiAgentPrompt, marker: "◎", body: line,
+                 attachSeparator: false)
+
 proc assistantItem*(content: string): TranscriptItem =
   TranscriptItem(kind: tiAssistant, marker: "●", body: content,
                  attachSeparator: true)
@@ -83,7 +90,7 @@ proc formatItem*(item: TranscriptItem): string =
   of tiUserPrompt:
     result = formatUserPromptItem(item.body)
   of tiAgentPrompt:
-    result = formatAgentPromptItem(item.body)
+    result = formatAgentPromptItem(item.body, item.marker)
   of tiAssistant:
     if item.body.strip.len == 0:
       result = emptyAssistantBytes(false)
@@ -185,9 +192,12 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
       # A harness-autosent steer renders as the `»` agent-prompt item the
-      # live path committed, never as a user `❯` echo.
+      # live path committed, never as a user `❯` echo; the goal kickoff
+      # keeps its `◎` target marker instead.
       let item =
-        if m{"agentSent"}.getBool(false): agentPromptItem(c)
+        if m{"agentSent"}.getBool(false):
+          if c.startsWith(GoalKickoffPrefix): goalPromptItem(c)
+          else: agentPromptItem(c)
         else: userPromptItem(c)
       # No length truncation: the live path echoes the full submitted line
       # (wrapped at terminal width by `formatUserPromptItem`), so the replay
