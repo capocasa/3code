@@ -414,6 +414,25 @@ suite "minline drawn caret spans":
     check spans == @[(start: 0, stop: 0), (start: 0, stop: 3),
                      (start: 3, stop: 6), (start: 6, stop: 9)]
 
+  test "caret resting in a break-space gap draws a lone caret cell (gh #59)":
+    # A caret typed into a trailing space run sits past the wrap margin,
+    # so the drawn caret belongs one row below - on a span that starts
+    # past the caret and holds no whole rune. caretSliceBytes used to
+    # slice text[sp.start + rl ..< sp.stop] with rl from the rune at
+    # sp.start and no clamp to the span: the empty span (8, 8) over
+    # "cac c    " produced text[9 ..< 8], a negative-length slice that
+    # raised RangeDefect on every repaint through that row.
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "ppp"
+    ed.contPrompt = "cccc"
+    ed.width = 10
+    ed.line = Line(text: "cac c    ", position: 7)
+    let rows = ed.renderRowSpans()
+    check rows.len == 2
+    check rows[0] == "pppcac c"
+    check rows[1] == "cccc" & CaretCellOn & " " & CaretCellOff
+
 suite "minline editor: basic typing":
   test "type 'hello' + Enter returns 'hello'":
     var ed = initEditor()
@@ -1047,6 +1066,29 @@ suite "minline editor: terminal-width wrap":
     # (prompt 0..1, 'a'=2, 'b'=3, 'c'=4, 'd'=5, col 6 is after 'd').
     let result = d.run(ed, prompt = "> ")
     check result == "abcd?efghijkl"
+
+  test "Left into a trailing space run at the wrap margin survives (gh #59)":
+    # Typing spaces past the margin parks the caret in a break-space
+    # run; moving back into it repaints the row whose span starts past
+    # the caret. 0.8.0 raised RangeDefect (value out of range: -1 notin
+    # 0 .. high) from back() -> fullRedraw -> renderRowSpans ->
+    # caretSliceBytes and the editor died mid-keystroke.
+    var ed = initEditor()
+    ed.contPrompt = "    "
+    # The app installs a painter; a plain driver run has none and skips
+    # the drawn-caret path the crash lives in. This one mirrors the
+    # fatprompt diff painter closely enough to hit renderRowSpans.
+    ed.painter = proc(e: var LineEditor) =
+      e.prevRowSpans = e.renderRowSpans()
+      e.write e.redrawBytes(synchronized = true)
+    let d = newDriver(width = 10)
+    d.pushString "cac c"
+    d.pushString "    "
+    d.push Left
+    d.push Left
+    d.push End
+    d.push Enter
+    check d.run(ed, prompt = "ppp") == "cac c    "
 
 # ---------------- Driver: terminal resize ----------------
 
