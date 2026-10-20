@@ -7,6 +7,7 @@ discard """
 ## (banner + output in scrollback, never to the model), and Alt+E /
 ## Ctrl+X Ctrl+E edit the prompt buffer in $VISUAL/$EDITOR.
 import std/[json, os, posix, strutils, times, unittest]
+import posix/termios
 import tty_expect
 import stub_helpers
 
@@ -264,3 +265,57 @@ suite "shell command and edit-in-editor":
     tty.drain(200)
     tty.expect "\u276f"
     echo "  PASS: Ctrl+X Ctrl+E edit-in-editor"
+
+proc ptyEchoes(s: TtySession): bool =
+  ## The pty's termios as the child left it: ECHO + ICANON must both be on
+  ## after exit, or the shell the user lands in eats keystrokes (gh #56).
+  var t: Termios
+  if tcGetAttr(s.masterFd.cint, addr t) != 0:
+    return false
+  (t.c_lflag and Cflag(ECHO or ICANON)) == Cflag(ECHO or ICANON)
+
+test ":q at a fresh prompt leaves the terminal echoing":
+  let root = newFixture("quit_echo_baseline")
+  writeConfiguredProvider(root)
+  writeStubResponses(root)
+  let tty = startStub(root, "")
+  defer: tty.close()
+
+  tty.expect "\u276f"
+  tty.typeText ":q"
+  tty.send "\n"
+  tty.expectExit(0)
+  require ptyEchoes(tty)
+  echo "  PASS: :q restores echo"
+
+test ":q after an edit-in-editor round-trip leaves the terminal echoing":
+  # Alt+E hands the terminal to $VISUAL and re-applies raw mode when it
+  # returns. That used to overwrite the cooked termios snapshot the exit
+  # cleanup restores, so the next :q "restored" raw mode: no echo, no
+  # line editing, only `reset` brought the shell back.
+  let root = newFixture("alt_e_exit_echo")
+  writeConfiguredProvider(root)
+  writeStubResponses(root)
+  let marker = root / "alt_exit_marker"
+  let editor = editorScript(root, marker)
+  let tty = startStub(root, editor)
+  defer: tty.close()
+
+  tty.expect "\u276f"
+
+  tty.typeText "draft"
+  tty.drain(100)
+  tty.sendAltChord('e')
+
+  require waitForFile(marker)
+  tty.drain(300)
+  tty.expectInHistory "edited line"
+
+  tty.expect "\u276f"
+  tty.sendBytes "\x15" # Ctrl+U: clear the edited buffer
+  tty.drain(100)
+  tty.typeText ":q"
+  tty.send "\n"
+  tty.expectExit(0)
+  require ptyEchoes(tty)
+  echo "  PASS: :q after Alt+E restores echo"
