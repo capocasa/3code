@@ -360,6 +360,60 @@ suite "prompts: setup — mistral":
     check "524K window" in s.prompt
     check "renamed `foo.nim` to `bar.nim`" in s.prompt
 
+suite "prompts: setup — deepseek":
+  test "tools section documents harness behavior, not just names":
+    let p = Profile(name: "deepseek.deepseek-flash", url: "x", key: "k",
+                    model: "deepseek-flash", family: "deepseek",
+                    version: "4.1")
+    let s = setup(p)
+    check s.prompt.startsWith("You are the DeepSeek edition of 3code")
+    check s.prompt.count("## 5. Tools") == 1
+    # The rewrite that fixed DS 4.1 Flash's patch-tool flailing
+    # (community.3code.capocasa.dev/t/9), condensed: the section must
+    # teach the semantics the harness actually enforces, one fact once.
+    check "exit=N" in s.prompt
+    check "tail-truncated" in s.prompt
+    check "hard" in s.prompt and "120s" in s.prompt
+    check "Lines over 2KB are skipped" in s.prompt
+    check "capped at 250 lines" in s.prompt
+    check "limit:-1` lifts the cap" in s.prompt
+    check "must already exist" in s.prompt
+    check "FIRST match" in s.prompt
+    check "2-3 lines of unique context" in s.prompt
+    check "Match ladder (`fuzzyReplaceFirst`)" in s.prompt
+    check "reports the strategy used" in s.prompt
+    check "verbatim from the file as it is on disk now" in s.prompt
+    check "no line numbers or gutters" in s.prompt
+    check "stale text errors" in s.prompt
+    check "the whole call errors and nothing is written" in s.prompt
+    check "resend" in s.prompt
+    check "Empty `search` is rejected" in s.prompt
+    check "unconditionally" in s.prompt
+
+  test "prompt stays terse (under 9.9KB with splices)":
+    let p = Profile(name: "deepseek.deepseek-flash", url: "x", key: "k",
+                    model: "deepseek-flash", family: "deepseek",
+                    version: "4.1")
+    let s = setup(p)
+    let full = s.prompt
+      .replace("{{credit}}", buildCredit(p))
+      .replace("{{skills}}", "(none installed)")
+    check full.len < 9900
+
+  test "tools are glmAndQwenTools (bash/read/write/patch)":
+    let p = Profile(name: "deepseek.deepseek-flash", url: "x", key: "k",
+                    model: "deepseek-flash", family: "deepseek",
+                    version: "4.1")
+    let s = setup(p)
+    check s.tools.kind == JArray
+    check s.tools.len == 8
+    var foundPatch = false
+    for t in s.tools:
+      if t{"function"}{"name"}.getStr == "patch":
+        foundPatch = true
+        check t{"function"}{"parameters"}{"properties"}.hasKey("edits")
+    check foundPatch
+
 suite "prompts: buildCredit":
   test "builds attribution for valid profile":
     let p = Profile(name: "zai.glm-5.1", model: "glm-5.1")

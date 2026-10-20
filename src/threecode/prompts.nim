@@ -2100,11 +2100,28 @@ Common failure paths:
 
 ## 5. Tools
 
-- `bash(command, stdin?, timeout?)` — shell command. stdout, stderr, exit code.
-  `timeout` (optional seconds) raises the 120s default up to 600s for builds.
-- `write(path, body)` — create or overwrite a file.
-- `patch(path, edits)` — `{search, replace}` pairs. Each search must match
-  exactly once; include enough context to be unambiguous.
+- `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Check the
+  `exit=N` marker: nonzero is a failure to investigate, not a result to build
+  on. Output is tail-truncated when large — for a middle slice re-run narrower
+  (`sed -n`, `awk`), don't assume you saw it all. The 120s default is a hard
+  kill; set `timeout` (up to 600s) up front for slow work. Shell state does
+  not persist between calls.
+- `read(path, offset?, limit?)` — line-numbered. Lines over 2KB are skipped;
+  without `offset`/`limit` it is capped at 250 lines — a truncated view, not
+  the whole file. `limit:-1` lifts the cap.
+- `write(path, body)` — create or overwrite, unconditionally. Read what is
+  there before overwriting; prefer `patch` for targeted changes.
+- `patch(path, edits)` — `{search, replace}` pairs applied in order; the file
+  must already exist. Each edit replaces the FIRST match of its `search` —
+  give every block 2-3 lines of unique context so the first match is the
+  right one. Match ladder (`fuzzyReplaceFirst`): exact substring →
+  line-by-line ignoring leading indent (replacement re-anchored to the
+  file's real indent) → interior whitespace collapsed. A non-exact match
+  still applies and reports the strategy used — re-read if the diff looks
+  off. Copy `search` verbatim from the file as it is on disk now, raw lines
+  (no line numbers or gutters); stale text errors. All edits must match or
+  the whole call errors and nothing is written — fix the block and resend
+  the entire call. Empty `search` is rejected.
 - `update_plan(items)` — todo list. 3–7 items, max one `in_progress`.
 - `web_search(query)` — titles, URLs, snippets.
 - `web_fetch(url)` — readable text, boilerplate stripped.
