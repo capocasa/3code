@@ -8,6 +8,10 @@ import std/[locks, terminal]
 import minline
 import ./syncoutput
 
+when defined(posix):
+  import posix
+  import std/termios
+
 proc SyncBegin*(): string = syncoutput.SyncBegin()
 proc SyncEnd*(): string = syncoutput.SyncEnd()
 
@@ -119,6 +123,26 @@ proc writeRaw*(bytes: string) =
   withTerminalWriteLock:
     stdout.write bytes
     stdout.flushFile
+
+proc ensureOutputProcessing*() =
+  ## Own the tty's output discipline instead of inheriting it. A parent
+  ## shell, multiplexer, or a previously crashed CLI can leave `OPOST`
+  ## disabled, which disables `ONLCR` with it: every bare `\n` 3code
+  ## writes then keeps the previous row's column, so wrapped output
+  ## drifts right and becomes unreadable. Turn both back on before the
+  ## first paint; every later termios restore hands that state back, so
+  ## the shell the user returns to is readable too.
+  when defined(posix):
+    for f in [stdout, stdin]:
+      let fd = f.getFileHandle()
+      if isatty(fd) == 0: continue
+      var mode: Termios
+      if fd.tcGetAttr(addr mode) != 0: continue
+      let wanted = mode.c_oflag or Cflag(OPOST) or Cflag(ONLCR)
+      if wanted == mode.c_oflag: continue
+      var patched = mode
+      patched.c_oflag = wanted
+      discard fd.tcSetAttr(TCSANOW, addr patched)
 
 proc setSteadyCursor*() =
   ## Use a steady block cursor while 3code is active.

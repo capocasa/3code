@@ -651,7 +651,7 @@ proc resizeMainThread*(s: TtySession; cols, rows: int): bool {.discardable.} =
 proc newTtySession*(bin: string; args: openArray[string] = [];
                     cwd = ""; env: openArray[EnvVar] = [];
                     cols = DefaultTtyCols; rows = DefaultTtyRows;
-                    keepHistory = true): TtySession =
+                    keepHistory = true; slaveNoOpost = false): TtySession =
   ## Start `bin` under a real PTY (POSIX) or Pseudo Console (Windows) with an
   ## isolated environment.
   ##
@@ -914,6 +914,15 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       discard close(tickerAckPipe[0])
       discard close(apiContinuePipe[1])
       discard login_tty(slaveFd)
+      # Optionally hand the child a tty with OPOST off, the state a crashed
+      # CLI or `stty -opost` leaves behind: ONLCR is inert, so any bare
+      # `\n` the child writes keeps the previous column. Tests for output
+      # discipline (gh #54) start the child exactly there.
+      if slaveNoOpost:
+        var mode: Termios
+        if tcGetAttr(0.cint, addr mode) == 0:
+          mode.c_oflag = mode.c_oflag and not Cflag(OPOST)
+          discard tcSetAttr(0.cint, TCSANOW, addr mode)
       clearEnv()
 
       var hasTerm = false
