@@ -94,6 +94,16 @@ overstate how deeply you verified. End with exactly one line: VERDICT:
 SATISFIED, or VERDICT: FEEDBACK: <what is missing or what to do
 next>."""
 
+const StepTruthClause* = """The goal is a PLAN: you also get the harness-parsed task list and
+the checkbox delta for this turn. Judge step truth: a checked box
+must match the evidence and the diff; name the first box that lies
+(checked without the work it claims, or finished work left unchecked
+and unexplained). Treat newly checked boxes as claims to verify."""
+  ## Prepended to the shared preamble for plan modes; the verdict
+  ## contract stays the preamble's last instruction.
+
+const CyberVerifierPreamble* = StepTruthClause & "\n\n" & VerifierPreamble
+
 proc goalModeActive*(dir = "."): bool =
   fileExists(dir / GoalFileName)
 
@@ -212,6 +222,65 @@ proc planCountsLine*(plan: CyberPlan): string =
   let done = plan.tasks.countIt(it.checked)
   $plan.tasks.len & " task" & (if plan.tasks.len != 1: "s" else: "") &
     ", " & $done & " done"
+
+type
+  PlanDelta* = object
+    ## Checkbox movement between two snapshots of cybernetic.md,
+    ## matched by task text (first match consumed, so duplicated task
+    ## texts still pair up).
+    newlyChecked*: seq[string]
+    newlyUnchecked*: seq[string]
+    added*: seq[string]
+    removed*: seq[string]
+
+proc planDelta*(pre, post: string): PlanDelta =
+  let a = parsePlan(pre).tasks
+  let b = parsePlan(post).tasks
+  var consumed = newSeq[bool](b.len)
+  for t in a:
+    var found = -1
+    for j, u in b:
+      if not consumed[j] and u.text == t.text:
+        found = j
+        break
+    if found < 0:
+      result.removed.add t.text
+    else:
+      consumed[found] = true
+      if t.checked and not b[found].checked: result.newlyUnchecked.add t.text
+      elif not t.checked and b[found].checked: result.newlyChecked.add t.text
+  for j, u in b:
+    if not consumed[j]: result.added.add u.text
+
+proc planFeedSection*(pre, post: string): string =
+  ## The structural half of the cybernetic verifier's feed: the parsed
+  ## task list plus the per-turn checkbox delta, so the side call judges
+  ## step truth (do checked boxes match evidence and diff) instead of
+  ## vibes. Empty when the post state has no task list (structure loss
+  ## is the guard's business, not the verifier's).
+  let plan = parsePlan(post)
+  if plan.tasks.len == 0: return
+  result = "Plan task list (harness-parsed from " & CyberFileName & ", " &
+    planCountsLine(plan) & "):"
+  for t in plan.tasks:
+    result.add "\n  [" & (if t.checked: "x" else: " ") & "] " & t.text
+  result.add "\n\nCheckbox delta this turn:"
+  if pre.strip.len == 0:
+    result.add "\n  (no turn-start snapshot; delta unknown)"
+    return
+  let d = planDelta(pre, post)
+  if d.newlyChecked.len == 0 and d.newlyUnchecked.len == 0 and
+      d.added.len == 0 and d.removed.len == 0:
+    result.add "\n  (no checkbox changes this turn)"
+    return
+  if d.newlyChecked.len > 0:
+    result.add "\n  newly checked: " & d.newlyChecked.join("; ")
+  if d.newlyUnchecked.len > 0:
+    result.add "\n  newly unchecked: " & d.newlyUnchecked.join("; ")
+  if d.added.len > 0:
+    result.add "\n  tasks added: " & d.added.join("; ")
+  if d.removed.len > 0:
+    result.add "\n  tasks removed: " & d.removed.join("; ")
 
 proc planTitle*(body: string): string =
   ## The plan's title: the first heading if there is one, else the
@@ -334,6 +403,19 @@ type
       ## `3 tasks, 1 done`; "" when the mode has no task structure.
     kickoffDisplay*: proc (body: string): string
       ## The scrollback kickoff item body under the `◎` marker.
+    structureGuard*: proc (post: string): string
+      ## Turn-boundary duty: mid-run structure loss returns the full
+      ## restore-the-plan continuation content (no side call runs);
+      ## "" lets the boundary proceed to the verifier.
+    updateNote*: proc (worked: bool; pre, post: string): string
+      ## Turn-boundary duty: update discipline. Work happened this turn
+      ## but the mode file is byte-identical to its turn-start snapshot
+      ## -> the mechanical note; "" when no note is owed.
+    verifierFeed*: proc (pre, post: string): string
+      ## Extra structural feed sections for the verifier prompt; "" when
+      ## the mode adds none.
+    judgeStepTruth*: bool
+      ## Prepend `StepTruthClause` to the verifier preamble.
 
 var modeRegistry* = newSeq[ModeDesc]()
   ## The mode table. goal mode is entry #1, registered at module init;
@@ -415,7 +497,11 @@ let goalMode* = ModeDesc(
   kickoffMessage: goalKickoffMessage,
   feedbackMessage: proc (body, fb: string): JsonNode = goalFeedbackMessage(fb),
   taskCounts: proc (body: string): string = "",
-  kickoffDisplay: proc (body: string): string = body.strip)
+  kickoffDisplay: proc (body: string): string = body.strip,
+  structureGuard: proc (post: string): string = "",
+  updateNote: proc (worked: bool; pre, post: string): string = "",
+  verifierFeed: proc (pre, post: string): string = "",
+  judgeStepTruth: false)
 
 modeRegistry.add goalMode
 
@@ -431,15 +517,37 @@ let cyberneticMode* = ModeDesc(
   kickoffMessage: cyberKickoffMessage,
   feedbackMessage: cyberFeedbackMessage,
   taskCounts: proc (body: string): string = planCountsLine(parsePlan(body)),
-  kickoffDisplay: proc (body: string): string =
+  kickoffDisplay: (proc (body: string): string =
     let plan = parsePlan(body)
     let counts = planCountsLine(plan)
     result = planTitle(body)
     if counts.len > 0: result.add " - " & counts
     let next = nextUncheckedText(plan)
-    if next.len > 0: result.add "; next: " & next)
+    if next.len > 0: result.add "; next: " & next),
+  structureGuard: (proc (post: string): string =
+    let err = validatePlanBody(post)
+    if err.len == 0: return ""
+    result = "Plan structure lost: " & err & ". Restore the plan file now - " &
+      "the task list and the ## Current state section, keeping every " &
+      "box already earned. The mode stays armed; the next satisfaction " &
+      "check judges the restored plan."),
+  updateNote: (proc (worked: bool; pre, post: string): string =
+    if worked and post.len > 0 and pre == post:
+      result = "Work happened this turn but " & CyberFileName &
+        " is unchanged. Update the plan to match reality: check off the " &
+        "tasks this turn finished, and record what the step taught " &
+        "under ## Current state."),
+  verifierFeed: planFeedSection,
+  judgeStepTruth: true)
 
 modeRegistry.add cyberneticMode
+
+proc harnessNote*(content: string): JsonNode =
+  ## A harness-autosent continuation carrying fully-formed content (the
+  ## structure-guard's restore note): same `agentSent` marking as every
+  ## other autosend, so replay renders it as a `»` item and no provider
+  ## ever sees the marker.
+  %*{"role": "user", "agentSent": true, "content": content}
 
 proc conflictingMode*(m: ModeDesc; dir = "."): ModeDesc =
   ## The first OTHER registry mode whose trigger file also sits in `dir`
@@ -521,6 +629,31 @@ proc resultHead(res: string): string =
   if last == first: return first
   first & "\n  ... " & last
 
+proc lastTurnStart*(messages: JsonNode): int =
+  ## Index one past the last user message, whoever sent it: the slice
+  ## of the transcript that belongs to the just-finished turn. Shared
+  ## by the evidence builder and the tool-action probe so the two can
+  ## never disagree about where a turn begins.
+  if messages == nil or messages.kind != JArray: return 0
+  for i in countdown(messages.len - 1, 0):
+    if messages[i].kind == JObject and
+        messages[i]{"role"}.getStr == "user":
+      return i + 1
+  0
+
+proc turnHadToolActions*(messages: JsonNode): bool =
+  ## Did the just-finished turn run any tool call? The cybernetic
+  ## update-discipline heuristic: work happened = at least one tool
+  ## action in the turn's slice (v1 is tool actions only).
+  if messages == nil or messages.kind != JArray: return false
+  for i in lastTurnStart(messages) ..< messages.len:
+    let tcs = messages[i]{"tool_calls"}
+    if messages[i].kind == JObject and
+        messages[i]{"role"}.getStr == "assistant" and
+        tcs != nil and tcs.kind == JArray and tcs.len > 0:
+      return true
+  false
+
 proc buildGoalEvidence*(messages: JsonNode): string =
   ## Harness-constructed evidence from the just-finished turn: walk the
   ## transcript's tool calls (the slice after the last user message,
@@ -528,12 +661,7 @@ proc buildGoalEvidence*(messages: JsonNode): string =
   ## Assistant prose is never included — the verifier judges artifacts,
   ## not claims — and the whole summary is capped.
   if messages == nil or messages.kind != JArray: return
-  var start = 0
-  for i in countdown(messages.len - 1, 0):
-    if messages[i].kind == JObject and
-        messages[i]{"role"}.getStr == "user":
-      start = i + 1
-      break
+  let start = lastTurnStart(messages)
   var calls: seq[tuple[id, name, brief: string]]
   var results: Table[string, string]
   for i in start ..< messages.len:
@@ -613,7 +741,7 @@ proc buildGoalDiff*(dir = "."): string =
       " bytes; run git yourself for the rest)"
 
 proc verifierPrompt*(goalText, evidence: string; diff = "";
-                    sourceFile = GoalFileName): string =
+                    sourceFile = GoalFileName; planFeed = ""): string =
   result = "Goal (from " & sourceFile & " in the repo root):\n\n" &
     goalText.strip &
     "\n\nEvidence from the agent's just-finished turn (harness-built from " &
@@ -621,14 +749,17 @@ proc verifierPrompt*(goalText, evidence: string; diff = "";
   if diff.strip.len > 0:
     result.add "\n\nWorking-tree diff vs HEAD captured by the harness " &
       "(tracked changes plus untracked files, capped):\n\n" & diff.strip
+  if planFeed.strip.len > 0:
+    result.add "\n\n" & planFeed.strip
   result.add "\n\nJudge from these inputs and end with the verdict line."
 
 # ---------- side call ----------
 
-var goalCheckHook*: proc (p: Profile, sourceFile, goalText, evidence: string):
+var goalCheckHook*: proc (p: Profile, preamble, prompt: string):
     tuple[ok: bool, text: string, err: string] = nil
-  ## Test seam: when set, `runGoalCheck` sends its side call here instead
-  ## of the wire. The verdict contract being a text line is what makes
+  ## Test seam: when set, `runGoalCheck` sends its side call here with
+  ## exactly what would go on the wire (judge preamble + opening
+  ## prompt). The verdict contract being a text line is what makes
   ## the loop testable without a provider.
 
 var goalStepHook*: proc (step: GoalStep) = nil
@@ -641,7 +772,7 @@ proc stepProse(text: string) =
   if goalStepHook != nil and text.strip.len > 0:
     goalStepHook(GoalStep(prose: text))
 
-proc runVerifierSideCall(p: Profile, sourceFile, goalText, evidence: string):
+proc runVerifierSideCall(p: Profile, preamble, prompt: string):
     tuple[ok: bool, text: string, err: string] =
   ## Toolless verifier: a fresh conversation (its own message list, the
   ## judge preamble, an empty roster so the provider offers nothing),
@@ -653,12 +784,8 @@ proc runVerifierSideCall(p: Profile, sourceFile, goalText, evidence: string):
   sideCallMode = true
   defer: sideCallMode = false
   var convo = newJArray()
-  convo.add %*{"role": "system", "content": VerifierPreamble}
-  # The diff is captured here, at check time, so it reflects exactly the
-  # state the verdict is about.
-  convo.add %*{"role": "user",
-    "content": verifierPrompt(goalText, evidence, buildGoalDiff(),
-                              sourceFile)}
+  convo.add %*{"role": "system", "content": preamble}
+  convo.add %*{"role": "user", "content": prompt}
   var usage: Usage
   var msg: JsonNode
   try:
@@ -669,13 +796,20 @@ proc runVerifierSideCall(p: Profile, sourceFile, goalText, evidence: string):
   stepProse(text)
   (true, text, "")
 
-proc runGoalCheck*(p: Profile, sourceFile, goalText, evidence: string):
-    GoalCheckResult =
-  ## Fire the side call and parse its verdict. `ok=false` means the call
-  ## itself failed (network, provider): the caller keeps running without
-  ## feedback and retries at the next boundary.
+proc runGoalCheck*(p: Profile; m: ModeDesc; modeText, evidence,
+                   preSnapshot: string): GoalCheckResult =
+  ## Compose the side call from the mode descriptor — the preamble
+  ## (step-truth judging for plan modes), the mode text, the evidence,
+  ## the check-time diff, and the structural feed — then fire it and
+  ## parse the verdict. `ok=false` means the call itself failed
+  ## (network, provider): the caller keeps running without feedback and
+  ## retries at the next boundary.
+  let preamble =
+    if m.judgeStepTruth: CyberVerifierPreamble else: VerifierPreamble
+  let prompt = verifierPrompt(modeText, evidence, buildGoalDiff(),
+                              m.fileName, m.verifierFeed(preSnapshot, modeText))
   let call = if goalCheckHook != nil: goalCheckHook else: runVerifierSideCall
-  let (ok, text, err) = call(p, sourceFile, goalText, evidence)
+  let (ok, text, err) = call(p, preamble, prompt)
   if not ok:
     return GoalCheckResult(ok: false, err: err)
   GoalCheckResult(ok: true, verdict: parseVerdict(text))

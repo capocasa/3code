@@ -248,3 +248,102 @@ suite "cyber mode surfaces (interactive)":
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     tty.expectAlive()
+
+proc toolReply(name, argsJson: string; content = ""): JsonNode =
+  %*{"role": "assistant", "preStreamDelayMs": 50, "content": content,
+     "tool_calls": [{"id": "c" & $epochTime(), "type": "function",
+       "function": {"name": name, "arguments": argsJson}}],
+     "usage": {"promptTokens": 5, "completionTokens": 2,
+                "totalTokens": 7, "cachedTokens": 0}}
+
+suite "cyber mode direction machinery (interactive)":
+  test "update discipline: work without a plan update gets the mechanical note":
+    let root = newFixture("cyber_discipline")
+    writeConfiguredProvider(root)
+    # The model does real work (a bash tool call) but never touches
+    # cybernetic.md. The first check must merge the verifier's FEEDBACK
+    # with the mechanical update note; after the model finally checks
+    # the box, no note rides and the verifier confirms.
+    writeFile(root / "run" / "cybernetic.md",
+      "# Plan\n\n- [ ] make the stub say DONE\n\n" &
+      "## Current state\n\nNot begun.\n")
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      toolReply("bash", """{"command": "echo real work"}"""),
+      reply("I did the work"),
+      reply("the task is not checked off\nVERDICT: FEEDBACK: check the box"),
+      toolReply("write",
+        """{"path": "cybernetic.md", "body": "# Plan\n\n- [x] make the stub say DONE\n\n## Current state\n\nWork done for real.\n"}"""),
+      reply("plan updated"),
+      reply("all done\nVERDICT: SATISFIED"),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    # Kickoff turn: a real tool action runs (the bash output lands), the
+    # plan file stays untouched.
+    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md"
+    tty.expectInHistory "real work"
+    # Turn end: FEEDBACK from the verifier AND the discipline note, one
+    # continuation carrying both.
+    tty.expectInHistory "cybernetic check: feedback"
+    tty.expectInHistory "check the box"
+    tty.expectInHistory "cybernetic.md is unchanged"
+    # The model updates the plan; the next check has no note to add and
+    # the verifier confirms against the checked plan.
+    tty.expectInHistory "plan updated"
+    tty.expectInHistory "cybernetic confirmed"
+    tty.drain(300)
+    check fileExists(root / "run" / "cybernetic-confirmed.md")
+    check not fileExists(root / "run" / "cybernetic.md")
+    tty.expectAlive()
+
+  test "structure loss mid-run: restore continuation, mode stays latched":
+    let root = newFixture("cyber_structure_loss")
+    writeConfiguredProvider(root)
+    # The model destroys the plan format (a prose-only rewrite). The
+    # boundary must refuse to run the verifier, say the structure was
+    # lost, and send the agent back to restore - the mode stays armed.
+    # After the restore, the verifier runs normally and confirms.
+    writeFile(root / "run" / "cybernetic.md",
+      "# Plan\n\n- [ ] keep the format\n\n" &
+      "## Current state\n\nNot begun.\n")
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      toolReply("write",
+        """{"path": "cybernetic.md", "body": "just prose now, no tasks, no sections\n"}"""),
+      reply("rewrote it"),
+      toolReply("write",
+        """{"path": "cybernetic.md", "body": "# Plan\n\n- [x] keep the format\n\n## Current state\n\nRestored.\n"}"""),
+      reply("restored the plan"),
+      reply("all done\nVERDICT: SATISFIED"),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md"
+    # The rewrite lands; the boundary catches the broken format before
+    # any verifier call.
+    tty.expectInHistory "rewrote it"
+    tty.expectInHistory "cybernetic check: plan structure lost"
+    tty.expectInHistory "at least one task item"
+    # The mode never dropped: the restore turn runs, then the verifier
+    # judges the restored plan and confirms.
+    tty.expectInHistory "restored the plan"
+    tty.expectInHistory "cybernetic confirmed"
+    tty.drain(300)
+    check fileExists(root / "run" / "cybernetic-confirmed.md")
+    check not fileExists(root / "run" / "cybernetic.md")
+    tty.expectAlive()

@@ -6,6 +6,7 @@
 
 import std/[json, os, strutils, tempfiles, unittest]
 import threecode/goal
+import threecode/types except Usage
 
 proc withModeDir(body: proc (dir: string)) =
   let dir = createTempDir("modes-test-", "")
@@ -289,3 +290,140 @@ suite "mode registry":
         check balk.err == "synth.md is already active; use :synth! to replace it"
         check startMode(synthMode(), "again", force = true).ok
         check readFile("synth.md").strip == "again"
+
+suite "plan delta and verifier feed":
+  test "delta: newly checked, unchecked, added, removed":
+    let pre = """# P
+
+- [ ] a
+- [x] b
+- [ ] dup
+- [ ] gone
+- [ ] c
+
+## Current state
+
+s
+"""
+    let post = """# P
+
+- [x] a
+- [ ] b
+- [ ] dup
+- [x] c
+- [ ] fresh
+
+## Current state
+
+s
+"""
+    let d = planDelta(pre, post)
+    check d.newlyChecked == @["a", "c"]
+    check d.newlyUnchecked == @["b"]
+    check d.added == @["fresh"]
+    check d.removed == @["gone"]
+
+  test "delta: duplicate task texts pair up one-to-one":
+    let d = planDelta("- [ ] x\n- [ ] x\n\n## Current state\n\ns",
+                      "- [x] x\n- [ ] x\n\n## Current state\n\ns")
+    check d.newlyChecked == @["x"]
+    check d.added.len == 0
+    check d.removed.len == 0
+
+  test "feed section: task list plus delta lines":
+    let pre = "- [ ] a\n- [ ] b\n\n## Current state\n\ns"
+    let post = "- [x] a\n- [ ] b\n- [ ] c\n\n## Current state\n\ns"
+    let f = planFeedSection(pre, post)
+    check "Plan task list (harness-parsed from cybernetic.md, 3 tasks, 1 done):" in f
+    check "[x] a" in f
+    check "[ ] b" in f
+    check "[ ] c" in f
+    check "newly checked: a" in f
+    check "tasks added: c" in f
+    check "no checkbox changes" notin f
+
+  test "feed section: no snapshot says unknown; no changes says so; broken plan is empty":
+    let body = "- [ ] a\n\n## Current state\n\ns"
+    check "(no turn-start snapshot; delta unknown)" in planFeedSection("", body)
+    check "(no checkbox changes this turn)" in planFeedSection(body, body)
+    check planFeedSection(body, "# prose only") == ""
+
+  test "turnHadToolActions: the last user message bounds the turn":
+    let withCalls = %*[
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": newJNull(),
+       "tool_calls": [{"id": "c1", "type": "function",
+         "function": {"name": "bash", "arguments": "{\"command\":\"ls\"}"}}]},
+      {"role": "tool", "tool_call_id": "c1", "content": "x"}]
+    check turnHadToolActions(withCalls)
+    let proseOnly = %*[
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "just words"}]
+    check not turnHadToolActions(proseOnly)
+    # Calls before the last user message belong to an earlier turn.
+    let stale = %*[
+      {"role": "user", "content": "earlier"},
+      {"role": "assistant", "content": newJNull(),
+       "tool_calls": [{"id": "c0", "type": "function",
+         "function": {"name": "bash", "arguments": "{}"}}]},
+      {"role": "user", "content": "now"}]
+    check not turnHadToolActions(stale)
+
+  test "structureGuard fires on a broken plan with restore instructions":
+    let ok = "- [ ] a\n\n## Current state\n\ns"
+    check cyberneticMode.structureGuard(ok) == ""
+    let lost = cyberneticMode.structureGuard("# all prose now")
+    check lost.startsWith("Plan structure lost:")
+    check "at least one task item" in lost
+    check "mode stays armed" in lost
+    # Current state gone, tasks still there: also guarded.
+    check "Current state section" in
+      cyberneticMode.structureGuard("- [ ] a\n")
+    # goal mode has no guard.
+    check goalMode.structureGuard("anything at all") == ""
+
+  test "updateNote: only when work happened and the file is byte-identical":
+    const body = "- [ ] a\n\n## Current state\n\ns"
+    let note = cyberneticMode.updateNote(true, body, body)
+    check note.startsWith("Work happened this turn but cybernetic.md is unchanged")
+    check "## Current state" in note
+    check cyberneticMode.updateNote(false, body, body) == ""
+    check cyberneticMode.updateNote(true, body, body & "x") == ""
+    check cyberneticMode.updateNote(true, "", "") == ""
+    check goalMode.updateNote(true, body, body) == ""
+
+  test "cybernetic runGoalCheck composes step-truth preamble and plan feed":
+    let prof = Profile(name: "stub", family: "glm", model: "stub-model")
+    goalCheckHook = proc (p: Profile, preamble, prompt: string):
+        tuple[ok: bool, text: string, err: string] =
+      check preamble == CyberVerifierPreamble
+      check "name the first box that lies" in preamble
+      # The verdict contract is still the preamble's final instruction.
+      check preamble.strip.endsWith("what to do\nnext>.")
+      check CyberFileName in prompt
+      check "Plan task list (harness-parsed" in prompt
+      check "newly checked: a" in prompt
+      check "evidence line" in prompt
+      (true, "VERDICT: SATISFIED", "")
+    defer: goalCheckHook = nil
+    # A hermetic cwd: buildGoalDiff captures the working tree, and this
+    # repo's own diff would leak into the content assertions.
+    withModeDir proc (dir: string) =
+      let pre = "- [ ] a\n\n## Current state\n\ns"
+      let post = "- [x] a\n\n## Current state\n\ns"
+      let r = runGoalCheck(prof, cyberneticMode, post, "evidence line", pre)
+      check r.ok
+      check r.verdict.kind == gvkSatisfied
+
+  test "goal mode runGoalCheck keeps the plain preamble, no feed":
+    let prof = Profile(name: "stub", family: "glm", model: "stub-model")
+    goalCheckHook = proc (p: Profile, preamble, prompt: string):
+        tuple[ok: bool, text: string, err: string] =
+      check preamble == VerifierPreamble
+      check "PLAN" notin preamble
+      check "Plan task list" notin prompt
+      (true, "VERDICT: SATISFIED", "")
+    defer: goalCheckHook = nil
+    withModeDir proc (dir: string) =
+      let r = runGoalCheck(prof, goalMode, "ship it", "evidence", "")
+      check r.ok

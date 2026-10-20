@@ -1582,8 +1582,24 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         commitTranscriptBytes(goalStepBytes(step), true)
       defer: goalStepHook = nil
       let modeText = readModeText(mode, session.cwd)
-      let check = runGoalCheck(p, mode.fileName, modeText,
-                               buildGoalEvidence(messages))
+      # Duty 1, structure guard: a plan that lost its format mid-run
+      # gets a mechanical restore-continuation and no side call (there
+      # is no task list to judge). The mode stays latched.
+      let guard = mode.structureGuard(modeText)
+      if guard.len > 0:
+        session.modeSnapshot = modeText
+        commitTranscriptBytes(
+          receiptBytes(mode.name & " check: plan structure lost"), true)
+        messages.add harnessNote(guard)
+        saveSession(session, messages)
+        commitTranscriptBytes(
+          receiptBytes("auto: " & mode.name & " check - continuing toward " &
+            mode.fileName), true)
+        commitTranscriptBytes(formatItem(agentPromptItem(guard)), true)
+        debugOut "runTurns: " & mode.name & " structure lost, continuing"
+        continue
+      let check = runGoalCheck(p, mode, modeText, buildGoalEvidence(messages),
+                               session.modeSnapshot)
       # The side call ran the bar/spinner hooks again; its usage is not
       # this turn's and must not leak into the next receipt.
       emitFatPromptEvent clearPendingHintEvent()
@@ -1591,11 +1607,26 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         onTurnInterrupted()
         turnEnded = true
         return true
+      # Duty 2, update discipline: work happened but the mode file is
+      # byte-identical to its turn-start snapshot -> the mechanical
+      # note. It rides with a verifier FEEDBACK or, when the check
+      # could not produce one, sends the agent back on its own.
+      let note = mode.updateNote(turnHadToolActions(messages),
+                                 session.modeSnapshot, modeText)
+      session.modeSnapshot = modeText
+      template sendBack(content: string; why: string) =
+        messages.add mode.feedbackMessage(modeText, content)
+        saveSession(session, messages)
+        commitTranscriptBytes(
+          receiptBytes("auto: " & mode.name & " check - continuing toward " &
+            mode.fileName), true)
+        commitTranscriptBytes(formatItem(agentPromptItem(content)), true)
+        debugOut "runTurns: " & why
       if not check.ok:
-        # Verifier call failed (network, provider): keep
-        # running without feedback, note it in the receipt, retry at the
-        # next boundary. The mode file is untouched, so the mode is
-        # still on.
+        # Verifier call failed (network, provider): note it in the
+        # receipt, retry at the next boundary. The mode file is
+        # untouched, so the mode is still on; the discipline note still
+        # sends the agent back.
         debugOut mode.name & " check failed: " & check.err
         # First line only: an ApiError msg can span lines, a receipt is one.
         let why = check.err.strip.splitLines[0]
@@ -1604,9 +1635,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             (if why.len > 0: mode.name & " check unavailable (" & why & ")"
              else: mode.name & " check unavailable") & ", retrying next turn"),
           true)
+        if note.len > 0:
+          sendBack(note, mode.name & " update discipline (check unavailable)")
+          continue
       elif check.verdict.kind == gvkSatisfied:
         if completeMode(mode, session.cwd):
           session.goalNotified = false
+          session.modeSnapshot = ""
           commitTranscriptBytes(
             receiptBytes(mode.name & " confirmed (" & mode.fileName &
               " renamed to " & mode.confirmedName & ")"), true)
@@ -1617,22 +1652,21 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       elif check.verdict.kind == gvkFeedback:
         commitTranscriptBytes(
           receiptBytes(mode.name & " check: feedback"), true)
-        messages.add mode.feedbackMessage(modeText, check.verdict.feedback)
-        saveSession(session, messages)
-        commitTranscriptBytes(
-          receiptBytes("auto: " & mode.name & " check - continuing toward " &
-            mode.fileName), true)
-        commitTranscriptBytes(
-          formatItem(agentPromptItem(check.verdict.feedback)), true)
-        debugOut "runTurns: " & mode.name & " check feedback, continuing"
+        var fb = check.verdict.feedback
+        if note.len > 0: fb.add "\n\nAlso: " & note
+        sendBack(fb, mode.name & " check feedback, continuing")
         continue
       else:
         commitTranscriptBytes(
           receiptBytes(mode.name &
             " check returned no verdict, retrying next turn"),
           true)
+        if note.len > 0:
+          sendBack(note, mode.name & " update discipline (no verdict)")
+          continue
     else:
       session.goalNotified = false
+      session.modeSnapshot = ""
     if streamedLive:
       stopTurnInputForFinalRender()
     endTurnAfterTranscriptAppend()

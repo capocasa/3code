@@ -238,6 +238,10 @@ type
     goalNotified*: bool  ## goal-mode activation receipt already shown (the
                          ## flag is per session: a resumed session announces
                          ## again at its first end-call boundary)
+    modeSnapshot*: string  ## the armed mode's file bytes at this turn's
+                           ## start: the update-discipline and delta
+                           ## baseline (transient; a resumed session starts
+                           ## from no snapshot, delta unknown one turn)
   ApiError* = object of CatchableError
     ## Base for all model/API failures. `callModel`'s retry loop and the
     ## turn loop catch this so every failure mode is handled uniformly.
