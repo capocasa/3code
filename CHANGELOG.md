@@ -2,6 +2,48 @@ Changelog
 
 Unreleased
 
+- **Modes: goal mode becomes entry #1 of a mode registry, and
+  cybernetic mode (`:cyber`) runs a markdown plan.** A mode is a
+  trigger file that arms a supervised loop, a `:` verb that writes
+  it, retirement names, and per-mode continuation builders; the
+  registry owns everything shared (arm validation, kickoff,
+  feedback, cancel, the turn-boundary check), so goal mode is now
+  just its first entry and a new mode is a descriptor, not a fork of
+  the loop. Modes are mutually exclusive: a second mode's file on
+  disk while one runs is a refused arming, receipted once right
+  under the detection line. Cybernetic mode is the second entry:
+  `cybernetic.md` carries a checkbox task list plus a `## Current
+  state` section, and arming refuses anything else with a teaching
+  error (`:cyber <text>` arms from a skeleton, bare `:cyber` is
+  status, `:cyber edit` revises the live plan in $VISUAL/$EDITOR,
+  `:cyber!`/`cancel` retires it). The kickoff orients on the first
+  unchecked task by name; feedback continuations re-orient on the
+  next one as boxes get ticked. Two mechanical duties run at every
+  turn boundary: a plan that lost its format mid-run gets a
+  restore-the-plan continuation and no side call, and
+  work-happened-but-plan-unchanged gets the update-discipline note,
+  which rides a verifier FEEDBACK or sends the agent back on its own.
+  The verifier for plan modes also judges step truth: the preamble
+  gains a clause that a checked box must match the evidence and the
+  diff (newly checked boxes are claims to verify), and the prompt
+  gains the plan delta (tasks ticked or added this turn) plus the
+  plan's own Current state section. Context collapse no longer
+  strands a supervised session: rollover injects a re-anchoring
+  continuation (counts, next unchecked task, Current state quoted),
+  receipted in scrollback.
+- **Session change log: the harness records net per-path mutations
+  and the verifier reads them.** Tool actions now land in a
+  per-session change log, net per mutated path, git or no git; the
+  verifier prompt carries it as the primary record of what the
+  session did (the working-tree diff stays as the git-reported
+  complement), and work-happened detection is content-aware
+  instead of action-aware: the update-discipline note fires when
+  the change log grew, not when any tool merely ran. A configured
+  verifier (`:verifier`, decision or chat) rides the same mode-aware
+  check - the System One state now carries the mode's full
+  orientation (mode text, evidence, diff, structural feed, session
+  change log) - so the verifier and mode features compose instead of
+  colliding.
 - **Verification-class models: goal mode can run its satisfaction check
   on a dedicated verifier (like jev), configurable and off by
   default.** Decision models - TypeSafe's Jev via OpenRouter is the
