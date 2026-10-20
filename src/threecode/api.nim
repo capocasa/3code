@@ -120,6 +120,16 @@ var interruptedFlag: Atomic[bool]
   ## model/tool steps and during HTTP polling / retry backoff so ctrl-c drops
   ## back to the prompt without killing the process.
 
+var sigintIdleExitFlag: Atomic[bool]
+  ## A real SIGINT (kill -INT from a supervisor like mpx, or a wrapping
+  ## script) replaces Nim's default die-on-SIGINT handler with
+  ## installInterruptHook. While a turn runs that means "cancel the turn";
+  ## while idle it used to mean nothing at all -- the signal was swallowed
+  ## and the process lived on, forcing the supervisor to escalate to
+  ## SIGKILL, which skips every restore path. The controller's prompt read
+  ## consumes this flag to exit through the normal quit path instead:
+  ## terminal restored by the exit procs, draft flushed, locks released.
+
 proc isInterrupted*(): bool {.gcsafe.} =
   interruptedFlag.load(moAcquire)
 
@@ -3903,6 +3913,19 @@ proc callSystemOne*(p: Profile, state: string, questions: JsonNode,
   except CatchableError as e:
     raise newException(ApiError, url & ": " & e.msg)
 
+proc consumeSigintIdleExit*(): bool {.gcsafe.} =
+  ## True once after an idle SIGINT; consumed so a later signal exits again.
+  if sigintIdleExitFlag.load(moAcquire):
+    sigintIdleExitFlag.store(false, moRelease)
+    return true
+
+proc clearSigintIdleExit*() {.gcsafe.} =
+  ## Drop a SIGINT that arrived while a turn was running: it already did
+  ## its job (cancelling that turn) and must not also quit at the prompt
+  ## the turn returns to.
+  sigintIdleExitFlag.store(false, moRelease)
+
 proc installInterruptHook*() =
   setControlCHook(proc() {.noconv.} =
-    requestTurnInterrupt())
+    requestTurnInterrupt()
+    sigintIdleExitFlag.store(true, moRelease))

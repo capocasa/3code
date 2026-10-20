@@ -18,6 +18,8 @@
 ## slave is the child's stderr) is asserted to contain no `Traceback` /
 ## `internal error` after every exit.
 import std/[json, os, strutils, unittest]
+when defined(posix):
+  import posix
 import tty_expect
 import stub_helpers
 
@@ -420,3 +422,38 @@ suite "quit signals":
     tty.expectExit(0, timeoutMs = 5000)
     assertNoTrace(tty)
     echo "  PASS: Ctrl-C interrupt then Ctrl-D quit cleanly"
+
+  when defined(posix):
+    template sigintKill(tty: TtySession) =
+      discard posix.kill(tty.pid, posix.SIGINT)
+
+    test "real SIGINT during a turn interrupts; SIGINT at idle quits":
+      # Regression: installInterruptHook replaces Nim's die-on-SIGINT
+      # handler, so a real SIGINT (kill -INT from a supervisor like mpx)
+      # was swallowed while idle -- the process lived on and the
+      # supervisor had to escalate to SIGKILL, which skips every terminal
+      # restore. During a turn SIGINT keeps its interrupt meaning; at the
+      # prompt it must exit through the :q path (exit 0, tty restored).
+      let root = newFixture("sigint_idle_quits")
+      writeConfiguredProvider(root)
+      # 30s pre-stream delay: only the interrupt can end the turn.
+      writeStubResponses(root, %*[{"role": "assistant", "preStreamDelayMs": 30000,
+          "content": "done.", "contentChunks": ["done."],
+          "usage": {"promptTokens": 5, "completionTokens": 2,
+                    "totalTokens": 7, "cachedTokens": 0}}])
+      let tty = startStub(root)
+      defer: tty.close()
+      tty.expect "\u276f"
+      for ch in "go":
+        tty.send($ch); tty.drain(10)
+      tty.send "\n"
+      tty.expect "\u25cb0%"       # hard sync: the turn is running
+      sigintKill(tty)             # SIGINT mid-turn: interrupt, not exit
+      tty.expectInHistory "interrupted by user"
+      tty.expectIdleCaret()       # prompt returns
+      tty.expectAlive()           # ...and the process stayed up
+      tty.drain(300)              # idle now; the stale flag is gone
+      sigintKill(tty)             # SIGINT at idle: quit like :q
+      tty.expectExit(0, timeoutMs = 5000)
+      assertNoTrace(tty)
+      echo "  PASS: SIGINT interrupted the turn, then quit cleanly at idle"
