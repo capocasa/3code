@@ -105,6 +105,10 @@ proc rowsAfter(st: RpcState; after: int64): string =
       if e.seqNum > after:
         result.add $e.seqNum & "\t" & e.kind & "\t" & esc(e.text) & "\n"
 
+proc latestSeq*(st: RpcState): int64 =
+  withLock st.gate:
+    if st.events.len > 0: result = st.events[^1].seqNum
+
 # ---------- registry ----------
 
 proc rpcDir(): string = userDataRoot() / "rpc"
@@ -265,7 +269,11 @@ proc handle(st: RpcState; req: Request): Future[void] {.async, gcsafe.} =
         &"{busy}\t{Version}\t{st.sessionId}\t{esc(st.initError)}\n")
     of "/events":
       var after = 0'i64
-      try: after = parseBiggestInt(q.getOrDefault("after", "0"))
+      try:
+        if q.getOrDefault("after", "") == "now":
+          after = st.latestSeq()  # open-the-chat semantics: only new rows
+        else:
+          after = parseBiggestInt(q.getOrDefault("after", "0"))
       except ValueError: discard
       let deadline = getTime() + initDuration(milliseconds = PollBudgetMs)
       while true:
