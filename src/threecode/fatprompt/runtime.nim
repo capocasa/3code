@@ -2223,27 +2223,29 @@ proc editBufferInExternalEditor(ed: var minline.LineEditor) =
     discard chmod(tmpFile, 0o600)
     # Suspend raw mode so the editor sees a cooked terminal: snapshot the
     # current (raw) mode, restore the cooked original, run the editor,
-    # then re-apply the raw snapshot.
+    # then re-apply the raw snapshot. The cooked snapshot itself must
+    # survive: it is what exit cleanup restores, and overwriting it with
+    # the raw mode here left the shell in no-echo mode after :q.
     var raw: Termios
     discard tcGetAttr(STDIN_FILENO.cint, addr raw)
+    let hadCookedSnapshot = inputOrigTermiosValid
     restoreInputTermios()
     termui.writeRaw("\x1b[?2004l\x1b[?25h" & minline.kittyKeyboardOff)
     discard execShellCmd(editor & " " & quoteShell(tmpFile))
     discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr raw)
-    inputOrigTermios = raw
-    inputOrigTermiosValid = true
+    inputOrigTermiosValid = hadCookedSnapshot
     recordRawMode()
     termui.writeRaw("\x1b[?2004h\x1b[?25l" & minline.kittyKeyboardOn)
   else:
     let h = getStdHandle(STD_INPUT_HANDLE)
     var rawMode: int32 = 0
     discard getConsoleMode(h, addr rawMode)
+    let hadCookedSnapshot = inputOrigConsoleModeValid
     restoreInputTermios()
     discard execShellCmd(editor & " " & quoteShell(tmpFile))
     discard setConsoleMode(h, rawMode and not
       (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
-    inputOrigConsoleMode = rawMode
-    inputOrigConsoleModeValid = true
+    inputOrigConsoleModeValid = hadCookedSnapshot
   let edited = try: readFile(tmpFile) except CatchableError: ""
   var text = edited
   if text.endsWith("\n"):
