@@ -2016,3 +2016,169 @@ suite "minline editor: new edit ops":
     expect EOFError:
       discard d2.run(ed2, prompt = "> ")
     check ed2.line.position == 4
+
+# ---------------- Vertical motion: O(n) target, repaint-free move ----------------
+
+suite "minline editor: repaint-free cursor motion":
+  proc refTarget(text: string; fromPos, pw, cw, width, delta: int): int =
+    ## The pre-optimization scan, kept as the reference: one
+    ## `cursorVisual` (itself a full `lineSpans` pass) per rune
+    ## boundary. Quadratic, but faithful to `cursorVisual` by
+    ## construction — `verticalTarget` must pick the same byte.
+    let (curR, curC) = cursorVisual(text, fromPos, pw, cw, width)
+    if delta < 0 and curR <= promptWrap(pw, width).head: return -1
+    if delta > 0 and curR >= totalRows(text, pw, cw, width) - 1: return -1
+    var best = -1
+    var bestDiff = high(int)
+    var i = 0
+    while i <= text.len:
+      let (r, c) = cursorVisual(text, i, pw, cw, width)
+      if r == curR + delta:
+        let d = abs(c - curC)
+        if d < bestDiff:
+          bestDiff = d
+          best = i
+      elif delta < 0 and r >= curR: break
+      elif delta > 0 and r > curR + 1: break
+      if i < text.len:
+        if text[i] == '\n': inc i
+        else: i += max(1, text.runeLenAt(i))
+      else:
+        inc i
+    best
+
+  proc isCursorOnlyBytes(s: string): bool =
+    ## `\r` followed by any run of CSI cursor moves (A/B/C) and nothing
+    ## else — the exact byte shape of a repaint-free motion keystroke.
+    var i = 0
+    if i < s.len and s[i] == '\r': inc i
+    while i < s.len:
+      if s[i] != '\x1b' or i + 1 >= s.len or s[i + 1] != '[': return false
+      inc i, 2
+      while i < s.len and s[i] in {'0'..'9'}: inc i
+      if i >= s.len or s[i] notin {'A', 'B', 'C'}: return false
+      inc i
+    true
+
+  proc runCaptured(keys: seq[int]): tuple[captured: string; mark: int;
+                                            ed: LineEditor] =
+    ## Drive readLineWith with byte-capture IO; `mark` is the capture
+    ## offset at the moment the (last) Up key is read, so
+    ## `captured[mark ..^ 1]` is exactly the bytes that keystroke wrote.
+    var pos = 0
+    var captured = ""
+    var mark = -1
+    let getCh: GetChProc = proc(): int =
+      if pos >= keys.len: raise newException(EOFError, "eof")
+      result = keys[pos]
+      if pos + Up.len <= keys.len and keys[pos .. pos + Up.len - 1] == Up:
+        mark = captured.len
+      inc pos
+    let write: WriteProc = proc(s: string) = captured.add s
+    var ed = initEditor()
+    expect EOFError:
+      # Queue-aware pending input: an ESC prefix must be read as a
+      # chord (Alt+Enter inserts a newline) exactly like a terminal
+      # whose key queue still holds the tail bytes.
+      discard ed.readLineWith("> ", getCh, write,
+                              getWidth = proc(): int = 40,
+                              hasPendingInput = proc(): bool = pos < keys.len)
+    (captured, mark, ed)
+
+  test "verticalTarget matches the per-boundary reference scan":
+    let texts = [
+      "", "a", "\n", "\n\n", "a\nb", "ab\ncd\nef", "aaaaaaaaaaaaaa",
+      "word word word word word", "ab   cd   ", "   leading spaces",
+      "a\n\nb", "a\n", "\na", "中文测试\nabc", "αβγ δεζ ζηθ",
+      "one two\nthree four five\nsix\n", "abcdef\n\n\nghij",
+      "supercalifragilistic word\nwrap"
+    ]
+    let combos = [(0, 0), (2, 2), (1, 3), (4, 2)]
+    for text in texts:
+      for width in [3, 5, 7, 10, 24]:
+        for (pw, cw) in combos:
+          for p in 0 .. text.len:
+            for delta in [-1, 1]:
+              let got = verticalTarget(text, p, pw, cw, width, delta)
+              let want = refTarget(text, p, pw, cw, width, delta)
+              check got == want
+
+  test "arrow up after multiline input emits cursor moves only":
+    var keys: seq[int] = @[]
+    for ch in "alpha": keys.add ord(ch)
+    keys.add AltEnter
+    for ch in "beta": keys.add ord(ch)
+    keys.add Up
+    let (captured, mark, ed) = runCaptured(keys)
+    check mark >= 0
+    let tail = captured[mark ..^ 1]
+    # One row up, column preserved: end of "beta" (col 6) -> end of
+    # "alpha" (col 6). Nothing else may be written: no erase, no rows,
+    # no prompt re-emit.
+    check tail == "\r\x1b[1A\x1b[6C"
+    check isCursorOnlyBytes(tail)
+    check ed.line.position == 4
+    check ed.renderRow == 0
+
+  test "arrow up on a big pasted buffer writes O(1) bytes":
+    var keys: seq[int] = @[]
+    for b in @[27, 91, 50, 48, 48, 126]: keys.add b
+    var pasted = ""
+    for i in 0 ..< 40:
+      pasted.add "line number " & $i & " of the pasted block\n"
+    for ch in pasted: keys.add ord(ch)
+    for b in @[27, 91, 50, 48, 49, 126]: keys.add b
+    keys.add Up
+    let (captured, mark, ed) = runCaptured(keys)
+    check mark >= 0
+    let tail = captured[mark ..^ 1]
+    # 40 pasted lines, one keystroke: the move must cost a handful of
+    # cursor-control bytes, not a repaint of the whole block.
+    check tail.len < 24
+    check isCursorOnlyBytes(tail)
+    check ed.line.text.len > 1000
+    # Caret was at the end of the last line; Up lands one row above it.
+    check ed.renderRow == 39
+
+  test "up then down returns the caret to the same spot":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "alpha"
+    d.push AltEnter
+    d.pushString "beta"
+    d.push Up
+    d.push Down
+    d.pushString "!"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "alpha\nbeta!"
+    check ed.echoRows == 2
+
+  test "home on a middle line moves the cursor without a repaint":
+    var keys: seq[int] = @[]
+    for ch in "alpha": keys.add ord(ch)
+    keys.add AltEnter
+    for ch in "beta": keys.add ord(ch)
+    keys.add Home
+    var mark = -1
+    # Mark the Home keystroke by hand: runCaptured marks Up only.
+    var pos = 0
+    var captured = ""
+    let homeSeq = Home
+    let getCh: GetChProc = proc(): int =
+      if pos >= keys.len: raise newException(EOFError, "eof")
+      result = keys[pos]
+      if pos + homeSeq.len <= keys.len and
+          keys[pos .. pos + homeSeq.len - 1] == homeSeq:
+        mark = captured.len
+      inc pos
+    let write: WriteProc = proc(s: string) = captured.add s
+    var ed = initEditor()
+    expect EOFError:
+      discard ed.readLineWith("> ", getCh, write,
+                              getWidth = proc(): int = 40,
+                              hasPendingInput = proc(): bool = pos < keys.len)
+    check mark >= 0
+    let tail = captured[mark ..^ 1]
+    check isCursorOnlyBytes(tail)
+    check ed.line.position == 6
+    check ed.renderRow == 1
