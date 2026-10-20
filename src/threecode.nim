@@ -35,6 +35,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   auth_xai, auth_openai, auth_google, auth_anthropic,
                   streamexec, cli, search, tabtitle, plugins, goal]
 import threecode/acp
+import threecode/rpc
 when not defined(android):
   import tinotify
 else:
@@ -350,6 +351,13 @@ proc main() =
   if rawParams.len > 0 and rawParams[0] == "--acp":
     minline.terminalRestoreSuppressed = true
     quit(acpMain(rawParams[1 .. ^1]))
+  # Headless REST frontend: `3code --rpc[=PORT]` serves the plain-text
+  # RPC surface 3code-app talks to (see threecode/rpc.nim). Same early
+  # dispatch as --acp: no terminal setup may run.
+  if rawParams.len > 0 and (rawParams[0] == "--rpc" or
+                            rawParams[0].startsWith("--rpc=")):
+    minline.terminalRestoreSuppressed = true
+    quit(rpcMain(rawParams))
   # -v/-h must not pay for TLS env, stale-binary walk, or sandbox
   # sweep. On Windows a debug 3code.exe is tens of MB and those
   # walks dominate `--version`.
