@@ -188,8 +188,15 @@ proc bannerPath(act: Action): string =
   ## The path portion of a path-bearing tool banner, never empty: a
   ## missing/blank path surfaces as `(no path)` so the banner row is
   ## never a bare icon with nothing after it (the model/user can see the
-  ## call was malformed rather than a silent `r ` / `w ` / `p `).
-  if act.path.len > 0: act.path else: "(no path)"
+  ## call was malformed rather than a silent `r ` / `w ` / `p `). A real
+  ## path rides an OSC 8 `file://` hyperlink (#60): `r`/`w`/`p` banners
+  ## are one click from the file itself, live viewport and replay alike
+  ## (both render through `bannerFor`). Terminals without OSC 8 show the
+  ## bare path unchanged.
+  if act.path.len == 0: return "(no path)"
+  let url = fileLinkUrl(act.path, "")
+  if url.len == 0: return act.path
+  osc8Link(url, act.path)
 
 proc bannerFor*(act: Action): string =
   ## Returns the parameter portion of the tool banner (no icon/prefix).
@@ -197,6 +204,8 @@ proc bannerFor*(act: Action): string =
   of akBash:
     previewCmd(act.body)
   of akRead:
+    # The range suffix stays outside the link span: it names lines of the
+    # linked file, not a path component.
     if act.offset > 0 or act.limit > 0:
       let endHint = if act.limit > 0: $(act.offset + act.limit - 1) else: "end"
       &"{act.bannerPath} {max(1, act.offset)}-{endHint}"

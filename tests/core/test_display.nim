@@ -1,5 +1,6 @@
 import std/[os, strutils, times, unittest]
 import threecode/display
+import threecode/types
 import threecode/util
 
 suite "display: assistant rendering":
@@ -518,6 +519,19 @@ suite "display: truncated tool output expansion":
     let dump = toolOutDir() / "T5.diff"
     check fileExists(dump)
     check readFile(dump) == diff
+
+  test "short patch diff still dumps and links T<n>.diff (#60)":
+    let diff = "*** fix.nim\n+beta2\n-beta"
+    let act = Action(kind: akPatch, path: "fix.nim")
+    let bytes = toolTranscriptBytes(act, "ok", 0, 4, diff)
+    check "T4.diff ↗" in bytes
+    check "\x1b]8;;file://" in bytes
+    check "\x1b]8;;\x1b\\" in bytes
+    check "+beta2" in bytes          # the painted body survives
+    check "*** fix.nim\n" notin bytes  # first line lives in the banner only
+    let dump = toolOutDir() / "T4.diff"
+    check fileExists(dump)
+    check readFile(dump) == diff      # ...but the dump stays whole
 
   test "short outputs render without any hint or dump":
     let bytes = toolResultBytes(akRead, "one\ntwo\nthree", 0, 9)

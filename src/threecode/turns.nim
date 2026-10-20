@@ -1550,7 +1550,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     # No session-start check, no per-tool-call checks. Interrupt is the
     # pause lever: it skips the check and ends the turn; on resume the
     # file is still there, so the goal is still on.
-    if goalModeActive():
+    # The goal file is a project-root artifact: activation keys off the
+    # session's project dir, not the process cwd. Embedders (library,
+    # ACP) run sessions against their own cwd while the process may sit
+    # anywhere — e.g. a test harness parked in a repo that happens to
+    # carry a goal.md must not arm goal mode for every session it runs,
+    # and the end-of-turn verifier call it would fire is a real API call.
+    if goalModeActive(session.cwd):
       if isInterrupted():
         onTurnInterrupted()
         turnEnded = true
@@ -1566,7 +1572,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       goalStepHook = proc (step: GoalStep) =
         commitTranscriptBytes(goalStepBytes(step), true)
       defer: goalStepHook = nil
-      let check = runGoalCheck(p, readGoalText(), buildGoalEvidence(messages))
+      let check = runGoalCheck(p, readGoalText(session.cwd),
+                               buildGoalEvidence(messages))
       # The side call ran the bar/spinner hooks again; its usage is not
       # this turn's and must not leak into the next receipt.
       emitFatPromptEvent clearPendingHintEvent()

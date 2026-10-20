@@ -853,6 +853,53 @@ func isMdFenceLine*(line: string): bool =
   let s = line.strip
   s.len >= 3 and s.startsWith("```")
 
+proc osc8Link*(url, text: string): string =
+  ## OSC 8 hyperlink: terminals that support it make `text` clickable and
+  ## carry `url` invisibly; others ignore the unknown OSC per ECMA-48 and
+  ## render `text` unchanged.
+  "\x1b]8;;" & url & "\x1b\\" & text & "\x1b]8;;\x1b\\"
+
+proc fileUrl*(path: string): string =
+  ## Percent-encoded `file://` URL for an absolute path (byte-wise, so
+  ## non-ASCII tmp paths stay valid URLs).
+  const Keep = {'A'..'Z', 'a'..'z', '0'..'9', '-', '.', '_', '~', '/'}
+  var p = path
+  when defined(windows):
+    p = p.replace('\\', '/')
+  result = "file://"
+  if not p.startsWith("/"): result.add "/"
+  for c in p:
+    if c in Keep: result.add c
+    else: result.add &"%{ord(c):02X}"
+
+proc fileLinkUrl*(path, baseDir: string): string =
+  ## Resolve a path-shaped link target to a `file://` URL: absolute
+  ## paths and `~/...` pass through, anything else resolves against
+  ## `baseDir` ("" = process cwd). "" for targets that are not paths at
+  ## all (`#anchors`, `scheme:foo`), so callers can fall back to their
+  ## pass-through rendering.
+  if path.len == 0 or path.startsWith("#"): return ""
+  if "://" in path or path.startsWith("mailto:"): return ""
+  let colon = path.find(':')
+  if colon > 0:
+    # A leading `scheme:` is not a path. The single exception is a
+    # windows drive letter (`C:\cfg`), and only on windows — there it
+    # is absolute and resolves below, while on posix the same shape is
+    # scheme-like garbage that must pass through verbatim, not join
+    # onto the project dir as a phantom file.
+    when not defined(windows):
+      return ""
+    elif colon != 1:
+      for k in 0 ..< colon:
+        if path[k] notin {'a'..'z', 'A'..'Z', '0'..'9', '+', '.', '-'}: return ""
+      return ""
+  var p = path
+  if p.startsWith("~/"):
+    p = getHomeDir() / p[2 ..^ 1]
+  elif not p.isAbsolute:
+    p = (if baseDir.len > 0: baseDir else: getCurrentDir()) / p
+  fileUrl(normalizedPath(p))
+
 const MarkBoundary = {' ', '\t', '\n', '.', ',', '!', '?', ';', ':',
                       '(', ')', '[', ']', '{', '}', '"', '\'', '/', '<', '>'}
 
@@ -862,7 +909,7 @@ proc isAtBoundary(line: string, i: int): bool =
   ## `snake_case` and `5*5` don't accidentally italicize.
   i < 0 or i >= line.len or line[i] in MarkBoundary
 
-func applyInlineMd*(line: string): string =
+proc applyInlineMd*(line: string; baseDir = ""): string =
   ## Strict in-line replacements for `***bold-italic***`, `**bold**`,
   ## `*italic*` / `_italic_`, backtick-code, and `[text](url)` links.
   ## Links become OSC 8 hyperlinks: the terminal makes the whole visible
@@ -870,7 +917,11 @@ func applyInlineMd*(line: string): string =
   ## stays visible in the text (bare `url` when the text is the url,
   ## `text - url` otherwise) so terminals without OSC 8 support, and
   ## regex URL detection, still work; unsupported terminals ignore the
-  ## unknown OSC per ECMA-48. Body text rides the
+  ## unknown OSC per ECMA-48. A target with no URI scheme but a path
+  ## shape (`some-plan.md`, `docs/x.md`, `/abs`, `~/x`) is resolved
+  ## against `baseDir` ("" = process cwd) into a `file://` URL — models
+  ## habitually answer in markdown, so `[plan](plan.md)` lands as a
+  ## working link instead of literal markup. Body text rides the
   ## terminal's default foreground (no envelope SGR), so the reverts
   ## just cancel bold / italic / underline back to default — no need
   ## to re-engage `\x1b[2m` (we no longer dim the body).
@@ -897,7 +948,7 @@ func applyInlineMd*(line: string): string =
       if found > i + 3:
         let inner = line[i + 3 ..< found]
         if inner[0] != ' ' and inner[^1] != ' ' and '*' notin inner:
-          result.add "\x1b[1m\x1b[3m\x1b[4m" & applyInlineMd(inner) &
+          result.add "\x1b[1m\x1b[3m\x1b[4m" & applyInlineMd(inner, baseDir) &
                      "\x1b[24m\x1b[23m\x1b[22m"
           i = found + 3
           continue
@@ -914,7 +965,7 @@ func applyInlineMd*(line: string): string =
           # Bold: real bold (bright). No color change, asterisks
           # dropped. Recurse so nested italic/code inside
           # (e.g. `**_lazy_**`) renders.
-          result.add "\x1b[1m" & applyInlineMd(inner) & "\x1b[22m"
+          result.add "\x1b[1m" & applyInlineMd(inner, baseDir) & "\x1b[22m"
           i = found + 2
           continue
     if line[i] == '*' and isAtBoundary(line, i - 1):
@@ -940,7 +991,7 @@ func applyInlineMd*(line: string): string =
           # underline is universally rendered, so the combo gives a
           # visible cue everywhere while the italic shows for terminals
           # that do support it.
-          result.add "\x1b[3m\x1b[4m" & applyInlineMd(inner) & "\x1b[24m\x1b[23m"
+          result.add "\x1b[3m\x1b[4m" & applyInlineMd(inner, baseDir) & "\x1b[24m\x1b[23m"
           i = found + 1
           continue
     if line[i] == '_' and isAtBoundary(line, i - 1):
@@ -968,9 +1019,12 @@ func applyInlineMd*(line: string): string =
       # `[text](url)` inline link. Text may carry nested inline
       # markdown; the url is emitted verbatim (never recursed into,
       # urls legitimately contain `*` and `_`). One level of balanced
-      # parens inside the url is honored (Wikipedia-style). Anything
-      # that isn't a URI target (`#anchor`, relative paths) or has a
-      # malformed shape passes through verbatim like the other markers.
+      # parens inside the url is honored (Wikipedia-style). A URI
+      # target links as-is; a path-shaped target resolves against
+      # `baseDir` into `file://` (#60: models answer with
+      # `[plan](plan.md)` and that should click). Anything else
+      # (`#anchor`, other schemes) or a malformed shape passes through
+      # verbatim like the other markers.
       var j = i + 1
       while j < line.len and line[j] != ']' and line[j] != '[':
         inc j
@@ -990,13 +1044,16 @@ func applyInlineMd*(line: string): string =
         if k < line.len and line[k] == ')':
           let text = line[i + 1 ..< j]
           let url = line[j + 2 ..< k]
-          if url.len > 0 and ("://" in url or url.startsWith("mailto:")):
+          let target =
+            if url.len == 0: ""
+            elif "://" in url or url.startsWith("mailto:"): url
+            else: fileLinkUrl(url, baseDir)
+          if target.len > 0:
             let vis = if text.len == 0 or text == url:
                         url
                       else:
-                        applyInlineMd(text) & " - " & url
-            result.add "\x1b]8;;" & url & "\x1b\\" & vis &
-                       "\x1b]8;;\x1b\\"
+                        applyInlineMd(text, baseDir) & " - " & url
+            result.add osc8Link(target, vis)
             i = k + 1
             continue
     result.add line[i]
@@ -1175,7 +1232,7 @@ func isMdSepRow*(line: string): bool =
       if ch notin {'-', ':', ' '}: return false
   true
 
-func renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
+proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
   ## Render a buffered markdown table as an aligned, box-drawn block.
   ## Each output line is prefixed with `indent` so the table sits in
   ## the harness's col-2 content area. Skips the alignment-separator
