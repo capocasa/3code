@@ -1162,6 +1162,70 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # stays an explicit opt-in. maxTokens is the gateway's own output
     # cap (16,384), not the model's.
     ("tesseracted", "Aleph-Alpha/Kolibri-1", "kolibri", "1", "", "high", 1.0, 16384, tbCurrentTurn, false, 262_144, false, false),
+
+    # vercel: the AI Gateway (ai-gateway.vercel.sh/v1). No markup on
+    # provider list prices, and the deepseek routes price below the lab's
+    # own list, so it doubles as the discount entry for the DS flash
+    # line. GLM ids are `zai/...` (not openrouter's `z-ai/...`). Keys are
+    # `vck_...` (KeyPrefixCatalog routes the wizard). A gateway between
+    # the client and the lab, so allowPrivate stays an explicit opt-in.
+    ("vercel", "zai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("vercel", "zai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("vercel", "deepseek/deepseek-v4.1-flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
+
+    # volccode: Volcengine (ByteDance) Ark Coding Plan
+    # (ark.cn-beijing.volces.com/api/coding/v3), a flat monthly
+    # subscription in the zaicode/kimicode shape: GLM, Kimi, MiniMax and
+    # Doubao models under one plan, 5-hour windows. Wire ids are the
+    # clean forms (glm-5.3, not Ark PAYG's glm-5-3-flash-260828). The
+    # plan also advertises DeepSeek V4.1 Flash 1017, but its exact coding
+    # endpoint id is unconfirmed, so it waits for a live /models check
+    # instead of a guess that preferCurated would force onto requests.
+    ("volccode", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("volccode", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+
+    # alibabatoken / alibabatoken-cn: Alibaba Cloud Model Studio Token
+    # Plan (intl endpoint Singapore region, cn endpoint Beijing), a
+    # credits subscription that carries GLM and DeepSeek alongside Qwen.
+    # Same compatible-mode surface as the qwen pay-as-you-go entries, but
+    # a different host and key, so it is its own provider, not a qwen
+    # alias.
+    ("alibabatoken", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("alibabatoken", "deepseek-v4.1-flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("alibabatoken-cn", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("alibabatoken-cn", "deepseek-v4.1-flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+
+    # engy: verified-inference gateway (api.engy.ai/v1) serving open
+    # weights from a permissionless GPU fleet; responses carry a proof
+    # that the named model produced them. Cheapest DS 4.1 flash hosting
+    # anywhere, but the fleet caps GLM at 328K context / 32K output, so
+    # the curated window and maxTokens are engy's, not the lab's. The
+    # per-model ZDR badge is a site claim, not a published API terms
+    # commitment, so allowPrivate stays opt-in.
+    ("engy", "glm-5.3", "glm", "5", "3", "high", 0.2, 32768, tbAllTurns, false, 327_680, false, false),
+    ("engy", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 32768, tbAllTurns, false, 327_680, false, false),
+    ("engy", "deepseek-v4.1-flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
+
+    # aihubmix: Chinese aggregator (aihubmix.com/v1, `sk-gateway-...`
+    # keys). The draw is the *-free coding tier: one-time $1 top-up
+    # unlocks permanent daily free quota (5 requests/minute, 100
+    # requests/day, 1M tokens/day per model) on glm/kimi/minimax coding
+    # models. The free twins rate-limit hard, so they are bulk-fallback
+    # rows, not daily drivers; the paid rows ride normal quotas.
+    ("aihubmix", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("aihubmix", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("aihubmix", "coding-glm-5.3-free", "glm", "5", "3-free", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("aihubmix", "coding-glm-5.3-flash-free", "glm", "5", "3-flash-free", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+
+    # cortecs: Europe's AI Gateway (api.cortecs.ai/v1). A router, but
+    # over EU-sovereign upstreams (TensorX, Nebius, sference, ...) that
+    # the catalog does not carry directly, with GDPR/EU AI Act posture
+    # and per-route compliance filtering. Model ids are clean (glm-5.3).
+    # Retention policy is per upstream route, not a gateway-wide
+    # commitment, so allowPrivate stays an explicit opt-in.
+    ("cortecs", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
+    ("cortecs", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
+    ("cortecs", "deepseek-v4.1-flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, thinkBack, contextWindow) tuples.

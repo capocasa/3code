@@ -374,6 +374,8 @@ login that rides on `anthropic`.
 | minimax / minimax-cn | China | `minimax-cn` is the domestic endpoint |
 | qwen / qwen-cn / qwen-us | China (Alibaba) | intl, domestic, and US-hosted DashScope endpoints |
 | tencent | China (intl endpoint) | Hunyuan on Tencent MaaS |
+| volccode | China (Beijing) | Volcengine (ByteDance) Ark coding plan: GLM, Kimi, MiniMax, and Doubao under one subscription, 5-hour windows |
+| alibabatoken / alibabatoken-cn | China (Singapore / Beijing regions) | Alibaba Model Studio token plan: credits subscription carrying GLM and DeepSeek alongside Qwen |
 | ★ openai | US | API key, or log in as `chatgpt` on a Plus/Pro subscription |
 | ★ xai | US | API key, or log in as `supergrok` on SuperGrok/X Premium+ |
 | anthropic | US | Claude on the Messages wire, or log in as `claudecode` on Pro/Max |
@@ -416,6 +418,7 @@ Where to point 3code when data must stay under EU jurisdiction.
 | ★ tesseracted | Germany | Tesseracted Labs' hosted Kolibri-1 (same weights, their GPUs): `:provider add tesseracted` (url `https://api.tesseracted.com/v1`); still in preview, so model access is granted manually: email modelaccess@tesseracted.com describing your use case and they send a key (`tl_live_...`) |
 | aki | EU | |
 | lyceum | EU | |
+| cortecs | EU (gateway) | routes to EU-sovereign upstreams (TensorX, Nebius, ...) under one API; GDPR posture, retention policy varies by route |
 
 ### Routers and aggregators
 
@@ -429,6 +432,9 @@ route before blaming the model.
 | novita | Singapore | free tier; often **quantized** |
 | nanogpt | varies | crypto payments; often **quantized** |
 | opencode / opencodego | gateway | OpenCode Zen (metered) and Go (subscription) gateways |
+| vercel | US company, upstreams worldwide | Vercel AI Gateway; no markup on list prices, DeepSeek routes below list (`vck_...` keys) |
+| aihubmix | China | aggregator speaking four wire protocols; a one-time $1 top-up unlocks permanent daily free GLM/Kimi/MiniMax coding quotas |
+| engy | varies (GPU fleet) | verified inference from a permissionless fleet; cheapest DS 4.1 flash around, GLM capped at 328K context |
 | huggingface | varies | router to partner clouds |
 | cheaperinference | varies | discount aggregator |
 
