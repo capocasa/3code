@@ -1,5 +1,5 @@
 import std/[tables, unittest]
-import threecode/[config, types]
+import threecode/[compact, config, prompts, types]
 
 suite "config: shortModel":
   test "strips everything before last slash":
@@ -82,6 +82,12 @@ suite "config: inferProvider":
   test "recognizes tl_live_ as tesseracted":
     check inferProvider("tl_live_cc0c1429xxx") == "tesseracted"
 
+  test "recognizes vck_ as vercel":
+    check inferProvider("vck_xxxxxxxxxxxx") == "vercel"
+
+  test "recognizes sk-gateway- as aihubmix":
+    check inferProvider("sk-gateway-xxxxxxxx") == "aihubmix"
+
   test "returns empty for unknown prefix":
     check inferProvider("my-custom-key") == ""
 
@@ -119,6 +125,58 @@ suite "config: echoMasksAsKey":
     check echoMasksAsKey("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
     # Whitespace means it is not a single token, key or otherwise.
     check not echoMasksAsKey("a longer sentence past twenty chars")
+
+suite "config: catalog urls":
+  test "new providers resolve to their gateway urls":
+    check catalogUrl("vercel") == "https://ai-gateway.vercel.sh/v1"
+    check catalogUrl("volccode") ==
+      "https://ark.cn-beijing.volces.com/api/coding/v3"
+    check catalogUrl("alibabatoken") ==
+      "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+    check catalogUrl("alibabatoken-cn") ==
+      "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    check catalogUrl("engy") == "https://api.engy.ai/v1"
+    check catalogUrl("aihubmix") == "https://aihubmix.com/v1"
+    check catalogUrl("cortecs") == "https://api.cortecs.ai/v1"
+
+suite "config: new known-good providers":
+  test "glm rows ride the glm family":
+    check knownGoodFamily("vercel", "zai/glm-5.3") == "glm"
+    check knownGoodFamily("volccode", "glm-5.3-flash") == "glm"
+    check knownGoodFamily("engy", "glm-5.3") == "glm"
+    check knownGoodTags("cortecs", "deepseek-v4.1-flash-1017") ==
+      ("deepseek", "4.1", "flash-1017")
+
+  test "wire repair restores author-prefixed ids":
+    check knownGoodWireModel("vercel", "glm-5.3") == "zai/glm-5.3"
+    check knownGoodWireModel("vercel", "deepseek/deepseek-v4.1-flash-1017") ==
+      "deepseek/deepseek-v4.1-flash-1017"
+    # Config persists normalized ids (prefix dropped, `v` before the
+    # version folded away); both must repair back to the wire id.
+    check knownGoodWireModel("vercel", "deepseek-4.1-flash-1017") ==
+      "deepseek/deepseek-v4.1-flash-1017"
+    check knownGoodWireModel("alibabatoken-cn", "deepseek-v4.1-flash-1017") ==
+      "deepseek-v4.1-flash-1017"
+    check knownGoodWireModel("aihubmix", "coding-glm-5.3-free") ==
+      "coding-glm-5.3-free"
+
+  test "dated qualifier repairs onto the curated id":
+    # Only with a designator before the date: a bare trailing date
+    # normalizes into the version (`glm-5.3.260828`), which the dash-tail
+    # repair does not reach.
+    check knownGoodWireModel("vercel", "zai/glm-5.3-flash-260828") ==
+      "zai/glm-5.3-flash"
+    check knownGoodWireModel("engy", "glm-5.3-flash-260828") ==
+      "glm-5.3-flash"
+
+  test "engy carries the fleet's own context cap":
+    check contextWindowFor("glm-5.3") == 1_000_000
+    let engyGlm = curatedFor("engy")
+    check "glm-5.3" in engyGlm
+    for combo in KnownGoodCombos:
+      if combo.provider == "engy" and combo.model == "glm-5.3":
+        check combo.contextWindow == 327_680
+        check combo.maxTokens == 32768
 
 suite "config: curatedFor":
   test "returns models for known provider":
