@@ -2,6 +2,24 @@ Changelog
 
 Unreleased
 
+- **The goal-mode check renders like scrollback, not a block of grey
+  text.** The verifier's reply used to land as a dim, wrapped, unmarked
+  tier — raw markdown asterisks and all — with the `VERDICT: ...`
+  contract line on screen. It is now a first-class scrollback item: a
+  `⌕` glyph leads the first row exactly where `●` leads a reply, and the
+  prose goes through `renderAssistantContentBytes` itself (the one
+  codepath for response rendering, via a swappable first-row bullet),
+  so the check's markdown renders like any other response. The verdict
+  line is stripped before display and its meaning is an icon row under
+  the body — green `✓` satisfied, red `✗` not — which also replaces the
+  `goal confirmed` receipt: the icon and color are the confirmation.
+  Arming is quiet now too: `:goal <text>` answers with no response
+  line, and the live kickoff commits no `auto: goal armed` receipt and
+  no `◎` item — the echoed command already says it — while a session
+  resumed from file still replays the kickoff prompt under its `◎`
+  marker. The cybernetic mode shares every one of these paths and so
+  inherits the same shapes.
+
 - **A width change re-breaks the committed transcript above the
   prompt.** Committed rows are hard-wrapped at the width they were
   painted at, so a resize used to leave them to the terminal's own
