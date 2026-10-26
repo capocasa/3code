@@ -636,11 +636,14 @@ proc cutPartialTrailingMarker*(content: string): string =
   while last > 0 and result[last - 1] in {' ', '\t', '\r', '\n'}: dec last
   result.setLen(last)
 
-proc renderAssistantContentBytes*(content: string): string =
+proc renderAssistantContentBytes*(content: string;
+    bullet = assistantBulletBytes()): string =
   ## String form of `renderAssistantContent`: the assistant item body
   ## (bullet + styled markdown) without touching a File. Used by the
   ## controller's transcript path, which owns when the bytes hit the
-  ## terminal.
+  ## terminal. `bullet` swaps the first-row marker (the goal-check item
+  ## leads with its own glyph) while keeping every other byte of the
+  ## walk identical - one codepath for all response-shaped scrollback.
   ##
   ## Reproduces the LIVE streaming commit shape (`feedContent` /
   ## `finishContent` in fatprompt/runtime.nim) line for line: every
@@ -681,7 +684,7 @@ proc renderAssistantContentBytes*(content: string): string =
       commits.add ""
       pendingBlank = false
     if wasFirst:
-      commits.add assistantBulletBytes() & assistantTextBytes(body)
+      commits.add bullet & assistantTextBytes(body)
     else:
       commits.add assistantTextBytes(body)
   let finish = captureMarkdownBytes(st, finish = true)
@@ -847,16 +850,29 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   if elapsedS >= 0: parts.add clockDuration(elapsedS)
   result = parts.join("  ")
 
+const VerifyGlyph* = "⌕"
+  ## The goal-check item marker: a single-cell loupe, the same glyph
+  ## vocabulary as `❯`/`»`/`◎`/`●`, distinguishing the check's item from
+  ## an agent reply at one glance.
+
 proc goalStepBytes*(step: GoalStep): string =
-  ## A verifier step in scrollback. Deliberately a different visual tier
-  ## from the agent's tool items (which are flush-left white banners over
-  ## grey output): everything here is dim and indented, so goal-check
-  ## traffic can never read as agent work.
-  let termW = try: terminalWidth() except CatchableError: 80
-  for line in step.prose.splitLines:
-    if line.strip.len == 0: continue
-    for chunk in wrapAnsi(line, max(20, termW - 4)):
-      result.add GreyFg & "  " & chunk & Reset & "\r\n"
+  ## A verifier step in scrollback, rendered exactly like any other
+  ## response item: the `⌕` glyph leads the first row and the prose goes
+  ## through `renderAssistantContentBytes` - the same markdown, colors,
+  ## and wrapping as an agent reply, no special tier. The verdict line
+  ## is already stripped from the prose; its meaning is the icon row
+  ## under the body: green `✓` satisfied, red `✗` not yet.
+  let body = renderAssistantContentBytes(
+    step.prose, AssistantTextStyle & VerifyGlyph & " " & Reset)
+  if body.len > 0:
+    result.add body & "\r\n"
+  case step.verdict
+  of gvkSatisfied:
+    result.add "\x1b[32m" & "  ✓" & Reset
+  of gvkFeedback:
+    result.add "\x1b[31m" & "  ✗" & Reset
+  of gvkNone:
+    discard
 
 proc receiptBytes*(label: string): string =
   ## The single canonical styling for a token receipt row (two-space

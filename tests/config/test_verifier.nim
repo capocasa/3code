@@ -236,8 +236,8 @@ suite "verifier decision check":
         %*{"answers": {"satisfied": {"type": "noul", "noul": 0.9}},
            "usage": {"input_tokens": 412, "output_tokens": 67}}
       defer: systemOneHook = nil
-      var steps: seq[string]
-      goalStepHook = proc (step: GoalStep) = steps.add step.prose
+      var steps: seq[GoalStep]
+      goalStepHook = proc (step: GoalStep) = steps.add step
       defer: goalStepHook = nil
       let prof = Profile(name: "zai.glm-5.3", model: "glm-5.3")
       let r = runGoalCheck(prof, goalMode, "ship it", "evidence line", "")
@@ -245,7 +245,9 @@ suite "verifier decision check":
       check r.verdict.kind == gvkSatisfied
       check askedModel == "typesafe/jev-latest"
       check "ship it" in askedState and "evidence line" in askedState
-      check steps.len == 1 and "p(satisfied)=0.90" in steps[0]
+      check steps.len == 1 and "p(satisfied)=0.90" in steps[0].prose
+      # The verdict rides the step, so scrollback can icon it.
+      check steps[0].verdict == gvkSatisfied
 
   test "decision failure is ok=false, retried next boundary":
     withVerifierState proc () =

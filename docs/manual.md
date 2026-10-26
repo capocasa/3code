@@ -1228,8 +1228,11 @@ with the verifier's feedback. Satisfied, the harness renames the file to
 `goal-confirmed.md` (the record of the run) and idles. The check has no
 tools and no rounds: orientation is the harness's job, so the check is one
 model call. And it shows its work: the verifier's reply lands in scrollback
-as a dim, indented tier clearly below the agent's own items. Nothing the
-harness runs is ever silent.
+as an item of its own, led by a `⌕` glyph and rendered exactly like any
+other response — same markdown, same wrapping — with the verdict line
+stripped and replaced by an icon row under the reply: a green `✓` when
+the goal is satisfied, a red `✗` when it is not. Nothing the harness
+runs is ever silent.
 
 ### Verifier models
 
@@ -1251,7 +1254,8 @@ check asks it two questions — is the goal satisfied, and what is the most
 important gap — and turns the answers into the same verdict/feedback the
 text verifier produces: `p(satisfied)` at or above 0.75 confirms the goal,
 anything else sends the agent back in with the gap as its direction. The
-decision lands in scrollback as one dim line with the model's own numbers.
+decision lands in scrollback as a `⌕` item with the model's own numbers
+and the same verdict icon row as a text check.
 
 These models never appear in ordinary model lists (`:model`, completion,
 the provider wizard): they cannot run a turn, they only judge one, so
@@ -1273,7 +1277,9 @@ it to end goal mode silently, interrupt to pause. Arming starts work
 immediately: `:goal <text>` writes the file and sends the agent off in the
 same breath, no extra prompt needed — and a `goal.md` that is already on
 disk when 3code starts arms identically: the session loads it and the
-kickoff turn runs at once, before the first prompt. `:goal cancel` (or
+kickoff turn runs at once, before the first prompt. The arm itself is
+quiet (the echoed command is the whole announcement); a session resumed
+from file replays the kickoff prompt under its `◎` marker. `:goal cancel` (or
 `:goal!`) cancels
 the active goal, retiring the file to `goal-cancelled.md` (`:goal new
 <text>` is the balking synonym that refuses a live goal, `:goal! <text>`

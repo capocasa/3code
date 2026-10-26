@@ -105,13 +105,14 @@ suite "goal command verbs":
   var prof = Profile()
   var editor: LineEditor
 
-  test ":goal TEXT arms and flags the immediate kickoff":
+  test ":goal TEXT arms quietly and flags the immediate kickoff":
     withCommandDir:
       let r = handleCommandResult(":goal make it so", messages, session,
                                   prof, editor)
       check r.recognized and r.ok
       check r.startGoalTurn
-      check "starting toward it now" in r.body
+      # No response body: the `:goal make it so` echo already says it.
+      check r.body == ""
       check readFile(GoalFileName).strip == "make it so"
 
   test ":goal new is the balking synonym":
@@ -169,7 +170,7 @@ suite "goal command verbs":
                                     editor)
         check r.recognized and r.ok
         check r.startGoalTurn
-        check "edited" in r.body
+        check r.body == ""
         check readFile(GoalFileName).strip == "edited text"
 
     test ":goal edit with an emptied file cancels the goal":

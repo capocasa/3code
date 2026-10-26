@@ -72,10 +72,12 @@ type
 
   GoalStep* = object
     ## One visible verifier step. The toolless verifier produces exactly
-    ## one: its reply, whose final line is the verdict. Everything the
-    ## check says is scrollback material - the check must never look
-    ## silent.
-    prose*: string  ## the verifier's reply
+    ## one: its reply minus the verdict line, whose verdict rides the
+    ## step so scrollback can show it as an icon instead of the contract
+    ## text. Everything the check says is scrollback material - the
+    ## check must never look silent.
+    prose*: string  ## the verifier's reply without its verdict line
+    verdict*: GoalVerdictKind  ## gvkNone for informational notes
 
 const VerifierPreamble* = """You are verifying progress toward a goal. You get the goal text, an
 evidence summary of the agent's last turn (harness-built from the
@@ -130,6 +132,16 @@ proc parseVerdict*(text: string): GoalVerdict =
     result.kind = gvkFeedback
     result.feedback = last["VERDICT: FEEDBACK:".len ..^ 1].strip
     if result.feedback.len == 0: result.kind = gvkNone
+
+proc stripVerdictLine*(text: string): string =
+  ## The display half of the verdict contract: the reply minus its
+  ## final verdict line, so scrollback never needs to show the contract
+  ## text (the verdict is an icon row instead). No verdict line means
+  ## the text comes back unchanged.
+  if parseVerdict(text).kind == gvkNone: return text
+  let lines = text.strip.splitLines
+  if lines.len <= 1: return ""
+  lines[0 .. ^2].join("\n")
 
 proc goalFeedbackMessage*(feedback: string): JsonNode =
   ## The harness-autosent continuation. Marked `agentSent` exactly like
@@ -860,13 +872,17 @@ var goalCheckHook*: proc (p: Profile, preamble, prompt: string):
 
 var goalStepHook*: proc (step: GoalStep) = nil
   ## Scrollback seam: the interactive controller installs this to commit
-  ## verifier steps as they happen (dim, indented, clearly not the
-  ## agent's work). Nil in tests and headless use, so a step is data,
-  ## never a paint obligation.
+  ## verifier steps as they happen (a `⌕` item rendered through the
+  ## regular response path, with the verdict as a colored icon row). Nil
+  ## in tests and headless use, so a step is data, never a paint
+  ## obligation.
 
-proc stepProse(text: string) =
-  if goalStepHook != nil and text.strip.len > 0:
-    goalStepHook(GoalStep(prose: text))
+proc stepProse(text: string; verdict = gvkNone) =
+  ## Emit a verifier step. A bare verdict with no prose still emits (an
+  ## icon-only check is legible); an informational note with neither
+  ## prose nor verdict is nothing at all.
+  if goalStepHook != nil and (text.strip.len > 0 or verdict != gvkNone):
+    goalStepHook(GoalStep(prose: text, verdict: verdict))
 
 proc runVerifierSideCall(p: Profile, preamble, prompt: string):
     tuple[ok: bool, text: string, err: string] =
@@ -889,7 +905,7 @@ proc runVerifierSideCall(p: Profile, preamble, prompt: string):
   except ApiError as e:
     return (false, "", e.msg)
   let text = msg{"content"}.getStr("")
-  stepProse(text)
+  stepProse(stripVerdictLine(text), parseVerdict(text).kind)
   (true, text, "")
 
 # ---------- decision verifier (System One) ----------
@@ -966,7 +982,7 @@ proc decisionGap*(answers: JsonNode): string =
     return picked.getStr
 
 proc decisionSummaryLine*(answers: JsonNode): string =
-  ## One scrollback line for the dim verifier tier: what the decision
+  ## One scrollback line for the verifier item body: what the decision
   ## model answered, in its own numbers.
   let p = decisionSatisfiedP(answers)
   let gap = decisionGap(answers)
@@ -1007,8 +1023,9 @@ proc runDecisionCheck(p: Profile; m: ModeDesc; modeText, evidence,
       buildGoalDiff(), m.fileName, m.verifierFeed(preSnapshot, modeText),
       buildSessionDiff(cache)), decisionQuestions(), usage)
     let answers = resp{"answers"}
-    stepProse(decisionSummaryLine(answers))
-    GoalCheckResult(ok: true, verdict: verdictFromDecision(answers))
+    let v = verdictFromDecision(answers)
+    stepProse(decisionSummaryLine(answers), v.kind)
+    GoalCheckResult(ok: true, verdict: v)
   except ApiError as e:
     GoalCheckResult(ok: false, err: e.msg)
 

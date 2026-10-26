@@ -132,18 +132,20 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     tty.send ":goal make the stub say GOAL_WORK_DONE"
     tty.expect ":goal make the stub say GOAL_WORK_DONE"
     tty.send "\n"
-    # The command receipt says work starts now...
-    tty.expectInHistory "starting toward it now"
-    # ...and the kickoff turn runs without any further keystroke: the
-    # harness-autosent receipt lands and the stub's first reply streams.
-    tty.expectInHistory "auto: goal armed - starting toward goal.md"
-    # The goal itself prints under the ◎ target marker, not the » steer
-    # marker: goal mode is a tier of its own.
-    tty.expectInHistory "◎ make the stub say GOAL_WORK_DONE"
+    tty.drain(100)
+    # The arm is quiet - no response line, no armed receipt, no ◎ item:
+    # the echoed command already says it. The proof the kickoff ran is
+    # the turn itself, which streams with no further keystroke.
     tty.expectInHistory "GOAL_WORK_DONE"
-    # Turn end: the verifier side call answers SATISFIED and retires the
-    # file. The session idles with the confirmed record on disk.
-    tty.expectInHistory "goal confirmed"
+    # Turn end: detection receipt, then the verifier's reply renders as
+    # a ⌕ scrollback item with the verdict line stripped, and the green
+    # ✓ icon row under it is the confirmation - no 'goal confirmed'
+    # receipt. The session idles with the confirmed record on disk.
+    tty.expectInHistory "goal mode: goal.md detected"
+    tty.expectInHistory "all done"
+    tty.expectNeverInHistory "VERDICT"
+    tty.expectInHistory "\u2315"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "goal-confirmed.md")
     check not fileExists(root / "run" / "goal.md")
@@ -185,12 +187,13 @@ suite "ctrl-r retry and goal kickoff (interactive)":
 
     tty.expect "\u276f"
     # Nothing is typed: the startup detection arms the goal and the
-    # kickoff turn runs on its own. Same ◎ target item as the :goal path.
-    tty.expectInHistory "auto: goal armed - starting toward goal.md"
-    tty.expectInHistory "◎ make the stub say GOAL_WORK_DONE"
+    # kickoff turn runs on its own, quiet like the :goal path (no armed
+    # receipt, no ◎ item - the detection receipt at turn end names the
+    # mode instead). The streamed reply is the proof it ran.
     tty.expectInHistory "GOAL_WORK_DONE"
-    # Turn end: the verifier confirms and retires the file.
-    tty.expectInHistory "goal confirmed"
+    # Turn end: the verifier confirms (the green ✓ icon row under its
+    # ⌕ reply) and retires the file.
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "goal-confirmed.md")
     check not fileExists(root / "run" / "goal.md")
@@ -240,7 +243,6 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     tty.expect "\u276f"
     tty.send ":goal make the stub say GOAL_WORK_DONE"
     tty.send "\n"
-    tty.expectInHistory "starting toward it now"
     tty.expectInHistory "GOAL_WORK_DONE"
     # The receipt commits before the side call; the verifier's slow model
     # call is running by the moment it lands, so these keystrokes must
@@ -248,10 +250,12 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     tty.expectInHistory "goal mode: goal.md detected"
     tty.send "SURVIVED_KEYS"
     tty.drain(300)
-    # The check shows its work: the verifier's reply prose lands in
-    # scrollback, dim and indented, before the verdict is honored.
+    # The check shows its work: the verifier's reply prose lands as a ⌕
+    # scrollback item (same rendering as a reply, verdict line stripped)
+    # and the green ✓ icon row closes it before the verdict is honored.
     tty.expectInHistory "checked the tree."
-    tty.expectInHistory "goal confirmed"
+    tty.expectNeverInHistory "VERDICT: SATISFIED"
+    tty.expectInHistory "\u2713"
     check fileExists(root / "run" / "goal-confirmed.md")
     check not fileExists(root / "run" / "goal.md")
     # Submit the buffer that lived through the check: the echoed prompt

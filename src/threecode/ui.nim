@@ -1910,10 +1910,12 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
   ## The whole `:<verb>` grammar, one mode descriptor in, one response
   ## line out: bare = status, bare with `!` or `cancel` = retire,
   ## `new TEXT` / bare TEXT = arm (balking at a live mode without `!`),
-  ## `edit` = revise the live file in $VISUAL/$EDITOR. `armed` mirrors
-  ## the old `armGoal`: every arm/re-arm path sets it so the controller
-  ## kicks the mode's work off immediately instead of waiting for the
-  ## next turn boundary.
+  ## `edit` = revise the live file in $VISUAL/$EDITOR. A successful arm
+  ## answers with an empty line - the command echo already says it and
+  ## the kickoff turn follows at once. `armed` mirrors the old
+  ## `armGoal`: every arm/re-arm path sets it so the controller kicks
+  ## the mode's work off immediately instead of waiting for the next
+  ## turn boundary.
   result.ok = true
   if parts.len == 0 and not forced:
     if fileExists(m.fileName):
@@ -1946,10 +1948,10 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
         result.ok = false
         result.line = gerr
       else:
+        # No response line on a successful arm: the `:verb <text>` echo
+        # in scrollback already carries the words, and the kickoff turn
+        # starts immediately below it.
         result.armed = true
-        result.line = (if forced: m.fileName & " replaced"
-                       else: m.fileName & " written") &
-          "; starting toward it now"
   elif parts[0] == "edit" and parts.len == 1:
     if not fileExists(m.fileName):
       result.ok = false
@@ -1982,7 +1984,6 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
           result.line = verr
         elif after != before:
           result.armed = true
-          result.line = m.fileName & " edited; starting toward it now"
         else:
           result.line = m.fileName & " unchanged"
   else:
@@ -1992,9 +1993,6 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
       result.line = gerr
     else:
       result.armed = true
-      result.line = (if forced: m.fileName & " replaced"
-                     else: m.fileName & " written") &
-        "; starting toward it now"
 
 proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
                    prof: var Profile, editor: var minline.LineEditor): bool =
@@ -2111,8 +2109,11 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       # immediately instead of waiting for the next turn boundary.
       let m = if name == ":cyber": cyberneticMode else: goalMode
       let r = modeVerbResult(m, parts, arg, forced)
-      if not r.ok: ok = false
-      if r.ok: resp r.line else: respErr r.line
+      if not r.ok:
+        ok = false
+        respErr r.line
+      elif r.line.len > 0:
+        resp r.line
       armGoal = r.armed
     of ":help", ":?":
       body.add renderHelpS()
