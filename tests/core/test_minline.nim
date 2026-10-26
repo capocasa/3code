@@ -1555,7 +1555,7 @@ suite "minline editor: shortcuts":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "ab"
-    d.push @[18]     # Ctrl+R: unbound after the retry-request removal
+    d.push @[15]     # Ctrl+O: never bound, must not insert or cancel
     d.pushString "c"
     d.push Enter
     check d.run(ed, prompt = "> ") == "abc"
@@ -1800,7 +1800,14 @@ const
   AltY* = @[27, 121]
   AltDot* = @[27, 46]
   AltR* = @[27, 114]
+  AltP* = @[27, 112]
+  AltN* = @[27, 110]
+  AltLess* = @[27, 60]
+  AltGreater* = @[27, 62]
   CtrlUnderscore* = @[31]
+  CtrlR* = @[18]
+  CtrlS* = @[19]
+  CtrlG* = @[7]
 
 proc selCells*(g: Grid, r: int): int =
   ## Count reverse-video cells on row `r` (the selection highlight).
@@ -2364,3 +2371,125 @@ suite "minline editor: undo":
     d.push CtrlUnderscore    # retracts the whole run, like readline
     d.push Enter
     check d.run(ed, prompt = "> ") == ""
+
+suite "minline editor: history search":
+  test "ctrl+r query then enter accepts and submits the match":
+    var ed = initEditor()
+    seedHistory(ed, @["apple pie", "banana split"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "ban"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "banana split"
+
+  test "ctrl+r steps to older matches on repeat":
+    var ed = initEditor()
+    seedHistory(ed, @["one alpha", "two alpha", "three alpha"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "alpha"   # newest match: "three alpha"
+    d.push CtrlR           # step older: "two alpha"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "two alpha"
+
+  test "ctrl+g aborts and restores the draft":
+    var ed = initEditor()
+    seedHistory(ed, @["keepme"])
+    let d = newDriver()
+    d.pushString "draft text"
+    d.push CtrlR
+    d.pushString "keep"    # match loads over the draft
+    d.push CtrlG
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "draft text"
+
+  test "escape accepts the match without submitting":
+    var ed = initEditor()
+    seedHistory(ed, @["hello there"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "there"
+    d.push Esc            # accept; the run ends at input exhaustion
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    # accepted, not submitted: the real prompt is back and the match
+    # stayed in the editor
+    check rowText(d.grid, 0).strip == "> hello there"
+
+  test "a failed search shows the failure banner":
+    var ed = initEditor()
+    seedHistory(ed, @["abc"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "zzz"
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    check rowText(d.grid, 0).startsWith "(failed reverse-i-search)"
+    check "`zzz'" in rowText(d.grid, 0)
+
+  test "the search banner shows the query and the match":
+    var ed = initEditor()
+    seedHistory(ed, @["apple pie"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "app"
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    check rowText(d.grid, 0).startsWith "(reverse-i-search)`app': "
+    check "apple pie" in rowText(d.grid, 0)
+
+  test "ctrl+s searches forward from an older entry":
+    var ed = initEditor()
+    seedHistory(ed, @["alpha one", "alpha two"])
+    let d = newDriver()
+    d.push Up
+    d.push Up            # parked on the oldest entry
+    d.push CtrlS
+    d.pushString "alpha"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "alpha two"
+
+  test "search is ascii-case-insensitive":
+    var ed = initEditor()
+    seedHistory(ed, @["Hello World"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "world"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "Hello World"
+
+  test "an unowned key aborts the search and then acts":
+    var ed = initEditor()
+    seedHistory(ed, @["stash me"])
+    let d = newDriver()
+    d.pushString "typed"
+    d.push CtrlR
+    d.pushString "stash"  # match replaces the buffer
+    d.push CtrlA          # not a search key: abort, restore, then move
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "typed"
+
+  test "alt+p jumps non-incrementally at enter":
+    var ed = initEditor()
+    seedHistory(ed, @["foo bar", "baz qux"])
+    let d = newDriver()
+    d.push AltP
+    d.pushString "qux"
+    d.push Enter          # completes the query and jumps (no submit)
+    d.push Enter          # now submits the jumped-to entry
+    check d.run(ed, prompt = "> ") == "baz qux"
+
+  test "alt+< and alt+> jump to the history extremes":
+    var ed = initEditor()
+    seedHistory(ed, @["a", "b", "c"])
+    let d = newDriver()
+    d.push AltLess
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "a"
+    var ed2 = initEditor()
+    seedHistory(ed2, @["a", "b", "c"])
+    let d2 = newDriver()
+    d2.pushString "x"
+    d2.push AltGreater    # back to the draft
+    d2.push Enter
+    check d2.run(ed2, prompt = "> ") == "x"

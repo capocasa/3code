@@ -103,7 +103,13 @@ const ShortcutNames* = [
   "delete-to-bol",
   "transpose-chars",
   "undo",
-  "revert-line"
+  "revert-line",
+  "isearch-backward",
+  "isearch-forward",
+  "nonincremental-search-backward",
+  "nonincremental-search-forward",
+  "history-begin",
+  "history-end"
 ]
 
 type KeySpec* = tuple[keys: seq[string], times: int]
@@ -621,6 +627,18 @@ type
     undoBytes*: int            ## total snapshot bytes, for the memory cap
     undoGroupOpen*: bool       ## a run of single-rune inserts is extending the top group
     undoGroupEnd*: int         ## cursor seat that run must continue at, else a new group starts
+    isearchActive*: bool       ## a history search (C-r/C-s, M-p/M-n) owns the keystrokes
+    isearchForward*: bool      ## search direction: newer entries (C-s) or older (C-r)
+    isearchNoninc*: bool       ## M-p/M-n: query completes at Enter, no live stepping
+    isearchQuery*: string
+    isearchIdx*: int           ## history index currently displayed, -1 = none yet
+    isearchOrigin*: int        ## last match, or the view the search started from
+    isearchFailed*: bool       ## last scan found nothing; banner says so
+    isearchSavedText*: string  ## pre-search state, restored by C-g
+    isearchSavedPos*: int
+    isearchSavedCursor*: int
+    isearchSavedAnchor*: int
+    isearchPrompt*: string     ## the real prompt, hidden while the banner shows
     clipboardWrite*: proc(s: string) {.closure.}
       ## Set by the host app: publishes `s` to the system clipboard
       ## (OSC 52). Nil in tests and standalone use: cut/copy still
@@ -2343,6 +2361,145 @@ proc historyNext*(ed: var LineEditor) =
 
 proc lineText*(ed: LineEditor): string = ed.line.text
 
+# ---------- History search (readline C-r/C-s, M-p/M-n) ----------
+
+proc isearchMatchOffset(entry, query: string): int =
+  ## Byte offset of `query` in `entry`, ASCII-case-insensitively, -1 when
+  ## absent. `toLowerAscii` keeps byte lengths, so the offset is valid in
+  ## the original string. An empty query matches at 0.
+  if query.len == 0: return 0
+  let at = entry.toLowerAscii.find(query.toLowerAscii)
+  result = if at >= 0: at else: -1
+
+proc isearchFindFrom(ed: var LineEditor; fromIdx: int): int =
+  ## Nearest entry at or past `fromIdx` in the search direction that
+  ## matches the query, -1 when there is none.
+  result = -1
+  let n = ed.history.entries.len
+  var i = fromIdx
+  while i >= 0 and i < n:
+    if isearchMatchOffset(ed.history.entries[i], ed.isearchQuery) >= 0:
+      return i
+    if ed.isearchForward: inc i else: dec i
+
+proc isearchPaint(ed: var LineEditor) =
+  ## Repaint with the search banner in place of the prompt, the way
+  ## readline's `(reverse-i-search)`query': match` line reads.
+  let banner =
+    if ed.isearchNoninc:
+      "History search: " & ed.isearchQuery
+    else:
+      "(" & (if ed.isearchFailed: "failed " else: "") &
+        (if ed.isearchForward: "forward-i-search" else: "reverse-i-search") &
+        ")`" & ed.isearchQuery & "': "
+  ed.prompt = banner
+  ed.promptW = visualCols(banner)
+  fullRedraw(ed)
+
+proc isearchRestorePrompt(ed: var LineEditor) =
+  ed.prompt = ed.isearchPrompt
+  ed.promptW = visualCols(ed.isearchPrompt)
+
+proc isearchShow(ed: var LineEditor; idx: int) =
+  ed.isearchIdx = idx
+  ed.isearchOrigin = idx
+  ed.isearchFailed = false
+  ed.line.text = ed.history.entries[idx]
+  ed.history.cursor = idx
+  ed.line.position =
+    clamp(isearchMatchOffset(ed.line.text, ed.isearchQuery), 0, ed.line.text.len)
+
+proc isearchStep(ed: var LineEditor) =
+  ## Scan for the next match from the last match (or the search origin),
+  ## show it, or flag the failure while keeping the last match visible.
+  let n = ed.history.entries.len
+  var fromIdx =
+    if ed.isearchOrigin == -1 and not ed.isearchForward: n - 1
+    elif ed.isearchOrigin == -1: -1
+    else: ed.isearchOrigin + (if ed.isearchForward: 1 else: -1)
+  let idx = isearchFindFrom(ed, fromIdx)
+  if idx >= 0:
+    isearchShow(ed, idx)
+    isearchPaint(ed)
+  else:
+    ed.isearchFailed = true
+    isearchPaint(ed)
+
+proc isearchQueryChanged(ed: var LineEditor) =
+  ## A non-incremental search collects its query untouched; an
+  ## incremental one keeps the current match while it still matches and
+  ## rescans otherwise.
+  if ed.isearchNoninc:
+    isearchPaint(ed)
+    return
+  if ed.isearchIdx >= 0:
+    let off = isearchMatchOffset(ed.history.entries[ed.isearchIdx],
+                                 ed.isearchQuery)
+    if off >= 0:
+      ed.isearchFailed = false
+      ed.line.position = clamp(off, 0, ed.line.text.len)
+      isearchPaint(ed)
+      return
+  isearchStep(ed)
+
+proc isearchStart*(ed: var LineEditor; forward: bool; noninc = false) =
+  ## Take the keystrokes over for a history search (C-r/C-s incremental,
+  ## M-p/M-n completed at Enter).
+  breakChains(ed)
+  ed.stashView()
+  ed.isearchActive = true
+  ed.isearchForward = forward
+  ed.isearchNoninc = noninc
+  ed.isearchQuery = ""
+  ed.isearchIdx = -1
+  ed.isearchOrigin = ed.history.cursor
+  ed.isearchFailed = false
+  ed.isearchSavedText = ed.line.text
+  ed.isearchSavedPos = ed.line.position
+  ed.isearchSavedCursor = ed.history.cursor
+  ed.isearchSavedAnchor = ed.selAnchor
+  ed.isearchPrompt = ed.prompt
+  isearchPaint(ed)
+
+proc isearchAccept(ed: var LineEditor) =
+  ## End the search keeping what it shows (readline: RET accepts and
+  ## executes, ESC accepts without executing). The shown entry becomes
+  ## the loaded view, its pending draft superseded.
+  ed.isearchActive = false
+  if ed.isearchIdx >= 0:
+    ed.history.drafts.del(ed.isearchIdx)
+    ed.history.cursorPos.del(ed.isearchIdx)
+    ed.history.cursor = ed.isearchIdx
+  ed.selAnchor = -1
+  isearchRestorePrompt(ed)
+  fullRedraw(ed)
+
+proc isearchAbort(ed: var LineEditor) =
+  ## End the search restoring the exact pre-search buffer, cursor, and
+  ## history view (readline C-g, or any key the search does not own).
+  ed.isearchActive = false
+  ed.line.text = ed.isearchSavedText
+  ed.line.position = ed.isearchSavedPos
+  ed.history.cursor = ed.isearchSavedCursor
+  ed.selAnchor = ed.isearchSavedAnchor
+  isearchRestorePrompt(ed)
+  fullRedraw(ed)
+
+proc historyBegin*(ed: var LineEditor) =
+  ## Jump to the oldest history entry (readline M-<).
+  if ed.history.entries.len == 0: return
+  breakChains(ed)
+  ed.stashView()
+  ed.history.cursor = 0
+  ed.loadView(0)
+
+proc historyEnd*(ed: var LineEditor) =
+  ## Jump back to the draft (readline M->).
+  breakChains(ed)
+  ed.stashView()
+  ed.history.cursor = -1
+  ed.loadView(-1)
+
 # Key Names
 var KEYNAMES* {.threadvar.}: array[0 .. 31, string]
 
@@ -2583,6 +2740,14 @@ proc cmdDeleteToBol(ed: var LineEditor) = ed.deleteToBol()
 proc cmdTransposeChars(ed: var LineEditor) = ed.transposeChars()
 proc cmdUndo(ed: var LineEditor) = ed.undo()
 proc cmdRevertLine(ed: var LineEditor) = ed.revertLine()
+proc cmdIsearchBackward(ed: var LineEditor) = ed.isearchStart(false)
+proc cmdIsearchForward(ed: var LineEditor) = ed.isearchStart(true)
+proc cmdNonincSearchBackward(ed: var LineEditor) =
+  ed.isearchStart(false, noninc = true)
+proc cmdNonincSearchForward(ed: var LineEditor) =
+  ed.isearchStart(true, noninc = true)
+proc cmdHistoryBegin(ed: var LineEditor) = ed.historyBegin()
+proc cmdHistoryEnd(ed: var LineEditor) = ed.historyEnd()
 when defined(posix):
   proc cmdSuspend(ed: var LineEditor) =
     ed.write "\n\e[?2004l"
@@ -2655,7 +2820,13 @@ var
     "delete-to-bol": "CtrlU",
     "transpose-chars": "CtrlT",
     "undo": "Ctrl_ Ctrl/",
-    "revert-line": "AltR"
+    "revert-line": "AltR",
+    "isearch-backward": "CtrlR",
+    "isearch-forward": "CtrlS",
+    "nonincremental-search-backward": "AltP",
+    "nonincremental-search-forward": "AltN",
+    "history-begin": "Alt<",
+    "history-end": "Alt>"
   }.toTable
 
 var CommandProcs*: Table[string, KeyCallback]
@@ -2684,6 +2855,7 @@ proc normalizeKeyToken(token: string): string =
   if t == "ctrln": return "ctrl+n"
   if t == "ctrlp": return "ctrl+p"
   if t == "ctrlr": return "ctrl+r"
+  if t == "ctrls": return "ctrl+s"
   if t == "ctrlu": return "ctrl+u"
   if t == "ctrlv": return "ctrl+v"
   if t == "ctrlw": return "ctrl+w"
@@ -2702,6 +2874,10 @@ proc normalizeKeyToken(token: string): string =
   if t == "alty": return "alt+y"
   if t == "alt.": return "alt+."
   if t == "altr": return "alt+r"
+  if t == "altp": return "alt+p"
+  if t == "altn": return "alt+n"
+  if t == "alt<": return "alt+<"
+  if t == "alt>": return "alt+>"
   # Cmd/Super chords (kitty keyboard protocol `super`, the macOS
   # Command key). Cmd+letter arrives as `CSI <code> ; 9 u`.
   for l in 'a' .. 'z':
@@ -2770,7 +2946,13 @@ proc parseShortcutSpec*(spec: string): seq[KeySpec] =
   for token in strutils.splitWhitespace(spec):
     let double = token.toLowerAscii.startsWith("double")
     var keys: seq[string] = @[]
-    for part in token.split('>'):
+    var parts = token.split('>')
+    if parts.len > 1 and parts[^1].len == 0:
+      # `Alt>` ends in the key `>` itself (readline M->): that final
+      # `>` is the key, not a chord join. Fold it back onto its part.
+      parts.setLen(parts.len - 1)
+      parts[^1].add '>'
+    for part in parts:
       if part.len == 0:
         raise newException(ValueError, token)
       keys.add normalizeKeyToken(part)
@@ -2884,6 +3066,12 @@ proc applyShortcuts*(shortcuts: Table[string, string]) =
     CommandProcs["transpose-chars"] = cmdTransposeChars
     CommandProcs["undo"] = cmdUndo
     CommandProcs["revert-line"] = cmdRevertLine
+    CommandProcs["isearch-backward"] = cmdIsearchBackward
+    CommandProcs["isearch-forward"] = cmdIsearchForward
+    CommandProcs["nonincremental-search-backward"] = cmdNonincSearchBackward
+    CommandProcs["nonincremental-search-forward"] = cmdNonincSearchForward
+    CommandProcs["history-begin"] = cmdHistoryBegin
+    CommandProcs["history-end"] = cmdHistoryEnd
   CommandProcsAll = CommandProcs
   when not defined(posix):
     CommandProcsAll["suspend"] = proc(ed: var LineEditor) = discard
@@ -3388,22 +3576,6 @@ proc terminalHasPendingInput*(): bool =
       return false
   true
 
-proc hasPendingEscapeTail(ed: LineEditor): bool =
-  ## POSIX terminals send a bare Escape with the same leading byte used
-  ## by arrow-key CSI sequences. Wait briefly for a tail byte; if none
-  ## arrives, treat it as a standalone cancel key.
-  # An embedded editor (tests, harnesses) supplies its own pending-byte
-  # probe via `hasPendingInput`; the fat prompt on Windows passes none,
-  # and the fallback used to be `true` (a phantom tail) because
-  # `terminalHasPendingInput` had no Windows peek: ESC then fell
-  # through to a blocking `_getch` for a second byte that never comes,
-  # freezing the input thread until the next keystroke. The `_kbhit`
-  # Windows branch makes the fallback honest.
-  if ed.hasPendingInput != nil:
-    ed.hasPendingInput()
-  else:
-    terminalHasPendingInput()
-
 # ---------- readLine driver ----------
 
 proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): LineEditor =
@@ -3444,6 +3616,7 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.selAnchor = -1
   ed.chordBuf = @[]
   clearUndo(ed)
+  ed.isearchActive = false
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0: ed.width = w
@@ -3491,6 +3664,8 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   of 8: base = "end"
   of 127: base = "backspace"
   of 47: base = "/"
+  of 60: base = "<"
+  of 62: base = ">"
   of 95: base = "_"
   of 97..122: base = $key.char  # shift is dropped: ctrl+shift+e == ctrl+e
   else: return                  # F-keys, keypad, keypad-enter: nothing bound
@@ -3501,6 +3676,22 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   if prefix.len == 0 and (bits and 1) != 0:
     prefix = "shift+"          # shift+delete and friends
   discard dispatchKeyName(ed, prefix & base)
+
+proc hasPendingEscapeTail(ed: LineEditor): bool =
+  ## POSIX terminals send a bare Escape with the same leading byte used
+  ## by arrow-key CSI sequences. Wait briefly for a tail byte; if none
+  ## arrives, treat it as a standalone cancel key.
+  # An embedded editor (tests, harnesses) supplies its own pending-byte
+  # probe via `hasPendingInput`; the fat prompt on Windows passes none,
+  # and the fallback used to be `true` (a phantom tail) because
+  # `terminalHasPendingInput` had no Windows peek: ESC then fell
+  # through to a blocking `_getch` for a second byte that never comes,
+  # freezing the input thread until the next keystroke. The `_kbhit`
+  # Windows branch makes the fallback honest.
+  if ed.hasPendingInput != nil:
+    ed.hasPendingInput()
+  else:
+    terminalHasPendingInput()
 
 proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## Process a single escape sequence starting just after the leading
@@ -3748,6 +3939,75 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
     return false
   return false
 
+proc handleIsearchKey(ed: var LineEditor; c1: int): bool =
+  ## One keystroke while a search is active. True = consumed by the
+  ## search. False = the search has ended (accept or abort) and the key
+  ## should process itself against the resulting buffer: Enter accepts
+  ## and then submits, exactly like readline's RET.
+  if c1 == 27 and not ed.hasPendingEscapeTail():
+    isearchAccept(ed)
+    return true
+  if c1 == 7:  # C-g
+    isearchAbort(ed)
+    return true
+  if c1 == 18 or c1 == 19:  # C-r / C-s: step, flipping direction
+    if ed.isearchNoninc:
+      ed.isearchForward = (c1 == 19)
+      isearchPaint(ed)
+      return true
+    ed.isearchForward = (c1 == 19)
+    isearchStep(ed)
+    return true
+  if c1 == 8 or c1 == 127:  # backspace: shrink the query, exit when empty
+    if ed.isearchQuery.len > 0:
+      var cut = ed.isearchQuery.len - 1
+      while cut > 0 and
+          (byte(ed.isearchQuery[cut]) and 0xC0'u8) == 0x80'u8:
+        dec cut
+      ed.isearchQuery.setLen cut
+      isearchQueryChanged(ed)
+    else:
+      isearchAccept(ed)
+    return true
+  if c1 == 23:  # C-w: pull the word before the match into the query
+    var p = ed.line.position
+    while p > 0 and ed.line.text[p - 1] in {' ', '\t', '\n'}: dec p
+    let wend = p
+    while p > 0 and ed.line.text[p - 1] notin {' ', '\t', '\n'}: dec p
+    if wend > p:
+      ed.isearchQuery.add ed.line.text[p ..< wend]
+      isearchQueryChanged(ed)
+    return true
+  if c1 == 10 or c1 == 13:  # Enter
+    if ed.isearchNoninc:
+      isearchStep(ed)
+      isearchAccept(ed)
+      return true
+    isearchAccept(ed)
+    return false
+  if c1 in PRINTABLE:
+    ed.isearchQuery.add c1.char
+    isearchQueryChanged(ed)
+    return true
+  if c1 >= 0x80:
+    var buf = ""
+    buf.add c1.char
+    let n = expectedSeqLen(c1)
+    for _ in 1 ..< n:
+      let b = ed.getCh()
+      if b >= 0 and (b and 0xC0) == 0x80:
+        buf.add b.char
+      else:
+        if b >= 0: ed.escPutback = b
+        return true
+    ed.isearchQuery.add buf
+    isearchQueryChanged(ed)
+    return true
+  # Anything else ends the search (restoring the pre-search state) and
+  # then acts on the buffer itself.
+  isearchAbort(ed)
+  return false
+
 proc readLineWith*(ed: var LineEditor, prompt: string,
                    getCh: GetChProc, write: WriteProc,
                    hidechars = false, noHistory = false,
@@ -3829,6 +4089,10 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
     # otherwise unsynchronized with those readers and corrupts the heap.
     callHook(ed.preMutate, ed)
     try:
+      if ed.isearchActive:
+        if handleIsearchKey(ed, c1):
+          paintIfCleared(ed, suffixJustCleared)
+          continue
       if c1 == 10 or c1 == 13:
         # Hidden-mode (api key) paste burst detection: when a newline
         # arrives immediately after other bytes (no inter-byte gap),
