@@ -15,7 +15,7 @@
 ]#
 
 import std/[algorithm, hashes, json, options, os, sequtils, strutils, tables]
-import types, util, modelname, anthropic, plugins
+import types, util, modelname, anthropic, plugins, screen
 
 # ThinkBackMode moved to types.nim (Profile.params needs it); re-export
 # for modules that historically reached it through prompts.
@@ -3313,6 +3313,21 @@ let dmailTool = %*{
   }
 }
 
+let screenshotTool = %*{
+  "type": "function",
+  "function": {
+    "name": "screenshot",
+    "description": "Capture the screen; the image is attached to your next message. Coordinates you read off it are delivered-raster pixels — drive the desktop with the `shot` script (see the computer-use note), never raw xdotool. Re-capture after actions to verify what actually happened.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "fidelity": {"type": "boolean", "description": "PNG instead of JPEG for unreadable small text (slower, larger)."}
+      },
+      "required": []
+    }
+  }
+}
+
 let glmAndQwenTools = %*[
   {
     "type": "function",
@@ -3705,6 +3720,10 @@ commands:
   :private on|off     toggle private mode for this session (bar recolors)
   :private allow X    trust provider X (optionally one model: allow X M) with
                       private data; persists as [params] allow-private
+  :computer          show computer use (screenshot + shot; off by default)
+  :computer on|off   let the model see and drive this desktop for the
+                      session (vision models only; a one-time note enters
+                      the chat)
   :goal               show the active goal (goal.md in this directory)
   :goal TEXT          write goal.md and immediately start working toward
                       it: a read-only verifier keeps the session on the
@@ -4319,12 +4338,13 @@ const RetiredBuiltinSkills* = ["cybernetic-plan.md"]
   ## an explicit list (not "anything unknown") so user-placed files in that
   ## dir are never touched.
 
-const BuiltinSkills*: array[5, (string, string)] = [
+const BuiltinSkills*: array[6, (string, string)] = [
   ("role-conversational.md",   staticRead("skills/role-conversational.md")),
   ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
   ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
   ("role-writing.md",          staticRead("skills/role-writing.md")),
-  ("task-debug-systematic.md", staticRead("skills/task-debug-systematic.md")),
+  ("task-debug-systematic.md",   staticRead("skills/task-debug-systematic.md")),
+  ("computer-use.md",          staticRead("skills/computer-use.md")),
 ]
   ## Universal skills compiled into the binary. Materialized to
   ## `~/.local/share/3code/skills/` on startup; re-extracted whenever
@@ -4410,6 +4430,21 @@ proc findSystemPromptOverride*(family: string): string =
   let global = userConfigRoot() / family & ".txt"
   if fileExists(global): return global
   ""
+
+proc screenshotOffered*(p: Profile): bool =
+  ## The screenshot schema rides the tools array only while computer use
+  ## is active on a vision profile: session-scoped activation, zero cost
+  ## when idle. The array change is a one-time cache bust at activation,
+  ## accepted and logged like any mid-session tool change.
+  computerUseEnabled and p.vision and screenBackendOk()
+
+proc activeTools*(p: Profile): JsonNode =
+  ## The request-facing tools for `p`: the family's static surface, plus
+  ## `screenshot` when computer use is live.
+  result = setup(p).tools
+  if screenshotOffered(p):
+    result = copy(result)
+    result.add screenshotTool
 
 proc buildSystemPrompt(p: Profile, skills: string): string =
   let override = findSystemPromptOverride(p.family)

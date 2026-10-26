@@ -348,7 +348,8 @@ const
                   "browserfetch",
                   "tone", "mode", "bash_path", "bash-path",
                   "bash", "auto-update", "tab-title",
-                  "verifier", "verifier_model", "verifier-model"]
+                  "verifier", "verifier_model", "verifier-model",
+                  "computer"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -614,6 +615,14 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           case v.toLowerAscii
           of "on", "true", "yes", "1": sandboxEnabled = true
           of "off", "false", "no", "0": sandboxEnabled = false
+          else: discard
+        of "computer":
+          # Same boolean dialect. Session-scoped in spirit: this line exists
+          # so tests and scripted runs can arm computer use; the :computer
+          # toggle never writes it back.
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": computerUseEnabled = true
+          of "off", "false", "no", "0": computerUseEnabled = false
           else: discard
         of "patient_retry", "patient-retry":
           # Same boolean dialect. Default on; an explicit `off` makes

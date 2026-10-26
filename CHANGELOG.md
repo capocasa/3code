@@ -331,6 +331,23 @@ Unreleased
   Works on chat-completions (verbatim `image_url` blocks) and the
   Responses API (`input_image` items) alike.
 
+- **Computer use (X11).** `:computer on` (or `--computer`, session-only,
+  never persisted) lets a vision model see and drive the desktop:
+  `screenshot()` captures the screen and attaches the image to the next
+  message (same budgeted delivery as image reads; transcript:
+  `· shot 1920x1080 -> 1280x720`), and a generated `shot` script
+  (`shot click 640 360`, `drag`, `type`, `key`, `scroll`, `title`) drives
+  mouse/keyboard through the ordinary bash tool — it takes
+  delivered-raster coordinates and does the native mapping itself, so the
+  model never does scale math; stale frames error loudly. Guardrails:
+  3 captures per turn without an intervening action, capture streaks feed
+  the flail detector, a one-time activation note (dmail pattern) teaches
+  the loop, and the screenshot schema is only offered while armed +
+  vision-capable + backend-probed (idle cost: one skills line,
+  `computer-use.md`). Backend probes X11 (`import`/`maim`/`scrot` +
+  `xdotool`); macOS/Wayland/Windows fail with a clear not-implemented
+  error.
+
 - **Private mode.** `-p`/`--private` or `:private on` (default off,
   session-only, like a browser's private window). While on, turns only
   run on allow-private providers/models and the live token bar repaints

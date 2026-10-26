@@ -1584,7 +1584,7 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode,
   let proBase = proModeBase(p)
   if proBase != "": result["model"] = %proBase
   let effTools = responsesTools(
-    if toolsOverride != nil: toolsOverride else: setup(p).tools)
+    if toolsOverride != nil: toolsOverride else: activeTools(p))
   # An empty effective roster (the toolless goal verifier) omits the
   # fields entirely: sending `"tools": []` needlessly dares strict
   # backends to 400.
@@ -3335,7 +3335,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         # the fields entirely: sending `"tools": []` needlessly dares
         # strict backends to 400.
         let effTools =
-          if toolsOverride != nil: toolsOverride else: setup(p).tools
+          if toolsOverride != nil: toolsOverride else: activeTools(p)
         if effTools == nil or effTools.len > 0:
           body["tools"] = effTools
           body["tool_choice"] = %"auto"

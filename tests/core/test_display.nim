@@ -616,6 +616,31 @@ when not defined(windows):
       check "(image read)" notin outp
       check "base64" notin outp
 
+    test "replay renders the screenshot banner and skips its follow-up":
+      let msgs = %*[
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "[computer use on] screenshot() ..."},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "c1", "type": "function",
+           "function": {"name": "screenshot", "arguments": "{}"}}]},
+        {"role": "user", "content": [
+          {"type": "text",
+           "text": "attached: shot 1 16x12 -> 16x12 (screenshot)"},
+          {"type": "image_url",
+           "image_url": {"url": "data:image/png;base64,AAAA"}}]},
+        {"role": "assistant", "content": "it is tiny"},
+      ]
+      let outp = captureReplay2(msgs, @[ToolRecord(
+        banner: "screenshot",
+        output: "screenshot 16x12 -> delivered 16x12 JPEG; shot attached below",
+        code: 0, kind: akScreenshot)])
+      check "· shot 16x12 -> 16x12" in outp
+      # Neither the activation note nor the screenshot follow-up echoed
+      # anything live; replay keeps them invisible.
+      check "(screenshot)" notin outp
+      check "computer use on" notin outp
+      check "base64" notin outp
+
     test ":show renders the whole receipt, never the base64":
       let receipt = "image tiny.png 16x12 PNG -> delivered 16x12 JPEG; " &
         "attached below"

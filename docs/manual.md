@@ -1043,6 +1043,39 @@ blocks to `[image WxH]` text notes — summaries never carry image blobs.
 (`magick` or `convert`) or, on macOS, `sips`. Without one, small originals
 pass through unchanged and large ones error with an install hint. (Windows
 resizer support is pending the Windows sandbox work.)
+
+## Computer use
+
+Vision models can also drive your desktop: `:computer on` (or `--computer`)
+arms the `screenshot` tool for the session. Off by default, never persisted
+— a resumed session starts with it off until you arm it again.
+
+On activation the backend is probed (X11: one of `import`/`maim`/`scrot`
+plus `xdotool`; missing binaries are named in the error), a one-time note
+enters the conversation teaching the model the observe→act→verify loop, and
+the `screenshot` schema joins the offered tools (a one-time prompt-cache
+bust, like any mid-session tools change). Idle cost is one skills-catalog
+line (`computer-use.md`).
+
+- `screenshot()` captures the screen; the image rides the next message as
+  an image block (same delivery path as `@image` and image reads), the tool
+  result is a text receipt, the transcript shows `· shot 1920x1080 -> 1280x720`.
+- A `shot` script lands in the temp dir: `shot click 640 360` (also
+  doubleclick/rightclick/middleclick, `drag X1 Y1 X2 Y2`, `type TEXT`,
+  `key ctrl+s`, `scroll up 3`, `title`). It takes delivered-raster
+  coordinates and maps them to the native screen itself; a stale frame
+  (no capture yet, or the resolution changed) errors loudly and tells the
+  model to `screenshot()` again. The model reaches it through the normal
+  bash tool — no new action surface.
+- Guardrails: captures are capped at 3 in a row without an intervening
+  action, capture streaks feed the flail detector, and there is no sandbox
+  between `shot` and your desktop — that is the point. Esc/Ctrl-C is the
+  panic button.
+
+macOS (screencapture + cliclick), Wayland (grim + ydotool) and Windows are
+not implemented; arming there fails with a clear error instead of
+half-working.
+
 ## Sessions
 
 List the 20 most recent sessions for the current directory:

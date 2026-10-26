@@ -22,6 +22,8 @@ type
     format*: string                 ## delivered subtype for the data URI
     path*: string                   ## delivered file on disk
     name*: string                   ## source basename, for receipts and notes
+    screenshot*: bool               ## capture origin: receipts and the
+                                    ## follow-up note say `shot`, not `read`
 
 func u8(d: string, i: int): int {.inline.} = int(uint8(d[i]))
 

@@ -24,6 +24,10 @@ var streamingEnabled*: bool = true
   ## the reliable fallback when a provider's SSE transport is flaky (empty
   ## 200 replies, ticker dying mid-response — the streamhttp TLS-read race).
   ## Toggled at runtime via `:streaming on/off`, persisted in `[settings]`.
+var computerUseEnabled*: bool = false
+  ## Session-scoped: `:computer on`, `--computer`, or `[settings]
+  ## computer = on` (tests/CLI). Never written back to the config by the
+  ## toggle — activation must not become a standing default.
 var notifyEnabled*: bool = true
   ## When true, a native desktop notification fires when a turn ends.
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
@@ -149,7 +153,7 @@ type
     ## One item in a model-emitted `update_plan` / `todo` list.
     text*: string
     status*: string
-  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akClear, akDMail, akPlugin, akError
+  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akScreenshot, akClear, akDMail, akPlugin, akError
   Action* = object
     ## The parsed, tool-agnostic representation of a single model tool call.
     ## `runAction` in actions.nim consumes this and produces the tool result.
@@ -264,6 +268,10 @@ type
                            ## from no snapshot, delta unknown one turn)
     changeCountStart*: int  ## the change log's entry count at this turn's
                             ## start: content-aware work-happened baseline
+    computerActivated*: bool
+      ## Runtime-only marker that the computer-use activation note entered
+      ## the conversation this run. Never persisted: resume starts with
+      ## the tool off until `:computer` (or an explicit config/flag) again.
   ApiError* = object of CatchableError
     ## Base for all model/API failures. `callModel`'s retry loop and the
     ## turn loop catch this so every failure mode is handled uniformly.

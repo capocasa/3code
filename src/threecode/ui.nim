@@ -13,13 +13,13 @@ import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
   auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins,
-  images, goal
+  images, goal, screen
 
 const CommandNames* = [":help", ":tokens", ":clear", ":goal", ":cyber", ":model",
                       ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":verifier",
                       ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
-                      ":version", ":sandbox", ":sb", ":retry", ":private",
+                      ":version", ":sandbox", ":sb", ":retry", ":private", ":computer",
                       ":quit", ":exit"]
 
 proc canonicalCommandName*(name: string): tuple[canon, ambig: string] =
@@ -35,6 +35,7 @@ proc canonicalCommandName*(name: string): tuple[canon, ambig: string] =
   if hits.len == 1: return (hits[0], "")
   if hits.len > 1: return (name, hits.join(" "))
   (name, "")
+
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
                                 noHistory: bool): string {.closure.}
@@ -111,8 +112,9 @@ proc classifyCommand*(cmd: string): CommandKind =
     # plugin state, so they go the mutating path.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "debug"): ckSafeImmediate
     else: ckMutating
-  of ":streaming", ":notify", ":retry", ":private", ":tab-title", ":verifier":
-    if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
+  of ":streaming", ":notify", ":retry", ":private", ":computer", ":tab-title",
+     ":verifier":
+    if parts.len == 0 or (parts.len == 1 and parts[0] in ["list", "status"]): ckSafeImmediate
     else: ckMutating
   of ":provider":
     if parts.len == 0:
@@ -248,6 +250,10 @@ proc completionFor*(line: string): seq[string] =
     result.add "off"
     return
   if words[0] == ":retry" and words.len == 2:
+    result.add "on"
+    result.add "off"
+    return
+  if words[0] == ":computer" and words.len == 2:
     result.add "on"
     result.add "off"
     return
@@ -1576,6 +1582,47 @@ proc cmdPrivate(arg: string, prof: var Profile): string =
   else:
     return errLnS("usage: :private [on|off|allow <provider> [model]|deny <provider> [model]]")
 
+proc cmdComputerStatus(prof: Profile, session: Session): string =
+  let mark = if computerUseEnabled: "on" else: "off"
+  result.add hintLnS("computer use: " & mark &
+    "  (on = the model can screenshot this screen and drive it with the " &
+    "shot script; session only, never persisted)")
+  if computerUseEnabled:
+    if screenBackendOk():
+      result.add hintLnS("shot script  " &
+        shotScriptPath(sessionIdFromPath(session.savePath)))
+    else:
+      result.add hintLnS("backend not probed yet — activates on the next turn")
+  elif prof.name != "":
+    result.add hintLnS("model         " & prof.model &
+      (if prof.vision: "  (vision)"
+       else: "  (cannot see images — :computer needs a vision model, " &
+             "e.g. glm-5.3-flash on zai)"))
+
+proc cmdComputer(arg: string, prof: Profile, session: Session): string =
+  let parts = arg.splitWhitespace()
+  if parts.len == 0 or (parts.len == 1 and parts[0] in ["list", "status"]):
+    return cmdComputerStatus(prof, session)
+  if parts.len != 1 or parts[0] notin ["on", "off"]:
+    return errLnS("usage: :computer [on|off]")
+  if parts[0] == "off":
+    computerUseEnabled = false
+    return hintLnS("computer use: off")
+  if not prof.vision:
+    return errLnS("computer use needs a vision model — " & prof.model &
+      " cannot see images. Switch to a vision model (glm-5.3-flash on " &
+      "zai) first.")
+  let (ok, err) = screen.ensureComputerUse(sessionIdFromPath(session.savePath))
+  if not ok:
+    return errLnS(err)
+  computerUseEnabled = true
+  # The one-time activation note and tool-schema offer land on the next
+  # turn (runTurns owns that), so the conversation stays the single place
+  # the model learns about `shot` from.
+  hintLnS("computer use: on — the screenshot tool is offered from the " &
+    "next turn and a short activation note enters the chat. Esc/Ctrl-C " &
+    "stays the panic button.")
+
 proc cmdSandboxSettingSelect(target: string): string =
   case target.toLowerAscii
   of "on":
@@ -1624,6 +1671,8 @@ proc commandTitle(name, arg: string; ok: bool): string =
     "notify"
   of ":retry":
     "retry"
+  of ":computer":
+    "computer"
   else:
     name.strip(chars = {':'})
 
@@ -2122,6 +2171,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       body.add cmdRetry(arg)
     of ":private":
       body.add cmdPrivate(arg, prof)
+    of ":computer":
+      body.add cmdComputer(arg, prof, session)
     of ":prompt":
       resp buildSystemPrompt(prof)
     of ":version":

@@ -125,6 +125,8 @@ proc usage() {.noreturn.} =
   -x, --experimental   allow combos outside the known-good list
   -p, --private        private mode: only allow-private providers/models run
                       (zero-training providers; the token bar repaints to show it)
+      --computer       computer use for this run: vision models get the
+                      screenshot tool + the shot desktop driver (X11)
       --no-sandbox     disable sandbox enforcement (bash runs unconfined)
   -D, --debug          colored debug trace to stderr
   -v, --version        print version
@@ -436,6 +438,7 @@ proc main() =
       of "g", "good": printKnownGood(); return
       of "x", "experimental": experimentalEnabled = true
       of "p", "private": privateMode = true
+      of "computer": computerUseEnabled = true
       of "no-sandbox": sandboxEnabled = false
       of "D", "debug": debugEnabled = true
       of "i", "interactive": interactive = true

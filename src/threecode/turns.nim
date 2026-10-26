@@ -11,7 +11,7 @@ import std/[algorithm, json, os, sequtils, sets, strformat, strutils, tables,
 when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api, plugins,
-  display, fatprompt, streamexec, toolstream, transcript, images
+  display, fatprompt, streamexec, toolstream, transcript, images, screen
 import sandbox
 import tabtitle
 import goal
@@ -351,7 +351,15 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   # signal that way. The ring only starts filling at FlailStreakArm calls
   # into the run, so a healthy burst of same-tool iteration (compile,
   # read, tweak, test) shorter than that never arms the signal at all.
-  let toks = distinctiveTokens(argsStr)
+  var toks = distinctiveTokens(argsStr)
+  # Screenshot calls carry no argument tokens (no path, no command), so
+  # the streak signal would be blind to a capture doom loop; a fixed
+  # synthetic token pair makes any long run of them read as one theme
+  # even when the args vary. Two tokens, not one: a single-token set is
+  # the sparse subject case the ring similarity math rightly ignores.
+  if name == "screenshot":
+    toks.incl "tool:screenshot"
+    toks.incl "tool:capture"
   if det.streakName != name:
     det.streakName = name
     det.streakLen = 0
@@ -884,6 +892,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     summarizedOn400 = false       # opaque-400 recovery fired this turn (one-shot)
     rolloverDue = false           # a context collapse happened; the mode's
                                   # handoff waits for tool pairing to settle
+    consecShots = 0                # screenshots since the last other action
   # A context collapse is a context clear for a mode with a rollover
   # duty: the fresh context re-anchors at the mode file. Receipted like
   # every harness act. Deferred past the tool loop when the collapsing
@@ -905,6 +914,28 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       commitTranscriptBytes(
         formatItem(agentPromptItem(note{"content"}.getStr)), true)
       saveSession(session, messages)
+  # Computer use activates once per run, before the first request: the
+  # backend probe, the `shot` script and the one-time note all happen
+  # here so every entry path (REPL :command, --computer flag, config
+  # line, library session) behaves identically. A probe failure or a
+  # non-vision profile surfaces once and disarms the tool for the run.
+  if computerUseEnabled and not session.computerActivated:
+    session.computerActivated = true
+    block computerGate:
+      if not p.vision:
+        computerUseEnabled = false
+        commitTranscriptBytes(errLnS(
+          "computer use unavailable: " & p.model & " cannot see images — " &
+          "a vision model (glm-5.3-flash on zai) is required"), true)
+        break computerGate
+      let (ok, err) = screen.ensureComputerUse(sessionIdFromPath(session.savePath))
+      if not ok:
+        computerUseEnabled = false
+        commitTranscriptBytes(errLnS(err), true)
+        break computerGate
+      let sp = screen.shotScriptPath(sessionIdFromPath(session.savePath))
+      messages.add %*{"role": "user", "content": computerUseNote(sp)}
+    saveSession(session, messages)
   # dmail is offered only when the active profile's tool schema includes
   # it (kimi family); the marker tagging below keys off the same flag.
   var dmailEnabled = false
@@ -916,6 +947,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           dmailEnabled = true
           break
   const
+    MaxConsecutiveShots = 3  # captures without an intervening action, then a note
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
     MaxEmptyRetries = 12
@@ -1360,6 +1392,28 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             Action(kind: akPlugin, path: name, body: pluginToolBanner(name, argsStr))
           else:
             toolCallToAction(p.family, name, args)
+        # Screenshot cap: captures are expensive (image tokens on the wire)
+        # and a run of them with no action between is avoidance, not
+        # observation. Identical consecutive calls are the flail
+        # detector's; this catches the varying-args variant.
+        if act.kind == akScreenshot:
+          inc consecShots
+          if consecShots > MaxConsecutiveShots:
+            let note = "SYSTEM: " & $consecShots & " screenshots in a row " &
+              "with no action between them. You already see the current " &
+              "screen — act on it (the shot script) or reply; another " &
+              "capture changes nothing."
+            session.toolLog.add ToolRecord(
+              banner: "! screenshot (cap)", output: note, code: -1,
+              kind: akError)
+            messages.add %*{"role": "tool", "tool_call_id": id,
+                            "content": note}
+            commitTranscriptBytes(
+              errLnS("screenshot cap: repeated captures without an " &
+                "intervening action; demanding one from the model"), true)
+            continue
+        else:
+          consecShots = 0
         let silent = isSkillRead(act)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
@@ -1546,9 +1600,19 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           extraNote = &"\n[{rest.len} image read(s) not attached: " &
             rest.join(", ") & "]"
           imgs.setLen MaxImagesPerTurn
-        let names = imgs.mapIt(it.name).join(", ")
+        # Screenshots announce geometry so the model can pin coordinates
+        # to the raster it just got; reads stay name-only as before.
+        let parts = imgs.mapIt(
+          if it.screenshot:
+            &"{it.name} {it.width}x{it.height} -> " &
+            &"{it.deliveredWidth}x{it.deliveredHeight}"
+          else: it.name)
+        let label =
+          if imgs.len > 0 and imgs.allIt(it.screenshot): "screenshot"
+          else: "image read"
+        let joined = parts.join(", ")
         messages.add imageUserMessage(
-          &"attached: {names} (image read){extraNote}", imgs)
+          &"attached: {joined} ({label}){extraNote}", imgs)
       saveSession(session, messages)
       if rolloverDue:
         # The deferred handoff: tool pairing has settled, the fresh
