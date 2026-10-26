@@ -2,6 +2,22 @@ Changelog
 
 Unreleased
 
+- **A width change re-breaks the committed transcript above the
+  prompt.** Committed rows are hard-wrapped at the width they were
+  painted at, so a resize used to leave them to the terminal's own
+  reflow, which breaks mid-word and strands stale tails. The engine now
+  journals committed transcript content as it is written
+  (`noteCommittedRows`, plus `noteNonMessageTail` for queued `:` command
+  echoes and their bodies, which never enter the messages), and a
+  width-only resize repaints that tail window re-wrapped at the new
+  width: word-boundary breaks, every row within the new width (each row
+  EL-terminated so a shorter row clears the stale tail of the wider row
+  it replaces), every word present exactly once and in order - which the
+  resize shakedown now asserts across 104/60/80 cols. The window is read
+  only while the main thread is parked in the input wait, never while a
+  modal wizard owns the screen; Windows stays frozen-rows because
+  ConPTY's resize model already full-repaints.
+
 - **Vertical cursor movement no longer repaints (and no longer crawls)
   on a pasted multi-line draft.** Two causes stacked: Up/Down picked
   their target with one `cursorVisual` - itself a full row-model walk -
