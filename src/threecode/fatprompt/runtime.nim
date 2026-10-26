@@ -3026,7 +3026,7 @@ proc wizardFinish*() =
   ## successful submits. The controller calls this once after the
   ## wizard's caller has done all post-processing and flushed its
   ## terminal output: at that point the input thread can re-enter the
-  ## persistent `readLineWith` and paint `❯ ` on a fresh row below
+  ## persistent `readLineWith` and paint `❯` and a space on a fresh row below
   ## the wizard's last message.
   ##
   ## Without this gate the input thread would exit the wizard branch

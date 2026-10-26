@@ -20,7 +20,7 @@
     var sep = document.createTextNode(' ');
 
     var docLink = document.createElement('a');
-    docLink.href = docsRoot + 'manual.html';
+    docLink.href = docsRoot + 'index.html';
     docLink.className = 'doc-site-doclink';
     docLink.textContent = 'Documentation';
 

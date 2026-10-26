@@ -24,7 +24,8 @@ selection.
 This manual is organized how-to style: getting a provider, daily use, the
 screen, sessions, the sandbox, embedding. The dry inventory of every config
 key, command-line switch, and `:` command lives in the
-[reference](reference.html).
+[reference](reference.html); the internal API, for embedding and
+contributing, in the [developer docs](dev.html).
 
 ## Quickstart
 
@@ -1920,11 +1921,8 @@ reproduce the issue. Terminal rendering bugs need a visual PTY test that shows
 the bad frame before the fix. A test that cannot show the bug has not
 reproduced it yet.
 
-Developer API documentation is generated at `docs/dev/threecode.html`:
-
-```
-nimble devdocs
-```
+Developer API documentation lives in the [developer docs](dev.html):
+module-by-module, generated from the source doc comments.
 
 ## Prior art
 

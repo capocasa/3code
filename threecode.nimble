@@ -100,7 +100,7 @@ task test, "Run the test suite via testament (all, or named files)":
       cmd.add " '" & file.replace("'", "'\"'\"'") & "'"
     exec cmd
 
-task docs, "Build HTML manual and reference from docs/*.md":
+task docs, "Build HTML manual, reference, and developer docs":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default
   # (light theme + visible theme switcher). Our curated dark theme lives
   # in 3code.css and wins by overwriting the generated file.
@@ -111,14 +111,16 @@ task docs, "Build HTML manual and reference from docs/*.md":
   mvFile("docs/manual.html", "docs/index.html")
   exec "nim md2html --docCmd:skip --outdir:docs docs/reference.md"
   exec "nim md2html --docCmd:skip --outdir:docs docs/plugins.md"
+  exec "nim md2html --docCmd:skip --outdir:docs docs/dev.md"
   cpFile("docs/3code.css", "docs/nimdoc.out.css")
-  for page in ["index.html", "reference.html", "plugins.html"]:
+  for page in ["index.html", "reference.html", "plugins.html", "dev.html"]:
     addPageToc("docs/" & page)
 
 task devdocs, "Build developer HTML docs from source":
-  # nim doc regenerates nimdoc.out.css and dochack.js from its built-in
-  # defaults (light theme + no 3code header). Restore the curated dark CSS
-  # and re-append the 3code header block to dochack.js after generating.
+  # NOTE: currently fails on this box. `nim doc` implies `-d:nimdoc`, which
+  # flips std/nativesockets to its winlean flavor on Linux; deps that mix
+  # std/net with std/posix (streamhttp setsockopt, sandwall sockshim/proxy
+  # SocketHandle/SockLen) then fail to typecheck in doc mode only.
   exec "nim doc --project --outdir:docs/dev src/threecode.nim"
   cpFile("docs/dev/3code.css", "docs/dev/nimdoc.out.css")
   exec "cat docs/dev/3code-header.js >> docs/dev/dochack.js"

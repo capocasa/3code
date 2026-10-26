@@ -1073,6 +1073,19 @@ h1.title::before {
   display: none;
 }
 
+/* developer docs kicker (dev.html) */
+.dev-kicker {
+  font-family: var(--mono);
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--anchor);
+  margin: 0 0 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
 /* selection */
 ::selection {
   background: var(--anchor);

@@ -3583,7 +3583,7 @@ var bashToolDisabled* = false
   ## threecode.nim): the bash/shell tool is dropped from the advertised
   ## surface so the model never plans around an execution path that
   ## would only return an error. The user was warned at startup; a
-  ## ```bash fence in a reply still hits the streamexec guard, which
+  ## fenced bash block in a reply still hits the streamexec guard, which
   ## answers with the same install one-liner.
 
 proc withoutShellTools(tools: JsonNode): JsonNode =

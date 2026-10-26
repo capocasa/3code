@@ -97,7 +97,10 @@
 <li><a href="#context-management">Context management</a></li>
 <li><a href="#chunked-mode">Chunked mode</a></li>
 <li><a href="#skills">Skills</a></li>
-<li><a href="#goal-mode">Goal mode</a></li>
+<li><a href="#goal-mode">Goal mode</a><ul>
+<li><a href="#verifier-models">Verifier models</a></li>
+</ul>
+</li>
 <li><a href="#no-subminusagents">No sub-agents</a></li>
 <li><a href="#sandbox">Sandbox</a><ul>
 <li><a href="#policy-format">Policy format</a></li>
@@ -131,7 +134,7 @@
 <h2 id="introduction">Introduction</h2><p>3code is the coding agent I wanted for my own work: capable, quiet, and not forever looking for new ways to spend tokens. It works with OpenAI-compatible providers, including free tiers, flat-rate coding plans, and local servers.</p>
 <p>The design rule is simple: get a correct result with the least model work, token use, and computer time. Open models, especially GLM, are good enough for most of my programming work. 3code gives them a focused prompt, a small tool set, persistent sessions, and a terminal interface that stays out of the way.</p>
 <p>The standard way to use 3code is also the simplest one: type what you want, like <tt class="docutils literal"><span class="pre">fix the flickering caret in the resize path</span></tt> or <tt class="docutils literal"><span class="pre">add tests for the parser edge cases</span></tt>, and press Enter. Current models read the code, do the work, and report back, without asking you anything in between. If a task is overly broad (<tt class="docutils literal"><span class="pre">improve this project</span></tt>), you will get questions or a plan first; narrow it down and it is back to hands-off. The interface exists to stay out of that loop: scrollback is plain terminal history, the footer is two rows, and everything else is your terminal's own scrolling, search, and selection.</p>
-<p>This manual is organized how-to style: getting a provider, daily use, the screen, sessions, the sandbox, embedding. The dry inventory of every config key, command-line switch, and <tt class="docutils literal"><span class="pre">:</span></tt> command lives in the <a class="reference external" href="reference.html">reference</a>.</p>
+<p>This manual is organized how-to style: getting a provider, daily use, the screen, sessions, the sandbox, embedding. The dry inventory of every config key, command-line switch, and <tt class="docutils literal"><span class="pre">:</span></tt> command lives in the <a class="reference external" href="reference.html">reference</a>; the internal API, for embedding and contributing, in the <a class="reference external" href="dev.html">developer docs</a>.</p>
 
 <h2 id="quickstart">Quickstart</h2><p>First, give 3code somewhere to run inference: an API provider or a local OpenAI-compatible server. Local models can work (Ollama and friends speak the same API), though small ones still have a rough time with difficult coding tasks.</p>
 
@@ -202,7 +205,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 
 <h2 id="providers-and-authentication">Providers and authentication</h2><p><tt class="docutils literal"><span class="pre">:provider</span></tt> lists configured providers and marks the current one, along with the model a switch would land on. <tt class="docutils literal"><span class="pre">:model</span></tt> does the same for its models. Both commands have tab completion, so there is no need to memorize catalog names. Model choices are sticky per provider: switching back with <tt class="docutils literal"><span class="pre">:provider</span></tt> returns to the model you last used there, not the first one in its list. The current provider and model are also sticky per directory: each project starts where it last left off, while directories never touched by <tt class="docutils literal"><span class="pre">:provider</span></tt> / <tt class="docutils literal"><span class="pre">:model</span></tt> keep the global config default. All of this lives in the config file; see <a class="reference external" href="reference.html#config-file">config file in the reference</a> for every key (<tt class="docutils literal"><span class="pre">-c FILE</span></tt> points a single run at a different one).</p>
 <p><pre class="listing">:provider nvidia
-:model gpt-oss-120b</pre></p>
+:model gpt-oss-20b</pre></p>
 <p>When a provider ships new models, <tt class="docutils literal"><span class="pre">:provider update &lt;name&gt;</span></tt> re-runs just the models step of the wizard: the offered list refreshes (curated in regular mode, the provider's <tt class="docutils literal"><span class="pre">/models</span></tt> endpoint under <tt class="docutils literal"><span class="pre">--experimental</span></tt>) and Enter keeps the current selection. Name, URL, and key pass through untouched; <tt class="docutils literal"><span class="pre">:provider edit &lt;name&gt;</span></tt> is the full wizard when those need changing too.</p>
 <p>To see what you are missing without entering the wizard, <tt class="docutils literal"><span class="pre">:provider new</span></tt> lists every configured provider's not-yet-configured models (<tt class="docutils literal"><span class="pre">:provider new &lt;name&gt;</span></tt> for one provider), and <tt class="docutils literal"><span class="pre">:provider pull</span></tt> brings them in, optionally scoped the same way or down to named models: <tt class="docutils literal"><span class="pre">:provider pull nvidia glm-5.4</span></tt>. New models append to the stored list; nothing is removed, and under <tt class="docutils literal"><span class="pre">--experimental</span></tt> each addition is verified with a one-token call first.</p>
 
@@ -302,6 +305,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <tr><td>Shift+Enter or Alt+Enter</td><td>insert a newline</td></tr>
 <tr><td>Up / Down</td><td>move through visual rows, then history</td></tr>
 <tr><td>Ctrl+Arrow</td><td>move by word</td></tr>
+<tr><td>Cmd+A</td><td>select all (kitty keyboard protocol terminals)</td></tr>
 <tr><td>Ctrl+U</td><td>clear the input buffer</td></tr>
 <tr><td>Ctrl+W</td><td>delete the previous word</td></tr>
 <tr><td>Ctrl+K</td><td>delete to end of line</td></tr>
@@ -327,7 +331,7 @@ delete-to-bol    = CmdBackspace
 delete-word-left = CtrlW AltBackspace</pre></p>
 <p>Terminals without the protocol ignore the handshake, and unbound Cmd keys simply do nothing. This is what makes the Command key usable on macOS: Option composes characters there (a dead accent on German layouts, so Alt+E and friends cannot arrive as keystrokes), while Cmd chords are reported as-is through the protocol.</p>
 
-<h3 id="selecting-text">Selecting text</h3><p>The input buffer is a real text widget: hold Shift with the arrows (or Home/End, Ctrl+Arrow for words, Ctrl+Shift+Home/End for the whole buffer) and the range highlights in reverse video. Then:</p>
+<h3 id="selecting-text">Selecting text</h3><p>The input buffer is a real text widget: hold Shift with the arrows (or Home/End, Ctrl+Arrow for words, Ctrl+Shift+Home/End for the whole buffer) and the range highlights in reverse video. Cmd+A selects the whole buffer. Then:</p>
 <table border="1" class="docutils"><tr><th>key</th><th>action</th></tr>
 <tr><td>Ctrl+X</td><td>cut the selection (without one, Ctrl+X is the emacs prefix)</td></tr>
 <tr><td>Alt+W</td><td>copy the selection</td></tr>
@@ -396,10 +400,11 @@ edit-in-editor = AltE CtrlX&gt;CtrlE</pre></p>
 <p>After the short initial retry period, attempts become part of the transcript:</p>
 <p><pre class="listing">Usage limit reached for the past 5 hours. (code 429). retry 42/64 in 2048s</pre></p>
 <p>Use these commands to inspect or change the setting:</p>
-<p><pre class="listing">:retry
+<p><pre class="listing">:retry list
 :retry off
 :retry on</pre></p>
-<p>Even with patient retry off, 3code gives transient failures about a minute before returning to the interactive prompt. The setting is stored as <tt class="docutils literal"><span class="pre">patient_retry</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt> (<a class="reference external" href="reference.html#settings">settings in the reference</a>). Press Esc to cancel the wait. Press Ctrl+R to cut the wait short and retry now: the backoff schedule is kept as it was, so later failures back off exactly as they would have. Ctrl+R also cancels and resends a request that has not shipped any output yet (still connecting, or headers only); once model output is streaming, or at the idle prompt, it does nothing. A stream that stalls network-quiet or arrives truncated mid-response is detected and retried on its own, regardless of the setting.</p>
+<p><tt class="docutils literal"><span class="pre">:retry</span></tt> with no argument is the command form of Ctrl+R: retry now.</p>
+<p>Even with patient retry off, 3code gives transient failures about a minute before returning to the interactive prompt. The setting is stored as <tt class="docutils literal"><span class="pre">patient_retry</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt> (<a class="reference external" href="reference.html#settings">settings in the reference</a>). Press Esc to cancel the wait. Press Ctrl+R to cut the wait short and retry now: the backoff schedule is kept as it was, so later failures back off exactly as they would have. Ctrl+R also cancels and resends a request that has not shipped any output yet (still connecting, or headers only); once model output is streaming, or at the idle prompt, it does nothing. Bare <tt class="docutils literal"><span class="pre">:retry</span></tt> does the same thing from the command line. A stream that stalls network-quiet or arrives truncated mid-response is detected and retried on its own, regardless of the setting.</p>
 <p>For a provider whose streaming is the problem rather than its availability, <tt class="docutils literal"><span class="pre">:streaming off</span></tt> switches requests to plain request/response mode: the reliable fallback when a provider's SSE implementation drops or truncates responses. The setting is per session, or permanent as <tt class="docutils literal"><span class="pre">streaming = off</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt>.</p>
 
 <h2 id="when-the-model-misbehaves">When the model misbehaves</h2><p>Two failure modes are common enough across providers that 3code guards against them automatically. Both guards are deliberately small: a few hundred tokens of mechanism for a failure mode that would otherwise burn millions. Provider API errors along the way surface as formatted messages, never raw JSON bodies.</p>
@@ -432,6 +437,7 @@ allow-private = &quot;true&quot;</pre></p>
 <p>Everything else is refused at the gate with a pointer to the fix:</p>
 <p><pre class="listing">zai.glm-5.2 is not allow-private (trust it with :private allow zai, or
 switch to a zero-training provider; :private lists)</pre></p>
+<p>The goal-mode verifier is fenced the same way: the satisfaction check ships the goal text and the working-tree diff, so while private mode is on a verifier that is not allow-private never sees them — the check quietly takes the session model instead (a dim note in scrollback says so). Trust a verifier with <tt class="docutils literal"><span class="pre">:private allow</span></tt> like any other model.</p>
 
 <h3 id="picking-a-private-provider">Picking a private provider</h3><p>Pick a provider with a zero-training policy you are satisfied with (a strict zero data retention policy, or at least a no-training plus bounded retention policy). A shortlist by region:</p>
 <table border="1" class="docutils"><tr><th>region</th><th>provider</th><th>policy</th></tr>
@@ -549,8 +555,16 @@ Task: add test coverage to the parser module.</pre></p>
 <p>The built-ins shipped today are the role skills (conversational, sysadmin, thinking partner, writing) and task-debug-systematic. To override one, put a file with the same name in a directory higher up the list. To add your own, drop a <tt class="docutils literal"><span class="pre">.md</span></tt> file in any of those directories with an instructive name: the filename is the trigger, so <tt class="docutils literal"><span class="pre">release-notes.md</span></tt> loads when the task smells like release notes. For heavier machinery than a skill there is a native plugin tier (C-ABI hooks and model-facing tools, running host-side); see <a class="reference external" href="plugins.html">plugins</a>. A skill file plus command-line tools still covers most of the same ground at a fraction of the context cost.</p>
 
 <h2 id="goal-mode">Goal mode</h2><p>Goal mode is the sturdier option for a long coding task. Drop a <tt class="docutils literal"><span class="pre">goal.md</span></tt> into the project root stating the goal: what must be true when the work is done, how to verify it. Anyone can write the file — you directly, or the model when you ask for multi-part work.</p>
-<p>While <tt class="docutils literal"><span class="pre">goal.md</span></tt> exists, every turn end runs a satisfaction check: a fresh side conversation with the same model, given the goal text and a summary of what the turn actually did (files, patches, commands — never the agent's own claims), verifies the repository itself and answers with a verdict. Not satisfied, the agent is sent back in with the verifier's feedback. Satisfied, the harness renames the file to <tt class="docutils literal"><span class="pre">goal-confirmed.md</span></tt> (the record of the run) and idles.</p>
-<p>The file is the whole interface. Edit <tt class="docutils literal"><span class="pre">goal.md</span></tt> mid-run to steer (<tt class="docutils literal"><span class="pre">:goal edit</span></tt> opens it in <tt class="docutils literal"><span class="pre">$VISUAL/$EDITOR</span></tt>; the next check reads it fresh), delete it to end goal mode silently, interrupt to pause. Arming starts work immediately: <tt class="docutils literal"><span class="pre">:goal &lt;text&gt;</span></tt> writes the file and sends the agent off in the same breath, no extra prompt needed. <tt class="docutils literal"><span class="pre">:goal cancel</span></tt> (or <tt class="docutils literal"><span class="pre">:goal!</span></tt>) cancels the active goal, retiring the file to <tt class="docutils literal"><span class="pre">goal-cancelled.md</span></tt> (<tt class="docutils literal"><span class="pre">:goal new &lt;text&gt;</span></tt> is the balking synonym that refuses a live goal, <tt class="docutils literal"><span class="pre">:goal! &lt;text&gt;</span></tt> replaces it, bare <tt class="docutils literal"><span class="pre">:goal</span></tt> shows it). A failing verifier call is retried at the next turn end; the harness does not give up on its own, but if it ever does the record lands in <tt class="docutils literal"><span class="pre">goal-given-up.md</span></tt>. Retired files accumulate harmlessly; delete or archive them whenever.</p>
+<p>While <tt class="docutils literal"><span class="pre">goal.md</span></tt> exists, every turn end runs a satisfaction check: a fresh side conversation with the session's own model, given the goal text, a summary of what the turn actually did (files, patches, commands — never the agent's own claims), and the working-tree diff, judges from those inputs alone and answers with a verdict. Not satisfied, the agent is sent back in with the verifier's feedback. Satisfied, the harness renames the file to <tt class="docutils literal"><span class="pre">goal-confirmed.md</span></tt> (the record of the run) and idles. The check has no tools and no rounds: orientation is the harness's job, so the check is one model call. And it shows its work: the verifier's reply lands in scrollback as a dim, indented tier clearly below the agent's own items. Nothing the harness runs is ever silent.</p>
+
+<h3 id="verifier-models">Verifier models</h3><p>The check can also run on a dedicated verification-class model:</p>
+<p><pre class="listing">:verifier                 show the verifier setting
+:verifier list            list the verification-class models you can use
+:verifier jev-latest      run every goal check on that model
+:verifier off             back to the session model (the default)</pre></p>
+<p>Verification-class models are decision models — TypeSafe's Jev (served through OpenRouter, so an existing OpenRouter key covers it) is the curated one. A decision model does not write prose: it answers typed questions (yes/no with a calibrated probability, pick-one-of-N) in a single forward pass, which makes a check per turn end cheap enough to run always. The goal check asks it two questions — is the goal satisfied, and what is the most important gap — and turns the answers into the same verdict/feedback the text verifier produces: <tt class="docutils literal"><span class="pre">p(satisfied)</span></tt> at or above 0.75 confirms the goal, anything else sends the agent back in with the gap as its direction. The decision lands in scrollback as one dim line with the model's own numbers.</p>
+<p>These models never appear in ordinary model lists (<tt class="docutils literal"><span class="pre">:model</span></tt>, completion, the provider wizard): they cannot run a turn, they only judge one, so <tt class="docutils literal"><span class="pre">:model jev-latest</span></tt> refuses and points here. Any ordinary model works as a verifier too (<tt class="docutils literal"><span class="pre">:verifier glm-5.3-flash</span></tt> on the current provider) — that check is the regular text side call, just on the named model instead of the session's. <tt class="docutils literal"><span class="pre">verifier off</span></tt> is exactly the behavior from before verifier models existed: the session model checks itself. The selection persists in the config (<tt class="docutils literal"><span class="pre">[settings] verifier_model = &quot;openrouter.typesafe/jev-latest&quot;</span></tt>, plus <tt class="docutils literal"><span class="pre">verifier = &quot;off&quot;</span></tt> only while disabled), and the welcome block grows a <tt class="docutils literal"><span class="pre">verifier</span></tt> line naming the active verifier so the state is visible at a glance. A verifier that stops resolving (provider removed, key gone) is skipped with a visible note — the check falls back to the session model rather than going silent.</p>
+<p>The file is the whole interface. Edit <tt class="docutils literal"><span class="pre">goal.md</span></tt> mid-run to steer (<tt class="docutils literal"><span class="pre">:goal edit</span></tt> opens it in <tt class="docutils literal"><span class="pre">$VISUAL/$EDITOR</span></tt>; the next check reads it fresh), delete it to end goal mode silently, interrupt to pause. Arming starts work immediately: <tt class="docutils literal"><span class="pre">:goal &lt;text&gt;</span></tt> writes the file and sends the agent off in the same breath, no extra prompt needed — and a <tt class="docutils literal"><span class="pre">goal.md</span></tt> that is already on disk when 3code starts arms identically: the session loads it and the kickoff turn runs at once, before the first prompt. <tt class="docutils literal"><span class="pre">:goal cancel</span></tt> (or <tt class="docutils literal"><span class="pre">:goal!</span></tt>) cancels the active goal, retiring the file to <tt class="docutils literal"><span class="pre">goal-cancelled.md</span></tt> (<tt class="docutils literal"><span class="pre">:goal new &lt;text&gt;</span></tt> is the balking synonym that refuses a live goal, <tt class="docutils literal"><span class="pre">:goal! &lt;text&gt;</span></tt> replaces it, bare <tt class="docutils literal"><span class="pre">:goal</span></tt> shows it). A failing verifier call is retried at the next turn end; the harness does not give up on its own, but if it ever does the record lands in <tt class="docutils literal"><span class="pre">goal-given-up.md</span></tt>. Retired files accumulate harmlessly; delete or archive them whenever.</p>
 
 <h2 id="no-subminusagents">No sub-agents</h2><p>3code does not provide sub-agents. They use plenty of tokens, and I have not seen enough benefit to justify the little management consultancy they form. For parallel or long-running work, use worktrees with goal mode.</p>
 
@@ -653,6 +667,18 @@ allow ~/.gradle/jdks
 
 Not `~/.gradle` whole: `gradle.properties` often holds
 credentials. Same JVM proxy note as maven.</pre>
+<p><tt class="docutils literal"><span class="pre">dotnet</span></tt> (.NET / MSBuild)::</p>
+<pre>allow ~/.nuget/packages
+readonly ~/.nuget/NuGet
+
+NuGet dies on an unreadable config (`~/.nuget/NuGet/NuGet.Config`
+can hold feed tokens, so it is readable, not writable - the same
+treatment `~/.gitconfig` gets), and the package cache is the only
+writable dot it needs: `~/.dotnet` writes are optional. MSBuild's
+worker nodes and the dotnet diagnostic server bind unix sockets
+in the temp dir, which is writable by default; the socket rights
+ride the writable grant (sandwall 0.5.12). Inside a fenced
+network, dotnet honors `http_proxy`/`https_proxy`.</pre>
 <p><tt class="docutils literal"><span class="pre">ruby</span></tt> (RubyGems + Bundler)::</p>
 <pre>allow ~/.gem/ruby
 allow ~/.local/share/gem
@@ -814,8 +840,7 @@ Arguments: --acp</pre></p>
 <li><strong>Bug fixes</strong> with a clear reproduction case</li>
 </ul>
 <p>Bug reports welcome, but make sure you give enough specific information to reproduce the issue. Terminal rendering bugs need a visual PTY test that shows the bad frame before the fix. A test that cannot show the bug has not reproduced it yet.</p>
-<p>Developer API documentation is generated at <tt class="docutils literal"><span class="pre">docs/dev/threecode.html</span></tt>:</p>
-<p><pre class="listing">nimble devdocs</pre></p>
+<p>Developer API documentation lives in the <a class="reference external" href="dev.html">developer docs</a>: module-by-module, generated from the source doc comments.</p>
 
 <h2 id="prior-art">Prior art</h2><p>3code is influenced by Claude Code, Goose, Pi, and Codex. It chooses different tradeoffs, but the family resemblance is intentional. As a European, using Claude Code can feel like driving a turbocharged Ford F-150 to buy a pack of gum. It is still a fine truck.</p>
 <p>3code omits features that do not help it write software reliably with fewer resources. Economy is the feature, not a billing surprise. </p>
@@ -827,7 +852,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-16 20:42:04 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-26 12:34:26 UTC</small>
       </div>
     </div>
   </div>

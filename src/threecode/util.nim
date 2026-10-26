@@ -1388,7 +1388,7 @@ func replaceFirst*(s, needle, repl: string): (string, bool) =
 func normalizePatchLine*(line: string): string =
   ## Fuzzy-match normalization for one search-block line: strip the
   ## leading indentation and trailing whitespace and drop a leading
-  ## `N> ` style diff/git prompt prefix if present. Two lines that differ
+  ## `N>`-space style diff/git prompt prefix if present. Two lines that differ
   ## only in indentation or a copied prompt artifact still compare equal.
   var l = line.strip(false, true)
   l = l.strip(true, false)
