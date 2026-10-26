@@ -1698,8 +1698,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           termengine.noteNonMessageTail(conflictReceipt, messages.len)
           commitTranscriptBytes(conflictReceipt, true)
       # Verifier steps land in scrollback as they happen: same commit
-      # path as the receipts around them, one dim indented tier below
-      # the agent's items so the check can never read as agent work.
+      # path as the receipts around them, a `⌕` item rendered like a
+      # reply with the verdict as a colored icon row closing it.
       goalStepHook = proc (step: GoalStep) =
         let stepBytes = goalStepBytes(step)
         termengine.noteNonMessageTail(stepBytes, journalAnchorMessagesLen)
@@ -1773,9 +1773,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           session.goalNotified = false
           session.modeSnapshot = ""
           session.changeCountStart = 0
-          commitHarnessNotice(
-            receiptBytes(mode.name & " confirmed (" & mode.fileName &
-              " renamed to " & mode.confirmedName & ")"), messages)
+          # No confirmation receipt: the green ✓ verdict row under the
+          # verifier's reply IS the confirmation; the rename is on disk.
         else:
           commitHarnessNotice(
             errLnS(mode.name & " satisfied but " & mode.fileName &

@@ -342,22 +342,36 @@ suite "goal check loop (canned verdicts, no provider)":
     check r.verdict.kind == gvkNone
 
 suite "verifier steps in scrollback":
-  test "the verifier reply renders as a dim, indented tier":
-    let b = goalStepBytes(GoalStep(prose: "checked the diff.\nVERDICT: SATISFIED"))
-    check b.contains("checked the diff.")
-    check b.contains("VERDICT: SATISFIED")
-    # Every row is dim grey and at least two columns in: nothing in a
-    # step renders flush left, so the tier can never read as agent work.
-    for row in b.splitLines:
-      if row.strip.len == 0: continue
-      check row.startsWith(GreyFg)
-      check row.startsWith(GreyFg & "  ")
-    # Long prose wraps inside the tier instead of running to the margin.
-    let wide = goalStepBytes(
-      GoalStep(prose: "word ".repeat(200).strip & "\nVERDICT: FEEDBACK: wrap"))
-    var wideRows = 0
-    for row in wide.splitLines:
-      if row.strip.len == 0: continue
-      check row.startsWith(GreyFg & "  ")
-      inc wideRows
-    check wideRows > 1
+  test "the check renders through the regular response path":
+    # The verify glyph leads the first row exactly where `●` leads a
+    # reply, and the prose is markdown-rendered by the same walk - raw
+    # markdown never reaches the screen.
+    let b = goalStepBytes(GoalStep(prose: "before **bold** after"))
+    check b.startsWith(AssistantTextStyle & VerifyGlyph & " " & Reset &
+      AssistantTextStyle & "before")
+    check "**bold**" notin b
+    check "\x1b[22m" & AssistantTextStyle & " after" in b
+    check GreyFg notin b
+
+  test "the verdict is an icon row, never the contract text":
+    let ok = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkSatisfied))
+    check "\x1b[32m" & "  ✓" & Reset in ok
+    check "VERDICT" notin ok
+    let no = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkFeedback))
+    check "\x1b[31m" & "  ✗" & Reset in no
+    check "VERDICT" notin no
+    # A note with no verdict shows the block alone.
+    check goalStepBytes(GoalStep(prose: "verifier off")).len > 0
+    check "✓" notin goalStepBytes(GoalStep(prose: "verifier off"))
+
+  test "the verdict line is stripped from the reply before display":
+    check stripVerdictLine("all done\nVERDICT: SATISFIED") == "all done"
+    check stripVerdictLine("notes\nVERDICT: FEEDBACK: run tests") == "notes"
+    check stripVerdictLine("VERDICT: SATISFIED") == ""
+    # No contract line means nothing to strip.
+    check stripVerdictLine("all good, no verdict line") ==
+      "all good, no verdict line"
+
+  test "a bare-verdict reply still shows its verdict icon":
+    check goalStepBytes(GoalStep(prose: "", verdict: gvkSatisfied)) ==
+      "\x1b[32m" & "  ✓" & Reset

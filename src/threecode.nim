@@ -929,12 +929,16 @@ proc main() =
   # `:goal new`, `:goal edit`, `:goal! TEXT`, the cybernetic
   # equivalents) and the startup detection of a trigger file that was
   # already on disk when the session opened: append the harness-autosent
-  # kickoff prompt, commit its receipt + `»` item, and run the turn now
-  # — the mode's work begins the moment the file is written (or found),
-  # not at the next turn boundary. Returns true if a buffered
-  # quit/interrupt should end the session. No refreshSystemPrompt: the
-  # kickoff rides the existing system prompt exactly like the in-turn
-  # feedback continuation in turns.nim.
+  # kickoff prompt and run the turn now — the mode's work begins the
+  # moment the file is written (or found), not at the next turn
+  # boundary. Nothing is committed for the kickoff itself in a live
+  # buffer: the arming `:verb <text>` echo already says it (and a
+  # startup-detection receipt lands at the first turn end), while a
+  # session resumed from file replays the `◎` kickoff item like any
+  # other message. Returns true if a buffered quit/interrupt should end
+  # the session. No refreshSystemPrompt: the kickoff rides the existing
+  # system prompt exactly like the in-turn feedback continuation in
+  # turns.nim.
   proc runModeKickoff(m: ModeDesc): bool =
     let modeText = readModeText(m, session.cwd)
     # The discipline baselines bind at arm time: the very first turn is
@@ -945,13 +949,6 @@ proc main() =
       session.changeCountStart = session.readCache.changes.len
     messages.add m.kickoffMessage(modeText)
     saveSession(session, messages)
-    let counts = m.taskCounts(modeText)
-    commitTranscriptBytes(
-      receiptBytes("auto: " & m.name & " armed - starting toward " &
-        m.fileName & (if counts.len > 0: " (" & counts & ")" else: "")),
-      true)
-    commitTranscriptBytes(
-      formatItem(goalPromptItem(m.kickoffDisplay(modeText))), true)
     runTurnWithSafetyNet()
 
   # Run a prompt that arrived on the command line (or was queued during

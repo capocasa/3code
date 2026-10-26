@@ -62,13 +62,14 @@ suite "mode verb (:goal grammar, both modes)":
     withModeDir proc (dir: string) =
       check verb(cyberneticMode, "new") == (false,
         "usage: :cyber new <text>", false)
-      check verb(cyberneticMode, "new first plan") == (true,
-        "cybernetic.md written; starting toward it now", true)
+      # A successful arm answers with no line: the command echo already
+      # says it and the kickoff turn follows at once.
+      check verb(cyberneticMode, "new first plan") == (true, "", true)
       check verb(cyberneticMode, "new second plan") == (false,
         "cybernetic.md is already active; use :cyber! to replace it",
         false)
-      check verb(cyberneticMode, "new third plan", forced = true) == (true,
-        "cybernetic.md replaced; starting toward it now", true)
+      check verb(cyberneticMode, "new third plan", forced = true) ==
+        (true, "", true)
       # One mode at a time: with cybernetic live the goal arm refuses,
       # and after cancelling it the plain-text goal arm goes through —
       # and then it is :cyber's turn to balk.
@@ -77,8 +78,7 @@ suite "mode verb (:goal grammar, both modes)":
         "modes are mutually exclusive - cancel it first with :cyber!",
         false)
       check verb(cyberneticMode, "cancel").ok
-      check verb(goalMode, "plain text arm") == (true,
-        "goal.md written; starting toward it now", true)
+      check verb(goalMode, "plain text arm") == (true, "", true)
       check verb(cyberneticMode, "mine") == (false,
         "goal.md (goal mode) is already active; harness modes are " &
         "mutually exclusive - cancel it first with :goal!", false)
@@ -90,7 +90,7 @@ suite "mode verb (:goal grammar, both modes)":
       discard startMode(cyberneticMode, "the plan")
       editorMk("""printf '%s\n' '- [x] did it' >> $1""")
       let r = verb(cyberneticMode, "edit")
-      check r == (true, "cybernetic.md edited; starting toward it now", true)
+      check r == (true, "", true)
       check "- [x] did it" in readFile(CyberFileName)
       # An editor that changes nothing leaves the mode un-kicked.
       editorMk("true")

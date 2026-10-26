@@ -86,17 +86,14 @@ suite "cyber mode surfaces (interactive)":
     tty.send ":cyber make the stub say PLAN_WORK_DONE"
     tty.expect ":cyber make the stub say PLAN_WORK_DONE"
     tty.send "\n"
-    tty.expectInHistory "cybernetic.md written; starting toward it now"
-    # The arm receipt carries the task counts...
-    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md (1 task, 0 done)"
-    # ...and so does the kickoff marker: title, counts, next task.
-    tty.expectInHistory "\u25ce make the stub say PLAN_WORK_DONE - 1 task, 0 done; next: make the stub say PLAN_WORK_DONE"
-    # The kickoff turn runs with no further keystroke.
+    tty.drain(100)
+    # The arm is quiet (the echoed command says it), so the streamed
+    # reply is the proof the kickoff turn ran with no further keystroke.
     tty.expectInHistory "PLAN_WORK_DONE"
-    # Turn end: detection receipt, then the verifier confirms and the
-    # plan retires.
+    # Turn end: detection receipt, then the verifier's ✓ icon row - no
+    # confirmed receipt - and the plan retires on disk.
     tty.expectInHistory "cybernetic mode: cybernetic.md detected"
-    tty.expectInHistory "cybernetic confirmed (cybernetic.md renamed to cybernetic-confirmed.md)"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
@@ -127,10 +124,9 @@ suite "cyber mode surfaces (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md (1 task, 0 done)"
-    tty.expectInHistory "\u25ce Plan - 1 task, 0 done; next: make the stub say PLAN_WORK_DONE"
+    # Quiet startup kickoff like goal mode's; the reply is the proof.
     tty.expectInHistory "PLAN_WORK_DONE"
-    tty.expectInHistory "cybernetic confirmed"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
@@ -169,10 +165,9 @@ suite "cyber mode surfaces (interactive)":
 
     tty.expect "\u276f"
     # goal mode wins the registry walk; the refusal names both verbs.
-    tty.expectInHistory "auto: goal armed - starting toward goal.md"
-    tty.expectInHistory "cybernetic.md is also on disk but goal mode is active; harness modes are mutually exclusive (:goal! cancels goal mode, then :cyber arms the plan)"
     tty.expectInHistory "GOAL_DONE"
-    tty.expectInHistory "goal confirmed"
+    tty.expectInHistory "cybernetic.md is also on disk but goal mode is active; harness modes are mutually exclusive (:goal! cancels goal mode, then :cyber arms the plan)"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     # goal.md is retired; the stale cybernetic.md is now the live plan
     # and bare :cyber shows it.
@@ -184,10 +179,8 @@ suite "cyber mode surfaces (interactive)":
     tty.send ":cyber! make the stub say PLAN_WORK_DONE"
     tty.expect ":cyber! make the stub say PLAN_WORK_DONE"
     tty.send "\n"
-    tty.expectInHistory "cybernetic.md replaced; starting toward it now"
-    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md (1 task, 0 done)"
     tty.expectInHistory "PLAN_WORK_DONE"
-    tty.expectInHistory "cybernetic confirmed"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check not fileExists(root / "run" / "goal.md")
     check not fileExists(root / "run" / "cybernetic.md")
@@ -219,8 +212,9 @@ suite "cyber mode surfaces (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Startup detection kicks goal work off; Ctrl-C mid-stream pauses it.
-    tty.expectInHistory "auto: goal armed - starting toward goal.md"
+    # Startup detection kicks goal work off; Ctrl-C mid-stream pauses
+    # it. The kickoff is quiet, so wait out the pre-stream delay's start
+    # before interrupting.
     tty.drain(400)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
@@ -242,9 +236,8 @@ suite "cyber mode surfaces (interactive)":
     tty.send ":cyber arm my plan"
     tty.expect ":cyber arm my plan"
     tty.send "\n"
-    tty.expectInHistory "cybernetic.md written; starting toward it now"
     tty.expectInHistory "PLAN_WORK_DONE"
-    tty.expectInHistory "cybernetic confirmed"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     tty.expectAlive()
@@ -289,7 +282,6 @@ suite "cyber mode direction machinery (interactive)":
     # Kickoff turn: a real mutation runs (the bash output lands in the
     # session change log too, powering work-happened), the plan file
     # stays untouched. A reads-only turn would owe no update note.
-    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md"
     tty.expectInHistory "real work"
     # Turn end: FEEDBACK from the verifier AND the discipline note, one
     # continuation carrying both.
@@ -299,7 +291,7 @@ suite "cyber mode direction machinery (interactive)":
     # The model updates the plan; the next check has no note to add and
     # the verifier confirms against the checked plan.
     tty.expectInHistory "plan updated"
-    tty.expectInHistory "cybernetic confirmed"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
@@ -334,7 +326,6 @@ suite "cyber mode direction machinery (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md"
     # The rewrite lands; the boundary catches the broken format before
     # any verifier call.
     tty.expectInHistory "rewrote it"
@@ -343,7 +334,7 @@ suite "cyber mode direction machinery (interactive)":
     # The mode never dropped: the restore turn runs, then the verifier
     # judges the restored plan and confirms.
     tty.expectInHistory "restored the plan"
-    tty.expectInHistory "cybernetic confirmed"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
@@ -389,7 +380,6 @@ suite "cyber mode rollover (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    tty.expectInHistory "auto: cybernetic armed - starting toward cybernetic.md (2 tasks, 1 done)"
     # Six tool rounds run; the sixth crosses the threshold.
     tty.expectInHistory "work 6"
     # The collapse receipt, then the rollover: receipted like every
@@ -404,7 +394,7 @@ suite "cyber mode rollover (interactive)":
     tty.expectInHistory "Phase 3 merged. Rollover is next."
     # The fresh context answers and the verifier confirms.
     tty.expectInHistory "RECOVERED"
-    tty.expectInHistory "cybernetic confirmed"
+    tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
