@@ -705,6 +705,14 @@ proc cutVisibleContent(content: string): string =
   ## as bookkeeping, not prose).
   cutPartialTrailingMarker(stripCheckpointMarkers(content))
 
+proc commitHarnessNotice(bytes: string; messages: JsonNode) =
+  ## Commit a harness notice (goal-mode verifier receipts and friends)
+  ## that lives in scrollback only — never in the session messages — and
+  ## journal its rows so the rebreak window can keep it on screen across a
+  ## width change.
+  termengine.noteNonMessageTail(bytes, messages.len)
+  commitTranscriptBytes(bytes, true)
+
 proc commitAssistantItem(content: string; restoreEditor = true;
                          attachReceipt = true) =
   # Emptiness is judged on the visible content, not the raw string: a
@@ -888,10 +896,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       let note = m.rolloverNote(body)
       messages.add note
       let counts = m.taskCounts(body)
-      commitTranscriptBytes(
-        receiptBytes("auto: " & m.name & " rollover - plan at " &
+      let rolloverReceipt = receiptBytes(
+        "auto: " & m.name & " rollover - plan at " &
           m.fileName &
-          (if counts.len > 0: " (" & counts & ")" else: "")), true)
+          (if counts.len > 0: " (" & counts & ")" else: ""))
+      termengine.noteNonMessageTail(rolloverReceipt, messages.len)
+      commitTranscriptBytes(rolloverReceipt, true)
       commitTranscriptBytes(
         formatItem(agentPromptItem(note{"content"}.getStr)), true)
       saveSession(session, messages)
@@ -926,6 +936,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   while true:
     var usage: Usage
     var msg: JsonNode
+    # Runtime-internal journal records (context notice, turn-end lines)
+    # anchor against this; it is the messages length their commits sit at.
+    journalAnchorMessagesLen = messages.len
     try:
       msg = callModel(wire, messages, usage, session.lastPromptTokens,
         maxTokensOverride)
@@ -960,12 +973,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           else: applySummary(messages, OverflowFallbackSummary)
         if collapsed > 0:
           saveSession(session, messages)
-          commitTranscriptBytes(
-            hintLnS("· request rejected as too large; collapsed " &
+          let collapsedNotice = hintLnS(
+            "· request rejected as too large; collapsed " &
               $collapsed & " message" &
               (if collapsed == 1: "" else: "s") &
               (if summarized > 0: " into a recap" else: " without a recap") &
-              ", retrying"), true)
+              ", retrying")
+          termengine.noteNonMessageTail(collapsedNotice, messages.len)
+          commitTranscriptBytes(collapsedNotice, true)
           # The failed call's reply was never appended, so pairing is
           # settled: the handoff rides the retry directly.
           injectRollover()
@@ -1089,11 +1104,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           let bumped = min(cur * 2, maxOutputTokensFor(wire))
           maxTokensOverride = max(maxTokensOverride, bumped)
         let backoff = emptyReplyBackoffS()
-        commitTranscriptBytes(
-          errLnS((if demoted: "finished by length, retrying with lower " &
+        let lengthNotice = errLnS(
+          (if demoted: "finished by length, retrying with lower " &
             "reasoning effort" else: "finished by length, retrying with " &
             humanTokens(maxTokensOverride) & " token budget") & " in " &
-            $backoff & "s"), true)
+            $backoff & "s")
+        termengine.noteNonMessageTail(lengthNotice, messages.len)
+        commitTranscriptBytes(lengthNotice, true)
         incEmptyRetryLevel()
         if emptyReplyWait():
           saveSession(session, messages)
@@ -1132,9 +1149,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           elif usage.reasoningTokens > 0: "reasoning only"
           else: "no content, no tool calls"
         let backoff = emptyReplyBackoffS()
-        commitTranscriptBytes(
-          errLnS("empty reply: " & reason & ". retrying " &
-            $emptyRetries & "/" & $MaxEmptyRetries & " in " & $backoff & "s"), true)
+        let emptyNotice = errLnS(
+          "empty reply: " & reason & ". retrying " &
+            $emptyRetries & "/" & $MaxEmptyRetries & " in " & $backoff & "s")
+        termengine.noteNonMessageTail(emptyNotice, messages.len)
+        commitTranscriptBytes(emptyNotice, true)
         incEmptyRetryLevel()
         if emptyReplyWait():
           saveSession(session, messages)
@@ -1186,15 +1205,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     of caSummarize:
       let summarized = summarizeHistory(messages, p)
       if summarized > 0:
-        commitTranscriptBytes(
-          hintLnS(&"· summarized {summarized} message" &
+        let summarizeNotice = hintLnS(
+          &"· summarized {summarized} message" &
             (if summarized == 1: "" else: "s") &
             (if byteGuard:
                &" (request body {humanBytes(lastRequestBodyBytes)}; gateway byte guard)"
              elif msgGuard:
                &" ({msgGuardCount} messages; tesseracted message-count guard)"
              else:
-               &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)")), true)
+               &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)"))
+        termengine.noteNonMessageTail(summarizeNotice, messages.len)
+        commitTranscriptBytes(summarizeNotice, true)
         saveSession(session, messages)
         # This reply's tool_calls may still be unanswered: defer the
         # handoff to the point just after their results land, or inject
@@ -1442,10 +1463,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
               "[dmail from your future self] " & act.body}
             saveSession(session, messages)
             dmailRevert = true
-            commitTranscriptBytes(
-              hintLnS("· dmail to checkpoint " & $cp & " (" &
-                humanTokens(session.lastPromptTokens) & " prompt tokens folded)"),
-              true)
+            let dmailNotice = hintLnS(
+              "· dmail to checkpoint " & $cp & " (" &
+                humanTokens(session.lastPromptTokens) & " prompt tokens folded)")
+            termengine.noteNonMessageTail(dmailNotice, messages.len)
+            commitTranscriptBytes(dmailNotice, true)
             break
           else:
             messages.add %*{"role": "tool", "tool_call_id": id,
@@ -1599,21 +1621,25 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         return true
       if not session.goalNotified:
         session.goalNotified = true
-        commitTranscriptBytes(
-          receiptBytes(mode.name & " mode: " & mode.fileName &
-            " detected (interrupt to pause, " & mode.verb & "! to cancel)"),
-          true)
+        let detectedReceipt = receiptBytes(
+          mode.name & " mode: " & mode.fileName &
+            " detected (interrupt to pause, " & mode.verb & "! to cancel)")
+        termengine.noteNonMessageTail(detectedReceipt, messages.len)
+        commitTranscriptBytes(detectedReceipt, true)
         # A second mode's file on disk while one mode runs is a refused
         # arming: say so once, right under the detection receipt.
         let other = conflictingMode(mode, session.cwd)
         if not noMode(other):
-          commitTranscriptBytes(
-            receiptBytes(modeConflictLabel(mode, other)), true)
+          let conflictReceipt = receiptBytes(modeConflictLabel(mode, other))
+          termengine.noteNonMessageTail(conflictReceipt, messages.len)
+          commitTranscriptBytes(conflictReceipt, true)
       # Verifier steps land in scrollback as they happen: same commit
       # path as the receipts around them, one dim indented tier below
       # the agent's items so the check can never read as agent work.
       goalStepHook = proc (step: GoalStep) =
-        commitTranscriptBytes(goalStepBytes(step), true)
+        let stepBytes = goalStepBytes(step)
+        termengine.noteNonMessageTail(stepBytes, journalAnchorMessagesLen)
+        commitTranscriptBytes(stepBytes, true)
       defer: goalStepHook = nil
       let modeText = readModeText(mode, session.cwd)
       # Duty 1, structure guard: a plan that lost its format mid-run
@@ -1622,13 +1648,15 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       let guard = mode.structureGuard(modeText)
       if guard.len > 0:
         session.modeSnapshot = modeText
-        commitTranscriptBytes(
-          receiptBytes(mode.name & " check: plan structure lost"), true)
+        commitHarnessNotice(
+          receiptBytes(mode.name & " check: plan structure lost"), messages)
         messages.add harnessNote(guard)
         saveSession(session, messages)
-        commitTranscriptBytes(
-          receiptBytes("auto: " & mode.name & " check - continuing toward " &
-            mode.fileName), true)
+        let checkReceipt = receiptBytes(
+          "auto: " & mode.name & " check - continuing toward " &
+            mode.fileName)
+        termengine.noteNonMessageTail(checkReceipt, messages.len)
+        commitTranscriptBytes(checkReceipt, true)
         commitTranscriptBytes(formatItem(agentPromptItem(guard)), true)
         debugOut "runTurns: " & mode.name & " structure lost, continuing"
         continue
@@ -1655,9 +1683,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       template sendBack(content: string; why: string) =
         messages.add mode.feedbackMessage(modeText, content)
         saveSession(session, messages)
-        commitTranscriptBytes(
+        commitHarnessNotice(
           receiptBytes("auto: " & mode.name & " check - continuing toward " &
-            mode.fileName), true)
+            mode.fileName), messages)
         commitTranscriptBytes(formatItem(agentPromptItem(content)), true)
         debugOut "runTurns: " & why
       if not check.ok:
@@ -1668,11 +1696,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         debugOut mode.name & " check failed: " & check.err
         # First line only: an ApiError msg can span lines, a receipt is one.
         let why = check.err.strip.splitLines[0]
-        commitTranscriptBytes(
+        commitHarnessNotice(
           receiptBytes(
             (if why.len > 0: mode.name & " check unavailable (" & why & ")"
              else: mode.name & " check unavailable") & ", retrying next turn"),
-          true)
+          messages)
         if note.len > 0:
           sendBack(note, mode.name & " update discipline (check unavailable)")
           continue
@@ -1681,25 +1709,25 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           session.goalNotified = false
           session.modeSnapshot = ""
           session.changeCountStart = 0
-          commitTranscriptBytes(
+          commitHarnessNotice(
             receiptBytes(mode.name & " confirmed (" & mode.fileName &
-              " renamed to " & mode.confirmedName & ")"), true)
+              " renamed to " & mode.confirmedName & ")"), messages)
         else:
-          commitTranscriptBytes(
+          commitHarnessNotice(
             errLnS(mode.name & " satisfied but " & mode.fileName &
-              " could not be renamed to " & mode.confirmedName), true)
+              " could not be renamed to " & mode.confirmedName), messages)
       elif check.verdict.kind == gvkFeedback:
-        commitTranscriptBytes(
-          receiptBytes(mode.name & " check: feedback"), true)
+        commitHarnessNotice(
+          receiptBytes(mode.name & " check: feedback"), messages)
         var fb = check.verdict.feedback
         if note.len > 0: fb.add "\n\nAlso: " & note
         sendBack(fb, mode.name & " check feedback, continuing")
         continue
       else:
-        commitTranscriptBytes(
+        commitHarnessNotice(
           receiptBytes(mode.name &
             " check returned no verdict, retrying next turn"),
-          true)
+          messages)
         if note.len > 0:
           sendBack(note, mode.name & " update discipline (no verdict)")
           continue

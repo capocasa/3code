@@ -92,12 +92,26 @@ suite "fat prompt on terminal resize":
     ## block and pulled the prompt up a row — the separator or token bar
     ## first, committed transcript lines once those were gone. Nothing
     ## above the prompt block may change across a width-only resize.
+    ##
+    ## Once real transcript lines sit above the prompt, the contract
+    ## flips from frozen to rebreak: committed rows are hard-wrapped at
+    ## the width they were painted at, so a width change must RE-EMIT
+    ## them re-wrapped at the new width (breaks on word boundaries, every
+    ## row within the new width, every word still present exactly once
+    ## and in order). A repaint that keeps the frozen rows leaves the
+    ## terminal to reflow them itself — mid-word — which is the bug this
+    ## guards against.
+    const Words = ["able", "bravo", "charlie", "delta", "echo",
+      "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima",
+      "mike", "november", "oscar", "papa", "quebec", "romeo",
+      "sierra", "tango", "uniform", "victor", "whiskey", "xray",
+      "yankee", "zulu"]
     let root = newFixture("resize_idle_above")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[
       {
-        "content": "committed reply alpha\ncommitted reply beta",
-        "contentChunks": ["committed reply alpha\ncommitted reply beta"],
+        "content": Words.join(" "),
+        "contentChunks": [Words.join(" ")],
         "usage": {
           "promptTokens": 20, "completionTokens": 5,
           "totalTokens": 25, "cachedTokens": 0
@@ -125,21 +139,42 @@ suite "fat prompt on terminal resize":
           settled & "\n--- after " & $w & " ---\n" & now & "\n" &
           tty.dumpFramesAround("❯")
 
-    # Commit a turn so real transcript lines sit above the idle prompt's
-    # chrome, then resize across widths again: every committed line must
-    # survive each change.
+    # Commit a turn whose answer word-wraps at 80 cols so real transcript
+    # lines sit above the idle prompt's chrome, then resize across widths:
+    # every width must re-break the committed answer at the new width.
+    proc assertRebroken(w: int) =
+      let screen = tty.screenText()
+      var last = -1
+      for word in Words:
+        let n = screen.count(word)
+        if n != 1:
+          doAssert false, "width " & $w & ": word '" & word & "' appears " &
+            $n & " times, want exactly 1 (lost or duplicated on rebreak)." &
+            "\n--- screen ---\n" & screen & tty.dumpFramesAround("❯")
+        let i = screen.find(word)
+        if i <= last:
+          doAssert false, "width " & $w & ": word '" & word &
+            "' out of order after rebreak.\n--- screen ---\n" & screen &
+            tty.dumpFramesAround("❯")
+        last = i
+      for row in tty.rows():
+        var carriesAnswer = false
+        for word in Words:
+          if word in row:
+            carriesAnswer = true
+            break
+        if carriesAnswer and row.len > w:
+          doAssert false, "width " & $w & ": answer row is " & $row.len &
+            " cols (frozen wrap kept; the terminal would reflow it " &
+            "mid-word): '" & row & "'\n--- screen ---\n" & screen &
+            tty.dumpFramesAround("❯")
     tty.send "hello\n"
-    tty.expectInHistory "committed reply beta"
+    tty.expectInHistory "zulu"
     tty.drain(800)
     for w in [104, 60, 80]:
       tty.resize(w, 24)
       tty.drain(400)
-      let screen = tty.screenText()
-      if "committed reply alpha" notin screen or
-          "committed reply beta" notin screen:
-        doAssert false, "width " & $w &
-          " resize wiped committed rows above the prompt:\n" & screen &
-          "\n" & tty.dumpFramesAround("committed reply")
+      assertRebroken(w)
 
     # The prompt itself is still live and editable after all resizes.
     tty.send "still here"

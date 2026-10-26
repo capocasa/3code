@@ -146,6 +146,25 @@ var inputIdleLinePending: Atomic[bool]
   ## `inputModalActive == false`) so the controller has a chance
   ## to drain the event; the wizard's `getCh` deliberately ignores
   ## it. See the wizard protocol header above `wizardRequest`.
+var replParkedAtInput*: Atomic[bool]
+  ## True only while the main thread is parked in the input wait. The
+  ## rebreak window's content source (`transcriptTailRows`) reads the live
+  ## session messages from render threads, which is safe exactly then: no
+  ## message appends are in flight. Flipped inside the terminal write lock
+  ## (`markReplParked`) so a window paint either finished before a submit
+  ## path's first append or starts after the flag says busy — the same
+  ## lock serializes both.
+
+var journalAnchorMessagesLen*: int = 0
+  ## The messages-array length as of the last turn-loop boundary, the
+  ## anchor runtime-internal journal records (`noteNonMessageTail`) use
+  ## when they cannot see the messages themselves. Slightly stale anchors
+  ## only misplace a notice within the window's tail, never lose it.
+
+proc markReplParked*(parked: bool) =
+  termui.withTerminalWriteLock:
+    replParkedAtInput.store(parked, moRelease)
+
 var inputModalActive*: Atomic[bool]
   ## Held for the lifetime of a modal wizard, including the gaps
   ## between `wizardReadLine` calls while the wizard's caller does
@@ -2087,10 +2106,11 @@ proc apiFinalUsage*(usage: Usage; window, elapsed: int;
                                                         window))
   if window > 0 and usage.promptTokens.float > 0.7 * window.float and
      usage.promptTokens.float <= SummarizeThresholdFrac * window.float:
-    commitTranscriptBytes(
-      GreyFg &
-        &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-summarization will fire near {humanTokens(int(SummarizeThresholdFrac * window.float))}; :summarize to act now" &
-        Reset & "\r\n", true)
+    let notice = GreyFg &
+      &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-summarization will fire near {humanTokens(int(SummarizeThresholdFrac * window.float))}; :summarize to act now" &
+      Reset & "\r\n"
+    termengine.noteNonMessageTail(notice, journalAnchorMessagesLen)
+    commitTranscriptBytes(notice, true)
 
 proc commitTurnEndNotice*(bytes: string) =
   ## Commit a turn-end harness line (no-usage elapsed, interrupt, fatal
@@ -2103,6 +2123,10 @@ proc commitTurnEndNotice*(bytes: string) =
   ## `beforeRepaint` swaps that stale label for the latest real numbers;
   ## the next submit then consumes it exactly like any resting bar. A
   ## session with no usage yet has no resting label; that stays prompt-only.
+  ## Journaled: turn-end lines live in scrollback only, so the rebreak
+  ## window must replay their rows from the journal rather than the
+  ## session messages.
+  termengine.noteNonMessageTail(bytes, journalAnchorMessagesLen)
   commitTranscriptBytes(bytes, restoreEditor = true,
     beforeRepaint = proc() =
       if fatPromptState.footer.restingLabel.len > 0:
