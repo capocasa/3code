@@ -1794,8 +1794,11 @@ const
   CtrlK* = @[11]
   CtrlT* = @[20]
   CtrlY* = @[25]
+  CtrlU* = @[21]
   AltD* = @[27, 100]
   AltW* = @[27, 119]
+  AltY* = @[27, 121]
+  AltDot* = @[27, 46]
 
 proc selCells*(g: Grid, r: int): int =
   ## Count reverse-video cells on row `r` (the selection highlight).
@@ -1992,6 +1995,80 @@ suite "minline editor: new edit ops":
     d.push CtrlU
     d.push Enter
     check d.run(ed, prompt = "> ") == "one\n"
+
+  test "ctrl+w then ctrl+y restores the killed word":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello world"
+    d.push CtrlW
+    d.push CtrlY
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "hello world"
+
+  test "consecutive ctrl+w kills append into one ring entry":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one two three"
+    d.push CtrlW
+    d.push CtrlW
+    d.push CtrlW
+    d.push CtrlY
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one two three"
+
+  test "a cursor move between kills breaks the append":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one two three"
+    d.push CtrlW     # kills "three"
+    d.push Left      # any non-kill action breaks the chain
+    d.push CtrlW     # kills "two " as its own entry
+    d.push CtrlY     # yanks the most recent kill only
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one two "
+
+  test "ctrl+k then ctrl+u kills append across directions":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello world"
+    d.push CtrlA
+    for _ in 1 .. 5: d.push Right
+    d.push CtrlK     # kills " world", cursor parks at 5
+    d.push CtrlU     # kills "hello" at the same seat: prepends
+    d.push CtrlY
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "hello world"
+
+  test "alt+y cycles the kill ring after a yank":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one"
+    d.push CtrlU     # ring: [one]
+    d.pushString "two"
+    d.push CtrlU     # ring: [two, one]
+    d.push CtrlY     # inserts "two"
+    d.push AltY      # replaces with "one"
+    d.push AltY      # wraps back to "two"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "two"
+
+  test "kills are rune-safe through yank":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "héllo wörld"
+    d.push CtrlW
+    d.push CtrlY
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "héllo wörld"
+
+  test "alt+. yanks the last arg, repeats walk older entries":
+    var ed = initEditor()
+    seedHistory(ed, @["alpha beta", "gamma delta"])
+    let d = newDriver()
+    d.push AltDot    # last word of the newest entry: "delta"
+    d.push AltDot    # replaced by the older entry's "beta"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "beta"
 
   test "alt+d deletes the word after the cursor":
     var ed = initEditor()

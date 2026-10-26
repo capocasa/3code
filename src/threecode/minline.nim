@@ -95,6 +95,8 @@ const ShortcutNames* = [
   "copy",
   "paste",
   "yank",
+  "yank-pop",
+  "yank-last-arg",
   "delete-word-right",
   "delete-to-boundary-right",
   "delete-to-eol",
@@ -600,7 +602,18 @@ type
     complMatches*: seq[string] ## current match list
     complIndex*: int           ## current match index (-1 = none)
     selAnchor*: int            ## selection anchor byte offset; -1 = no selection
-    lastKill*: string          ## last cut/copied text, for yank
+    lastKill*: string          ## last cut/copied text, for yank (head of the kill ring)
+    killRing*: Deque[string]   ## readline kill ring; index 0 is the most recent kill
+    killCont*: bool            ## previous editor action was a kill (append rule)
+    killPt*: int               ## cursor seat the last kill left; a kill at the same seat extends the head entry
+    yankCont*: bool            ## previous editor action was a yank/yank-pop (M-y validity)
+    yankRingIdx*: int          ## ring slot the last yank pulled; yank-pop cycles from here
+    yankStart*: int            ## byte span of the last yank, for yank-pop replacement
+    yankEnd*: int
+    lastArgCont*: bool         ## previous editor action was yank-last-arg (repeat walks older)
+    lastArgIdx*: int           ## history index the last yank-last-arg pulled from
+    lastArgStart*: int         ## byte span yank-last-arg inserted, for replacement on repeat
+    lastArgEnd*: int
     clipboardWrite*: proc(s: string) {.closure.}
       ## Set by the host app: publishes `s` to the system clipboard
       ## (OSC 52). Nil in tests and standalone use: cut/copy still
@@ -1543,6 +1556,34 @@ proc deleteSelection*(ed: var LineEditor) =
   ed.line.position = a
   ed.selAnchor = -1
 
+const KillRingMax = 64
+
+proc breakChains(ed: var LineEditor) =
+  ## Drop the "previous action" state that links consecutive kills
+  ## (append), yank-pop, and yank-last-arg repeats. Every editor action
+  ## that is not itself one of those must run this first.
+  ed.killCont = false
+  ed.yankCont = false
+  ed.lastArgCont = false
+
+proc killSave(ed: var LineEditor; text: string; atFront: bool; wasAt, nowAt: int) =
+  ## Add killed `text` to the kill ring, readline-style: a kill issued
+  ## with the cursor at the seat the previous kill left (`wasAt ==
+  ## killPt`, no command in between) extends the head entry: backward
+  ## kills prepend, forward kills append, and anything else starts a
+  ## fresh entry. `wasAt`/`nowAt` of -1 force a fresh entry (selection
+  ## deletes, whose span has no cursor seat).
+  if text.len == 0: return
+  if ed.killCont and ed.killRing.len > 0 and wasAt >= 0 and wasAt == ed.killPt:
+    if atFront: ed.killRing[0] = text & ed.killRing[0]
+    else: ed.killRing[0].add text
+  else:
+    ed.killRing.addFirst text
+    if ed.killRing.len > KillRingMax: ed.killRing.popLast
+  ed.lastKill = ed.killRing[0]
+  ed.killCont = true
+  ed.killPt = nowAt
+
 proc back*(ed: var LineEditor, n = 1) =
   ## Step the cursor left by ``n`` runes / newlines.
   let hadSel = ed.hasSelection()
@@ -1569,6 +1610,7 @@ proc forward*(ed: var LineEditor, n = 1) =
   if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc deletePrevious*(ed: var LineEditor) =
+  breakChains(ed)
   if ed.hasSelection():
     ed.deleteSelection()
     callHook(ed.onMutate, ed)
@@ -1585,6 +1627,7 @@ proc deletePrevious*(ed: var LineEditor) =
   fullRedraw(ed)
 
 proc deleteNext*(ed: var LineEditor) =
+  breakChains(ed)
   if ed.hasSelection():
     ed.deleteSelection()
     callHook(ed.onMutate, ed)
@@ -1615,6 +1658,7 @@ proc insertText*(ed: var LineEditor, s: string) =
   ## The insert is capped at ``MaxBufferBytes``: what does not fit is cut
   ## at a rune boundary and the terminal is belled, so a runaway paste
   ## lands whole up to the cap instead of growing the buffer forever.
+  breakChains(ed)
   if s.len == 0: return
   var s = s
   let room = MaxBufferBytes - ed.line.text.len
@@ -1660,6 +1704,7 @@ proc changeLine*(ed: var LineEditor, s: string) =
   ## Replace the entire buffer (history recall, prefill, external
   ## editor). Same hard cap as typing: oversized content is cut at a
   ## rune boundary and belled rather than loaded unchecked.
+  breakChains(ed)
   ed.selAnchor = -1
   var s = s
   if s.len > MaxBufferBytes:
@@ -1677,6 +1722,7 @@ proc clearLine*(ed: var LineEditor) =
 
 proc goToStart*(ed: var LineEditor) =
   ## Move to the start of the current logical line.
+  breakChains(ed)
   let hadSel = ed.hasSelection()
   let oldPos = ed.line.position
   ed.clearSelection()
@@ -1688,6 +1734,7 @@ proc goToStart*(ed: var LineEditor) =
 
 proc goToEnd*(ed: var LineEditor) =
   ## Move to the end of the current logical line.
+  breakChains(ed)
   let hadSel = ed.hasSelection()
   let oldPos = ed.line.position
   ed.clearSelection()
@@ -1698,6 +1745,7 @@ proc goToEnd*(ed: var LineEditor) =
   if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc goToBufferStart*(ed: var LineEditor) =
+  breakChains(ed)
   let hadSel = ed.hasSelection()
   let oldPos = ed.line.position
   ed.clearSelection()
@@ -1705,6 +1753,7 @@ proc goToBufferStart*(ed: var LineEditor) =
   if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc goToBufferEnd*(ed: var LineEditor) =
+  breakChains(ed)
   let hadSel = ed.hasSelection()
   let oldPos = ed.line.position
   ed.clearSelection()
@@ -1715,6 +1764,7 @@ proc isWordChar(b: char): bool {.inline.} =
   b != ' ' and b != '\t' and b != '\n'
 
 proc wordLeft*(ed: var LineEditor) =
+  breakChains(ed)
   let hadSel = ed.hasSelection()
   let oldPos = ed.line.position
   ed.clearSelection()
@@ -1727,6 +1777,7 @@ proc wordLeft*(ed: var LineEditor) =
   if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc wordRight*(ed: var LineEditor) =
+  breakChains(ed)
   let hadSel = ed.hasSelection()
   let oldPos = ed.line.position
   ed.clearSelection()
@@ -1741,7 +1792,9 @@ proc wordRight*(ed: var LineEditor) =
 
 proc deleteWordLeft*(ed: var LineEditor) =
   if ed.hasSelection():
+    let sel = ed.selectionText()
     ed.deleteSelection()
+    killSave(ed, sel, true, -1, -1)
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
@@ -1752,6 +1805,7 @@ proc deleteWordLeft*(ed: var LineEditor) =
   while p > 0 and isWordChar(ed.line.text[p - 1]):
     dec p
   if p == stop: return
+  killSave(ed, ed.line.text[p ..< stop], true, stop, p)
   ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
   ed.line.position = p
   callHook(ed.onMutate, ed)
@@ -1765,7 +1819,9 @@ proc deleteToBoundaryLeft*(ed: var LineEditor) =
   ## (``/usr/local/bin`` -> ``/usr/local/`` -> ``/usr/``) instead of
   ## stalling when the cursor lands right after a delimiter.
   if ed.hasSelection():
+    let sel = ed.selectionText()
     ed.deleteSelection()
+    killSave(ed, sel, true, -1, -1)
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
@@ -1780,6 +1836,7 @@ proc deleteToBoundaryLeft*(ed: var LineEditor) =
     if not (c.isAlphanumeric or c == '_'): break
     dec p
   if p == stop: return
+  killSave(ed, ed.line.text[p ..< stop], true, stop, p)
   ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
   ed.line.position = p
   callHook(ed.onMutate, ed)
@@ -1789,6 +1846,7 @@ proc visualUp*(ed: var LineEditor) =
   ## Move up by one visual row, preserving the visual column as best as
   ## possible. If already on the top visual row of the buffer, fall back
   ## to ``historyPrevious`` (Emacs convention).
+  breakChains(ed)
   let hadSel = ed.hasSelection()
   let oldPos = ed.line.position
   ed.clearSelection()
@@ -1800,6 +1858,7 @@ proc visualUp*(ed: var LineEditor) =
   if not moveOnlyRedraw(ed, oldPos, hadSel): fullRedraw(ed)
 
 proc visualDown*(ed: var LineEditor) =
+  breakChains(ed)
   let hadSel = ed.hasSelection()
   let oldPos = ed.line.position
   ed.clearSelection()
@@ -1816,6 +1875,7 @@ template selectMotion(ed: LineEditor, body: untyped): untyped =
   ## anchors at the current cursor, every motion then moves the cursor
   ## and keeps the anchor put. A motion that lands back on the anchor
   ## drops the selection (a zero-width selection is no selection).
+  breakChains(ed)
   if ed.selAnchor < 0: ed.selAnchor = ed.line.position
   body
   if ed.selAnchor == ed.line.position: ed.selAnchor = -1
@@ -1910,21 +1970,28 @@ proc selectBufferEnd*(ed: var LineEditor) =
 
 proc copySelection*(ed: var LineEditor) =
   ## Copy the selection to the kill ring and the system clipboard.
-  ## Keeps the selection and the cursor: copy is non-destructive.
+  ## Keeps the selection and the cursor: copy is non-destructive, and
+  ## unlike a kill it does not arm the consecutive-kill append rule.
   if not ed.hasSelection(): return
-  ed.lastKill = ed.selectionText()
+  let sel = ed.selectionText()
+  if sel.len > 0:
+    ed.killRing.addFirst sel
+    if ed.killRing.len > KillRingMax: ed.killRing.popLast
+    ed.lastKill = sel
+  breakChains(ed)
   if ed.clipboardWrite != nil:
-    ed.clipboardWrite(ed.lastKill)
+    ed.clipboardWrite(sel)
   else:
-    ed.write clipboard.clipboardWriteOsc52(ed.lastKill)
+    ed.write clipboard.clipboardWriteOsc52(sel)
 
 proc cutSelection*(ed: var LineEditor) =
   if not ed.hasSelection(): return
-  ed.lastKill = ed.selectionText()
+  let sel = ed.selectionText()
+  killSave(ed, sel, true, -1, -1)
   if ed.clipboardWrite != nil:
-    ed.clipboardWrite(ed.lastKill)
+    ed.clipboardWrite(sel)
   else:
-    ed.write clipboard.clipboardWriteOsc52(ed.lastKill)
+    ed.write clipboard.clipboardWriteOsc52(sel)
   ed.deleteSelection()
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
@@ -1943,17 +2010,75 @@ proc pasteText*(ed: var LineEditor, s: string) =
   ## Insert `s` at the cursor, replacing any selection (the clipboard
   ## path; `yank` routes through here too).
   if s.len == 0: return
+  breakChains(ed)
   ed.insertText(s)
 
 proc yank*(ed: var LineEditor) =
-  ## Insert the last cut/copied text (Emacs C-y).
-  if ed.lastKill.len == 0: return
-  ed.insertText(ed.lastKill)
+  ## Insert the most recent kill-ring entry at the cursor (Emacs C-y);
+  ## yank-pop (M-y) cycles older entries right after it.
+  if ed.killRing.len == 0: return
+  let start = ed.line.position
+  ed.insertText(ed.killRing[0])
+  ed.killCont = false
+  ed.lastArgCont = false
+  ed.yankCont = true
+  ed.yankRingIdx = 0
+  ed.yankStart = start
+  ed.yankEnd = ed.line.position
+
+proc yankPop*(ed: var LineEditor) =
+  ## Replace the just-yanked span with the next older kill-ring entry
+  ## (Emacs M-y). Valid only immediately after a yank or yank-pop.
+  if not ed.yankCont or ed.killRing.len == 0: return
+  ed.yankRingIdx = (ed.yankRingIdx + 1) mod ed.killRing.len
+  let entry = ed.killRing[ed.yankRingIdx]
+  ed.selAnchor = -1
+  ed.line.text = ed.line.text[0 ..< ed.yankStart] & entry &
+                 ed.line.text[ed.yankEnd .. ^1]
+  ed.line.position = ed.yankStart + entry.len
+  ed.yankEnd = ed.line.position
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
+
+proc yankLastArg*(ed: var LineEditor) =
+  ## Insert the last word of the previous history entry; repeated
+  ## presses walk to older entries (Emacs M-.). Multi-line entries give
+  ## the last word of their last non-empty line.
+  if ed.history.entries.len == 0: return
+  if not ed.lastArgCont:
+    let refIdx =
+      if ed.history.cursor == -1: ed.history.entries.len - 1
+      else: ed.history.cursor - 1
+    if refIdx < 0: return
+    ed.lastArgIdx = refIdx
+  else:
+    if ed.lastArgIdx <= 0: return
+    dec ed.lastArgIdx
+  var lastLine = ""
+  for ln in ed.history.entries[ed.lastArgIdx].split('\n'):
+    if ln.strip.len > 0: lastLine = ln
+  let fields = strutils.splitWhitespace(lastLine)
+  if fields.len == 0: return
+  let word = fields[^1]
+  if ed.lastArgCont and ed.lastArgStart >= 0:
+    ed.line.text = ed.line.text[0 ..< ed.lastArgStart] &
+                   ed.line.text[ed.lastArgEnd .. ^1]
+    ed.line.position = ed.lastArgStart
+  else:
+    ed.selAnchor = -1
+  let start = ed.line.position
+  ed.insertText(word)
+  ed.lastArgStart = start
+  ed.lastArgEnd = ed.line.position
+  ed.lastArgCont = true
 
 proc deleteWordRight*(ed: var LineEditor) =
-  ## Delete the word (and trailing spaces) right of the cursor.
+  ## Delete the word (and trailing spaces) right of the cursor, saving
+  ## it to the kill ring.
   if ed.hasSelection():
+    let sel = ed.selectionText()
     ed.deleteSelection()
+    killSave(ed, sel, false, -1, -1)
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
@@ -1965,6 +2090,7 @@ proc deleteWordRight*(ed: var LineEditor) =
   while p < n and isWordChar(ed.line.text[p]):
     inc p
   if p == start: return
+  killSave(ed, ed.line.text[start ..< p], false, start, start)
   ed.line.text = ed.line.text[0 ..< start] & ed.line.text[p .. ^1]
   ed.line.position = start
   callHook(ed.onMutate, ed)
@@ -1974,7 +2100,9 @@ proc deleteToBoundaryRight*(ed: var LineEditor) =
   ## Delete forward to the next non-alphanumeric boundary: the forward
   ## twin of `deleteToBoundaryLeft`, peeling one path segment per press.
   if ed.hasSelection():
+    let sel = ed.selectionText()
     ed.deleteSelection()
+    killSave(ed, sel, false, -1, -1)
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
@@ -1990,39 +2118,50 @@ proc deleteToBoundaryRight*(ed: var LineEditor) =
     if not (c.isAlphanumeric or c == '_'): break
     inc p
   if p == start: return
+  killSave(ed, ed.line.text[start ..< p], false, start, start)
   ed.line.text = ed.line.text[0 ..< start] & ed.line.text[p .. ^1]
   ed.line.position = start
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
 proc deleteToEol*(ed: var LineEditor) =
-  ## Delete from the cursor to the end of the current logical line.
+  ## Delete from the cursor to the end of the current logical line,
+  ## saving it to the kill ring.
   if ed.hasSelection():
+    let sel = ed.selectionText()
     ed.deleteSelection()
+    killSave(ed, sel, false, -1, -1)
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
+  let wasAt = ed.line.position
   var p = ed.line.position
   while p < ed.line.text.len and ed.line.text[p] != '\n':
     inc p
-  if p == ed.line.position: return
-  ed.line.text = ed.line.text[0 ..< ed.line.position] &
+  if p == wasAt: return
+  killSave(ed, ed.line.text[wasAt ..< p], false, wasAt, wasAt)
+  ed.line.text = ed.line.text[0 ..< wasAt] &
                  ed.line.text[p .. ^1]
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
 proc deleteToBol*(ed: var LineEditor) =
-  ## Delete from the start of the current logical line to the cursor.
+  ## Delete from the start of the current logical line to the cursor,
+  ## saving it to the kill ring.
   if ed.hasSelection():
+    let sel = ed.selectionText()
     ed.deleteSelection()
+    killSave(ed, sel, true, -1, -1)
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
+  let wasAt = ed.line.position
   var p = ed.line.position
   while p > 0 and ed.line.text[p - 1] != '\n':
     dec p
-  if p == ed.line.position: return
-  ed.line.text = ed.line.text[0 ..< p] & ed.line.text[ed.line.position .. ^1]
+  if p == wasAt: return
+  killSave(ed, ed.line.text[p ..< wasAt], true, wasAt, p)
+  ed.line.text = ed.line.text[0 ..< p] & ed.line.text[wasAt .. ^1]
   ed.line.position = p
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
@@ -2030,6 +2169,7 @@ proc deleteToBol*(ed: var LineEditor) =
 proc transposeChars*(ed: var LineEditor) =
   ## Swap the rune before the cursor with the one under it (Emacs C-t).
   ## At end of line swaps the last two runes before the cursor.
+  breakChains(ed)
   if ed.hasSelection():
     ed.deleteSelection()
     callHook(ed.onMutate, ed)
@@ -2338,6 +2478,8 @@ proc cmdCut(ed: var LineEditor) = ed.cutSelection()
 proc cmdCopy(ed: var LineEditor) = ed.copySelection()
 proc cmdPaste(ed: var LineEditor) = ed.pasteClipboard()
 proc cmdYank(ed: var LineEditor) = ed.yank()
+proc cmdYankPop(ed: var LineEditor) = ed.yankPop()
+proc cmdYankLastArg(ed: var LineEditor) = ed.yankLastArg()
 proc cmdDeleteWordRight(ed: var LineEditor) = ed.deleteWordRight()
 proc cmdDeleteToBoundaryRight(ed: var LineEditor) = ed.deleteToBoundaryRight()
 proc cmdDeleteToEol(ed: var LineEditor) = ed.deleteToEol()
@@ -2407,6 +2549,8 @@ var
     "copy": "AltW",
     "paste": "CtrlV",
     "yank": "CtrlY",
+    "yank-pop": "AltY",
+    "yank-last-arg": "Alt.",
     "delete-word-right": "AltD CtrlDelete",
     "delete-to-boundary-right": "",
     "delete-to-eol": "CtrlK",
@@ -2453,6 +2597,8 @@ proc normalizeKeyToken(token: string): string =
   if t == "alth": return "alt+h"
   if t == "altd": return "alt+d"
   if t == "altw": return "alt+w"
+  if t == "alty": return "alt+y"
+  if t == "alt.": return "alt+."
   # Cmd/Super chords (kitty keyboard protocol `super`, the macOS
   # Command key). Cmd+letter arrives as `CSI <code> ; 9 u`.
   for l in 'a' .. 'z':
@@ -2626,6 +2772,8 @@ proc applyShortcuts*(shortcuts: Table[string, string]) =
     CommandProcs["copy"] = cmdCopy
     CommandProcs["paste"] = cmdPaste
     CommandProcs["yank"] = cmdYank
+    CommandProcs["yank-pop"] = cmdYankPop
+    CommandProcs["yank-last-arg"] = cmdYankLastArg
     CommandProcs["delete-word-right"] = cmdDeleteWordRight
     CommandProcs["delete-to-boundary-right"] = cmdDeleteToBoundaryRight
     CommandProcs["delete-to-eol"] = cmdDeleteToEol
@@ -3160,6 +3308,7 @@ proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): 
   result.escPutback = -1
   result.selAnchor = -1
   result.chordBuf = @[]
+  result.killRing = initDeque[string]()
 
 proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   if ed.prefillText.len > 0:
