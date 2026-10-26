@@ -552,7 +552,7 @@ suite "terminal visual contract":
     tty.send "hello"
     tty.drain(200)
     tty.expect "\u276f hello"
-    tty.send "\x15"  # Ctrl-U clears the editor line
+    tty.send "\x15"  # Ctrl-U deletes to line start, emptying "hello"
     tty.send ":q\n"
     tty.drain(300)
     tty.expectExit(0, timeoutMs = 5000)

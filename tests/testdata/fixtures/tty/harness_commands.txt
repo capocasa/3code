@@ -31,7 +31,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -74,7 +74,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -110,7 +110,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -151,7 +151,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -187,7 +187,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -228,7 +228,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -264,7 +264,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -305,7 +305,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -341,7 +341,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -382,7 +382,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -417,7 +417,7 @@ model     stub-large
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
@@ -458,7 +458,7 @@ reasoning high
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names

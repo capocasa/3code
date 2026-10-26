@@ -2206,7 +2206,7 @@ KEYMAP["left"]      = proc(ed: var LineEditor) = ed.back()
 KEYMAP["right"]     = proc(ed: var LineEditor) = ed.forward()
 KEYMAP["ctrl+b"]    = proc(ed: var LineEditor) = ed.back()
 KEYMAP["ctrl+f"]    = proc(ed: var LineEditor) = ed.forward()
-KEYMAP["ctrl+u"]    = proc(ed: var LineEditor) = ed.clearLine()
+KEYMAP["ctrl+u"]    = proc(ed: var LineEditor) = ed.deleteToBol()
 KEYMAP["ctrl+a"]    = proc(ed: var LineEditor) = ed.goToStart()
 KEYMAP["ctrl+e"]    = proc(ed: var LineEditor) = ed.goToEnd()
 KEYMAP["home"]      = proc(ed: var LineEditor) = ed.goToStart()
@@ -2419,7 +2419,7 @@ var
     "delete-word-right": "AltD CtrlDelete",
     "delete-to-boundary-right": "",
     "delete-to-eol": "CtrlK",
-    "delete-to-bol": "",
+    "delete-to-bol": "CtrlU",
     "transpose-chars": "CtrlT"
   }.toTable
 
@@ -2856,7 +2856,7 @@ proc initKeyTables*() =
   KEYMAP["right"]     = proc(ed: var LineEditor) = ed.forward()
   KEYMAP["ctrl+b"]    = proc(ed: var LineEditor) = ed.back()
   KEYMAP["ctrl+f"]    = proc(ed: var LineEditor) = ed.forward()
-  KEYMAP["ctrl+u"]    = proc(ed: var LineEditor) = ed.clearLine()
+  KEYMAP["ctrl+u"]    = proc(ed: var LineEditor) = ed.deleteToBol()
   KEYMAP["ctrl+a"]    = proc(ed: var LineEditor) = ed.goToStart()
   KEYMAP["ctrl+e"]    = proc(ed: var LineEditor) = ed.goToEnd()
   KEYMAP["home"]      = proc(ed: var LineEditor) = ed.goToStart()

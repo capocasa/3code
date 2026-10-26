@@ -1975,6 +1975,35 @@ suite "minline editor: new edit ops":
     d.push Enter
     check d.run(ed, prompt = "> ") == "he"
 
+  test "ctrl+u deletes to start of line":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello"
+    d.push CtrlA
+    d.push Right
+    d.push Right
+    d.push CtrlU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "llo"
+
+  test "ctrl+u from end of line clears it":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello"
+    d.push CtrlU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+
+  test "ctrl+u spares other logical lines":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one"
+    d.push AltEnter
+    d.pushString "two"
+    d.push CtrlU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one\n"
+
   test "alt+d deletes the word after the cursor":
     var ed = initEditor()
     let d = newDriver()

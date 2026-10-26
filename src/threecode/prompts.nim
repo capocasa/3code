@@ -3773,7 +3773,7 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   ctrl+k        delete to end of line
   alt+d         delete the word after the cursor (also ctrl+delete)
