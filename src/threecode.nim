@@ -797,7 +797,10 @@ proc main() =
     # Unpin this command's hourglass echo into its committed scrollback
     # item (same rows where it sat, hourglass dropped now that it runs) so
     # later output lands below it and any further queued items stay
-    # pinned at the bottom.
+    # pinned at the bottom. A queued command never enters the messages,
+    # so its echo is journal content like the idle path's echo+body
+    # bundle (a queued PROMPT does become a message and needs nothing).
+    termengine.noteNonMessageTail(formatQueuedPromptItem(cmd), messages.len)
     commitQueuedEchoSend(cmd)
     if classifyCommand(cmd) == ckModal:
       # A modal wizard paints its own prompts and output flush at the
@@ -821,7 +824,9 @@ proc main() =
         emitFatPromptEvent clearPendingHintEvent()
         emitFatPromptEvent clearBarEvent()
     if res.body.len > 0:
-      commitTranscriptBytes(plainCommandBodyBytes(res.body),
+      let bodyBytes = plainCommandBodyBytes(res.body)
+      termengine.noteNonMessageTail(bodyBytes, messages.len)
+      commitTranscriptBytes(bodyBytes,
                             restoreEditor = true,
                             beforeRepaint = clearSubmittedCommandFooter,
                             reserveFooter = true)
