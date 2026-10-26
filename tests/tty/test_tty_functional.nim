@@ -1701,6 +1701,41 @@ max-tokens = "8192"
     defer: tty2.close()
     tty2.expect draftText
 
+  test "a deliberate quit discards the draft instead of saving the quit word":
+    # Regression (issue #62): the only prompt a clean quit ever persisted was
+    # the quit word itself. `:q` was flushed to the cwd-keyed draft sidecar
+    # while it was being typed, no quit path removed it, and the exit-proc
+    # flush wrote it straight back — so every later start in that directory
+    # restored `:q` into the editor, and Ctrl-D could no longer leave (it
+    # only quits on an empty line). A deliberate quit is not the unexpected
+    # shutdown drafts exist for: the editor's text leaves with the session.
+    let root = newFixture("draft_discarded_on_quit")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+    let tty1 = startStub(root)
+    tty1.expect "❯"
+    tty1.send ":q\n"
+    tty1.expectExit(0, timeoutMs = 5000)
+    # No sidecar survives in either scope (pending cwd-keyed, session-keyed)
+    # — the drafts tree must be empty, not merely moved.
+    var sidecars = 0
+    let draftsDir = root / "data" / "3code" / "drafts"
+    if dirExists(draftsDir):
+      for p in walkDirRec(draftsDir):
+        if p.endsWith(".prompt"): inc sidecars
+    check sidecars == 0
+
+    # The next start in the same directory comes up with an empty editor: no
+    # restored `:q`, so Ctrl-D still quits. The welcome banner itself mentions
+    # `:q`, so assert the live prompt row rather than the whole screen.
+    let tty2 = startStub(root)
+    defer: tty2.close()
+    tty2.expect "❯"
+    tty2.drain 400
+    check ":q" notin tty2.rows()[tty2.rowContaining("❯")]
+    tty2.ctrlD()
+    tty2.expectExit(0, timeoutMs = 5000)
+
   # The quiet-watch thread now only fires a hard timeout; there is no
   # intermediate hourglass label. Wait briefly so the spinner is active
   # before exercising cancel.

@@ -730,6 +730,15 @@ proc main() =
     signal(SIGHUP, signalCleanup)
   editor.completionCallback = proc(ed: minline.LineEditor): seq[string] =
     completionFor(ed.lineText)
+  proc quitDiscardingDraft() =
+    ## A deliberate exit (`:q` and friends, Ctrl-D, a queued quit event, the
+    ## oneshot paths) abandons the editor with the session instead of
+    ## handing its text to the next run in this directory. The gate stops
+    ## the flusher thread and the exit-proc `flushDraftNow` from writing the
+    ## quit word back out; `clearDraft` drops what the flusher already
+    ## persisted while it was being typed.
+    fatprompt.discardDrafts()
+    clearDraft(session)
   # The bootstrap provider wizard (and every later prompt) reads via the
   # input thread, whose startup guard is `inputEditor != nil`. Wire the
   # module-global pointers before the wizard can run, or the first-run
@@ -1010,6 +1019,7 @@ proc main() =
     if prompt != "" and runInitialPrompt(prompt):
       # quit, not return: unwinding `editor` while the input thread still
       # holds it is the Windows oneshot SIGSEGV (illegal storage access).
+      quitDiscardingDraft()
       quit(0)
     # Oneshot: a prompt given on the command line runs once and exits. Only
     # -i/--interactive keeps the REPL open afterward (and no prompt at all
@@ -1021,6 +1031,7 @@ proc main() =
       emitFatPromptEvent clearBarEvent()
       termengine.renderFooter(clearFooterFrame(), inputThreadRunning,
                               addr editor)
+      quitDiscardingDraft()
       quit(0)
     while true:
       var done = false
@@ -1102,6 +1113,7 @@ proc main() =
       # clean exit doesn't restore text the user already sent.
       clearDraft(session)
       if runTurnWithSafetyNet(): break
+    quitDiscardingDraft()
     pluginsShutdown()
 
   except IOError as e:

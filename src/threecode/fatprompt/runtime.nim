@@ -133,6 +133,12 @@ var draftDirty: Atomic[bool]
 var draftFlusherStop: Atomic[bool]
 var draftFlusherThread: Thread[void]
 var draftFlusherRunning = false
+var draftsDiscarded: Atomic[bool]
+  ## A deliberate quit (`:q`, Ctrl-D) is not the unexpected shutdown the
+  ## draft sidecar exists for: whatever is in the editor leaves with the
+  ## session. Set by the controller on the way out so neither the flusher
+  ## thread nor the exit-proc `flushDraftNow` can write the quit word back
+  ## out as the next run's restored prompt.
 
 var inputState*: InputState
 var inputStateLock*: Lock
@@ -1377,6 +1383,7 @@ proc stopBarTick*(): int =
 proc snapshotAndSaveDraft() =
   ## Take a consistent (session path, editor text) snapshot and persist it as
   ## a draft. Called from the flusher thread and the synchronous final flush.
+  ## No-op once the controller has discarded drafts for a deliberate quit.
   ## The editor's buffer belongs to the terminal write lock (the input thread
   ## mutates `line.text` under it via preMutate/postMutate, and the GUI thread
   ## reads it there in renderFooter); reading it under inputStateLock alone
@@ -1388,6 +1395,7 @@ proc snapshotAndSaveDraft() =
   ## flush triggered from a signal handler (cleanup) non-blocking: the
   ## snapshot is skipped and retried on the next tick when either lock is
   ## held.
+  if draftsDiscarded.load(moAcquire): return
   var sessionPtr: ptr Session = nil
   var text = ""
   if tryAcquire(inputStateLock):
@@ -1421,6 +1429,15 @@ proc ensureDraftFlusherStarted*() =
   createThread(draftFlusherThread, draftFlusherLoop)
   draftFlusherRunning = true
 
+proc discardDrafts*() =
+  ## Stop persisting prompt drafts from this point on. Called by the
+  ## controller when the user quits deliberately: the editor's contents are
+  ## abandoned with the session rather than restored into the next one.
+  ## Idempotent; pair with `session.clearDraft` to also drop what the flusher
+  ## already wrote.
+  draftsDiscarded.store(true, moRelease)
+  draftDirty.store(false, moRelease)
+
 proc stopDraftFlusher*() =
   ## Signal the flusher thread to stop (non-blocking; does not join). Safe to
   ## call from any thread, including the flusher thread itself, since it never
@@ -1431,7 +1448,10 @@ proc flushDraftNow*() =
   ## Persist the current draft synchronously. Called from cleanup as the last
   ## reliable save before teardown. No-op when no session path exists yet;
   ## otherwise writes unconditionally — we are shutting down, so a redundant
-  ## write is cheap insurance against losing the in-flight prompt.
+  ## write is cheap insurance against losing the in-flight prompt. Also a
+  ## no-op after `discardDrafts`: a deliberate quit must not re-create the
+  ## sidecar the controller just removed.
+  if draftsDiscarded.load(moAcquire): return
   draftDirty.store(false, moRelease)
   {.cast(gcsafe).}:
     try: snapshotAndSaveDraft()

@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **A deliberate quit no longer saves the quit word as the next prompt
+  (gh #62).** The drafts subsystem had one live exit: `Ctrl-D` only quits
+  on an empty line, so the only way to leave with text in the editor was
+  to clear it and type `:q` - and that word was flushed to the cwd-keyed
+  draft sidecar as it was typed, nothing removed it on the way out, and
+  the exit-proc flush wrote it straight back. Every later start in that
+  directory restored `:q` into the editor, where it also blocked `Ctrl-D`
+  until you deleted it. Quitting is not the unexpected shutdown drafts
+  exist for: the quit paths now drop both sidecar scopes and gate the
+  flusher, so the editor's text leaves with the session. A killed process
+  still restores its half-typed prompt exactly as before.
 - **3code owns the tty's output discipline (gh #54).** A shell left
   `-opost` by a crashed CLI or `stty -opost` used to break every wrapped
   row: with `OPOST` off, `ONLCR` is inert, so the bare `\n` 3code writes
