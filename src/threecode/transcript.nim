@@ -7,6 +7,7 @@
 import std/[json, strutils, tables]
 
 import actions, display, fatprompt, goal, session, types, util, images
+import engine as termengine
 
 export isEmptyReplyMsg
 
@@ -186,8 +187,10 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         if text.startsWith("attached: ") and "(image read)" in text:
           continue
         let c = stripPreamble(text).strip & " [image attached]"
+        let bytes = formatItem(userPromptItem(c))
         stdout.write "\n"
-        stdout.write formatItem(userPromptItem(c)) & "\n"
+        stdout.write bytes & "\n"
+        termengine.noteCommittedRows(bytes)
         continue
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
@@ -202,8 +205,10 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       # No length truncation: the live path echoes the full submitted line
       # (wrapped at terminal width by `formatUserPromptItem`), so the replay
       # must too.
+      let bytes = formatItem(item)
       stdout.write "\n"
-      stdout.write formatItem(item) & "\n"
+      stdout.write bytes & "\n"
+      termengine.noteCommittedRows(bytes)
     of "assistant":
       var c = m{"content"}.getStr("").strip
       # Sessions saved by `renderSession` persist a tool-less empty reply as
@@ -243,6 +248,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
           bytes.attachReceipt(receiptBytes(tokenLineLabel(u, window, elapsed)), true)
         stdout.write "\n"
         stdout.write bytes & "\n"
+        termengine.noteCommittedRows(bytes)
         # A tool-less empty reply persisted with the provider's explanation
         # (`finish_reason`) gets the same explanatory line the live retry
         # loop painted (`empty reply: <reason>. ...`), so a resumed session
@@ -254,6 +260,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
             var reason = errLnS("empty reply: " & fr)
             reason.trimTranscriptTail()
             stdout.write reason & "\n"
+            termengine.noteCommittedRows(reason, separator = false)
       if isLast:
         result = u
       if hasTools:
@@ -278,6 +285,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
                 bytes.attachReceipt(deferredReceipt, true)
               stdout.write "\n"
               stdout.write bytes & "\n"
+              termengine.noteCommittedRows(bytes)
             continue
           var code = 0
           var output = ""
@@ -344,16 +352,225 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
             bytes.trimTranscriptTail()
           stdout.write "\n"
           stdout.write bytes & "\n"
+          termengine.noteCommittedRows(bytes)
           # The flail-noted call's `»` warning rides below its tool item,
           # the same position the live commit wrote it.
           let flailNote = flailNotes.getOrDefault(tc{"id"}.getStr, "")
           if flailNote.len > 0 and flailNote != lastAgentNote:
             lastAgentNote = flailNote
+            let noteBytes = formatItem(agentPromptItem(flailNote))
             stdout.write "\n"
-            stdout.write formatItem(agentPromptItem(flailNote)) & "\n"
+            stdout.write noteBytes & "\n"
+            termengine.noteCommittedRows(noteBytes)
     of "tool":
       # Result already rendered alongside the assistant's tool_call via
       # toolLog; nothing to do here.
       discard
     else: discard
   stdout.flushFile
+
+proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
+                     window: int; family: string;
+                     journal: seq[termengine.TailJournalRecord];
+                     width, budget: int): seq[string] =
+  ## The rebreak window's content: the committed transcript tail re-rendered
+  ## at the CURRENT terminal width (the formatters read the live width; the
+  ## `width` argument is advisory), newest content last, at most `budget`
+  ## rows, the topmost unit head-truncated because its head already lives in
+  ## scrollback above the window. Items render through the exact replay walk
+  ## above (`replaySessionTail`): replay/live parity is the contract, so a
+  ## re-broken window matches what a resume would have painted. Journal
+  ## records — committed scrollback the messages cannot re-render — merge in
+  ## by their messages-length anchor and keep the wraps they were committed
+  ## with; only their content must survive a resize.
+  if messages == nil or messages.kind != JArray or budget <= 0: return
+  var start = 0
+  while start < messages.len and messages[start]{"role"}.getStr == "system":
+    inc start
+  if start >= messages.len: return
+  var lastAssistant = -1
+  for i in countdown(messages.len - 1, start):
+    if messages[i]{"role"}.getStr == "assistant":
+      lastAssistant = i
+      break
+  var agentNotes = initTable[string, string]()
+  var flailNotes = initTable[string, string]()
+  for m in messages:
+    if m.kind != JObject or m{"role"}.getStr != "tool": continue
+    if m{"agentSent"}.getBool(false):
+      agentNotes[m{"tool_call_id"}.getStr] = m{"content"}.getStr("")
+    let fn = m{"flailNote"}.getStr("")
+    if fn.len > 0:
+      flailNotes[m{"tool_call_id"}.getStr] = fn
+  var lastAgentNote = ""
+  var toolIdx = 0
+  type TailUnit = tuple[anchor: int, rows: seq[string]]
+  proc itemRows(bytes: string): seq[string] =
+    var rows: seq[string] = @[]
+    for row in bytes.split("\r\n"):
+      rows.add row
+    while rows.len > 0 and rows[^1].len == 0:
+      rows.setLen(rows.len - 1)
+    rows
+  var units: seq[TailUnit] = @[]
+  template emit(anchor: int, bytes: string) =
+    let rows = itemRows(bytes)
+    if rows.len > 0:
+      units.add (anchor, rows)
+  for i in start ..< messages.len:
+    let m = messages[i]
+    let anchor = i + 1
+    case m{"role"}.getStr
+    of "user":
+      let raw = m{"content"}
+      if raw != nil and raw.kind == JArray:
+        let text = userTextBlocks(raw).strip
+        if text.startsWith("attached: ") and "(image read)" in text:
+          continue
+        let c = stripPreamble(text).strip & " [image attached]"
+        emit anchor, formatItem(userPromptItem(c))
+        continue
+      let c = stripPreamble(m{"content"}.getStr("")).strip
+      if c.len == 0: continue
+      let item =
+        if m{"agentSent"}.getBool(false):
+          if c.startsWith(GoalKickoffPrefix): goalPromptItem(c)
+          else: agentPromptItem(c)
+        else: userPromptItem(c)
+      emit anchor, formatItem(item)
+    of "assistant":
+      var c = m{"content"}.getStr("").strip
+      if isEmptyReplyMsg(c): c = ""
+      let u = usageFromJson(m{"usage"})
+      let elapsed = m{"usage"}{"elapsed"}.getInt(-1)
+      let isLast = i == lastAssistant
+      let hasTools =
+        block:
+          let tcs = m{"tool_calls"}
+          tcs != nil and tcs.kind == JArray and tcs.len > 0
+      let receiptCap = not isLast and u.totalTokens > 0 and not hasTools
+      let steerFollows =
+        i + 1 < messages.len and
+        messages[i + 1].kind == JObject and
+        messages[i + 1]{"role"}.getStr == "user" and
+        messages[i + 1]{"agentSent"}.getBool(false)
+      if c.len > 0 or (not hasTools and not steerFollows):
+        var bytes = formatItem(assistantItem(c))
+        if receiptCap:
+          bytes.attachReceipt(
+            receiptBytes(tokenLineLabel(u, window, elapsed)), true)
+        emit anchor, bytes
+        if c.len == 0:
+          let fr = m{"finish_reason"}.getStr("").strip
+          if fr.len > 0:
+            var reason = errLnS("empty reply: " & fr)
+            reason.trimTranscriptTail()
+            emit anchor, reason
+      if hasTools:
+        let tcs = m{"tool_calls"}
+        lastAgentNote = ""
+        let deferredReceipt =
+          if not isLast and u.totalTokens > 0:
+            receiptBytes(tokenLineLabel(u, window, elapsed))
+          else: ""
+        for j in 0 ..< tcs.len:
+          let tc = tcs[j]
+          inc toolIdx
+          let agentNote = agentNotes.getOrDefault(tc{"id"}.getStr, "")
+          if agentNote.len > 0:
+            if agentNote != lastAgentNote:
+              lastAgentNote = agentNote
+              var bytes = formatItem(agentPromptItem(agentNote))
+              if deferredReceipt.len > 0 and j == tcs.len - 1:
+                bytes.attachReceipt(deferredReceipt, true)
+              emit anchor, bytes
+            continue
+          var code = 0
+          var output = ""
+          var kind = akBash
+          var plan: seq[PlanItem] = @[]
+          var act: Action
+          var haveAct = false
+          if toolIdx <= toolLog.len:
+            let rec = toolLog[toolIdx - 1]
+            code = rec.code
+            output = rec.output
+            kind = rec.kind
+            plan = rec.plan
+          block rebuildAction:
+            let fn = tc{"function"}
+            if fn == nil or fn.kind != JObject: break rebuildAction
+            let name = fn{"name"}.getStr("?")
+            let argsStr = fn{"arguments"}.getStr("")
+            let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                       except CatchableError: newJObject()
+            act = toolCallToAction(family, name, args)
+            haveAct = true
+            kind = act.kind
+            if act.kind == akPlan and act.plan.len == 0 and plan.len > 0:
+              act.plan = plan
+            else:
+              plan = act.plan
+            if toolIdx > toolLog.len:
+              code = 0
+              output = ""
+          var bytes: string
+          if haveAct:
+            if isSkillRead(act):
+              bytes = skillLoadedBytes(act)
+              bytes.trimTranscriptTail()
+            else:
+              let diff =
+                if act.kind == akWrite and code == 0: act.body else: ""
+              var item = toolItem(act, output, code, toolIdx, diff)
+              bytes = formatItem(item)
+              if deferredReceipt.len > 0 and j == tcs.len - 1:
+                bytes.attachReceipt(deferredReceipt, true)
+          else:
+            var banner = ""
+            if toolIdx <= toolLog.len: banner = toolLog[toolIdx - 1].banner
+            if banner.len == 0: banner = "?"
+            bytes = toolTranscriptBytes(banner, kind, output, code, toolIdx)
+            bytes.trimTranscriptTail()
+          emit anchor, bytes
+          let flailNote = flailNotes.getOrDefault(tc{"id"}.getStr, "")
+          if flailNote.len > 0 and flailNote != lastAgentNote:
+            lastAgentNote = flailNote
+            emit anchor, formatItem(agentPromptItem(flailNote))
+    of "tool":
+      discard
+    else: discard
+  # Merge the journal and cut to the budget, newest first. The newest unit
+  # sits directly above the volatile block, whose own top row is the gap —
+  # it costs no separator; every older unit costs the one blank separator
+  # row a live commit writes between items.
+  var picked: seq[seq[string]] = @[]
+  var used = 0
+  var iu = units.len - 1
+  var jr = journal.len - 1
+  while iu >= 0 or jr >= 0:
+    var rows: seq[string]
+    if jr >= 0 and (iu < 0 or
+        journal[jr].atMessagesLen >= units[iu].anchor):
+      rows = journal[jr].rows
+      dec jr
+    else:
+      rows = units[iu].rows
+      dec iu
+    if rows.len == 0: continue
+    let sep = if picked.len == 0: 0 else: 1
+    if used + sep + rows.len <= budget:
+      if sep == 1: picked.add @[""]
+      picked.add rows
+      used += sep + rows.len
+      continue
+    # The topmost unit does not fit whole: head-truncate it (its head
+    # already lives in scrollback above the window) and stop.
+    let keep = budget - used - sep
+    if keep > 0:
+      if sep == 1: picked.add @[""]
+      picked.add rows[rows.len - keep .. ^1]
+    break
+  for rows in picked:
+    for row in rows:
+      result.add row

@@ -47,6 +47,11 @@ type
     ## The editor's own rows are NOT included here; they are read live from
     ## the editor's `renderRow` at each walk-up.
     paintedFooterRows: int
+    ## Visible widths of the committed scrollback rows most recently
+    ## written (bounded ring, blank separators included as width 0). The
+    ## rebreak window's erase walk derives from this how tall the stale
+    ## committed rows are at a candidate width; see `noteCommittedRows`.
+    committedRowWidths: seq[int]
     toolViewportRows: seq[string]
     toolViewportBannerRows: int  # leading rows that are banner (white), not output (grey)
     toolViewportHasGap: bool  # separator row above the viewport, matching committed scrollback spacing
@@ -108,6 +113,76 @@ var headlessTranscriptHook*: proc(bytes: string) {.closure.}
   ## When set (library mode), `appendTranscript` forwards the committed
   ## transcript bytes here instead of painting them. Bytes carry ANSI
   ## styling; stripping is the consumer's job (library.nim owns that).
+
+var transcriptTailRows*: proc(width, budget: int): seq[string] {.closure, gcsafe.}
+  ## Rebreak window source, set by the interactive controller: renders the
+  ## committed transcript tail (rows carrying ANSI styling) re-wrapped at
+  ## `width`, newest content last, at most `budget` rows with the topmost
+  ## item head-truncated. Called by `paintVolatileRegion`'s width-change
+  ## branch under the terminal write lock, after the resize, so formatters
+  ## inside the provider read the live terminal width. Nil (library mode,
+  ## and on Windows where ConPTY's resize model already full-repaints)
+  ## keeps the frozen-rows behavior.
+
+type
+  TailJournalRecord* = object
+    ## Committed scrollback the session messages cannot re-render (harness
+    ## notices, command bodies, wizard status), kept as the rows that were
+    ## painted. `atMessagesLen` is the messages-array length at commit time:
+    ## the record sits between message `atMessagesLen-1` and message
+    ## `atMessagesLen` in commit order, which is how the rebreak window
+    ## merges it with the message-backed items. Rows keep their committed
+    ## wraps (frozen breaks) — only their content must survive a resize.
+    atMessagesLen*: int
+    rows*: seq[string]
+
+var tailJournal: seq[TailJournalRecord]
+  ## Guarded by the terminal write lock: appended from commit flows that
+  ## already hold it, snapshotted by the rebreak provider under it.
+
+const TailJournalMax = 64
+const CommittedRowRingMax = 4096
+
+proc noteNonMessageTail*(bytes: string; anchor: int) {.gcsafe.} =
+  if not engineOutputEnabled: return
+  if bytes.len == 0: return
+  {.cast(gcsafe).}:
+    termio.withTerminalWriteLock:
+      var rec = TailJournalRecord(atMessagesLen: anchor, rows: @[])
+      for row in bytes.split("\r\n"):
+        rec.rows.add row
+      tailJournal.add rec
+      if tailJournal.len > TailJournalMax:
+        tailJournal = tailJournal[tailJournal.len - TailJournalMax .. ^1]
+
+proc tailJournalSnapshot*(): seq[TailJournalRecord] {.gcsafe.} =
+  {.cast(gcsafe).}:
+    termio.withTerminalWriteLock:
+      result = tailJournal
+
+proc noteCommittedRows*(e: var TerminalEngine; bytes: string;
+                        separator = true) =
+  if separator:
+    e.committedRowWidths.add 0
+  for row in bytes.split("\r\n"):
+    e.committedRowWidths.add visibleWidth(row)
+  let overflow = e.committedRowWidths.len - CommittedRowRingMax
+  if overflow > 0:
+    e.committedRowWidths = e.committedRowWidths[overflow .. ^1]
+
+proc noteCommittedRows*(bytes: string; separator = true) {.gcsafe.} =
+  ## Track the geometry of committed scrollback rows: the rebreak window's
+  ## one-shot erase must cover the rows a reflow terminal grew on a width
+  ## change (each committed row re-wraps to ceil(w / newWidth) rows), or the
+  ## repaint strands mid-word-broken copies above the window.
+  if not engineOutputEnabled: return
+  {.cast(gcsafe).}:
+    defaultEngine.noteCommittedRows(bytes, separator)
+
+proc reflowedCommittedHeight(e: TerminalEngine; width: int): int =
+  if width <= 1: return 0
+  for w in e.committedRowWidths:
+    result += max(1, (w + width - 1) div width)
 
 # Test-mode geometry audit. Under the PTY harness (frame fd set), every
 # footer paint/clear logs the model's footer-row count so a test can fail
@@ -525,6 +600,24 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
         edPtr[].prevRowSpans = newEdModel
         break
   let blockH = max(cur.len, 1)
+  # Rebreak window: on a width change the committed rows that share the
+  # screen with the volatile block are re-rendered at the new width above
+  # the block, in this same frame. Committed rows are hard-wrapped at the
+  # width they were painted at; without this repaint a reflow terminal
+  # re-wraps them itself — mid-word — which is the reported bug. The walk
+  # below extends by `windowCover`: the window rows it paints, or the
+  # reflowed height of the stale committed rows when that is taller (a
+  # shrink grew them), so the erase never strands mid-word copies above
+  # the window. An empty render (no content, mid-turn stream, modal)
+  # keeps the walk at the volatile-only geometry — the frozen behavior.
+  var windowRows: seq[string] = @[]
+  var windowCover = 0
+  if resized and transcriptTailRows != nil:
+    let termH = try: terminalHeight() except CatchableError: 0
+    if termH > blockH + 1:
+      windowRows = transcriptTailRows(width, termH - 1 - blockH)
+    if windowRows.len > 0:
+      windowCover = max(windowRows.len, e.reflowedCommittedHeight(width))
   # The cursor sits at the block's bottom, which the erase always left as
   # a live row. A growing block must claim its extra rows from scrollback
   # first (the old erase created them by clearing rows below the walk-up
@@ -560,12 +653,31 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # growth scroll the cursor already sits at the (new) block bottom.
   # On resize this is the single walk: to whichever block top sits
   # higher, then erase down so the row loop repaints from a blank slate.
-  let up = if resizeErase >= 0: resizeErase else: max(0, prevH - 1 - belowCaret)
+  let up = if resizeErase >= 0: resizeErase + windowCover
+    else: max(0, prevH - 1 - belowCaret)
 
   if up > 0:
     lead.add "\x1b[" & $up & "A"
   if resizeErase >= 0:
     lead.add "\r\x1b[J"
+    # The window rows land between the erase and the block: they are
+    # committed scrollback from here on (append-only), so walk-ups and
+    # commits below need no window-awareness — the next commit's
+    # separator lands directly below the window's last row. Each row is
+    # EL-terminated so a shorter re-broken row clears the stale tail of
+    # the wider row it replaces (the grid does not reflow).
+    for row in windowRows:
+      lead.add diffRowBytes(row, "", width)
+      lead.add "\r\n"
+    if windowCover > 0:
+      # The window replaced the newest `windowCover` committed rows on
+      # screen with `windowRows.len` rows at the new width; keep the
+      # geometry ring in step so the NEXT resize estimates from what is
+      # actually on screen.
+      let drop = min(e.committedRowWidths.len, windowCover)
+      if drop > 0:
+        e.committedRowWidths.setLen(e.committedRowWidths.len - drop)
+      e.noteCommittedRows(join(windowRows, "\r\n"), separator = false)
   # When the previous block was taller at the top, the vacated rows are
   # handled one of two ways. When the shrink is exactly the footer band
   # losing rows (a retry notice's padding rows clearing), absorb them
@@ -1182,6 +1294,7 @@ proc writeTranscriptItem(e: var TerminalEngine; transcript: string;
     stdout.write "\r\n"
   stdout.write transcript
   stdout.write "\r\n"
+  e.noteCommittedRows(transcript, separator = not flushWithPrevious)
 
 proc repaintVolatileAfterCommit(e: var TerminalEngine;
                                 edPtr: ptr minline.LineEditor;
