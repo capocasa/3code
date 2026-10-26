@@ -3778,7 +3778,19 @@ input:
   ctrl+k        delete to end of line
   alt+d         delete the word after the cursor (also ctrl+delete)
   ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   alt+e         edit the prompt buffer in $VISUAL/$EDITOR

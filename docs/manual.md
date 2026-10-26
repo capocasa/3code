@@ -476,10 +476,24 @@ Useful input keys:
 | Ctrl+K | delete to end of line |
 | Alt+D / Ctrl+Delete | delete the next word |
 | Ctrl+T | transpose characters around the cursor |
+| Ctrl+K / Ctrl+U | delete to end / start of line (into the kill ring) |
+| Ctrl+W / Alt+D | delete previous / next word (into the kill ring) |
+| Ctrl+Y | yank the last kill |
+| Alt+Y | cycle older kills right after Ctrl+Y |
+| Alt+. | insert the last word of the previous history entry |
+| Ctrl+_ or Ctrl+/ | undo; a typed run retracts in one step |
+| Alt+R | revert to the recalled entry as recorded (empty draft at the prompt) |
+| Alt+T | transpose the words around the cursor |
+| Alt+U / Alt+L / Alt+C | upcase / downcase / capitalize the next word |
+| Ctrl+Q | insert the next key literally (a real tab, an escape byte) |
+| Ctrl+] | jump to the next occurrence of the next typed character |
+| Ctrl+@ or Alt+Space | set the mark (binds `exchange-point-and-mark` to swap back) |
+| Ctrl+R / Ctrl+S | incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts |
+| Alt+P / Alt+N | history search completed at Enter |
+| Alt+< / Alt+> | jump to the oldest entry / back to the draft |
 | Ctrl+L | clear the screen |
 | Alt+E | edit the input buffer in $VISUAL/$EDITOR |
 | Ctrl+X Ctrl+E | same (emacs edit-and-execute-command) |
-| Ctrl+R | retry the in-flight request (ignored once output is streaming) |
 | Ctrl+C | clear current input; cancel the turn when it is empty |
 | Esc | same as Ctrl+C |
 | Ctrl+D | exit |
@@ -569,7 +583,13 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `buffer-end`, `select-left`, `select-right`, `select-up`, `select-down`,
 `select-home`, `select-end`, `select-word-left`, `select-word-right`,
 `select-all`, `select-buffer-start`, `select-buffer-end`, `cut`, `copy`,
-`paste`, `yank`, `transpose-chars`.
+`paste`, `yank`, `yank-pop`, `yank-last-arg`, `transpose-chars`,
+`transpose-words`, `upcase-word`, `downcase-word`, `capitalize-word`,
+`undo`, `revert-line`, `isearch-backward`, `isearch-forward`,
+`nonincremental-search-backward`, `nonincremental-search-forward`,
+`history-begin`, `history-end`, `set-mark`, `exchange-point-and-mark`,
+`quoted-insert`, `char-search`, `char-search-backward`,
+`delete-horizontal-space`, `tab-insert`.
 
 Keys joined by `>` form a chord: pressed in sequence, they run the
 command once. The default `edit-in-editor` binding is exactly that:
