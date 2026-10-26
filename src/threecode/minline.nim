@@ -101,7 +101,9 @@ const ShortcutNames* = [
   "delete-to-boundary-right",
   "delete-to-eol",
   "delete-to-bol",
-  "transpose-chars"
+  "transpose-chars",
+  "undo",
+  "revert-line"
 ]
 
 type KeySpec* = tuple[keys: seq[string], times: int]
@@ -607,6 +609,11 @@ type
     lastArgIdx*: int           ## history index the last yank-last-arg pulled from
     lastArgStart*: int         ## byte span yank-last-arg inserted, for replacement on repeat
     lastArgEnd*: int
+    undoStack*: Deque[tuple[text: string, position: int, selAnchor: int]]
+      ## pre-mutation snapshots, oldest first; C-_ pops the newest
+    undoBytes*: int            ## total snapshot bytes, for the memory cap
+    undoGroupOpen*: bool       ## a run of single-rune inserts is extending the top group
+    undoGroupEnd*: int         ## cursor seat that run must continue at, else a new group starts
     clipboardWrite*: proc(s: string) {.closure.}
       ## Set by the host app: publishes `s` to the system clipboard
       ## (OSC 52). Nil in tests and standalone use: cut/copy still
@@ -1550,6 +1557,8 @@ proc deleteSelection*(ed: var LineEditor) =
   ed.selAnchor = -1
 
 const KillRingMax = 64
+const UndoMaxEntries = 128
+const UndoMaxBytes = 2 * MaxBufferBytes
 
 proc breakChains(ed: var LineEditor) =
   ## Drop the "previous action" state that links consecutive kills
@@ -1576,6 +1585,63 @@ proc killSave(ed: var LineEditor; text: string; atFront: bool; wasAt, nowAt: int
   ed.lastKill = ed.killRing[0]
   ed.killCont = true
   ed.killPt = nowAt
+
+proc pushUndo(ed: var LineEditor; typing: bool) =
+  ## Snapshot the pre-mutation buffer for undo (C-_). `typing` marks a
+  ## single-rune insert; one such continuing at the seat the previous
+  ## run ended (`undoGroupEnd`) extends that group instead of stacking
+  ## a snapshot per keystroke, so one C-_ retracts a whole typed run.
+  ## The caller re-arms `undoGroupEnd` after its mutation.
+  if typing and ed.undoGroupOpen and ed.line.position == ed.undoGroupEnd:
+    ed.undoGroupEnd = -1  # armed below by the mutating caller
+    return
+  ed.undoStack.addLast (ed.line.text, ed.line.position, ed.selAnchor)
+  ed.undoBytes += ed.line.text.len
+  while ed.undoStack.len > UndoMaxEntries or
+      (ed.undoBytes > UndoMaxBytes and ed.undoStack.len > 1):
+    ed.undoBytes -= ed.undoStack[0][0].len
+    ed.undoStack.popFirst
+  ed.undoGroupOpen = typing
+
+proc clearUndo(ed: var LineEditor) =
+  ed.undoStack.clear()
+  ed.undoBytes = 0
+  ed.undoGroupOpen = false
+  ed.undoGroupEnd = -1
+
+proc undo*(ed: var LineEditor) =
+  ## Restore the buffer as it was before the last edit command (Emacs
+  ## C-_, which modern terminals also emit for Ctrl+/). Runs of
+  ## single-rune inserts retract as one step. No redo: revert-line
+  ## (M-r) is the deliberate reset.
+  if ed.undoStack.len == 0: return
+  let snap = ed.undoStack.popLast
+  ed.undoBytes -= snap.text.len
+  ed.line.text = snap.text
+  ed.line.position = snap.position
+  ed.selAnchor = snap.selAnchor
+  ed.undoGroupOpen = false
+  breakChains(ed)
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
+
+proc revertLine*(ed: var LineEditor) =
+  ## Reset the current view to its pristine state (Emacs M-r): the
+  ## history entry as recorded (pending edits to it are discarded), or
+  ## an empty draft at the fresh prompt. The view's undo history goes
+  ## with it.
+  breakChains(ed)
+  if ed.history.cursor >= 0:
+    ed.history.drafts.del(ed.history.cursor)
+    ed.history.cursorPos.del(ed.history.cursor)
+    ed.line.text = ed.history.entries[ed.history.cursor]
+  else:
+    ed.line.text = ""
+  ed.line.position = ed.line.text.len
+  ed.selAnchor = -1
+  clearUndo(ed)
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
 
 proc back*(ed: var LineEditor, n = 1) =
   ## Step the cursor left by ``n`` runes / newlines.
@@ -1605,11 +1671,13 @@ proc forward*(ed: var LineEditor, n = 1) =
 proc deletePrevious*(ed: var LineEditor) =
   breakChains(ed)
   if ed.hasSelection():
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
   if ed.line.position <= 0: return
+  pushUndo(ed, typing = false)
   let start =
     if ed.line.text[ed.line.position - 1] == '\n': ed.line.position - 1
     else: runeStartBefore(ed.line.text, ed.line.position)
@@ -1622,11 +1690,13 @@ proc deletePrevious*(ed: var LineEditor) =
 proc deleteNext*(ed: var LineEditor) =
   breakChains(ed)
   if ed.hasSelection():
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
   if ed.line.position >= ed.line.text.len: return
+  pushUndo(ed, typing = false)
   let stop =
     if ed.line.text[ed.line.position] == '\n': ed.line.position + 1
     else: ed.line.position + runeLenSafe(ed.line.text, ed.line.position)
@@ -1661,11 +1731,13 @@ proc insertText*(ed: var LineEditor, s: string) =
   if s.len > room:
     s.setLen runeBoundaryAtOrBefore(s, room)
     capNotice(ed)
+  pushUndo(ed, typing = s.runeLen == 1)
   if ed.hasSelection(): ed.deleteSelection()
   if ed.mode == mdInsert or s.contains('\n'):
     ed.line.text = ed.line.text[0 ..< ed.line.position] & s &
                    ed.line.text[ed.line.position .. ^1]
     ed.line.position += s.len
+    ed.undoGroupEnd = ed.line.position
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
     return
@@ -1684,6 +1756,7 @@ proc insertText*(ed: var LineEditor, s: string) =
     p += rl
     i += rl
   ed.line.position = p
+  ed.undoGroupEnd = ed.line.position
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
@@ -1698,6 +1771,7 @@ proc changeLine*(ed: var LineEditor, s: string) =
   ## editor). Same hard cap as typing: oversized content is cut at a
   ## rune boundary and belled rather than loaded unchecked.
   breakChains(ed)
+  pushUndo(ed, typing = false)
   ed.selAnchor = -1
   var s = s
   if s.len > MaxBufferBytes:
@@ -1786,6 +1860,7 @@ proc wordRight*(ed: var LineEditor) =
 proc deleteWordLeft*(ed: var LineEditor) =
   if ed.hasSelection():
     let sel = ed.selectionText()
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     killSave(ed, sel, true, -1, -1)
     callHook(ed.onMutate, ed)
@@ -1798,6 +1873,7 @@ proc deleteWordLeft*(ed: var LineEditor) =
   while p > 0 and isWordChar(ed.line.text[p - 1]):
     dec p
   if p == stop: return
+  pushUndo(ed, typing = false)
   killSave(ed, ed.line.text[p ..< stop], true, stop, p)
   ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
   ed.line.position = p
@@ -1813,6 +1889,7 @@ proc deleteToBoundaryLeft*(ed: var LineEditor) =
   ## stalling when the cursor lands right after a delimiter.
   if ed.hasSelection():
     let sel = ed.selectionText()
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     killSave(ed, sel, true, -1, -1)
     callHook(ed.onMutate, ed)
@@ -1829,6 +1906,7 @@ proc deleteToBoundaryLeft*(ed: var LineEditor) =
     if not (c.isAlphanumeric or c == '_'): break
     dec p
   if p == stop: return
+  pushUndo(ed, typing = false)
   killSave(ed, ed.line.text[p ..< stop], true, stop, p)
   ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
   ed.line.position = p
@@ -1980,6 +2058,7 @@ proc copySelection*(ed: var LineEditor) =
 proc cutSelection*(ed: var LineEditor) =
   if not ed.hasSelection(): return
   let sel = ed.selectionText()
+  pushUndo(ed, typing = false)
   killSave(ed, sel, true, -1, -1)
   if ed.clipboardWrite != nil:
     ed.clipboardWrite(sel)
@@ -2023,6 +2102,7 @@ proc yankPop*(ed: var LineEditor) =
   ## Replace the just-yanked span with the next older kill-ring entry
   ## (Emacs M-y). Valid only immediately after a yank or yank-pop.
   if not ed.yankCont or ed.killRing.len == 0: return
+  pushUndo(ed, typing = false)
   ed.yankRingIdx = (ed.yankRingIdx + 1) mod ed.killRing.len
   let entry = ed.killRing[ed.yankRingIdx]
   ed.selAnchor = -1
@@ -2053,23 +2133,28 @@ proc yankLastArg*(ed: var LineEditor) =
   let fields = strutils.splitWhitespace(lastLine)
   if fields.len == 0: return
   let word = fields[^1]
+  pushUndo(ed, typing = false)
   if ed.lastArgCont and ed.lastArgStart >= 0:
-    ed.line.text = ed.line.text[0 ..< ed.lastArgStart] &
+    ed.line.text = ed.line.text[0 ..< ed.lastArgStart] & word &
                    ed.line.text[ed.lastArgEnd .. ^1]
-    ed.line.position = ed.lastArgStart
+    ed.line.position = ed.lastArgStart + word.len
   else:
     ed.selAnchor = -1
-  let start = ed.line.position
-  ed.insertText(word)
-  ed.lastArgStart = start
+    ed.line.text = ed.line.text[0 ..< ed.line.position] & word &
+                   ed.line.text[ed.line.position .. ^1]
+    ed.line.position += word.len
+  ed.lastArgStart = ed.line.position - word.len
   ed.lastArgEnd = ed.line.position
   ed.lastArgCont = true
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
 
 proc deleteWordRight*(ed: var LineEditor) =
   ## Delete the word (and trailing spaces) right of the cursor, saving
   ## it to the kill ring.
   if ed.hasSelection():
     let sel = ed.selectionText()
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     killSave(ed, sel, false, -1, -1)
     callHook(ed.onMutate, ed)
@@ -2083,6 +2168,7 @@ proc deleteWordRight*(ed: var LineEditor) =
   while p < n and isWordChar(ed.line.text[p]):
     inc p
   if p == start: return
+  pushUndo(ed, typing = false)
   killSave(ed, ed.line.text[start ..< p], false, start, start)
   ed.line.text = ed.line.text[0 ..< start] & ed.line.text[p .. ^1]
   ed.line.position = start
@@ -2094,6 +2180,7 @@ proc deleteToBoundaryRight*(ed: var LineEditor) =
   ## twin of `deleteToBoundaryLeft`, peeling one path segment per press.
   if ed.hasSelection():
     let sel = ed.selectionText()
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     killSave(ed, sel, false, -1, -1)
     callHook(ed.onMutate, ed)
@@ -2111,6 +2198,7 @@ proc deleteToBoundaryRight*(ed: var LineEditor) =
     if not (c.isAlphanumeric or c == '_'): break
     inc p
   if p == start: return
+  pushUndo(ed, typing = false)
   killSave(ed, ed.line.text[start ..< p], false, start, start)
   ed.line.text = ed.line.text[0 ..< start] & ed.line.text[p .. ^1]
   ed.line.position = start
@@ -2122,6 +2210,7 @@ proc deleteToEol*(ed: var LineEditor) =
   ## saving it to the kill ring.
   if ed.hasSelection():
     let sel = ed.selectionText()
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     killSave(ed, sel, false, -1, -1)
     callHook(ed.onMutate, ed)
@@ -2132,6 +2221,7 @@ proc deleteToEol*(ed: var LineEditor) =
   while p < ed.line.text.len and ed.line.text[p] != '\n':
     inc p
   if p == wasAt: return
+  pushUndo(ed, typing = false)
   killSave(ed, ed.line.text[wasAt ..< p], false, wasAt, wasAt)
   ed.line.text = ed.line.text[0 ..< wasAt] &
                  ed.line.text[p .. ^1]
@@ -2143,6 +2233,7 @@ proc deleteToBol*(ed: var LineEditor) =
   ## saving it to the kill ring.
   if ed.hasSelection():
     let sel = ed.selectionText()
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     killSave(ed, sel, true, -1, -1)
     callHook(ed.onMutate, ed)
@@ -2153,6 +2244,7 @@ proc deleteToBol*(ed: var LineEditor) =
   while p > 0 and ed.line.text[p - 1] != '\n':
     dec p
   if p == wasAt: return
+  pushUndo(ed, typing = false)
   killSave(ed, ed.line.text[p ..< wasAt], true, wasAt, p)
   ed.line.text = ed.line.text[0 ..< p] & ed.line.text[wasAt .. ^1]
   ed.line.position = p
@@ -2164,6 +2256,7 @@ proc transposeChars*(ed: var LineEditor) =
   ## At end of line swaps the last two runes before the cursor.
   breakChains(ed)
   if ed.hasSelection():
+    pushUndo(ed, typing = false)
     ed.deleteSelection()
     callHook(ed.onMutate, ed)
     fullRedraw(ed)
@@ -2179,6 +2272,7 @@ proc transposeChars*(ed: var LineEditor) =
     if rightStart <= 0: return
   var leftStart = runeStartBefore(ed.line.text, rightStart)
   if leftStart == rightStart: return
+  pushUndo(ed, typing = false)
   let leftLen = rightStart - leftStart
   let rightLen = min(runeLenSafe(ed.line.text, rightStart), n - rightStart)
   ed.line.text = ed.line.text[0 ..< leftStart] &
@@ -2207,6 +2301,7 @@ proc loadView(ed: var LineEditor, idx: int) =
     else: text.len
   ed.line.text = text
   ed.line.position = clamp(pos, 0, text.len)
+  clearUndo(ed)
   fullRedraw(ed)
 
 proc stashView(ed: var LineEditor) =
@@ -2271,6 +2366,7 @@ KEYNAMES[23]   = "ctrl+w"
 KEYNAMES[24]   = "ctrl+x"
 KEYNAMES[25]   = "ctrl+y"
 KEYNAMES[26]   = "ctrl+z"
+KEYNAMES[31]   = "ctrl+_"
 
 var KEYSEQS* {.threadvar.}: CritBitTree[KeySeq]
 
@@ -2477,6 +2573,8 @@ proc cmdDeleteToBoundaryRight(ed: var LineEditor) = ed.deleteToBoundaryRight()
 proc cmdDeleteToEol(ed: var LineEditor) = ed.deleteToEol()
 proc cmdDeleteToBol(ed: var LineEditor) = ed.deleteToBol()
 proc cmdTransposeChars(ed: var LineEditor) = ed.transposeChars()
+proc cmdUndo(ed: var LineEditor) = ed.undo()
+proc cmdRevertLine(ed: var LineEditor) = ed.revertLine()
 when defined(posix):
   proc cmdSuspend(ed: var LineEditor) =
     ed.write "\n\e[?2004l"
@@ -2547,7 +2645,9 @@ var
     "delete-to-boundary-right": "",
     "delete-to-eol": "CtrlK",
     "delete-to-bol": "CtrlU",
-    "transpose-chars": "CtrlT"
+    "transpose-chars": "CtrlT",
+    "undo": "Ctrl_ Ctrl/",
+    "revert-line": "AltR"
   }.toTable
 
 var CommandProcs*: Table[string, KeyCallback]
@@ -2580,6 +2680,8 @@ proc normalizeKeyToken(token: string): string =
   if t == "ctrlw": return "ctrl+w"
   if t == "ctrlt": return "ctrl+t"
   if t == "ctrlx": return "ctrl+x"
+  if t == "ctrl_": return "ctrl+_"
+  if t == "ctrl/": return "ctrl+/"
   if t == "ctrly": return "ctrl+y"
   if t == "ctrlz": return "ctrl+z"
   if t == "altb": return "alt+b"
@@ -2590,6 +2692,7 @@ proc normalizeKeyToken(token: string): string =
   if t == "altw": return "alt+w"
   if t == "alty": return "alt+y"
   if t == "alt.": return "alt+."
+  if t == "altr": return "alt+r"
   # Cmd/Super chords (kitty keyboard protocol `super`, the macOS
   # Command key). Cmd+letter arrives as `CSI <code> ; 9 u`.
   for l in 'a' .. 'z':
@@ -2770,6 +2873,8 @@ proc applyShortcuts*(shortcuts: Table[string, string]) =
     CommandProcs["delete-to-eol"] = cmdDeleteToEol
     CommandProcs["delete-to-bol"] = cmdDeleteToBol
     CommandProcs["transpose-chars"] = cmdTransposeChars
+    CommandProcs["undo"] = cmdUndo
+    CommandProcs["revert-line"] = cmdRevertLine
   CommandProcsAll = CommandProcs
   when not defined(posix):
     CommandProcsAll["suspend"] = proc(ed: var LineEditor) = discard
@@ -2941,6 +3046,7 @@ proc initKeyTables*() =
   KEYNAMES[24]   = "ctrl+x"
   KEYNAMES[25]   = "ctrl+y"
   KEYNAMES[26]   = "ctrl+z"
+  KEYNAMES[31]   = "ctrl+_"
 
   KEYSEQS["up"]         = @[27, 91, 65]
   KEYSEQS["down"]       = @[27, 91, 66]
@@ -3300,6 +3406,7 @@ proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): 
   result.selAnchor = -1
   result.chordBuf = @[]
   result.killRing = initDeque[string]()
+  result.undoStack = initDeque[tuple[text: string, position: int, selAnchor: int]]()
 
 proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   if ed.prefillText.len > 0:
@@ -3327,6 +3434,7 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.complPrefix = ""
   ed.selAnchor = -1
   ed.chordBuf = @[]
+  clearUndo(ed)
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0: ed.width = w
@@ -3373,6 +3481,8 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   of 7: base = "home"
   of 8: base = "end"
   of 127: base = "backspace"
+  of 47: base = "/"
+  of 95: base = "_"
   of 97..122: base = $key.char  # shift is dropped: ctrl+shift+e == ctrl+e
   else: return                  # F-keys, keypad, keypad-enter: nothing bound
   var prefix = ""
