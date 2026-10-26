@@ -109,7 +109,18 @@ const ShortcutNames* = [
   "nonincremental-search-backward",
   "nonincremental-search-forward",
   "history-begin",
-  "history-end"
+  "history-end",
+  "transpose-words",
+  "upcase-word",
+  "downcase-word",
+  "capitalize-word",
+  "set-mark",
+  "exchange-point-and-mark",
+  "quoted-insert",
+  "char-search",
+  "char-search-backward",
+  "delete-horizontal-space",
+  "tab-insert"
 ]
 
 type KeySpec* = tuple[keys: seq[string], times: int]
@@ -639,6 +650,7 @@ type
     isearchSavedCursor*: int
     isearchSavedAnchor*: int
     isearchPrompt*: string     ## the real prompt, hidden while the banner shows
+    markPos*: int              ## emacs mark (C-@/M-SPC); -1 = unset. Survives plain motion, unlike a selection anchor.
     clipboardWrite*: proc(s: string) {.closure.}
       ## Set by the host app: publishes `s` to the system clipboard
       ## (OSC 52). Nil in tests and standalone use: cut/copy still
@@ -2308,6 +2320,136 @@ proc transposeChars*(ed: var LineEditor) =
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
+proc wordSpansAround(ed: LineEditor; p: int): tuple[a1, b1, a2, b2: int] =
+  ## Byte spans of the word before and after `p` (runes grouped by
+  ## `isWordChar`); a missing word collapses to a zero span at its side.
+  result = (p, p, p, p)
+  var b1 = p
+  while b1 > 0 and not isWordChar(ed.line.text[b1 - 1]): dec b1
+  var a1 = b1
+  while a1 > 0 and isWordChar(ed.line.text[a1 - 1]): dec a1
+  var a2 = p
+  let n = ed.line.text.len
+  while a2 < n and not isWordChar(ed.line.text[a2]): inc a2
+  var b2 = a2
+  while b2 < n and isWordChar(ed.line.text[b2]): inc b2
+  result = (a1, b1, a2, b2)
+
+proc transposeWords*(ed: var LineEditor) =
+  ## Drag the word before the cursor over the word after it (Emacs M-t);
+  ## at the end of the buffer, swap the last two words.
+  breakChains(ed)
+  if ed.hasSelection():
+    ed.deleteSelection()
+    callHook(ed.onMutate, ed)
+    fullRedraw(ed)
+    return
+  var (a1, b1, a2, b2) = wordSpansAround(ed, ed.line.position)
+  if b1 == a1 and b2 == a2: return   # no words on either side
+  if b1 == a1:
+    # no word before the cursor: use the word ending at the gap start
+    var p = a2
+    while p > 0 and not isWordChar(ed.line.text[p - 1]): dec p
+    b1 = p
+    while p > 0 and isWordChar(ed.line.text[p - 1]): dec p
+    a1 = p
+  if b2 == a2:
+    # no word after the cursor: transpose the two words before it
+    var p = a1
+    while p > 0 and not isWordChar(ed.line.text[p - 1]): dec p
+    var b0 = p
+    while p > 0 and isWordChar(ed.line.text[p - 1]): dec p
+    if p == b0: return
+    b2 = b1
+    a2 = a1
+    b1 = b0
+    a1 = p
+  if a1 == b1 or a2 == b2: return
+  pushUndo(ed, typing = false)
+  let w1 = ed.line.text[a1 ..< b1]
+  let w2 = ed.line.text[a2 ..< b2]
+  ed.line.text = ed.line.text[0 ..< a1] & w2 &
+                 ed.line.text[b1 ..< a2] & w1 &
+                 ed.line.text[b2 .. ^1]
+  ed.line.position = b2
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
+
+proc caseWord*(ed: var LineEditor; mode: char) =
+  ## Re-case the word at/after the cursor and park past it: 'u'
+  ## uppercase (M-u), 'l' lowercase (M-l), 'c' capitalize (M-c).
+  breakChains(ed)
+  if ed.hasSelection():
+    ed.deleteSelection()
+    callHook(ed.onMutate, ed)
+    fullRedraw(ed)
+    return
+  let n = ed.line.text.len
+  var a = ed.line.position
+  while a < n and not isWordChar(ed.line.text[a]): inc a
+  var b = a
+  while b < n and isWordChar(ed.line.text[b]): inc b
+  if a == b: return
+  pushUndo(ed, typing = false)
+  var acc = ""
+  var i = a
+  var first = true
+  while i < b:
+    var r: Rune
+    fastRuneAt(ed.line.text, i, r)
+    let mapped =
+      if mode == 'u': toUpper(r)
+      elif mode == 'l': toLower(r)
+      elif first: toUpper(r)
+      else: toLower(r)
+    acc.add $mapped
+    first = false
+  ed.line.text = ed.line.text[0 ..< a] & acc & ed.line.text[b .. ^1]
+  ed.line.position = b
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
+
+proc setMark*(ed: var LineEditor) =
+  ## Drop the emacs mark at the cursor (C-@ / M-SPC). Unlike a
+  ## selection anchor the mark survives plain cursor motion;
+  ## exchange-point-and-mark selects back to it.
+  breakChains(ed)
+  ed.markPos = ed.line.position
+  fullRedraw(ed)
+
+proc exchangePointAndMark*(ed: var LineEditor) =
+  ## Swap the cursor with the mark and select the region between them
+  ## (Emacs C-x C-x; unbound by default because Ctrl+X is cut).
+  breakChains(ed)
+  if ed.markPos < 0:
+    ed.markPos = ed.line.position
+  else:
+    let m = ed.markPos
+    ed.markPos = ed.line.position
+    ed.line.position = m
+    ed.selAnchor = ed.markPos
+  fullRedraw(ed)
+
+proc deleteHorizontalSpace*(ed: var LineEditor) =
+  ## Delete the spaces and tabs around the cursor (readline M-\;
+  ## unbound by default because ESC \ decodes as a string terminator).
+  breakChains(ed)
+  let n = ed.line.text.len
+  var a = ed.line.position
+  var b = ed.line.position
+  while a > 0 and ed.line.text[a - 1] in {' ', '\t'}: dec a
+  while b < n and ed.line.text[b] in {' ', '\t'}: inc b
+  if a == b: return
+  pushUndo(ed, typing = false)
+  ed.line.text = ed.line.text[0 ..< a] & ed.line.text[b .. ^1]
+  ed.line.position = a
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
+
+proc insertTab*(ed: var LineEditor) =
+  ## Insert a literal tab (readline tab-insert; unbound by default).
+  ed.insertText("\t")
+
 proc loadView(ed: var LineEditor, idx: int) =
   ## Pull the buffer + cursor for view ``idx`` into the editor.
   ## ``idx == -1`` is the user's draft; ``0..entries.len-1`` is a
@@ -2531,6 +2673,8 @@ KEYNAMES[24]   = "ctrl+x"
 KEYNAMES[25]   = "ctrl+y"
 KEYNAMES[26]   = "ctrl+z"
 KEYNAMES[31]   = "ctrl+_"
+KEYNAMES[0]    = "ctrl+@"
+KEYNAMES[29]   = "ctrl+]"
 
 var KEYSEQS* {.threadvar.}: CritBitTree[KeySeq]
 
@@ -2747,6 +2891,64 @@ proc cmdNonincSearchBackward(ed: var LineEditor) =
 proc cmdNonincSearchForward(ed: var LineEditor) =
   ed.isearchStart(true, noninc = true)
 proc cmdHistoryBegin(ed: var LineEditor) = ed.historyBegin()
+proc cmdTransposeWords(ed: var LineEditor) = ed.transposeWords()
+proc cmdUpcaseWord(ed: var LineEditor) = ed.caseWord('u')
+proc cmdDowncaseWord(ed: var LineEditor) = ed.caseWord('l')
+proc cmdCapitalizeWord(ed: var LineEditor) = ed.caseWord('c')
+proc cmdSetMark(ed: var LineEditor) = ed.setMark()
+proc cmdExchangePointAndMark(ed: var LineEditor) = ed.exchangePointAndMark()
+proc cmdDeleteHorizontalSpace(ed: var LineEditor) = ed.deleteHorizontalSpace()
+proc cmdInsertTab(ed: var LineEditor) = ed.insertTab()
+
+proc readNextRune(ed: var LineEditor): string =
+  ## Read one full rune from the key stream (for C-q and C-], which
+  ## take their argument from the next keystroke).
+  let c1 = ed.getCh()
+  if c1 < 0: return ""
+  result.add c1.char
+  if c1 >= 0x80:
+    let n = expectedSeqLen(c1)
+    for _ in 1 ..< n:
+      let b = ed.getCh()
+      if b >= 0 and (b and 0xC0) == 0x80:
+        result.add b.char
+      else:
+        if b >= 0: ed.escPutback = b
+        break
+
+proc cmdQuotedInsert(ed: var LineEditor) =
+  ## C-q: insert the next rune literally (a literal tab, an escape
+  ## byte, a control character) instead of letting it act.
+  let r = readNextRune(ed)
+  if r.len > 0: ed.insertText(r)
+
+proc cmdCharSearch(ed: var LineEditor; backward: bool) =
+  ## C-]: read a rune, move the cursor to its next occurrence (or the
+  ## previous one for the backward variant).
+  breakChains(ed)
+  let r = readNextRune(ed)
+  if r.len == 0: return
+  if backward:
+    var at = -1
+    var i = 0
+    while true:
+      let f = ed.line.text.find(r, i)
+      if f < 0 or f >= ed.line.position: break
+      at = f
+      i = f + 1
+    if at >= 0:
+      let old = ed.line.position
+      ed.line.position = at
+      if not moveOnlyRedraw(ed, old, false): fullRedraw(ed)
+  else:
+    let start = ed.line.position + runeLenSafe(ed.line.text, ed.line.position)
+    let f = ed.line.text.find(r, start)
+    if f >= 0:
+      let old = ed.line.position
+      ed.line.position = f
+      if not moveOnlyRedraw(ed, old, false): fullRedraw(ed)
+
+proc cmdCharSearchBackward(ed: var LineEditor) = cmdCharSearch(ed, true)
 proc cmdHistoryEnd(ed: var LineEditor) = ed.historyEnd()
 when defined(posix):
   proc cmdSuspend(ed: var LineEditor) =
@@ -2826,7 +3028,18 @@ var
     "nonincremental-search-backward": "AltP",
     "nonincremental-search-forward": "AltN",
     "history-begin": "Alt<",
-    "history-end": "Alt>"
+    "history-end": "Alt>",
+    "transpose-words": "AltT",
+    "upcase-word": "AltU",
+    "downcase-word": "AltL",
+    "capitalize-word": "AltC",
+    "set-mark": "Ctrl@ AltSpace",
+    "exchange-point-and-mark": "",
+    "quoted-insert": "CtrlQ",
+    "char-search": "Ctrl]",
+    "char-search-backward": "",
+    "delete-horizontal-space": "",
+    "tab-insert": ""
   }.toTable
 
 var CommandProcs*: Table[string, KeyCallback]
@@ -2856,6 +3069,8 @@ proc normalizeKeyToken(token: string): string =
   if t == "ctrlp": return "ctrl+p"
   if t == "ctrlr": return "ctrl+r"
   if t == "ctrls": return "ctrl+s"
+  if t == "ctrlq": return "ctrl+q"
+  if t == "ctrlo": return "ctrl+o"
   if t == "ctrlu": return "ctrl+u"
   if t == "ctrlv": return "ctrl+v"
   if t == "ctrlw": return "ctrl+w"
@@ -2878,6 +3093,13 @@ proc normalizeKeyToken(token: string): string =
   if t == "altn": return "alt+n"
   if t == "alt<": return "alt+<"
   if t == "alt>": return "alt+>"
+  if t == "altt": return "alt+t"
+  if t == "altu": return "alt+u"
+  if t == "altl": return "alt+l"
+  if t == "altc": return "alt+c"
+  if t == "altspace": return "alt+space"
+  if t == "ctrl@": return "ctrl+@"
+  if t == "ctrl]": return "ctrl+]"
   # Cmd/Super chords (kitty keyboard protocol `super`, the macOS
   # Command key). Cmd+letter arrives as `CSI <code> ; 9 u`.
   for l in 'a' .. 'z':
@@ -3072,6 +3294,17 @@ proc applyShortcuts*(shortcuts: Table[string, string]) =
     CommandProcs["nonincremental-search-forward"] = cmdNonincSearchForward
     CommandProcs["history-begin"] = cmdHistoryBegin
     CommandProcs["history-end"] = cmdHistoryEnd
+    CommandProcs["transpose-words"] = cmdTransposeWords
+    CommandProcs["upcase-word"] = cmdUpcaseWord
+    CommandProcs["downcase-word"] = cmdDowncaseWord
+    CommandProcs["capitalize-word"] = cmdCapitalizeWord
+    CommandProcs["set-mark"] = cmdSetMark
+    CommandProcs["exchange-point-and-mark"] = cmdExchangePointAndMark
+    CommandProcs["quoted-insert"] = cmdQuotedInsert
+    CommandProcs["char-search"] = proc(ed: var LineEditor) = cmdCharSearch(ed, false)
+    CommandProcs["char-search-backward"] = cmdCharSearchBackward
+    CommandProcs["delete-horizontal-space"] = cmdDeleteHorizontalSpace
+    CommandProcs["tab-insert"] = cmdInsertTab
   CommandProcsAll = CommandProcs
   when not defined(posix):
     CommandProcsAll["suspend"] = proc(ed: var LineEditor) = discard
@@ -3244,6 +3477,8 @@ proc initKeyTables*() =
   KEYNAMES[25]   = "ctrl+y"
   KEYNAMES[26]   = "ctrl+z"
   KEYNAMES[31]   = "ctrl+_"
+  KEYNAMES[0]    = "ctrl+@"
+  KEYNAMES[29]   = "ctrl+]"
 
   KEYSEQS["up"]         = @[27, 91, 65]
   KEYSEQS["down"]       = @[27, 91, 66]
@@ -3663,8 +3898,10 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   of 7: base = "home"
   of 8: base = "end"
   of 127: base = "backspace"
+  of 29: base = "]"
   of 47: base = "/"
   of 60: base = "<"
+  of 64: base = "@"
   of 62: base = ">"
   of 95: base = "_"
   of 97..122: base = $key.char  # shift is dropped: ctrl+shift+e == ctrl+e
@@ -3776,6 +4013,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
     ## letters even though they fall in the printable range.
   var altName: string
   if c2 == 8: altName = "alt+h"        # Ctrl+Alt+H = ESC + backspace byte
+  elif c2 == 32: altName = "alt+space"   # M-SPC (set-mark)
   elif c2 in 32..126 and c2 notin StructuralTail:
     altName = "alt+" & c2.char.toLowerAscii
   if altName.len > 0 and dispatchKeyName(ed, altName):

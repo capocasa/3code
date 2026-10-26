@@ -1808,6 +1808,14 @@ const
   CtrlR* = @[18]
   CtrlS* = @[19]
   CtrlG* = @[7]
+  CtrlQ* = @[17]
+  AltT* = @[27, 116]
+  AltU* = @[27, 117]
+  AltL* = @[27, 108]
+  AltC* = @[27, 99]
+  AltSpace* = @[27, 32]
+  CtrlAt* = @[0]
+  CtrlCloseBracket* = @[29]
 
 proc selCells*(g: Grid, r: int): int =
   ## Count reverse-video cells on row `r` (the selection highlight).
@@ -2493,3 +2501,112 @@ suite "minline editor: history search":
     d2.push AltGreater    # back to the draft
     d2.push Enter
     check d2.run(ed2, prompt = "> ") == "x"
+
+suite "minline editor: readline word and mark commands":
+  test "alt+t transposes the last two words at the end":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one two"
+    d.push AltT
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "two one"
+
+  test "alt+t mid-line drags the word before the cursor over the next":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "foo bar"
+    d.push CtrlA
+    for _ in 1 .. 3: d.push Right   # cursor inside the gap
+    d.push AltT
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "bar foo"
+
+  test "alt+u upcases the word at the cursor":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "abc def"
+    d.push CtrlA
+    d.push AltU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ABC def"
+
+  test "alt+l downcases, alt+c capitalizes":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ABC def"
+    d.push CtrlA
+    d.push AltL      # "ABC" -> "abc", cursor before the space
+    d.push AltC      # skips the space, capitalizes "def"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abc Def"
+
+  test "case commands are rune-safe":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "héllö"
+    d.push CtrlA
+    d.push AltU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "HÉLLÖ"
+
+  test "ctrl+q inserts the next key literally":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "a"
+    d.push CtrlQ
+    d.push Tab       # a literal tab, not completion
+    d.pushString "b"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "a\tb"
+
+  test "ctrl+] jumps to the next occurrence of the typed char":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "aXbXc"
+    d.push CtrlA
+    d.push CtrlCloseBracket
+    d.pushString "X"
+    d.push CtrlCloseBracket
+    d.pushString "X"
+    d.push CtrlK     # kills from the second X to the end
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "aXb"
+
+  test "set-mark survives plain motion, exchange selects back":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"exchange-point-and-mark": "CtrlO"}.toTable
+    d.pushString "abcd"
+    d.push CtrlAt      # mark at 4
+    d.push CtrlA       # plain motion: the mark must survive
+    d.push @[15]       # Ctrl+O: exchange, select back to the mark
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    check ed.markPos == 0
+    check ed.line.position == 4
+    check ed.selAnchor == 0
+    check selectionText(ed) == "abcd"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "delete-horizontal-space strips the gap at the cursor":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"delete-horizontal-space": "CtrlO"}.toTable
+    d.pushString "a  b"
+    d.push CtrlA
+    d.push Right
+    d.push Right      # parked between the two spaces
+    d.push @[15]
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "tab-insert puts a literal tab in the buffer":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"tab-insert": "CtrlO"}.toTable
+    d.pushString "a"
+    d.push @[15]
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "a\t"
+    minline.configuredShortcuts = initTable[string, string]()
