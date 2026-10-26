@@ -28,17 +28,34 @@
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
 ===== 950 =====
@@ -71,17 +88,34 @@ input:
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 ===== 194 =====
@@ -107,17 +141,34 @@ input:
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
@@ -148,17 +199,34 @@ alt
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
@@ -184,17 +252,34 @@ alt
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
@@ -225,17 +310,34 @@ stub-large
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
@@ -261,17 +363,34 @@ stub-large
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
@@ -302,17 +421,34 @@ experimental: level is free-form, type any value
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
@@ -338,17 +474,34 @@ experimental: level is free-form, type any value
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
@@ -379,17 +532,34 @@ model     stub-large
 input:
   single-line   just type and press Enter
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  queueing      Enter while a turn runs queues the line (the prompt sits
+                at the screen bottom with a ⧖ until it sends); prompts and
+                :commands send in order at the turn's end, and backspace
+                on an empty prompt pulls the last queued line back into
+                the editor
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
+  ctrl+k        delete to end of line
+  alt+d         delete the word after the cursor (also ctrl+delete)
+  ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
-  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
-  ctrl+x ctrl+e same (emacs edit-and-execute-command)
-  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
