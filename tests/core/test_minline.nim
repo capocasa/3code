@@ -1799,6 +1799,8 @@ const
   AltW* = @[27, 119]
   AltY* = @[27, 121]
   AltDot* = @[27, 46]
+  AltR* = @[27, 114]
+  CtrlUnderscore* = @[31]
 
 proc selCells*(g: Grid, r: int): int =
   ## Count reverse-video cells on row `r` (the selection highlight).
@@ -2277,3 +2279,88 @@ suite "minline editor: repaint-free cursor motion":
     check isCursorOnlyBytes(tail)
     check ed.line.position == 6
     check ed.renderRow == 1
+
+suite "minline editor: undo":
+  test "ctrl+_ retracts a typed run as one step":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello"
+    d.push CtrlUnderscore
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+
+  test "a cursor move between typed chars splits the undo groups":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push CtrlA      # move: ends the first typing group
+    d.pushString "c"  # new group
+    d.push CtrlUnderscore
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab"
+
+  test "ctrl+_ restores after a kill with the cursor parked":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello world"
+    d.push CtrlW      # kills "world"
+    d.push CtrlUnderscore
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "hello world"
+
+  test "ctrl+_ undoes an escape-clear":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "keep"
+    d.push Esc        # clears the non-empty line
+    d.push CtrlUnderscore
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "keep"
+
+  test "undo does not cross history views":
+    var ed = initEditor()
+    seedHistory(ed, @["old"])
+    let d = newDriver()
+    d.pushString "draft"
+    d.push Up         # stash draft, load "old" (undo stack resets)
+    d.push Down       # back to the draft
+    d.push CtrlUnderscore  # nothing to undo on this view
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "draft"
+
+  test "alt+r reverts edits to a recalled entry":
+    var ed = initEditor()
+    seedHistory(ed, @["original"])
+    let d = newDriver()
+    d.push Up
+    d.pushString "XX"
+    d.push AltR
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "original"
+
+  test "alt+r empties the fresh draft":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "junk"
+    d.push AltR
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+
+  test "undo is rune-safe":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "héllo"
+    d.push CtrlW      # rune-safe kill ends the typing group
+    d.pushString "!"  # a fresh group of one
+    d.push CtrlUnderscore  # undoes the "!" insert (buffer empty)
+    d.push CtrlUnderscore  # undoes the kill: bytes come back whole
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "héllo"
+
+  test "a typed run through a kill retracts together":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "héllo!"   # one consecutive insert run
+    d.push CtrlUnderscore    # retracts the whole run, like readline
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
