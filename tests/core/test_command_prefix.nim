@@ -208,12 +208,12 @@ suite ":retry command":
   var prof = Profile()
   var editor: LineEditor
 
-  test "bare :retry is the ctrl-r command form":
+  test "bare :retry requests an instant retry":
     clearRetryNow()
     check classifyCommand(":retry") == ckSafeImmediate
     let r = handleCommandResult(":retry", messages, session, prof, editor)
     check r.recognized and r.ok
-    check "ctrl-r" in r.body
+    check "instant retry" in r.body
     check isRetryNow()
     clearRetryNow()
 

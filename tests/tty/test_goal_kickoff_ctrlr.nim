@@ -5,10 +5,10 @@ discard """
 ## suites cannot reach (they live behind the input thread and the idle
 ## REPL loop):
 ##
-## - Ctrl+R retry: the keystroke must travel input thread ->
-##   `onRetryRequest` -> `requestTurnRetry`, and the retry backoff must
-##   break immediately when it lands (the transport-level contract is
-##   covered by tests/stream; this is the wiring).
+## - `:retry` retry: the command must travel the idle REPL loop ->
+##   `requestTurnRetry`, and the retry backoff must break immediately
+##   when it lands (the transport-level contract is covered by
+##   tests/stream; this is the wiring).
 ## - Goal kickoff: `:goal TEXT` at the idle prompt must start goal
 ##   achievement immediately (a harness-autosent turn, no second prompt),
 ##   and the turn-end verifier must then confirm and retire goal.md.
@@ -50,11 +50,11 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "THREECODE_STUB_STREAM", val: "1"),
   ]
 
-suite "ctrl-r retry and goal kickoff (interactive)":
-  test "ctrl-r during a 429 backoff retries immediately":
+suite ":retry and goal kickoff (interactive)":
+  test ":retry during a 429 backoff retries immediately":
     let root = newFixture("ctrl_r_backoff")
     writeConfiguredProvider(root)
-    # A 429 whose backoff is 6000ms, then a normal reply. Ctrl+R pressed
+    # A 429 whose backoff is 6000ms, then a normal reply. `:retry` sent
     # during the wait must skip the remaining backoff and resend; the
     # reply can then only appear long before the full 6s wait. Without
     # the skip the expect times out (nothing else can produce the text).
@@ -81,8 +81,8 @@ suite "ctrl-r retry and goal kickoff (interactive)":
     tty.send "\n"
     tty.expectNoticeRow("429")
     tty.drain(100)
-    # Ctrl+R (raw 0x12) mid-backoff: the wait breaks and the resend runs.
-    tty.send "\x12"
+    # `:retry` mid-backoff: the wait breaks and the resend runs.
+    tty.send ":retry\n"
     let t0 = epochTime()
     check tty.expectInHistory("recovered", timeoutMs = 4000)
     let elapsed = epochTime() - t0

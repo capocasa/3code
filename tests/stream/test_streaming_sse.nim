@@ -562,7 +562,7 @@ proc serveContentPauseContent(server: SseServer) {.thread.} =
     discard
   client.close()
 
-suite "streaming SSE: ctrl-r retry (retry-now)":
+suite "streaming SSE: retry-now":
   # The streaming side of the Ctrl+R contract: a request that has shipped
   # nothing (head still pending) is cancelled and resent; a request that
   # has shipped model data ignores the press entirely.

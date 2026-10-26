@@ -337,7 +337,7 @@ suite "non-streaming xml tool_call promotion":
     # The promoted block is stripped from content.
     check "<tool_call>" notin msg{"content"}.getStr
 
-suite "ctrl-r retry (retry-now) through the shared retry block":
+suite "retry-now through the shared retry block":
   # The Ctrl+R contract, at the layer that owns it: a stale press is
   # cleared at callModel entry, a mid-loop press aborts the attempt as
   # the RetryNowMsg marker and resends immediately (no backoff, no
