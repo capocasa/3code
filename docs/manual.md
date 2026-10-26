@@ -471,7 +471,7 @@ Useful input keys:
 | Up / Down | move through visual rows, then history |
 | Ctrl+Arrow | move by word |
 | Cmd+A | select all (kitty keyboard protocol terminals) |
-| Ctrl+U | clear the input buffer |
+| Ctrl+U | delete to start of line |
 | Ctrl+W | delete the previous word |
 | Ctrl+K | delete to end of line |
 | Alt+D / Ctrl+Delete | delete the next word |
