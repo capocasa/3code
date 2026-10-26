@@ -690,6 +690,14 @@ proc cutVisibleContent(content: string): string =
   ## as bookkeeping, not prose).
   cutPartialTrailingMarker(stripCheckpointMarkers(content))
 
+proc commitHarnessNotice(bytes: string; messages: JsonNode) =
+  ## Commit a harness notice (goal-mode verifier receipts and friends)
+  ## that lives in scrollback only — never in the session messages — and
+  ## journal its rows so the rebreak window can keep it on screen across a
+  ## width change.
+  termengine.noteNonMessageTail(bytes, messages.len)
+  commitTranscriptBytes(bytes, true)
+
 proc commitAssistantItem(content: string; restoreEditor = true;
                          attachReceipt = true) =
   # Emptiness is judged on the visible content, not the raw string: a
@@ -863,6 +871,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   while true:
     var usage: Usage
     var msg: JsonNode
+    # Runtime-internal journal records (context notice, turn-end lines)
+    # anchor against this; it is the messages length their commits sit at.
+    journalAnchorMessagesLen = messages.len
     try:
       msg = callModel(wire, messages, usage, session.lastPromptTokens,
         maxTokensOverride)
@@ -897,12 +908,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           else: applySummary(messages, OverflowFallbackSummary)
         if collapsed > 0:
           saveSession(session, messages)
-          commitTranscriptBytes(
-            hintLnS("· request rejected as too large; collapsed " &
+          let collapsedNotice = hintLnS(
+            "· request rejected as too large; collapsed " &
               $collapsed & " message" &
               (if collapsed == 1: "" else: "s") &
               (if summarized > 0: " into a recap" else: " without a recap") &
-              ", retrying"), true)
+              ", retrying")
+          termengine.noteNonMessageTail(collapsedNotice, messages.len)
+          commitTranscriptBytes(collapsedNotice, true)
           continue
       # Transport retry budget exhausted (or another fatal callModel error).
       # `callModel` already stopped the spinner, but the deferred `endTurn`
@@ -1023,11 +1036,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           let bumped = min(cur * 2, maxOutputTokensFor(wire))
           maxTokensOverride = max(maxTokensOverride, bumped)
         let backoff = emptyReplyBackoffS()
-        commitTranscriptBytes(
-          errLnS((if demoted: "finished by length, retrying with lower " &
+        let lengthNotice = errLnS(
+          (if demoted: "finished by length, retrying with lower " &
             "reasoning effort" else: "finished by length, retrying with " &
             humanTokens(maxTokensOverride) & " token budget") & " in " &
-            $backoff & "s"), true)
+            $backoff & "s")
+        termengine.noteNonMessageTail(lengthNotice, messages.len)
+        commitTranscriptBytes(lengthNotice, true)
         incEmptyRetryLevel()
         if emptyReplyWait():
           saveSession(session, messages)
@@ -1066,9 +1081,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           elif usage.reasoningTokens > 0: "reasoning only"
           else: "no content, no tool calls"
         let backoff = emptyReplyBackoffS()
-        commitTranscriptBytes(
-          errLnS("empty reply: " & reason & ". retrying " &
-            $emptyRetries & "/" & $MaxEmptyRetries & " in " & $backoff & "s"), true)
+        let emptyNotice = errLnS(
+          "empty reply: " & reason & ". retrying " &
+            $emptyRetries & "/" & $MaxEmptyRetries & " in " & $backoff & "s")
+        termengine.noteNonMessageTail(emptyNotice, messages.len)
+        commitTranscriptBytes(emptyNotice, true)
         incEmptyRetryLevel()
         if emptyReplyWait():
           saveSession(session, messages)
@@ -1120,15 +1137,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     of caSummarize:
       let summarized = summarizeHistory(messages, p)
       if summarized > 0:
-        commitTranscriptBytes(
-          hintLnS(&"· summarized {summarized} message" &
+        let summarizeNotice = hintLnS(
+          &"· summarized {summarized} message" &
             (if summarized == 1: "" else: "s") &
             (if byteGuard:
                &" (request body {humanBytes(lastRequestBodyBytes)}; gateway byte guard)"
              elif msgGuard:
                &" ({msgGuardCount} messages; tesseracted message-count guard)"
              else:
-               &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)")), true)
+               &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)"))
+        termengine.noteNonMessageTail(summarizeNotice, messages.len)
+        commitTranscriptBytes(summarizeNotice, true)
         saveSession(session, messages)
     of caNone: discard
     if toolCalls.len > 0:
@@ -1341,10 +1360,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
               "[dmail from your future self] " & act.body}
             saveSession(session, messages)
             dmailRevert = true
-            commitTranscriptBytes(
-              hintLnS("· dmail to checkpoint " & $cp & " (" &
-                humanTokens(session.lastPromptTokens) & " prompt tokens folded)"),
-              true)
+            let dmailNotice = hintLnS(
+              "· dmail to checkpoint " & $cp & " (" &
+                humanTokens(session.lastPromptTokens) & " prompt tokens folded)")
+            termengine.noteNonMessageTail(dmailNotice, messages.len)
+            commitTranscriptBytes(dmailNotice, true)
             break
           else:
             messages.add %*{"role": "tool", "tool_call_id": id,

@@ -26,6 +26,8 @@
 ##     └── minline      readline-style input
 
 import std/[json, os, parseopt, strformat, strutils, tables, terminal, times]
+when not defined(windows):
+  import std/atomics
 import std/exitprocs
 when defined(posix):
   import std/posix
@@ -923,9 +925,34 @@ proc main() =
       termengine.renderFooter(clearFooterFrame(), inputThreadRunning,
                               addr editor)
       quit(0)
+    # Rebreak window source: on a width change the committed transcript
+    # tail is re-rendered at the new width above the volatile block
+    # (breaks on word boundaries instead of the terminal's mid-word
+    # reflow). Only while the main thread is parked in the input wait —
+    # reading the live messages from a render thread is safe exactly
+    # then — and never while a modal wizard owns the screen. Windows
+    # stays frozen-rows: ConPTY's resize model already full-repaints, and
+    # the walk math would double-paint there.
+    when not defined(windows):
+      proc tailRowsAt(width, budget: int): seq[string] {.closure, gcsafe.} =
+        if not replParkedAtInput.load(moAcquire): return @[]
+        if inputModalActive.load(moAcquire): return @[]
+        if inputMessages == nil or inputSession == nil or
+            inputProfile == nil:
+          return @[]
+        {.cast(gcsafe).}:
+          result = renderTailRows(inputMessages[], inputSession[].toolLog,
+            contextWindowFor(inputProfile[]), inputProfile[].family,
+            termengine.tailJournalSnapshot(), width, budget)
+      termengine.transcriptTailRows = tailRowsAt
     while true:
+      # Parked: the input wait is the one window where the session
+      # messages are stable, so the rebreak provider may read them.
+      markReplParked(true)
       var done = false
       var line = readInput(editor, done)
+      markReplParked(false)
+      journalAnchorMessagesLen = messages.len
       if done:
         echo ""
         break
@@ -949,8 +976,10 @@ proc main() =
           # profile) are ordinary transcript items, committed through the
           # same single history path as every other command result.
           if commandResult.body.len > 0:
+            let statusBytes = plainCommandBodyBytes(commandResult.body)
+            termengine.noteNonMessageTail(statusBytes, messages.len)
             commitTranscriptBytes(
-              plainCommandBodyBytes(commandResult.body),
+              statusBytes,
               restoreEditor = true,
               reserveFooter = true)
           continue
@@ -968,6 +997,10 @@ proc main() =
           if commandResult.clearFooter:
             emitFatPromptEvent clearPendingHintEvent()
             emitFatPromptEvent clearBarEvent()
+        # The echo + command body live in scrollback only (commands never
+        # enter the messages), so the rebreak window must replay them from
+        # the journal.
+        termengine.noteNonMessageTail(bytes, messages.len)
         commitTranscriptBytes(
           bytes,
           restoreEditor = true,
@@ -977,8 +1010,9 @@ proc main() =
         releaseIdleSubmittedInput()
         continue
       if prof.name == "":
-        commitTranscriptBytes(
-          errLnS("no provider configured. use :provider add"), true)
+        let noProvider = errLnS("no provider configured. use :provider add")
+        termengine.noteNonMessageTail(noProvider, messages.len)
+        commitTranscriptBytes(noProvider, true)
         releaseIdleSubmittedInput()
         continue
       messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
