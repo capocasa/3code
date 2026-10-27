@@ -426,7 +426,7 @@ edit-in-editor = AltE CtrlX&gt;CtrlE</pre></p>
 <p><pre class="listing">:retry list
 :retry off
 :retry on</pre></p>
-<p><tt class="docutils literal"><span class="pre">:retry</span></tt> with no argument is retry now: it cuts a backoff wait short, keeping the backoff schedule as it was so later failures back off exactly as they would have, and it cancels and resends a request that has not shipped any output yet (still connecting, or headers only). Once model output is streaming, or at the idle prompt, it does nothing. Commands typed while a turn runs take effect at Enter, so this works mid-wait.</p>
+<p><tt class="docutils literal"><span class="pre">:retry</span></tt> with no argument is retry now: it cuts a backoff wait short and resets the backoff schedule, so the next failure starts from the short end of the curve again, and it cancels and resends a request that has not shipped any output yet (still connecting, or headers only). Once model output is streaming, or at the idle prompt, it does nothing. Commands typed while a turn runs take effect at Enter, so this works mid-wait.</p>
 <p>Even with patient retry off, 3code gives transient failures about a minute before returning to the interactive prompt. The setting is stored as <tt class="docutils literal"><span class="pre">patient_retry</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt> (<a class="reference external" href="reference.html#settings">settings in the reference</a>). Press Esc to cancel the wait. A stream that stalls network-quiet or arrives truncated mid-response is detected and retried on its own, regardless of the setting.</p>
 <p>For a provider whose streaming is the problem rather than its availability, <tt class="docutils literal"><span class="pre">:streaming off</span></tt> switches requests to plain request/response mode: the reliable fallback when a provider's SSE implementation drops or truncates responses. The setting is per session, or permanent as <tt class="docutils literal"><span class="pre">streaming = off</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt>.</p>
 
@@ -884,7 +884,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-27 14:15:52 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-27 14:27:48 UTC</small>
       </div>
     </div>
   </div>

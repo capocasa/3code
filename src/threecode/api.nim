@@ -324,10 +324,10 @@ proc networkQuietMsg*(quietMs = QuietTooLongMs): string =
   NetworkQuietPrefix & " " & $(quietMs div 1000) & "s"
 
 const RetryNowMsg* = "retry requested by user"
-  ## Canonical marker for a user-requested retry (Ctrl+R). A transport
+  ## Canonical marker for a user-requested retry (`:retry`). A transport
   ## that has shipped no model data writes it into `StreamOutcome.errMsg`
   ## instead of `InterruptedByUserMsg`; `callModel` maps it to an
-  ## immediate resend with no backoff and no retry-level inflation.
+  ## immediate resend, no backoff taken, and the retry curve resets.
 
 proc longestStringLeaf(j: JsonNode): string =
   ## Longest string value in the tree. Ids, codes, types and urls are short;
@@ -429,6 +429,16 @@ proc decayLevel(level: var int, lastTs: var float, now: float) =
     if idleMin > 0:
       level = max(0, level - idleMin)
       lastTs = now
+
+proc resetRetryLevels*() {.gcsafe.} =
+  ## `:retry` semantics: a user-forced fresh attempt restarts the whole
+  ## curve. Both categories zero and their decay clocks forget, so the
+  ## next failure backs off from the short end regardless of which
+  ## curve armed the wait that was cut short.
+  serverRetryLevel = 0
+  serverLastTs = 0.0
+  rateRetryLevel = 0
+  rateLastTs = 0.0
 
 var emptyRetryLevel = 0
   ## Backoff level for empty-assistant-reply resends (`runTurns`'s
@@ -614,18 +624,18 @@ proc clearRetryNow*() {.gcsafe.} =
   retryNowFlag.store(false, moRelease)
 
 proc requestTurnRetry*(source = "unspecified") {.gcsafe.} =
-  ## Ctrl+R's whole payload: set the flag. No fd shutdown, unlike
+  ## `:retry`'s whole payload: set the flag. No fd shutdown, unlike
   ## `requestTurnInterrupt` — shutting the socket down would kill a
-  ## stream that shipped data and is SUPPOSED to ignore the press. The
+  ## stream that shipped data and is SUPPOSED to ignore the command. The
   ## transports' recv loops already wake every `QuietRecvWakeMs` (500ms)
-  ## to re-check flags, so the press lands within one wake window without
+  ## to re-check flags, so it lands within one wake window without
   ## touching the connection. It also never sets `interruptedFlag` (the
   ## turn must keep running) and never cancels an active tool (a tool call
-  ## is model data already shipped). Whether the press has any effect is
+  ## is model data already shipped). Whether it has any effect is
   ## decided where the state is known: transports ignore it once model
   ## data shipped, `callModel` clears a stale flag at entry, and the
-  ## backoff wait consumes it by skipping the remaining sleep without
-  ## touching the retry levels.
+  ## backoff wait consumes it by skipping the remaining sleep and
+  ## resetting the retry curve (`resetRetryLevels`).
   debugOut("retry-now flag set", source)
   retryNowFlag.store(true, moRelease)
 
@@ -1111,7 +1121,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       result.errMsg = InterruptedByUserMsg
       return
     if isRetryNow() and not isInterrupted():
-      # Ctrl+R landed before this attempt sent anything: nothing to
+      # `:retry` landed before this attempt sent anything: nothing to
       # cancel, just resend now.
       result.errMsg = RetryNowMsg
       return
@@ -1136,7 +1146,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           break
         except StreamTimeoutError:
           if isRetryNow() and not isInterrupted():
-            # Ctrl+R while only headers (or nothing) had arrived: cancel
+            # `:retry` while only headers (or nothing) had arrived: cancel
             # and let callModel resend immediately.
             closeCachedStreamConn()
             result.errMsg = RetryNowMsg
@@ -1222,9 +1232,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         if isRetryNow() and not isInterrupted() and
             accContent.len == 0 and accReasoning.len == 0 and
             accTools.len == 0:
-          # Ctrl+R after the head but before any model data shipped
+          # `:retry` after the head but before any model data shipped
           # (keepalive comments do not count): cancel and resend. Once
-          # content, reasoning or tool deltas exist, the press is ignored
+          # content, reasoning or tool deltas exist, the command is ignored
           # here — retrying would duplicate visible output.
           closeCachedStreamConn()
           result.errMsg = RetryNowMsg
@@ -1724,7 +1734,7 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
       result.errMsg = InterruptedByUserMsg
       return
     if isRetryNow() and not isInterrupted():
-      # Ctrl+R landed before this attempt sent anything: nothing to
+      # `:retry` landed before this attempt sent anything: nothing to
       # cancel, just resend now.
       result.errMsg = RetryNowMsg
       return
@@ -1790,7 +1800,7 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
     except StreamTimeoutError:
       if isRetryNow() and not isInterrupted() and
           accContent.len == 0 and accTools.len == 0:
-        # Ctrl+R before any model data shipped (Ctrl+R contract; see
+        # `:retry` before any model data shipped (the :retry contract; see
         # streamHttp's body-loop wake for the reasoning caveat).
         closeCachedStreamConn()
         result.errMsg = RetryNowMsg
@@ -2015,7 +2025,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
       result.errMsg = InterruptedByUserMsg
       return
     if isRetryNow() and not isInterrupted():
-      # Ctrl+R landed before this attempt sent anything: nothing to
+      # `:retry` landed before this attempt sent anything: nothing to
       # cancel, just resend now.
       result.errMsg = RetryNowMsg
       return
@@ -2042,7 +2052,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
         except StreamTimeoutError:
           if isRetryNow() and not isInterrupted():
             # Nothing is painted until the whole body arrives, so a
-            # Ctrl+R cancel is always duplication-free here.
+            # `:retry` cancel is always duplication-free here.
             closeCachedStreamConn()
             result.errMsg = RetryNowMsg
             return
@@ -2276,7 +2286,7 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
       result.errMsg = InterruptedByUserMsg
       return
     if isRetryNow() and not isInterrupted():
-      # Ctrl+R landed before this attempt sent anything: nothing to
+      # `:retry` landed before this attempt sent anything: nothing to
       # cancel, just resend now.
       result.errMsg = RetryNowMsg
       return
@@ -3372,7 +3382,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  # A Ctrl+R press only ever refers to the request in flight; one that
+  # A `:retry` only ever refers to the request in flight; one that
   # landed while no request ran (tool call, between turns) is stale and
   # must not abort this call's first attempt.
   clearRetryNow()
@@ -3482,10 +3492,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     #     `assistantMsg == nil`, `errMsg != ""`; `retryCategory` would not
     #     retry any of them.
     if outcome.errMsg == RetryNowMsg:
-      # A Ctrl+R-aborted attempt (or a press that raced the loop head):
-      # resend now, no backoff taken, no retry-level inflation — the
-      # curve resumes where it was, so "keep the backoff times the
-      # same" holds for later failures.
+      # A `:retry`-aborted attempt (or a command that raced the loop
+      # head): resend now, no backoff taken — and the retry-now branch
+      # below resets the curve, so later failures back off from the
+      # short end again.
       code = 0
       category = "retry-now"
       errMsg = outcome.errMsg
@@ -3545,10 +3555,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           formatApiDetail(errMsg, outcome.errBody, code))
       raise newHttpError(code, errMsg, outcome.errBody)
     if category == "retry-now":
-      # Ctrl+R asked for this resend: no backoff, no notice row, no
-      # retry-level inflation. Attempt counting still applies, so a
-      # Ctrl+R storm stays bounded by MaxAttempts like any other retry.
+      # `:retry` asked for this resend: no backoff, no notice row, and
+      # the curve resets. Attempt counting still applies, so a `:retry`
+      # storm stays bounded by MaxAttempts like any other retry.
       clearRetryNow()
+      resetRetryLevels()
       clearNetworkQuiet()
       hookProviderActivity()
       continue
@@ -3584,15 +3595,22 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     pluginOnModelRetry(p.name, p.model, code, category, backoff, attempt + 1)
     hookStartSpinner("")
     hookRetryWait(retryLabel, backoff)
+    # Set when `:retry` cuts this wait short: the level update after the
+    # wait block becomes a `resetRetryLevels` instead of an inc. Declared
+    # per failure so a later full wait in the same call incs normally.
+    var skipRetryLevelInc = false
     block wait:
       var remaining = backoff * 1000
       var lastShown = backoff
       while remaining > 0:
         if isInterrupted(): break wait
         if isRetryNow():
-          # Ctrl+R during the wait: retry immediately. The level inc
-          # below runs exactly as it would have after a full wait, so
-          # the backoff times for later failures stay the same.
+          # `:retry` during the wait: retry immediately. The user asked
+          # for a fresh attempt, so the curve resets instead of aging:
+          # skipRetryLevelInc makes the inc below a zeroing (both
+          # categories), and the next failure backs off from the short
+          # end again.
+          skipRetryLevelInc = true
           clearRetryNow()
           break wait
         let step = min(100, remaining)
@@ -3621,7 +3639,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     # before any provider data can arrive. This was why network-quiet errors
     # burned through all retries with no backoff taken.
     hookProviderActivity()
-    if category == "rate":
+    if skipRetryLevelInc:
+      resetRetryLevels()
+    elif category == "rate":
       inc rateRetryLevel
       rateLastTs = epochTime()
     else:

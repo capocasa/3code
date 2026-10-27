@@ -77,7 +77,7 @@ names, model names, and paths where supported.
 | `:verifier on/off` | toggle the verifier without losing the selection |
 | `:notify` | show notify mode |
 | `:notify on/off` | toggle the desktop notification that fires when a turn ends |
-| `:retry` | retry now: cut a retry backoff or resend a data-less in-flight request |
+| `:retry` | retry now: cut a backoff wait (the curve resets) or resend a data-less in-flight request |
 | `:retry list` | show patient-retry mode |
 | `:retry on/off` | toggle patient retry of 429/5xx/network errors |
 | `:private` | show private mode and trusted providers |

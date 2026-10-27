@@ -124,11 +124,11 @@ proc callHttpStub(url, key, bodyStr: string; baseLabel: string;
   ## Self-contained: does not depend on the provider stub's failure helpers
   ## so the two stubs can be used independently (http stub tests the
   ## network layer; provider stub tests everything else).
-  # Same entry contract as the real transports: a Ctrl+R press that is
-  # still set when the request starts aborts it as a retry-now marker
-  # (nothing has shipped, so the resend is duplication-free). callModel
-  # clears a stale flag at its entry, so reaching here with the flag set
-  # means the press landed mid-attempt-loop.
+  # Same entry contract as the real transports: a `:retry` that is still
+  # set when the request starts aborts it as a retry-now marker (nothing
+  # has shipped, so the resend is duplication-free). callModel clears a
+  # stale flag at its entry, so reaching here with the flag set means
+  # the command landed mid-attempt-loop.
   if isRetryNow() and not isInterrupted():
     result.errMsg = RetryNowMsg
     return
@@ -141,7 +141,7 @@ proc callHttpStub(url, key, bodyStr: string; baseLabel: string;
     # other string as a transport-level error message.
     let f = node{"failure"}.getStr
     if f == "retry-now":
-      # A canned Ctrl+R abort: the real transport's wake path returned
+      # A canned `:retry` abort: the real transport's wake path returned
       # the marker; exercise callModel's mapping of it.
       result.errMsg = RetryNowMsg
       return
