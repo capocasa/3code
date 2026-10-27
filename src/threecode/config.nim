@@ -1384,15 +1384,20 @@ proc loadProfile*(wanted: string): Profile =
   prof
 
 const ProviderCatalog*: seq[(string, string)] = @[
+  ("aihubmix",    "https://aihubmix.com/v1"),
   ("aki",         "https://aki.io/openai/v1"),
+  ("alibabatoken", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"),
+  ("alibabatoken-cn", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"),
   ("anthropic",   "https://api.anthropic.com/v1"),
   ("arcee",       "https://conductor.arcee.ai/v1"),
   ("baseten",     "https://inference.baseten.co/v1"),
   ("cerebras",    "https://api.cerebras.ai/v1"),
   ("cheaperinference", "https://api.cheaperinference.com/v1"),
   ("commandcode", "https://api.commandcode.ai/provider/v1"),
+  ("cortecs",     "https://api.cortecs.ai/v1"),
   ("deepinfra",   "https://api.deepinfra.com/v1/openai"),
   ("deepseek",    "https://api.deepseek.com/v1"),
+  ("engy",        "https://api.engy.ai/v1"),
   ("fireworks",   "https://api.fireworks.ai/inference/v1"),
   ("friendli",    "https://api.friendli.ai/serverless/v1"),
   ("google",      "https://generativelanguage.googleapis.com/v1beta/openai"),
@@ -1433,15 +1438,19 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("together",    "https://api.together.xyz/v1"),
   ("together-eu", "https://eu.api.together.xyz/v1"),
   ("venice",      "https://api.venice.ai/api/v1"),
+  ("vercel",      "https://ai-gateway.vercel.sh/v1"),
+  ("volccode",    "https://ark.cn-beijing.volces.com/api/coding/v3"),
   ("xai",         "https://api.x.ai/v1"),
   ("xiaomi",      "https://api.xiaomimimo.com/v1"),
   ("zai",         "https://api.z.ai/api/paas/v4"),
   ("zaicode",     "https://api.z.ai/api/coding/paas/v4"),
 ]
-  ## Skipped on purpose: `cortects.ai` is a router (an OpenAI-compatible
-  ## front-end that fans out to other providers' models), so adding it
-  ## here would just duplicate the underlying providers we already list.
-  ## Routers belong in user config when wanted, not in the catalog.
+  ## Routers stay out when they only re-sell providers we already list
+  ## (the many OpenRouter clones models.dev catalogues); a router earns a
+  ## catalog entry when it adds something the direct list lacks, like
+  ## vercel's below-list pricing, cortecs' EU-sovereign upstreams, or
+  ## aihubmix's free coding tiers. Anything narrower belongs in user
+  ## config, not in the catalog.
 
 proc catalogUrl*(name: string): string =
   when defined(providerStub):
@@ -1452,6 +1461,8 @@ proc catalogUrl*(name: string): string =
   ""
 
 const KeyPrefixCatalog*: seq[(string, string)] = @[
+  ("vck_",       "vercel"),
+  ("sk-gateway-", "aihubmix"),
   ("sk-ant-",  "anthropic"),
   ("sk-or-",   "openrouter"),
   ("sk-proj-", "openai"),
