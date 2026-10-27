@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **An empty prompt continues the ongoing session.** Press Enter with
+  nothing typed and a turn runs on the conversation exactly as it stands:
+  no user message is appended, no `❯` echo is painted, the `.3log` gains
+  only the reply — the cheap way to say "keep going". The empty submit
+  rides the same queued-event path as a text submit (so the controller
+  always consumes it and the input thread never parks unconsumed), and a
+  submit that races the turn boundary gets the same continuation from the
+  post-turn drain. A fresh session with nothing to continue, and an empty
+  Enter mid-turn, stay inert. On by default; `[settings]`
+  `allow-empty-prompt = off` (`allow_empty_prompt` spelling accepted)
+  restores the no-op and round-trips through the config writer.
 - **The goal-mode check renders like scrollback, not a block of grey
   text.** The verifier's reply used to land as a dim, wrapped, unmarked
   tier — raw markdown asterisks and all — with the `VERDICT: ...`
