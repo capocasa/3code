@@ -303,13 +303,22 @@ Unreleased
   file ends goal mode silently. A failing check retries at the next
   turn end; the harness never gives up on its own.
 - **Ctrl+R retries now; `:retry` is the command form.** During a
-  patient-retry backoff, Ctrl+R cuts the wait short and resends while
-  keeping the backoff schedule intact, so later failures back off
-  exactly as they would have. Ctrl+R also cancels and resends a request
-  that has not shipped any output yet; once model output is streaming,
-  or at the idle prompt, it does nothing. Bare `:retry` does the same
-  from the command line; `:retry on`, `:retry off`, and `:retry list`
-  manage the patient-retry setting itself.
+  patient-retry backoff, Ctrl+R cuts the wait short and resends, and
+  the reset is part of the deal: the backoff curve starts over, so the
+  next failure waits from the short end again instead of climbing a
+  ladder the user already lost patience with. Ctrl+R also cancels and
+  resends a request that has not shipped any output yet; once model
+  output is streaming, or at the idle prompt, it does nothing. Bare
+  `:retry` does the same from the command line; `:retry on`, `:retry
+  off`, and `:retry list` manage the patient-retry setting itself.
+- **`--rpc`: a headless REST surface for 3code-app.** `3code --rpc[=PORT]`
+  serves a plain-text RPC on loopback - `/id`, `/session/new`,
+  `/prompt`, `/cancel`, `/events` (25 s long-poll of TSV event rows),
+  `/scrollback` - one session per process, stdout protocol-clean, the
+  same early dispatch as `--acp` so no terminal is ever set up.
+  Instances register under `~/.local/share/3code/rpc/<pid>` and a
+  later start sweeps entries whose pid is gone, so a GUI can find
+  live agents without stale hits.
 - **Sandbox `ask`: one-key approval for the gray zone.** `:sandbox ask
   P` denies exactly like `:sandbox deny P`, but when a sandboxed bash
   command is blocked on an ask-protected path, 3code puts one question
