@@ -98,6 +98,18 @@ suite "config validation: schema (in-process)":
     let m = validateConfig(P, entries)
     check "bad value 'maybe' for 'tab-title'" in m
 
+  test "allow-empty-prompt and allow_empty_prompt are permitted keys":
+    let entries = @[
+      ("settings", "allow-empty-prompt", "off", 3),
+      ("settings", "allow_empty_prompt", "off", 4)
+    ]
+    check validateConfig(P, entries) == ""
+
+  test "bad boolean value for allow-empty-prompt is reported":
+    let entries = @[("settings", "allow-empty-prompt", "maybe", 3)]
+    let m = validateConfig(P, entries)
+    check "bad value 'maybe' for 'allow-empty-prompt'" in m
+
   test "bad boolean value for patient_retry is reported":
     let entries = @[("settings", "patient_retry", "maybe", 3)]
     let m = validateConfig(P, entries)

@@ -348,6 +348,7 @@ const
                   "browserfetch",
                   "tone", "mode", "bash_path", "bash-path",
                   "bash", "auto-update", "tab-title",
+                  "allow-empty-prompt", "allow_empty_prompt",
                   "verifier", "verifier_model", "verifier-model",
                   "computer"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
@@ -419,7 +420,8 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
     of "settings":
       if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled",
                       "patient_retry", "patient-retry",
-          "sandbox_wall_warn", "auto-update", "tab-title", "verifier"] and
+          "sandbox_wall_warn", "auto-update", "tab-title", "verifier",
+          "allow-empty-prompt", "allow_empty_prompt"] and
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
@@ -623,6 +625,13 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           case v.toLowerAscii
           of "on", "true", "yes", "1": computerUseEnabled = true
           of "off", "false", "no", "0": computerUseEnabled = false
+          else: discard
+        of "allow-empty-prompt", "allow_empty_prompt":
+          # Same boolean dialect. Default on; an explicit `off` makes an
+          # empty submit a no-op again (the pre-continuation behavior).
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": allowEmptyPromptEnabled = true
+          of "off", "false", "no", "0": allowEmptyPromptEnabled = false
           else: discard
         of "patient_retry", "patient-retry":
           # Same boolean dialect. Default on; an explicit `off` makes
@@ -911,6 +920,8 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "sandbox = \"off\"\n"
   if not patientRetryEnabled:
     buf.add "patient_retry = \"off\"\n"
+  if not allowEmptyPromptEnabled:
+    buf.add "allow-empty-prompt = \"off\"\n"
   if browserFetchEnabled:
     buf.add "browserfetch = \"on\"\n"
   if not sandboxWallWarn:

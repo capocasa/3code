@@ -89,6 +89,44 @@ suite "config: [settings] browserfetch":
     writeConfigFile(tmp, "test.model-a", @[])
     check readFile(tmp).find("browserfetch") < 0
 
+suite "config: [settings] allow-empty-prompt":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-empty-prompt.ini"
+    allowEmptyPromptEnabled = true
+
+  teardown:
+    removeFile(tmp)
+    allowEmptyPromptEnabled = true
+
+  test "default is on":
+    writeFile(tmp, "[settings]\n\n")
+    discard parseConfigFile(tmp)
+    check allowEmptyPromptEnabled
+
+  test "parse accepts off (both spellings)":
+    writeFile(tmp, "[settings]\nallow-empty-prompt = off\n")
+    discard parseConfigFile(tmp)
+    check not allowEmptyPromptEnabled
+    writeFile(tmp, "[settings]\nallow_empty_prompt = \"true\"\n")
+    discard parseConfigFile(tmp)
+    check allowEmptyPromptEnabled
+
+  test "off persists and round-trips; default-on is omitted":
+    allowEmptyPromptEnabled = false
+    writeConfigFile(tmp, "test.model-a", @[])
+    check readFile(tmp).find("allow-empty-prompt = \"off\"") >= 0
+    discard parseConfigFile(tmp)
+    check not allowEmptyPromptEnabled
+    # default-on state is omitted from the config (clean config invariant);
+    # writeConfigFile re-parses the disk file, which re-sets the global, so
+    # the omission needs the file gone first (same as the browserfetch test).
+    removeFile(tmp)
+    allowEmptyPromptEnabled = true
+    writeConfigFile(tmp, "test.model-a", @[])
+    check readFile(tmp).find("allow-empty-prompt") < 0
+
 suite "config: parseConfigFile round-trip":
   var tmp = ""
 

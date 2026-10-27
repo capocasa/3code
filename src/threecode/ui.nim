@@ -1855,10 +1855,14 @@ proc imageAttachEcho*(): string =
   ## tokens attached: `@mockup.png rebuild this [image attached]`.
   if lastImageAttachments.len == 0: "" else: " [image attached]"
 
-proc readInput*(editor: var minline.LineEditor, done: var bool): string =
+proc readInput*(editor: var minline.LineEditor, done: var bool,
+                 emptySubmit: var bool): string =
   ## Read a line submitted by the persistent input thread. The same
   ## ``minline.readLineWith`` path owns idle prompt input and active-turn
   ## buffered input; the controller only consumes completed lines here.
+  ## ``emptySubmit`` is set only when a submitted line was blank — the
+  ## controller's continue-the-session gesture. The other ``""`` returns
+  ## (an idle Ctrl-C / ESC) leave it false so they stay no-ops.
   ensureInputThreadStarted()
   # Arriving at the prompt ends the "during a turn" window: a SIGINT from
   # that window already cancelled its turn and must not also quit here.
@@ -1883,6 +1887,7 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
           termengine.renderFooter(footerFrame(fatPromptState),
                                   inputThreadRunning, inputEditor)
         releaseIdleSubmittedInput()
+        emptySubmit = true
         return ""
       return line
     if wasInterrupt:

@@ -866,6 +866,12 @@ proc main() =
         if prof.name == "":
           editor.prefillText = ev.text
           return false
+        if ev.text.strip == "" and allowEmptyPromptEnabled:
+          # An empty submit that raced the drain at the turn boundary (the
+          # input thread saw idle before this drain began): same contract
+          # as the idle empty prompt — continue the session, append nothing.
+          discard runTurnsInteractive(prof, messages, session)
+          continue
         var promptText = ev.text
         pluginOnPrompt(promptText, session.savePath, prof.name, prof.model)
         if not ev.echoed:
@@ -1084,13 +1090,30 @@ proc main() =
       # messages are stable, so the rebreak provider may read them.
       markReplParked(true)
       var done = false
-      var line = readInput(editor, done)
+      var emptySubmit = false
+      var line = readInput(editor, done, emptySubmit)
       markReplParked(false)
       journalAnchorMessagesLen = messages.len
       if done:
         echo ""
         break
-      if line == "": continue
+      if line == "":
+        # Empty prompt: continue the ongoing session. A turn runs on the
+        # messages exactly as they stand — no user message appended, no
+        # `❯` echo, nothing written to the .3log — with the previous turn's
+        # pending receipt committed where the bar sat, the same submit
+        # transition a real prompt takes. Needs an ongoing conversation
+        # (a system-only session has nothing to continue) and a provider;
+        # otherwise the empty submit stays the old no-op. An idle Ctrl-C /
+        # ESC also returns "" here but leaves `emptySubmit` false, so it
+        # never triggers a turn.
+        if emptySubmit and allowEmptyPromptEnabled and
+            prof.name != "" and messages.len > 1:
+          commitPendingSubmitReceipt()
+          receiptTouchesNextResponse = true
+          resetEditorRowModel(addr editor)
+          if runTurnWithSafetyNet(): break
+        continue
       let t = line.strip
       if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
       let commandResult = handleCommandResult(line, messages, session, prof, editor)
