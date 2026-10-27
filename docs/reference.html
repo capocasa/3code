@@ -34,7 +34,10 @@
 <ul class="page-toc-list">
 <li><a href="#introduction">Introduction</a></li>
 <li><a href="#command-line-switches">Command line switches</a></li>
-<li><a href="#interactive-commands">Interactive commands</a></li>
+<li><a href="#interactive-commands">Interactive commands</a><ul>
+<li><a href="#key-bindings">Key bindings</a></li>
+</ul>
+</li>
 <li><a href="#config-file">Config file</a><ul>
 <li><a href="#settings">settings</a></li>
 <li><a href="#provider">provider</a></li>
@@ -128,6 +131,40 @@
 <tr><td><tt class="docutils literal"><span class="pre">:plugin debug on/off</span></tt></td><td>trace every plugin call to <tt class="docutils literal"><span class="pre">THREECODE_DEBUG_LOG</span></tt> (or stderr)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:! CMD</span></tt></td><td>run a shell command yourself, output streamed live to scrollback only</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:quit</span></tt> / <tt class="docutils literal"><span class="pre">:q</span></tt> / <tt class="docutils literal"><span class="pre">:exit</span></tt></td><td>leave</td></tr>
+</table>
+<h3 id="key-bindings">Key bindings</h3><p>Default keys at the prompt. <tt class="docutils literal"><span class="pre">:help</span></tt> prints the ones in effect; <a class="reference external" href="manual.html#rebinding-keys">rebinding keys</a> covers how to change them.</p>
+<table border="1" class="docutils"><tr><th>key</th><th>action</th></tr>
+<tr><td>Enter</td><td>submit; on an empty prompt, continue the ongoing session (a turn runs with nothing appended)</td></tr>
+<tr><td>Shift+Enter or Alt+Enter</td><td>insert a newline</td></tr>
+<tr><td>Up / Down</td><td>move through visual rows, then history</td></tr>
+<tr><td>Ctrl+Arrow</td><td>move by word</td></tr>
+<tr><td>Cmd+A</td><td>select all (kitty keyboard protocol terminals)</td></tr>
+<tr><td>Ctrl+U</td><td>delete to start of line</td></tr>
+<tr><td>Ctrl+W</td><td>delete the previous word</td></tr>
+<tr><td>Ctrl+K</td><td>delete to end of line</td></tr>
+<tr><td>Alt+D / Ctrl+Delete</td><td>delete the next word</td></tr>
+<tr><td>Ctrl+T</td><td>transpose characters around the cursor</td></tr>
+<tr><td>Ctrl+K / Ctrl+U</td><td>delete to end / start of line (into the kill ring)</td></tr>
+<tr><td>Ctrl+W / Alt+D</td><td>delete previous / next word (into the kill ring)</td></tr>
+<tr><td>Ctrl+Y</td><td>yank the last kill</td></tr>
+<tr><td>Alt+Y</td><td>cycle older kills right after Ctrl+Y</td></tr>
+<tr><td>Alt+.</td><td>insert the last word of the previous history entry</td></tr>
+<tr><td><a class="reference internal" href="#Ctrl">Ctrl</a> or Ctrl+/</td><td>undo; a typed run retracts in one step</td></tr>
+<tr><td>Alt+R</td><td>revert to the recalled entry as recorded (empty draft at the prompt)</td></tr>
+<tr><td>Alt+T</td><td>transpose the words around the cursor</td></tr>
+<tr><td>Alt+U / Alt+L / Alt+C</td><td>upcase / downcase / capitalize the next word</td></tr>
+<tr><td>Ctrl+Q</td><td>insert the next key literally (a real tab, an escape byte)</td></tr>
+<tr><td>Ctrl+]</td><td>jump to the next occurrence of the next typed character</td></tr>
+<tr><td>Ctrl+@ or Alt+Space</td><td>set the mark (binds <tt class="docutils literal"><span class="pre">exchange-point-and-mark</span></tt> to swap back)</td></tr>
+<tr><td>Ctrl+R / Ctrl+S</td><td>incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts</td></tr>
+<tr><td>Alt+P / Alt+N</td><td>history search completed at Enter</td></tr>
+<tr><td>Alt+&lt; / Alt+&gt;</td><td>jump to the oldest entry / back to the draft</td></tr>
+<tr><td>Ctrl+L</td><td>clear the screen</td></tr>
+<tr><td>Alt+E</td><td>edit the input buffer in $VISUAL/$EDITOR</td></tr>
+<tr><td>Ctrl+X Ctrl+E</td><td>same (emacs edit-and-execute-command)</td></tr>
+<tr><td>Ctrl+C</td><td>clear current input; cancel the turn when it is empty</td></tr>
+<tr><td>Esc</td><td>same as Ctrl+C</td></tr>
+<tr><td>Ctrl+D</td><td>exit</td></tr>
 </table>
 <h2 id="config-file">Config file</h2><p>Location: <tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt> on Linux, <tt class="docutils literal"><span class="pre">~/Library/Application Support/3code/config</span></tt> on macOS, <tt class="docutils literal"><span class="pre">%APPDATA%\3code\config</span></tt> on Windows; <tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt> overrides the base directory on every platform. <tt class="docutils literal"><span class="pre">-c FILE</span></tt> / <tt class="docutils literal"><span class="pre">--config FILE</span></tt> reads a different file for a single run; it is rewritten by 3code itself whenever providers or models change, same as the default. Annotated example: <tt class="docutils literal"><span class="pre">docs/config.example</span></tt> in the repository.</p>
 <p>Values are Nim string literals, always wrapped in double quotes. parsecfg treats <tt class="docutils literal"><span class="pre">:</span></tt>, <tt class="docutils literal"><span class="pre">=</span></tt>, and <tt class="docutils literal"><span class="pre">#</span></tt> as syntax in unquoted values, so an unquoted URL or API key can silently truncate. <tt class="docutils literal"><span class="pre">;</span></tt> and <tt class="docutils literal"><span class="pre">#</span></tt> start comments. An unknown section or key is a startup error with a <tt class="docutils literal"><span class="pre">file:line:</span></tt> pointer, so a typo cannot quietly disable a setting.</p>
@@ -226,7 +263,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-27 14:15:53 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-27 14:26:40 UTC</small>
       </div>
     </div>
   </div>

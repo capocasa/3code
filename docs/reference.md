@@ -103,6 +103,45 @@ names, model names, and paths where supported.
 | `:! CMD` | run a shell command yourself, output streamed live to scrollback only |
 | `:quit` / `:q` / `:exit` | leave |
 
+### Key bindings
+
+Default keys at the prompt. `:help` prints the ones in effect;
+[rebinding keys](manual.html#rebinding-keys) covers how to change them.
+
+| key | action |
+| --- | --- |
+| Enter | submit; on an empty prompt, continue the ongoing session (a turn runs with nothing appended) |
+| Shift+Enter or Alt+Enter | insert a newline |
+| Up / Down | move through visual rows, then history |
+| Ctrl+Arrow | move by word |
+| Cmd+A | select all (kitty keyboard protocol terminals) |
+| Ctrl+U | delete to start of line |
+| Ctrl+W | delete the previous word |
+| Ctrl+K | delete to end of line |
+| Alt+D / Ctrl+Delete | delete the next word |
+| Ctrl+T | transpose characters around the cursor |
+| Ctrl+K / Ctrl+U | delete to end / start of line (into the kill ring) |
+| Ctrl+W / Alt+D | delete previous / next word (into the kill ring) |
+| Ctrl+Y | yank the last kill |
+| Alt+Y | cycle older kills right after Ctrl+Y |
+| Alt+. | insert the last word of the previous history entry |
+| Ctrl+_ or Ctrl+/ | undo; a typed run retracts in one step |
+| Alt+R | revert to the recalled entry as recorded (empty draft at the prompt) |
+| Alt+T | transpose the words around the cursor |
+| Alt+U / Alt+L / Alt+C | upcase / downcase / capitalize the next word |
+| Ctrl+Q | insert the next key literally (a real tab, an escape byte) |
+| Ctrl+] | jump to the next occurrence of the next typed character |
+| Ctrl+@ or Alt+Space | set the mark (binds `exchange-point-and-mark` to swap back) |
+| Ctrl+R / Ctrl+S | incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts |
+| Alt+P / Alt+N | history search completed at Enter |
+| Alt+< / Alt+> | jump to the oldest entry / back to the draft |
+| Ctrl+L | clear the screen |
+| Alt+E | edit the input buffer in $VISUAL/$EDITOR |
+| Ctrl+X Ctrl+E | same (emacs edit-and-execute-command) |
+| Ctrl+C | clear current input; cancel the turn when it is empty |
+| Esc | same as Ctrl+C |
+| Ctrl+D | exit |
+
 ## Config file
 
 Location: `~/.config/3code/config` on Linux,

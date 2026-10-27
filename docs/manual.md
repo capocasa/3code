@@ -296,17 +296,16 @@ Switch accounts with:
 ### Anthropic and Claude
 
 An `sk-ant-` key (or `anthropic` in the wizard) creates a normal API-key
-provider against api.anthropic.com. 3code speaks the Anthropic Messages wire
-natively: the system prompt as a top-level field, tool calls as typed content
-blocks, and adaptive thinking with effort levels (`:reasoning` low / medium /
-high / xhigh / max). Claude 5.x always thinks — `off` is not offered on Opus
-5.5 and Fable, where Anthropic rejects it — and thinking summaries stream to
-the reasoning ticker. Sonnet 5.5 turns off up-front thinking with
-`between_tools` instead of `disabled`. Thinking blocks replay across tool
-loops with their signatures, so long agentic runs keep their reasoning; the
-models that bind thinking to the conversation (Opus 5.5, Sonnet 5.5, Fable)
-ride Anthropic's drop-block fallback so an interrupted or compacted history
-degrades instead of failing.
+provider against api.anthropic.com. Claude runs on the native Anthropic
+Messages wire, not a compatibility shim: the system prompt is a top-level
+field, tool calls are typed content blocks. Pick a thinking level with
+`:reasoning`. Claude 5.x always thinks; models that reject `off` simply do
+not offer it. Thinking summaries stream to the reasoning ticker while you
+wait.
+
+Thinking survives the long haul. Blocks replay across tool loops with
+their signatures, and a compacted or interrupted history degrades instead
+of failing.
 
 A Claude Pro or Max subscription works like the ChatGPT login: enter
 `claudecode` in the provider wizard and finish the browser OAuth on
@@ -469,44 +468,21 @@ Output streams into a live viewport while the command runs, then folds into
 your scrollback; the model never sees it. The command runs through the same
 sandbox policy and the same executor as model-run commands.
 
-Useful input keys:
+The daily keys:
 
 | key | action |
 | --- | --- |
-| Enter | submit; on an empty prompt, continue the ongoing session (a turn runs with nothing appended) |
+| Enter | submit |
 | Shift+Enter or Alt+Enter | insert a newline |
-| Up / Down | move through visual rows, then history |
+| Up / Down | history |
 | Ctrl+Arrow | move by word |
-| Cmd+A | select all (kitty keyboard protocol terminals) |
-| Ctrl+U | delete to start of line |
-| Ctrl+W | delete the previous word |
-| Ctrl+K | delete to end of line |
-| Alt+D / Ctrl+Delete | delete the next word |
-| Ctrl+T | transpose characters around the cursor |
-| Ctrl+K / Ctrl+U | delete to end / start of line (into the kill ring) |
-| Ctrl+W / Alt+D | delete previous / next word (into the kill ring) |
-| Ctrl+Y | yank the last kill |
-| Alt+Y | cycle older kills right after Ctrl+Y |
-| Alt+. | insert the last word of the previous history entry |
-| Ctrl+_ or Ctrl+/ | undo; a typed run retracts in one step |
-| Alt+R | revert to the recalled entry as recorded (empty draft at the prompt) |
-| Alt+T | transpose the words around the cursor |
-| Alt+U / Alt+L / Alt+C | upcase / downcase / capitalize the next word |
-| Ctrl+Q | insert the next key literally (a real tab, an escape byte) |
-| Ctrl+] | jump to the next occurrence of the next typed character |
-| Ctrl+@ or Alt+Space | set the mark (binds `exchange-point-and-mark` to swap back) |
-| Ctrl+R / Ctrl+S | incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts |
-| Alt+P / Alt+N | history search completed at Enter |
-| Alt+< / Alt+> | jump to the oldest entry / back to the draft |
-| Ctrl+L | clear the screen |
-| Alt+E | edit the input buffer in $VISUAL/$EDITOR |
-| Ctrl+X Ctrl+E | same (emacs edit-and-execute-command) |
-| Ctrl+C | clear current input; cancel the turn when it is empty |
-| Esc | same as Ctrl+C |
+| Ctrl+R / Ctrl+S | search history as you type |
+| Alt+E | edit the input in $VISUAL/$EDITOR |
+| Ctrl+C or Esc | clear input; cancel the turn when it is empty |
 | Ctrl+D | exit |
 
-If you forget one, `:help` prints the current command and key list. The
-full command table is in the [reference](reference.html#interactive-commands).
+If you forget one, `:help` prints the keys in effect. The full table,
+kill ring and all, lives in the [reference](reference.html#key-bindings).
 
 Pasting behaves the way you want: a multi-line paste stays one draft instead
 of submitting on the first embedded newline, so you can paste a code block,
@@ -953,24 +929,11 @@ active one:
 :reasoning off
 ```
 
-The valid values depend on the model:
-
-- binary reasoning models use `off` and `on`
-- many models use `low`, `medium`, and `high`
-- GLM 5.2 uses `off`, `high`, and `max`
-- GLM 5.3 uses `low`, `high`, and `max` (thinking cannot be disabled)
-- OpenAI o-series models use `low`, `medium`, and `high`
-- GPT-5.0 uses `minimal`, `low`, `medium`, and `high`
-- GPT-5.1 and later add `none`
-- GPT-5.4 and GPT-5.5 add `xhigh`
-- GPT-5.6 adds `max` and does not use `minimal`
-- GPT-6 Astra and GPT-6.1 Sol use `low`, `medium`, `high`, `xhigh`, and `max`; thinking cannot be disabled
-- GPT-6 Sol and GPT-6 Luna use `none`, `low`, `medium`, `high`, `xhigh`, and `max`
-- GPT-5.5 Pro uses `medium`, `high`, and `xhigh`; GPT-5 Pro uses `high`
-- GPT-4.x has no reasoning setting
-
-3code sends the right provider-specific field for the selected model.
-Providers have not settled on one common reasoning scale.
+There is no common scale. Most models use `low`, `medium`, and `high`.
+Some start at `off`, some end at `max`, some cannot turn thinking off at
+all. 3code knows the scale of the model you picked and sends the right
+field for it. A level missing from the list is a level the model does
+not have.
 
 When a provider streams reasoning text, 3code keeps it moving through a
 one-line ticker above the interactive prompt. It is not added to the
@@ -1050,21 +1013,16 @@ model:
   the transcript shows `· read img logo.png 1920x1080 -> 1280x720`, and the
   follow-up message carries the pixels.
 
-Which models can see: every known-good row of a multimodal model is curated
-vision-capable (`--good`): the whole gemini and grok lineups, the OpenAI
-gpt chat line (not gpt-oss, o3-mini, or the codex slugs: text-only),
-glm-5.3-flash on every host, deepseek v4.1-flash and the v4-flash-vision-exp
-hostings, kimi k3.1 pro (native vision, verified live on novita, venice
-and cheaperinference), mistral-large-4 / large-2512,
-nemotron-3.5-super-vl, inkling, and mimo v2.6. Spot-probed live with a
-real image on the providers that took a key (answers came back: grok
-said "Button.", venice's glm-5.3-flash said "Buttons"). Two exceptions
-stay off: nebius, whose proxy rejects image
-content parts outright, and the claude line, because 3code's Anthropic wire
-path has no image-part translation yet. `[params] vision = "off"` revokes
-a curated combo (`:provider edit`), `"on"` opts an experimental one in.
-On a non-vision model, `@x.png` and `read x.png` both fail with a hint naming
-a vision model — nothing silently degrades.
+Which models can see: the ones `--good` marks as vision-capable. The mark
+is earned. Every curated combo was probed with a real image (grok looked
+at a button and said "Button."). Two exceptions stay off: nebius, whose
+proxy rejects image parts outright, and the claude line, whose wire path
+has no image translation yet.
+
+You can overrule the mark with `[params] vision = "off"` or `"on"` (set
+via `:provider edit`). Nothing fails quietly either way: on a model
+without vision, `@x.png` and `read x.png` both fail with a hint naming a
+model that has it.
 
 Delivery is budgeted, not original: images are re-encoded once to JPEG q85
 inside a 1280 px box and a 190 KB base64 budget, with a quality-then-scale
@@ -1372,27 +1330,13 @@ In practice:
 - The project directory is writable out of the box (`allow ./` is in the
   built-in default), plus the temp directories. A fresh clone needs no
   setup at all.
-- The default covers command-line builds of the common languages:
-  version control reads its user config (`readonly ~/.gitconfig`,
-  `readonly ~/.config/git`, the matching mercurial paths), the Nim
-  toolchain runs (`allow ~/.nimble`, `readonly ~/.choosenim`), uv venvs
-  execute (`readonly ~/.local/share/uv`), and the dependency and
-  build caches the mainstream toolchains keep under your home are
-  writable (`~/go`, `~/.cache`, `~/.npm`, `~/.cargo/registry`). C and
-  Zig builds ride the project dir and the read-only system baseline
-  (Zig's global cache is `~/.cache/zig`; on Windows
-  `~/AppData/Local/zig`). On macOS `javac` runs out of the box: the
-  JVM's own startup needs (a `kern.grade_cputype` sysctl the kernel
-  classifies as a write, and opendirectoryd user lookups) ride the
-  sandbox profile itself, and the JDK homes under your home are
-  read-only (`~/Library/Java`, `~/.jdks`, `~/.sdkman/candidates`;
-  system JVMs under `/Library/Java` and brew's `/opt` were already
-  covered by the baseline). Token-bearing files stay fenced:
-  `~/.npmrc`, `~/.cargo/credentials`, `~/.git-credentials`, `~/.ssh`.
-  Ruby and the heavier ecosystems live one section down, as recipes. On Windows the caches move to `~/AppData/Local/npm-cache` and
-  `~/AppData/Local/pip/cache`, and the bash child gets a seeded copy of
-  your global git config (it runs as a separate sandbox user, so git's
-  ownership check would otherwise reject every project repo).
+- The default covers command-line builds of the common languages. Git,
+  Go, Nim, Python, Rust, Zig, and C build out of the box. On Windows,
+  git gets a seeded copy of your global config, so it works there too.
+  Files that carry tokens stay fenced: `~/.ssh`, `~/.git-credentials`,
+  `~/.npmrc`, `~/.cargo/credentials`. Every rule is listed in [the
+  built-in default](#builtminusin-default) below, and stacks beyond it get
+  recipes in [sandbox settings](#sandbox-settings-collection).
 - Stacks not covered by the default add their home with one rule: maven
   wants `:sandbox allow ~/.m2/repository`, gradle `:sandbox allow
   ~/.gradle/caches`, an npm prefix like `~/.node_modules` becomes
