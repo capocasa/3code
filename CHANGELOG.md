@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **Kimi K3.1 Pro runs on every provider that serves it.** Twenty-two
+  known-good rows across fourteen hosts (kimi, kimicode, openrouter,
+  novita, nanogpt, venice, cheaperinference, tencent, opencodego,
+  vercel, volccode, aihubmix, kilo, commandcode), each carrying the
+  wire id its catalog actually lists, dash-spelled and case-sensitive
+  spellings included. K3.1 always thinks; the knob is top-level
+  `reasoning_effort` low/high/max (default max), which `:reasoning`
+  now sends on any host, and temperature is omitted because the
+  serving side fixes it at 1.0. Native vision, spot-probed live with a
+  real image on the hosts that took a key (novita, venice,
+  cheaperinference): the rows are vision-capable, `@img.png` and `read
+  img.png` work.
 - **An empty prompt continues the ongoing session.** Press Enter with
   nothing typed and a turn runs on the conversation exactly as it stands:
   no user message is appended, no `❯` echo is painted, the `.3log` gains
