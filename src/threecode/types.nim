@@ -81,6 +81,13 @@ proc oneShotSessionId*(): string =
     oneShotSessionIdSeed = stamp
   "3code-" & oneShotSessionIdSeed
 
+var allowEmptyPromptEnabled*: bool = true
+  ## When true, submitting an empty prompt (Enter on an empty line, or a
+  ## whitespace-only draft) continues the ongoing session: a model turn
+  ## runs on the messages exactly as they stand, appending no user message.
+  ## The way to say "keep going" without polluting the transcript. Default
+  ## on; `[settings]` `allow-empty-prompt = off` restores the old no-op.
+
 var browserFetchEnabled*: bool = false
   ## `[settings]` `browserfetch = on`: when a plain `web_fetch` returns a
   ## page whose text is next to nothing after tag stripping (a JS shell),

@@ -152,6 +152,7 @@ Keys under `[settings]`:
 | `auto-update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit |
 | `verifier_model` | `PROVIDER.MODEL` | the model goal mode's satisfaction check runs on (see [verifier models](manual.html#verifier-models)); a decision model answers typed questions in one request. Not set = the session model checks (the default) |
 | `verifier` | `on`/`off` | enable/disable the selected verifier without clearing it; absent means on while a model is selected |
+| `allow-empty-prompt` | `on`/`off` (default on) | submitting an empty prompt continues the ongoing session: a turn runs on the messages as they stand, appending no user message; `allow_empty_prompt` spelling accepted |
 
 ### provider
 

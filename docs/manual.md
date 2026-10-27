@@ -467,7 +467,7 @@ Useful input keys:
 
 | key | action |
 | --- | --- |
-| Enter | submit |
+| Enter | submit; on an empty prompt, continue the ongoing session (a turn runs with nothing appended) |
 | Shift+Enter or Alt+Enter | insert a newline |
 | Up / Down | move through visual rows, then history |
 | Ctrl+Arrow | move by word |
@@ -492,6 +492,13 @@ Pasting behaves the way you want: a multi-line paste stays one draft instead
 of submitting on the first embedded newline, so you can paste a code block,
 edit it, and submit with Enter. `:!` and `@file` prefixes still work inside
 a pasted draft.
+
+An empty prompt is a real gesture: press Enter with nothing typed and the
+ongoing session continues — a turn runs on the conversation exactly as it
+stands, no user message appended. It is the cheap way to say "keep going"
+after a turn you want more of. On a fresh session with no turns yet it
+does nothing. `allow-empty-prompt = off` in `[settings]` turns the gesture
+off (it is on by default).
 
 The defaults are the same readline-style Ctrl keys everywhere, including
 macOS. If you want the Mac editing keys instead, bind the `Cmd` names in

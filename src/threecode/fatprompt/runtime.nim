@@ -2555,6 +2555,15 @@ proc inputThreadProc() {.thread.} =
           # Park the input thread so keystrokes don't append to the
           # uncleared editor before the controller drains this event.
           inputIdleLinePending.store(true, moRelease)
+      elif not hasText and not modal and not turnActive and
+          allowEmptyPromptEnabled:
+        # Empty Enter at the idle prompt: an empty submit, queued and parked
+        # exactly like a text submit so the controller can continue the
+        # ongoing session on it. The controller decides whether a turn runs
+        # (it needs an ongoing conversation); its empty-line path releases
+        # the park when it doesn't, so the thread never wedges.
+        pushInputEvent(InputEvent(kind: ieLine, text: ""))
+        inputIdleLinePending.store(true, moRelease)
       ed.renderSuffix = ""
       ed.renderSuffixCursor = false
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
@@ -3203,21 +3212,22 @@ proc endTurnAfterTranscriptAppend*(failed = false) =
   emitFatPromptEvent setPromptModeEvent(pmIdle)
   tabtitle.settleTabTitle(not failed)
 
-proc emitUserSubmit*(line: string) =
-  ## Append the submitted prompt as transcript and clear the volatile editor
-  ## area. The editor text itself is data; the on-screen prompt is chrome.
-  ## A pending receipt (armed by the previous turn's usage, or by --resume
-  ## whose replay suppresses the last receipt into the live bar) commits in
-  ## its own item FIRST, flush with the transcript above it - the same
-  ## shape `commitPendingReceiptAfterStream` paints when usage arrives
-  ## after a streamed answer - so the echo below keeps the standard
-  ## one-blank separator every other committed item has. Bundling receipt
-  ## and echo into one item joined them flush and dropped that separator:
-  ## the first submit after --resume removed the line above the prompt.
-  proc clearSubmittedFooterState() =
-    emitFatPromptEvent clearPendingHintEvent()
-    emitFatPromptEvent clearBarEvent()
-    emitFatPromptEvent clearTickerEvent()
+proc clearSubmittedFooterState() =
+  ## Convert the live submit-time chrome (pending receipt hint, bar,
+  ## ticker) into its cleared state inside a transcript commit's
+  ## `beforeRepaint`, so the repaint can never reintroduce stale chrome.
+  emitFatPromptEvent clearPendingHintEvent()
+  emitFatPromptEvent clearBarEvent()
+  emitFatPromptEvent clearTickerEvent()
+
+proc commitPendingSubmitReceipt*() =
+  ## The receipt half of the user-submit transition: a pending receipt
+  ## (armed by the previous turn's usage, or by --resume whose replay
+  ## suppresses the last receipt into the live bar) commits in its own
+  ## item, flush with the transcript above it - the same shape
+  ## `commitPendingReceiptAfterStream` paints when usage arrives after a
+  ## streamed answer. Shared by `emitUserSubmit` and the empty-prompt
+  ## continuation, which commits the receipt but echoes no `❯` item.
   if pendingHint.active:
     let label = tokenLineLabel(pendingHint.usage, pendingHint.window,
                                pendingHint.elapsed)
@@ -3228,6 +3238,16 @@ proc emitUserSubmit*(line: string) =
         restoreEditor = true,
         beforeRepaint = clearSubmittedFooterState,
         flushWithPrevious = true)
+
+proc emitUserSubmit*(line: string) =
+  ## Append the submitted prompt as transcript and clear the volatile editor
+  ## area. The editor text itself is data; the on-screen prompt is chrome.
+  ## The pending receipt commits FIRST (see `commitPendingSubmitReceipt`)
+  ## so the echo below keeps the standard one-blank separator every other
+  ## committed item has; bundling receipt and echo into one item joined them
+  ## flush and dropped that separator: the first submit after --resume
+  ## removed the line above the prompt.
+  commitPendingSubmitReceipt()
   # The inter-item separator is owned by `appendTranscript` (one blank row
   # prepended before every item after the first). Items carry bare content.
   receiptTouchesNextResponse = true
