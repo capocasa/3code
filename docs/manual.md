@@ -1028,10 +1028,12 @@ Which models can see: every known-good row of a multimodal model is curated
 vision-capable (`--good`): the whole gemini and grok lineups, the OpenAI
 gpt chat line (not gpt-oss, o3-mini, or the codex slugs: text-only),
 glm-5.3-flash on every host, deepseek v4.1-flash and the v4-flash-vision-exp
-hostings, mistral-large-4 / large-2512, nemotron-3.5-super-vl, inkling, and
-mimo v2.6. Spot-probed live with a real image on the providers that took a
-key (answers came back: grok said "Button.", venice's glm-5.3-flash said
-"Buttons"). Two exceptions stay off: nebius, whose proxy rejects image
+hostings, kimi k3.1 pro (native vision, verified live on novita, venice
+and cheaperinference), mistral-large-4 / large-2512,
+nemotron-3.5-super-vl, inkling, and mimo v2.6. Spot-probed live with a
+real image on the providers that took a key (answers came back: grok
+said "Button.", venice's glm-5.3-flash said "Buttons"). Two exceptions
+stay off: nebius, whose proxy rejects image
 content parts outright, and the claude line, because 3code's Anthropic wire
 path has no image-part translation yet. `[params] vision = "off"` revokes
 a curated combo (`:provider edit`), `"on"` opts an experimental one in.

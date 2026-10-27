@@ -2789,9 +2789,21 @@ proc applyKimiReasoning(p: Profile, body: JsonNode) =
   ## baseten defaults off. `on` sends enable_thinking=true, `off` sends
   ## false (inert on nebius, which can't be turned off).
   ##
+  ## K3 and K3.1 always think and grade effort instead: low/high/max
+  ## (default max) via top-level `reasoning_effort`, documented on the
+  ## platform and taken by the aggregators (verified live on novita,
+  ## venice, cheaperinference; openrouter normalizes it). The path is
+  ## host-independent, so it also covers first-party, where the K2.6
+  ## `thinking.type` toggle does not exist.
+  ##
   ## First-party gateways (kimicode's api.kimi.com/coding, moonshot.ai)
   ## are the exception: K2.x there is forced-thinking and 400s on
   ## `chat_template_kwargs`. Send nothing; thinking stays on.
+  case p.reasoning
+  of "low", "high", "max":
+    body["reasoning_effort"] = %p.reasoning
+    return
+  else: discard
   if providerOf(p) in ["kimicode", "kimi"]: return
   case p.reasoning
   of "off":

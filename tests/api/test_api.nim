@@ -141,6 +141,52 @@ suite "api request shaping":
     check "temperature" notin body
     check body{"max_tokens"}.getInt == 8192
 
+  test "kimi k3.1 rows omit temperature (upstream pins it to 1.0)":
+    block novita:
+      var body = %*{"stream": true}
+      let p = Profile(name: "novita.moonshotai/kimi-k3.1-pro", family: "kimi",
+                      model: "moonshotai/kimi-k3.1-pro")
+      applyGenerationDefaults(p, body)
+      check "temperature" notin body
+      check body{"max_tokens"}.getInt == 8192
+    block firstParty:
+      var body = %*{"stream": true}
+      let p = Profile(name: "kimi.kimi-k3.1-pro-highspeed", family: "kimi",
+                      model: "kimi-k3.1-pro-highspeed")
+      applyGenerationDefaults(p, body)
+      check "temperature" notin body
+      check body{"max_tokens"}.getInt == 8192
+
+  test "kimi effort levels send top-level reasoning_effort":
+    block aggregator:
+      var body = %*{"stream": true}
+      let p = Profile(name: "novita.moonshotai/kimi-k3.1-pro", family: "kimi",
+                      model: "moonshotai/kimi-k3.1-pro", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+      check "chat_template_kwargs" notin body
+    block firstPartyMax:
+      var body = %*{"stream": true}
+      let p = Profile(name: "kimicode.k3.1-pro", family: "kimi",
+                      model: "k3.1-pro", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "max"
+      check "chat_template_kwargs" notin body
+    block k2StillToggles:
+      var body = %*{"stream": true}
+      let p = Profile(name: "together.moonshotai/Kimi-K2.6", family: "kimi",
+                      model: "moonshotai/Kimi-K2.6", reasoning: "on")
+      applyReasoning(p, body)
+      check body{"chat_template_kwargs"}{"enable_thinking"}.getBool
+      check "reasoning_effort" notin body
+    block firstPartyK2SendsNothing:
+      var body = %*{"stream": true}
+      let p = Profile(name: "kimi.kimi-k2.6", family: "kimi",
+                      model: "kimi-k2.6", reasoning: "on")
+      applyReasoning(p, body)
+      check "chat_template_kwargs" notin body
+      check "reasoning_effort" notin body
+
   test "litellm k3 omits temperature (same as kimicode)":
     var body = %*{"stream": true}
     let p = Profile(name: "litellm.k3", family: "kimi", model: "k3")

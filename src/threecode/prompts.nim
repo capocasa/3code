@@ -330,6 +330,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("commandcode", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbCurrentTurn, false, 1_000_000, false, true),
     ("commandcode", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("commandcode", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("commandcode", "moonshotai/Kimi-K3.1-Pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("commandcode", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("commandcode", "xai/grok-4.6", "grok", "4", "6", "high", 0.2, 8192, tbNone, false, 500_000, false, true),
     ("commandcode", "xiaomi/mimo-v2.5", "mimo", "2", "5", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -447,6 +448,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("novita", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("kilo", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, tbNone, false, 262_144, false, false),
+    # K3.1 Pro on the Kilo Gateway (catalog-listed, moonshotai/ ids).
+    ("kilo", "moonshotai/kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
 
     # nanogpt (OpenAI-compatible aggregator; model ids carry a provider/ tag)
     ("nanogpt", "TEE/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
@@ -482,6 +485,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "qwen3.6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("opencodego", "minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("opencodego", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
+    ("opencodego", "kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("opencodego", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("opencodego", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("opencodego", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
@@ -491,6 +495,12 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
 
     # kimi (Kimi API Platform, api.moonshot.ai; bare model ids)
     ("kimi", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    # K3.1 Pro (post-trained K3, 1M window, native vision): always
+    # thinks, grades effort via top-level reasoning_effort (low/high/
+    # max, default max), and pins temperature/top_p upstream — omit
+    # them like k3 on this gateway.
+    ("kimi", "kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
+    ("kimi", "kimi-k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("kimi", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("kimi", "kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
 
@@ -498,6 +508,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # k3 rejects any temperature != 1.0 (HTTP 400); omit the field so the
     # server default (1.0) applies. temperature < 0 means "omit".
     ("kimicode", "k3", "kimi", "3", "", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, false),
+    # K3.1 twins carry K3's constraints verbatim (always-on thinking,
+    # reasoning_effort low/high/max, temperature omitted), plus vision.
+    ("kimicode", "k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
+    ("kimicode", "k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("kimicode", "kimi-for-coding", "kimi", "2", "7-code", "on", 0.6, 8192, tbCurrentTurn, false, 262_144, false, false),
     ("kimicode", "kimi-for-coding-highspeed", "kimi", "2", "7-code-hs", "on", 0.6, 4096, tbCurrentTurn, false, 262_144, false, false),
     # litellm counting proxy (3code-swe): kimicode gateway behind the
@@ -579,6 +593,12 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "kimi-k2-6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("venice", "kimi-k2-7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("venice", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    # Venice's validator rejects chat_template_kwargs outright, so the
+    # K3.1 rows default to the effort knob instead (verified live:
+    # reasoning_effort max accepted, temperature omitted fine, image
+    # input served). Dash-spelled ids are Venice's own.
+    ("venice", "kimi-k3-1-pro", "kimi", "3.1", "pro", "max", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
+    ("venice", "kimi-k3-1-pro-highspeed", "kimi", "3.1", "pro-hs", "max", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("venice", "minimax-m25", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("venice", "minimax-m27", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("venice", "minimax-m3-1-flash", "minimax", "3.1", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -637,6 +657,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("cheaperinference", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
     ("cheaperinference", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, tbNone, false, 500_000, false, true),
     ("cheaperinference", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("cheaperinference", "kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
+    ("cheaperinference", "kimi-k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("cheaperinference", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("cheaperinference", "qwen3-6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("cheaperinference", "qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
@@ -646,6 +668,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "thinkingmachines/inkling-small:free", "inkling", "1", "small-free", "medium", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("novita", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, true, false),
     ("novita", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, true, false),
+    # K3.1 upstream pins temperature to 1.0 and Novita's gateway
+    # enforces it (400 on any other value, verified live); effort and
+    # image input verified live here too.
+    ("novita", "moonshotai/kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, true, true),
+    ("novita", "moonshotai/kimi-k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, true, true),
     ("novita", "qwen/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, true, false),
     ("novita", "qwen/qwen3.6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("novita", "qwen/qwen3.7-max", "qwen", "3.7", "max", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
@@ -654,6 +681,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "meituan/longcat-2.0", "longcat", "2", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("openrouter", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("openrouter", "moonshotai/kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("openrouter", "openai/gpt-4.1", "gpt", "", "4.1", "medium", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("openrouter", "openai/gpt-4.1-mini", "gpt", "", "4.1-mini", "medium", 0.2, 4096, tbNone, false, 1_000_000, false, true),
     ("openrouter", "openai/gpt-4.1-nano", "gpt", "", "4.1-nano", "medium", 0.2, 4096, tbNone, false, 1_000_000, false, true),
@@ -814,6 +842,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("nanogpt", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("nanogpt", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("nanogpt", "moonshotai/kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
+    ("nanogpt", "moonshotai/kimi-k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("nanogpt", "openai/gpt-4.1", "gpt", "", "4.1", "medium", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("nanogpt", "openai/gpt-4.1-mini", "gpt", "", "4.1-mini", "medium", 0.2, 4096, tbNone, false, 1_000_000, false, true),
     ("nanogpt", "openai/gpt-4.1-nano", "gpt", "", "4.1-nano", "medium", 0.2, 4096, tbNone, false, 1_000_000, false, true),
@@ -1105,6 +1135,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("tencent", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("tencent", "kimi-k2.7-code-highspeed", "kimi", "2", "7-code-hs", "on", 0.6, 4096, tbAllTurns, false, 262_144, false, false),
     ("tencent", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("tencent", "kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
+    ("tencent", "kimi-k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("tencent", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("tencent", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("tencent", "minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -1177,6 +1209,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("vercel", "zai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("vercel", "zai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("vercel", "deepseek/deepseek-v4.1-flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
+    ("vercel", "moonshotai/kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
+    ("vercel", "moonshotai/kimi-k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
 
     # volccode: Volcengine (ByteDance) Ark Coding Plan
     # (ark.cn-beijing.volces.com/api/coding/v3), a flat monthly
@@ -1188,6 +1222,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # instead of a guess that preferCurated would force onto requests.
     ("volccode", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("volccode", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    # kimi-k3.1-pro landed on the plan 10.24 (Ark release notes);
+    # Moonshot-served, so the K3.1 constraint set applies as-is.
+    ("volccode", "kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
 
     # alibabatoken / alibabatoken-cn: Alibaba Cloud Model Studio Token
     # Plan (intl endpoint Singapore region, cn endpoint Beijing), a
@@ -1221,6 +1258,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("aihubmix", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("aihubmix", "coding-glm-5.3-free", "glm", "5", "3-free", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("aihubmix", "coding-glm-5.3-flash-free", "glm", "5", "3-flash-free", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("aihubmix", "kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
 
     # cortecs: Europe's AI Gateway (api.cortecs.ai/v1). A router, but
     # over EU-sovereign upstreams (TensorX, Nebius, sference, ...) that
@@ -2950,7 +2988,7 @@ Every output token costs. No preamble before tool calls. Done: one sentence, wha
 {{credit}}
 """
 
-const KimiPreamble = """You are the Kimi edition of 3code, the economical coding agent, backed by Moonshot AI's Kimi (K2.5 / K2.6 / K2.7-code / K3), a Mixture-of-Experts model trained for long-horizon agentic coding and multi-step tool use. Your strength is sustaining coherent work over hundreds of tool calls. Use it: when a task resists, keep going — try the next approach, fix the environment, look it up. Giving up early wastes more tokens than persistence ever costs.
+const KimiPreamble = """You are the Kimi edition of 3code, the economical coding agent, backed by Moonshot AI's Kimi (K2.5 / K2.6 / K2.7-code / K3 / K3.1), a Mixture-of-Experts model trained for long-horizon agentic coding and multi-step tool use. Your strength is sustaining coherent work over hundreds of tool calls. Use it: when a task resists, keep going — try the next approach, fix the environment, look it up. Giving up early wastes more tokens than persistence ever costs.
 
 `3CODE.md` / `AGENTS.md` (when present) override this prompt.
 
@@ -4302,6 +4340,13 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # `other` today; it's the bucket for the next stealth model
         # whose surface hasn't been probed yet.
         return @[]
+      if fam == "kimi" and combo.version == "3.1":
+        # K3.1 Pro (every host) always thinks; the only knob is the
+        # effort. Top-level `reasoning_effort` low/high/max (default
+        # max) is documented on the platform and verified live on
+        # novita, venice and cheaperinference; venice additionally
+        # rejects `chat_template_kwargs`, so `on` is not offered.
+        return @["low", "high", "max"]
       if fam == "kimi" and p in ["kimi", "kimicode"]:
         # First-party Kimi (api.moonshot.ai / api.kimi.com/coding) does
         # not speak the vLLM `enable_thinking` knob the aggregators take.

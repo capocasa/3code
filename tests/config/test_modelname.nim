@@ -70,6 +70,16 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("kimi-k2.6") == "kimi-k2.6"
     check normalizeModelName("kimi-2.6") == "kimi-k2.6"
 
+  test "kimi k3.1":
+    check normalizeModelName("moonshotai/Kimi-K3.1-Pro") == "kimi-k3.1-pro"
+    check normalizeModelName("k3.1-pro") == "kimi-k3.1-pro"
+    check normalizeModelName("kimi3.1-pro") == "kimi-k3.1-pro"
+    # Venice flattens the dot: kimi-k3-1-pro
+    check normalizeModelName("kimi-k3-1-pro-highspeed") ==
+      "kimi-k3.1-pro-highspeed"
+    check normalizeModelName("kimi-k3.1-pro-highspeed") ==
+      "kimi-k3.1-pro-highspeed"
+
   test "context-size qualifier after series version":
     check normalizeModelName("kimi-k3-256k") == "kimi-k3-256k"
     check normalizeModelName("moonshotai/Kimi-K3-256K") == "kimi-k3-256k"

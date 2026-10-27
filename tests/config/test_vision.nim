@@ -47,7 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 269
+    check visionRows == 291
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
@@ -62,6 +62,12 @@ suite "vision: known-good curation":
     check knownGoodVision("mistral", "mistral-large-4")
     check knownGoodVision("together", "thinkingmachines/Inkling")
     check knownGoodVision("xiaomi", "mimo-v2.6-flash")
+    # kimi k3.1 pro is natively multimodal; live image pings on the
+    # hosts that took a key (novita, venice, cheaperinference).
+    check knownGoodVision("novita", "moonshotai/kimi-k3.1-pro")
+    check knownGoodVision("venice", "kimi-k3-1-pro")
+    check knownGoodVision("cheaperinference", "kimi-k3.1-pro-highspeed")
+    check knownGoodVision("kimicode", "k3.1-pro")
     check not knownGoodVision("nebius", "zai-org/GLM-5.3-Flash")
     check not knownGoodVision("nebius", "deepseek-ai/DeepSeek-V4.1-Flash")
     check not knownGoodVision("nebius", "nvidia/Nemotron-3.5-Super-VL")
