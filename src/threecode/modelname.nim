@@ -35,6 +35,7 @@ const ModelFamilies* = [
 
 const ModelAliases* = [
   ("k3", "kimi-k3"),
+  ("k3.1", "kimi-k3.1"),
   ("kimi3", "kimi-k3"),
   ("kimi-for-coding", "kimi-k2.7-code"),
   ("kimi-for-coding-highspeed", "kimi-k2.7-code-highspeed"),

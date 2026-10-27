@@ -468,6 +468,7 @@ suite "config: known-good lookup with normalized pretty names":
     # off-table ids (the retired kimi-k2.6 direct row) stay empty.
     check knownGoodWireModel("kimicode", "kimi-for-coding") == "kimi-for-coding"
     check knownGoodWireModel("kimicode", "kimi-k2.6") == ""
+
     check knownGoodWireModel("kimicode", "kimi-k2.5") == ""
     check knownGoodWireModel("kimicode", "weird-model") == ""
     # A designator sibling is not a qualifier tail of the base combo.
@@ -481,6 +482,24 @@ suite "config: known-good lookup with normalized pretty names":
     check knownGoodFamily("platte", "glm-5.3") == "glm"
     check knownGoodWireModel("novita", "glm-5.3-flash") == "zai-org/glm-5.3-flash"
     check knownGoodWireModel("venice", "glm-5.3-flash") == "z-ai-glm-5-3-flash"
+
+  test "knownGoodWireModel resolves kimi k3.1 wire ids":
+    check knownGoodWireModel("kimicode", "kimi-k3.1-pro") == "k3.1-pro"
+    check knownGoodWireModel("kimicode", "k3.1-pro-highspeed") ==
+      "k3.1-pro-highspeed"
+    check knownGoodWireModel("venice", "kimi-k3.1-pro-highspeed") ==
+      "kimi-k3-1-pro-highspeed"
+    check knownGoodWireModel("commandcode", "moonshotai/Kimi-K3.1-Pro") ==
+      "moonshotai/Kimi-K3.1-Pro"
+    check knownGoodWireModel("volccode", "kimi-k3.1-pro") == "kimi-k3.1-pro"
+    check knownGoodWireModel("vercel", "moonshotai/kimi-k3.1-pro") ==
+      "moonshotai/kimi-k3.1-pro"
+    check knownGoodWireModel("cheaperinference", "kimi-k3.1-pro-highspeed") ==
+      "kimi-k3.1-pro-highspeed"
+    check knownGoodFamily("cheaperinference", "kimi-k3.1-pro") == "kimi"
+    check knownGoodWireModel("openrouter", "moonshotai/kimi-k3.1-pro") ==
+      "moonshotai/kimi-k3.1-pro"
+    check knownGoodFamily("openrouter", "moonshotai/kimi-k3.1-pro") == "kimi"
 
   test "orderedModels keeps entered order regardless of known-good rank":
     let prov = ProviderRec(name: "zai", url: "https://api.z.ai",
