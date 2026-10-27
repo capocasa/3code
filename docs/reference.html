@@ -103,7 +103,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">:verifier on/off</span></tt></td><td>toggle the verifier without losing the selection</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:notify</span></tt></td><td>show notify mode</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:notify on/off</span></tt></td><td>toggle the desktop notification that fires when a turn ends</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">:retry</span></tt></td><td>retry now: cut a retry backoff or resend a data-less in-flight request (same as ctrl-r)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:retry</span></tt></td><td>retry now: cut a retry backoff or resend a data-less in-flight request</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:retry list</span></tt></td><td>show patient-retry mode</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:retry on/off</span></tt></td><td>toggle patient retry of 429/5xx/network errors</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:private</span></tt></td><td>show private mode and trusted providers</td></tr>
@@ -157,6 +157,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <tr><td><tt class="docutils literal"><span class="pre">auto-update</span></tt></td><td><tt class="docutils literal"><span class="pre">true</span></tt>/<tt class="docutils literal"><span class="pre">false</span></tt></td><td>self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">verifier_model</span></tt></td><td><tt class="docutils literal"><span class="pre">PROVIDER.MODEL</span></tt></td><td>the model goal mode's satisfaction check runs on (see <a class="reference external" href="manual.html#verifier-models">verifier models</a>); a decision model answers typed questions in one request. Not set = the session model checks (the default)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">verifier</span></tt></td><td><tt class="docutils literal"><span class="pre">on</span></tt>/<tt class="docutils literal"><span class="pre">off</span></tt></td><td>enable/disable the selected verifier without clearing it; absent means on while a model is selected</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">allow-empty-prompt</span></tt></td><td><tt class="docutils literal"><span class="pre">on</span></tt>/<tt class="docutils literal"><span class="pre">off</span></tt> (default on)</td><td>submitting an empty prompt continues the ongoing session: a turn runs on the messages as they stand, appending no user message; <tt class="docutils literal"><span class="pre">allow_empty_prompt</span></tt> spelling accepted</td></tr>
 </table>
 <h3 id="provider">provider</h3><p>One <tt class="docutils literal"><span class="pre">[provider]</span></tt> section per provider; repeat the section header for each. Sections may share a <tt class="docutils literal"><span class="pre">url</span></tt> and <tt class="docutils literal"><span class="pre">key</span></tt>; two sections with the same <tt class="docutils literal"><span class="pre">name</span></tt> are a config error.</p>
 <table border="1" class="docutils"><tr><th>key</th><th>meaning</th></tr>
@@ -225,7 +226,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-26 12:34:27 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-27 14:15:53 UTC</small>
       </div>
     </div>
   </div>
