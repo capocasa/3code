@@ -456,6 +456,12 @@ suite "config: known-good lookup with normalized pretty names":
     check knownGoodWireModel("volccode", "kimi-k3.1-pro") == "kimi-k3.1-pro"
     check knownGoodWireModel("vercel", "moonshotai/kimi-k3.1-pro") ==
       "moonshotai/kimi-k3.1-pro"
+    check knownGoodWireModel("cheaperinference", "kimi-k3.1-pro-highspeed") ==
+      "kimi-k3.1-pro-highspeed"
+    check knownGoodFamily("cheaperinference", "kimi-k3.1-pro") == "kimi"
+    check knownGoodWireModel("openrouter", "moonshotai/kimi-k3.1-pro") ==
+      "moonshotai/kimi-k3.1-pro"
+    check knownGoodFamily("openrouter", "moonshotai/kimi-k3.1-pro") == "kimi"
 
   test "orderedModels keeps entered order regardless of known-good rank":
     let prov = ProviderRec(name: "zai", url: "https://api.z.ai",
