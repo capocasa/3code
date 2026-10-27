@@ -42,20 +42,33 @@ vision = "on"
 
 suite "vision: known-good curation":
   test "every combo row carries the vision field":
-    # Arity is compile-checked; what matters is that the seeded rows are
-    # exactly the probed-live ones, not a broad family sweep.
+    # Arity is compile-checked; what matters is the seeded rows: every
+    # known-good row of a multimodal model, minus the probe exceptions.
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 5
+    check visionRows == 269
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
     check knownGoodVision("zaicode", "glm-5.3-flash")
 
-  test "third-party hostings wait for a probe":
-    check not knownGoodVision("openrouter", "z-ai/glm-5.3-flash")
-    check not knownGoodVision("novita", "zai-org/glm-5.3-flash")
+  test "third-party hostings of vision models are curated too":
+    check knownGoodVision("openrouter", "z-ai/glm-5.3-flash")
+    check knownGoodVision("novita", "zai-org/glm-5.3-flash")
+    check knownGoodVision("xai", "grok-4.7")
+    check knownGoodVision("google", "gemini-3.8-flash")
+    check knownGoodVision("openai", "gpt-5.4")
+    check knownGoodVision("mistral", "mistral-large-4")
+    check knownGoodVision("together", "thinkingmachines/Inkling")
+    check knownGoodVision("xiaomi", "mimo-v2.6-flash")
+    check not knownGoodVision("nebius", "zai-org/GLM-5.3-Flash")
+    check not knownGoodVision("nebius", "deepseek-ai/DeepSeek-V4.1-Flash")
+    check not knownGoodVision("nebius", "nvidia/Nemotron-3.5-Super-VL")
+    check not knownGoodVision("anthropic", "claude-sonnet-5-5")
+    check not knownGoodVision("openai", "o3-mini")
+    check not knownGoodVision("openai", "gpt-5.3-codex")
+    check not knownGoodVision("groq", "openai/gpt-oss-120b")
 
   test "the deepseek vision-exp hostings are curated":
     # novita and the zen gateways dropped vision-exp (live 404s / no
@@ -68,6 +81,8 @@ suite "vision: known-good curation":
     check not knownGoodVision("zai", "glm-5.3")
     check not knownGoodVision("zai", "glm-5.2")
     check not knownGoodVision("deepseek", "deepseek-v4-flash")
+    check not knownGoodVision("xai", "grok-build-0.1")
+    check not knownGoodVision("novita", "moonshotai/kimi-k2.6")
     check not knownGoodVision("made-up", "whatever")
 
 suite "vision: visionCapable":

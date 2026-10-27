@@ -1018,11 +1018,17 @@ model:
   the transcript shows `· read img logo.png 1920x1080 -> 1280x720`, and the
   follow-up message carries the pixels.
 
-Which models can see: `zai.glm-5.3-flash`, `zaicode.glm-5.3-flash` and the
-`deepseek-v4-flash-vision-exp` hostings are curated vision-capable in the
-known-good table (`--good`). Third-party hostings of the same models are a
-patchwork: add `[params] vision = "on"` for a provider+model you have
-probed yourself (`:provider edit`), or `"off"` to disable a curated one.
+Which models can see: every known-good row of a multimodal model is curated
+vision-capable (`--good`): the whole gemini and grok lineups, the OpenAI
+gpt chat line (not gpt-oss, o3-mini, or the codex slugs: text-only),
+glm-5.3-flash on every host, deepseek v4.1-flash and the v4-flash-vision-exp
+hostings, mistral-large-4 / large-2512, nemotron-3.5-super-vl, inkling, and
+mimo v2.6. Spot-probed live with a real image on the providers that took a
+key (answers came back: grok said "Button.", venice's glm-5.3-flash said
+"Buttons"). Two exceptions stay off: nebius, whose proxy rejects image
+content parts outright, and the claude line, because 3code's Anthropic wire
+path has no image-part translation yet. `[params] vision = "off"` revokes
+a curated combo (`:provider edit`), `"on"` opts an experimental one in.
 On a non-vision model, `@x.png` and `read x.png` both fail with a hint naming
 a vision model — nothing silently degrades.
 
