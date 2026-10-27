@@ -32,6 +32,7 @@ usage: 3code [options] [prompt...]
 | `--no-sandbox` | disable sandbox enforcement for this run (bash runs unconfined) |
 | `-D`, `--debug` | colored debug trace to stderr |
 | `--acp` | speak [ACP v1](manual.html#agent-client-protocol) on stdio as the agent, for editors and custom clients (takes no prompt) |
+| `--rpc[=PORT]` | serve the plain-text RPC surface for 3code-app on loopback (headless, one session per process) |
 | `-v`, `--version` | print version (release builds carry branch/commit provenance) |
 | `-h`, `--help` | the usage message, including the config path |
 
