@@ -216,7 +216,7 @@ type
       ## forever: the joinThread-after-it hang (1442s CI kill).
     served*: Atomic[int]
       ## Connections fully served. Incremented by the retry-now serve
-      ## variants so a test can prove a Ctrl+R did (or did not) resend.
+      ## variants so a test can prove `:retry` did (or did not) resend.
     secondResponse*: string
       ## Second connection's body (the retry-now variants); `response` is
       ## always the first connection's.
@@ -515,7 +515,7 @@ suite "streaming SSE tool-call accumulation":
 proc serveTwoDelayedFirst(server: SseServer) {.thread.} =
   ## Two sequential connections: the first holds the response head for
   ## 2400ms (a request that shipped nothing), the second answers
-  ## immediately. A Ctrl+R press that lands inside the delay aborts the
+  ## immediately. A `:retry` that lands inside the delay aborts the
   ## first attempt; the resend takes the second connection.
   const delayMs = 2400
   for round in 0 ..< 2:
@@ -533,14 +533,14 @@ proc serveTwoDelayedFirst(server: SseServer) {.thread.} =
       discard client.drainRequestBody(contentLength)
       server.served.store(round + 1, moRelease)
     except CatchableError:
-      discard  # the aborted first client: expected on a Ctrl+R resend
+      discard  # the aborted first client: expected on a `:retry` resend
     client.close()
 
 proc serveContentPauseContent(server: SseServer) {.thread.} =
   ## One connection: head + a first content delta, a 1500ms pause, then
   ## the rest of the stream. Model data HAS shipped during the pause, so
-  ## a Ctrl+R press there must be ignored (retrying would duplicate
-  ## visible output): the stream continues on the same connection.
+  ## a `:retry` there must be ignored (retrying would duplicate visible
+  ## output): the stream continues on the same connection.
   const pauseMs = 1500
   var client: Socket
   if not server.acceptWithinDeadline(client): return
@@ -563,14 +563,14 @@ proc serveContentPauseContent(server: SseServer) {.thread.} =
   client.close()
 
 suite "streaming SSE: retry-now":
-  # The streaming side of the Ctrl+R contract: a request that has shipped
-  # nothing (head still pending) is cancelled and resent; a request that
-  # has shipped model data ignores the press entirely.
+  # The streaming side of the `:retry` contract: a request that has
+  # shipped nothing (head still pending) is cancelled and resent; a
+  # request that has shipped model data ignores the command entirely.
   proc retryAfter(ms: int) {.thread.} =
     sleep ms
     requestTurnRetry("test-timer")
 
-  test "press while only headers pending: cancel and resend":
+  test "command while only headers pending: cancel and resend":
     let server = newSseServer(makeSseCompleteContent("FIRST_ATTEMPT", "id-cr1"))
     server.secondResponse = makeSseCompleteContent("SECOND_ATTEMPT", "id-cr2")
     var srv: Thread[SseServer]
@@ -591,9 +591,9 @@ suite "streaming SSE: retry-now":
     check server.served.load(moAcquire) == 2
     check not isRetryNow()
 
-  test "press after content shipped: ignored, stream completes":
+  test "command after content shipped: ignored, stream completes":
     # The first chunk is ONLY a content delta — no finish_reason, no
-    # [DONE] — so the stream is genuinely incomplete when the press
+    # [DONE] — so the stream is genuinely incomplete when the command
     # lands mid-pause.
     let server = newSseServer(
       "data: " & $(%*{"choices":[{"index":0,

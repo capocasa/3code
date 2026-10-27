@@ -338,18 +338,19 @@ suite "non-streaming xml tool_call promotion":
     check "<tool_call>" notin msg{"content"}.getStr
 
 suite "retry-now through the shared retry block":
-  # The Ctrl+R contract, at the layer that owns it: a stale press is
-  # cleared at callModel entry, a mid-loop press aborts the attempt as
-  # the RetryNowMsg marker and resends immediately (no backoff, no
-  # retry-level inflation), and a press during a live backoff skips the
-  # remaining wait and retries now while the level inc below the wait
-  # block still runs — the backoff times for later failures are kept.
+  # The `:retry` contract, at the layer that owns it: a stale command is
+  # cleared at callModel entry, a mid-loop command aborts the attempt as
+  # the RetryNowMsg marker and resends immediately (no backoff, curve
+  # reset), and a command during a live backoff skips the remaining wait
+  # and retries now with the curve reset — the next failure backs off
+  # from the short end again, not where the skipped wait left it.
   var savedStreaming: bool
 
   setup:
     savedStreaming = streamingEnabled
     streamingEnabled = false
     resetHttpStubIdx()
+    resetRetryLevels()
     clearRetryNow()
     clearInterrupted()
 
@@ -373,10 +374,10 @@ suite "retry-now through the shared retry block":
     sleep ms
     requestTurnRetry("test-timer")
 
-  test "a stale press (no request in flight) does nothing":
-    # requestTurnRetry before the call = the press landed during a tool
-    # call or between turns. callModel clears it at entry, so the first
-    # canned response is used, not aborted-and-resent.
+  test "a stale command (no request in flight) does nothing":
+    # requestTurnRetry before the call = the command landed during a
+    # tool call or between turns. callModel clears it at entry, so the
+    # first canned response is used, not aborted-and-resent.
     requestTurnRetry("test-stale")
     writeResponses("tc_retrynow_stale.json", """[
       {"choices": [{"index": 0, "message": {"content": "FIRST"},
@@ -391,7 +392,7 @@ suite "retry-now through the shared retry block":
     check msg{"content"}.getStr == "FIRST"
 
   test "an aborted attempt (RetryNowMsg) resends immediately, no backoff":
-    # First response is a canned Ctrl+R abort; the second succeeds. A
+    # First response is a canned `:retry` abort; the second succeeds. A
     # backoff here would cost >= 1s (any level), so finishing far under
     # that proves the resend was immediate.
     writeResponses("tc_retrynow_marker.json", """[
@@ -413,7 +414,7 @@ suite "retry-now through the shared retry block":
 
   test "a press during the backoff wait retries now":
     # First response is a 429 (backoff >= 1s at any level). A timer
-    # presses Ctrl+R 300ms in; the wait breaks, the resend takes the
+    # fires `:retry` 300ms in; the wait breaks, the resend takes the
     # second response, and the whole call finishes far under the full
     # backoff. The press is consumed, not left armed.
     writeResponses("tc_retrynow_backoff.json", """[
@@ -434,16 +435,14 @@ suite "retry-now through the shared retry block":
     check elapsed < 0.9
     check not isRetryNow()
 
-  test "the skip keeps the backoff times for later failures":
+  test "the skip resets the backoff curve for later failures":
     # Same skip as above; then a second call whose first response is a
-    # 429 followed by a 401. The 429's wait must still run its full
-    # length (the level inc below the skipped wait executed, exactly as
-    # after an unskipped one), so the second call takes >= 1s. If the
-    # skip had skipped the inc too, a level-0 429 would still be 1s, so
-    # assert on the discriminating case instead: the skip itself must
-    # not have LOWERED anything (elapsed < 0.9 for call one, and call
-    # two's wait not zero).
-    writeResponses("tc_retrynow_keepcurve.json", """[
+    # 429 followed by a 401. The skip reset the curve, so that 429 waits
+    # the level-0 1s. Had the skip kept the curve (the old semantics:
+    # the level inc below the skipped wait executed), the same 429 would
+    # wait the level-1 2s — the < 1.9 bound is the discriminator, and
+    # >= 0.9 proves a real level-0 wait ran rather than no wait.
+    writeResponses("tc_retrynow_resetcurve.json", """[
       {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
       {"choices": [{"index": 0, "message": {"content": "ONE"},
         "finish_reason": "stop"}]},
@@ -460,7 +459,8 @@ suite "retry-now through the shared retry block":
     joinThread(timer)
     check msg1 != nil
     check skipElapsed < 0.9
-    # Second call: full 429 backoff (>= 1s), then the 401 terminates.
+    # Second call: level-0 429 wait (~1s, not the kept-curve 2s), then
+    # the 401 terminates.
     let t1 = epochTime()
     var raisedCode = 0
     try:
@@ -471,3 +471,70 @@ suite "retry-now through the shared retry block":
     let fullElapsed = epochTime() - t1
     check raisedCode == 401
     check fullElapsed >= 0.9
+    check fullElapsed < 1.9
+
+  test "a full wait after a skip incs normally":
+    # The skip flag is per failure: attempt one's skipped wait resets the
+    # curve, attempt two's FULL wait (no second `:retry`) must inc it.
+    # Call two proves the inc ran: its 429 waits the level-1 2s, not the
+    # level-0 1s a stale skip flag (reset instead of inc) would leave.
+    writeResponses("tc_retrynow_skipthenfull.json", """[
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"choices": [{"index": 0, "message": {"content": "DONE"},
+        "finish_reason": "stop"}]},
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"failure": "401", "body": "{\"error\":\"unauthorized\"}"}
+    ]""")
+    var usage: Usage
+    var timer: Thread[int]
+    createThread(timer, retryAfter, 300)
+    let msg = callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    joinThread(timer)
+    check msg != nil
+    check msg{"content"}.getStr == "DONE"
+    let t1 = epochTime()
+    var raisedCode = 0
+    try:
+      discard callModel(glmProfile(),
+        %*[{"role": "user", "content": "go"}], usage, 0)
+    except HttpError as e:
+      raisedCode = e.code
+    let fullElapsed = epochTime() - t1
+    check raisedCode == 401
+    check fullElapsed >= 1.9
+
+  test "the marker resend resets the curve too":
+    # The other retry-now consumption site: the data-less resend. Call
+    # one takes a full 429 wait (no timer) and succeeds, leaving
+    # rateRetryLevel = 1 under both semantics. Call two is a marker
+    # resend ("retry-now" fixture) followed by success — the retry-now
+    # branch must zero the level. Call three proves it: its 429 waits
+    # the level-0 1s, not the level-1 2s, then the 401 terminates.
+    writeResponses("tc_retrynow_marker_reset.json", """[
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"choices": [{"index": 0, "message": {"content": "ONE"},
+        "finish_reason": "stop"}]},
+      {"failure": "retry-now"},
+      {"choices": [{"index": 0, "message": {"content": "TWO"},
+        "finish_reason": "stop"}]},
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"failure": "401", "body": "{\"error\":\"unauthorized\"}"}
+    ]""")
+    var usage: Usage
+    discard callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)  # full 1s wait
+    discard callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)  # marker: no wait
+    let t1 = epochTime()
+    var raisedCode = 0
+    try:
+      discard callModel(glmProfile(),
+        %*[{"role": "user", "content": "go"}], usage, 0)
+    except HttpError as e:
+      raisedCode = e.code
+    let fullElapsed = epochTime() - t1
+    check raisedCode == 401
+    check fullElapsed >= 0.9
+    check fullElapsed < 1.9

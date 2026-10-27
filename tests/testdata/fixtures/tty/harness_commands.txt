@@ -1,7 +1,7 @@
 ===== 571 =====
   :notify on|off    toggle turn-end desktop notification
-  :retry              retry now: cut a retry backoff or resend a data-less
-                      in-flight request
+  :retry              retry now: cut a backoff wait (the curve resets) or
+                      resend a data-less in-flight request
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
@@ -60,8 +60,8 @@ input:
 ❯
 ===== 950 =====
   :notify on|off    toggle turn-end desktop notification
-  :retry              retry now: cut a retry backoff or resend a data-less
-                      in-flight request
+  :retry              retry now: cut a backoff wait (the curve resets) or
+                      resend a data-less in-flight request
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt

@@ -3819,8 +3819,8 @@ commands:
   :verifier list      list verification-class models (decision models like jev)
   :verifier X         run goal checks on X (a listed verifier or a provider model)
   :verifier on|off    toggle the verifier without losing the selection
-  :retry              retry now: cut a retry backoff or resend a data-less
-                      in-flight request
+  :retry              retry now: cut a backoff wait (the curve resets) or
+                      resend a data-less in-flight request
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :private            show private mode (off by default; on = allow-private only)

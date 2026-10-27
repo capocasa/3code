@@ -744,12 +744,13 @@ Use these commands to inspect or change the setting:
 :retry on
 ```
 
-`:retry` with no argument is retry now: it cuts a backoff wait short,
-keeping the backoff schedule as it was so later failures back off exactly
-as they would have, and it cancels and resends a request that has not
-shipped any output yet (still connecting, or headers only). Once model
-output is streaming, or at the idle prompt, it does nothing. Commands
-typed while a turn runs take effect at Enter, so this works mid-wait.
+`:retry` with no argument is retry now: it cuts a backoff wait short
+and resets the backoff schedule, so the next failure starts from the
+short end of the curve again, and it cancels and resends a request that
+has not shipped any output yet (still connecting, or headers only). Once
+model output is streaming, or at the idle prompt, it does nothing.
+Commands typed while a turn runs take effect at Enter, so this works
+mid-wait.
 
 Even with patient retry off, 3code gives transient failures about a minute
 before returning to the interactive prompt. The setting is stored as
