@@ -768,18 +768,17 @@ Use these commands to inspect or change the setting:
 :retry on
 ```
 
-`:retry` with no argument is the command form of Ctrl+R: retry now.
+`:retry` with no argument is retry now: it cuts a backoff wait short,
+keeping the backoff schedule as it was so later failures back off exactly
+as they would have, and it cancels and resends a request that has not
+shipped any output yet (still connecting, or headers only). Once model
+output is streaming, or at the idle prompt, it does nothing. Commands
+typed while a turn runs take effect at Enter, so this works mid-wait.
 
 Even with patient retry off, 3code gives transient failures about a minute
 before returning to the interactive prompt. The setting is stored as
 `patient_retry` in `[settings]` ([settings in the
 reference](reference.html#settings)). Press Esc to cancel the wait.
-Press Ctrl+R to cut the wait short and retry now: the backoff schedule is
-kept as it was, so later failures back off exactly as they would have.
-Ctrl+R also cancels and resends a request that has not shipped any output
-yet (still connecting, or headers only); once model output is streaming,
-or at the idle prompt, it does nothing. Bare `:retry` does the same
-thing from the command line.
 A stream that stalls network-quiet or arrives truncated mid-response is
 detected and retried on its own, regardless of the setting.
 
