@@ -552,7 +552,16 @@ suite "terminal visual contract":
     tty.send "hello"
     tty.drain(200)
     tty.expect "\u276f hello"
-    tty.send "\x15"  # Ctrl-U clears the editor line
+    tty.send "\x15"  # Ctrl-U deletes to line start, emptying "hello"
+    # Readline search reaches the real pty: C-r repaints the prompt row
+    # as the search minibuffer while the query is typed, C-g restores.
+    tty.send "\x12"        # Ctrl-R
+    tty.drain(200)
+    tty.send "hel"
+    tty.drain(200)
+    tty.expectInHistory "reverse-i-search)`hel'"
+    tty.send "\a"          # Ctrl-G aborts the search
+    tty.drain(150)
     tty.send ":q\n"
     tty.drain(300)
     tty.expectExit(0, timeoutMs = 5000)

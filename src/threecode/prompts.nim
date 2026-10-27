@@ -3782,7 +3782,7 @@ commands:
   :verifier X         run goal checks on X (a listed verifier or a provider model)
   :verifier on|off    toggle the verifier without losing the selection
   :retry              retry now: cut a retry backoff or resend a data-less
-                      in-flight request (same as ctrl-r)
+                      in-flight request
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :private            show private mode (off by default; on = allow-private only)
@@ -3861,12 +3861,24 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   ctrl+k        delete to end of line
   alt+d         delete the word after the cursor (also ctrl+delete)
   ctrl+t        transpose characters around the cursor
+  alt+t         transpose the words around the cursor
+  alt+u/l/c     upcase / downcase / capitalize the next word
+  ctrl+y        yank the last kill; alt+y cycles older kills
+  alt+.         insert the last word of the previous entry
+  ctrl+_        undo (also ctrl+/); a typed run retracts in one step
+  alt+r         revert to the recalled entry (or the empty draft)
+  ctrl+q        insert the next key literally (e.g. a real tab)
+  ctrl+]        jump to the next occurrence of the next typed char
+  ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   alt+e         edit the prompt buffer in $VISUAL/$EDITOR

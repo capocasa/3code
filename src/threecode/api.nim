@@ -601,12 +601,11 @@ proc requestTurnInterrupt*(source = "unspecified") {.gcsafe.} =
   cancelActiveTool()
 
 var retryNowFlag: Atomic[bool]
-  ## Set by Ctrl+R (the input thread's `onRetryRequest` hook). Consumed by
-  ## `callModel`: a retry backoff skips its remaining wait, and a transport
-  ## that has not shipped model data aborts and resends. Cleared at every
-  ## `callModel` entry, so a press that lands between requests (during a
-  ## tool call, after the stream completed) does nothing, per the Ctrl+R
-  ## contract.
+  ## Set by the `:retry` command. Consumed by `callModel`: a retry backoff
+  ## skips its remaining wait, and a transport that has not shipped model
+  ## data aborts and resends. Cleared at every `callModel` entry, so a
+  ## request that lands between requests (during a tool call, after the
+  ## stream completed) does nothing.
 
 proc isRetryNow*(): bool {.gcsafe.} =
   retryNowFlag.load(moAcquire)

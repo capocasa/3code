@@ -1483,12 +1483,12 @@ proc cmdRetry(arg: string): string =
   let parts = arg.splitWhitespace()
   case parts.len
   of 0:
-    # The command form of Ctrl+R: same one-flag payload, effective while
+    # The command form: one-flag payload, effective while
     # a request is in flight or a retry backoff is counting down. At idle
-    # the flag is cleared at the next callModel entry, so the press is
-    # inert exactly like the key.
+    # the flag is cleared at the next callModel entry, so an idle
+    # invocation is inert.
     requestTurnRetry(":retry")
-    return hintLnS("instant retry requested (same as ctrl-r); takes " &
+    return hintLnS("instant retry requested; takes " &
       "effect if a request is in flight or a backoff is running")
   of 1:
     if parts[0] == "list":

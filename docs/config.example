@@ -51,7 +51,16 @@ current = "ollama.qwen3-coder:480b"
 ; select-left, select-right, select-up, select-down, select-home,
 ; select-end, select-word-left, select-word-right, select-all,
 ; select-buffer-start, select-buffer-end, cut, copy, paste, yank,
-; transpose-chars. `clear` also adds the discarded text to history.
+; yank-pop, yank-last-arg, transpose-chars, transpose-words,
+; upcase-word, downcase-word, capitalize-word, undo, revert-line,
+; isearch-backward, isearch-forward, nonincremental-search-backward,
+; nonincremental-search-forward, history-begin, history-end, set-mark,
+; exchange-point-and-mark, quoted-insert, char-search,
+; char-search-backward, delete-horizontal-space, tab-insert.
+; `clear` also adds the discarded text to history. Key tokens beyond
+; the obvious: Ctrl_ (C-_), Ctrl/ (C-/), Ctrl@ (C-@), Ctrl] (C-]),
+; Alt< Alt> (M-< M->), Alt. (M-.), AltSpace (M-SPC), AltY, AltR,
+; AltP, AltN, AltT, AltU, AltL, AltC, AltQ, CtrlR, CtrlS.
 ; [shortcuts]
 ; cancel = "DoubleESC CtrlC"
 ; clear = "ESC"

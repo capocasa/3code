@@ -1551,25 +1551,14 @@ suite "minline editor: shortcuts":
       discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "> hello"
 
-  test "CtrlR fires the retry-request hook and inserts nothing":
-    var fired = 0
+  test "unbound ctrl keys are swallowed, never literal characters":
     var ed = initEditor()
-    ed.onRetryRequest = proc() = inc fired
     let d = newDriver()
     d.pushString "ab"
-    d.push @[18]     # Ctrl+R, default binding of retry-request
+    d.push @[15]     # Ctrl+O: never bound, must not insert or cancel
     d.pushString "c"
     d.push Enter
     check d.run(ed, prompt = "> ") == "abc"
-    check fired == 1
-    # Unset hook: the key is a swallowed no-op, never a literal character.
-    var ed2 = initEditor()
-    let d2 = newDriver()
-    d2.pushString "ab"
-    d2.push @[18]
-    d2.pushString "c"
-    d2.push Enter
-    check d2.run(ed2, prompt = "> ") == "abc"
 
   test "plain CtrlE is end-of-line, not edit-in-editor":
     # The default spec once read "AltE CtrlX CtrlE" with no chord
@@ -1805,8 +1794,28 @@ const
   CtrlK* = @[11]
   CtrlT* = @[20]
   CtrlY* = @[25]
+  CtrlU* = @[21]
   AltD* = @[27, 100]
   AltW* = @[27, 119]
+  AltY* = @[27, 121]
+  AltDot* = @[27, 46]
+  AltR* = @[27, 114]
+  AltP* = @[27, 112]
+  AltN* = @[27, 110]
+  AltLess* = @[27, 60]
+  AltGreater* = @[27, 62]
+  CtrlUnderscore* = @[31]
+  CtrlR* = @[18]
+  CtrlS* = @[19]
+  CtrlG* = @[7]
+  CtrlQ* = @[17]
+  AltT* = @[27, 116]
+  AltU* = @[27, 117]
+  AltL* = @[27, 108]
+  AltC* = @[27, 99]
+  AltSpace* = @[27, 32]
+  CtrlAt* = @[0]
+  CtrlCloseBracket* = @[29]
 
 proc selCells*(g: Grid, r: int): int =
   ## Count reverse-video cells on row `r` (the selection highlight).
@@ -1974,6 +1983,109 @@ suite "minline editor: new edit ops":
     d.push CtrlK
     d.push Enter
     check d.run(ed, prompt = "> ") == "he"
+
+  test "ctrl+u deletes to start of line":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello"
+    d.push CtrlA
+    d.push Right
+    d.push Right
+    d.push CtrlU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "llo"
+
+  test "ctrl+u from end of line clears it":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello"
+    d.push CtrlU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+
+  test "ctrl+u spares other logical lines":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one"
+    d.push AltEnter
+    d.pushString "two"
+    d.push CtrlU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one\n"
+
+  test "ctrl+w then ctrl+y restores the killed word":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello world"
+    d.push CtrlW
+    d.push CtrlY
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "hello world"
+
+  test "consecutive ctrl+w kills append into one ring entry":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one two three"
+    d.push CtrlW
+    d.push CtrlW
+    d.push CtrlW
+    d.push CtrlY
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one two three"
+
+  test "a cursor move between kills breaks the append":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one two three"
+    d.push CtrlW     # kills "three"
+    d.push Left      # any non-kill action breaks the chain
+    d.push CtrlW     # kills "two " as its own entry
+    d.push CtrlY     # yanks the most recent kill only
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "one two "
+
+  test "ctrl+k then ctrl+u kills append across directions":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello world"
+    d.push CtrlA
+    for _ in 1 .. 5: d.push Right
+    d.push CtrlK     # kills " world", cursor parks at 5
+    d.push CtrlU     # kills "hello" at the same seat: prepends
+    d.push CtrlY
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "hello world"
+
+  test "alt+y cycles the kill ring after a yank":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one"
+    d.push CtrlU     # ring: [one]
+    d.pushString "two"
+    d.push CtrlU     # ring: [two, one]
+    d.push CtrlY     # inserts "two"
+    d.push AltY      # replaces with "one"
+    d.push AltY      # wraps back to "two"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "two"
+
+  test "kills are rune-safe through yank":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "héllo wörld"
+    d.push CtrlW
+    d.push CtrlY
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "héllo wörld"
+
+  test "alt+. yanks the last arg, repeats walk older entries":
+    var ed = initEditor()
+    seedHistory(ed, @["alpha beta", "gamma delta"])
+    let d = newDriver()
+    d.push AltDot    # last word of the newest entry: "delta"
+    d.push AltDot    # replaced by the older entry's "beta"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "beta"
 
   test "alt+d deletes the word after the cursor":
     var ed = initEditor()
@@ -2182,3 +2294,319 @@ suite "minline editor: repaint-free cursor motion":
     check isCursorOnlyBytes(tail)
     check ed.line.position == 6
     check ed.renderRow == 1
+
+suite "minline editor: undo":
+  test "ctrl+_ retracts a typed run as one step":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello"
+    d.push CtrlUnderscore
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+
+  test "a cursor move between typed chars splits the undo groups":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push CtrlA      # move: ends the first typing group
+    d.pushString "c"  # new group
+    d.push CtrlUnderscore
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab"
+
+  test "ctrl+_ restores after a kill with the cursor parked":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello world"
+    d.push CtrlW      # kills "world"
+    d.push CtrlUnderscore
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "hello world"
+
+  test "ctrl+_ undoes an escape-clear":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "keep"
+    d.push Esc        # clears the non-empty line
+    d.push CtrlUnderscore
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "keep"
+
+  test "undo does not cross history views":
+    var ed = initEditor()
+    seedHistory(ed, @["old"])
+    let d = newDriver()
+    d.pushString "draft"
+    d.push Up         # stash draft, load "old" (undo stack resets)
+    d.push Down       # back to the draft
+    d.push CtrlUnderscore  # nothing to undo on this view
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "draft"
+
+  test "alt+r reverts edits to a recalled entry":
+    var ed = initEditor()
+    seedHistory(ed, @["original"])
+    let d = newDriver()
+    d.push Up
+    d.pushString "XX"
+    d.push AltR
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "original"
+
+  test "alt+r empties the fresh draft":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "junk"
+    d.push AltR
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+
+  test "undo is rune-safe":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "héllo"
+    d.push CtrlW      # rune-safe kill ends the typing group
+    d.pushString "!"  # a fresh group of one
+    d.push CtrlUnderscore  # undoes the "!" insert (buffer empty)
+    d.push CtrlUnderscore  # undoes the kill: bytes come back whole
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "héllo"
+
+  test "a typed run through a kill retracts together":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "héllo!"   # one consecutive insert run
+    d.push CtrlUnderscore    # retracts the whole run, like readline
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+
+suite "minline editor: history search":
+  test "ctrl+r query then enter accepts and submits the match":
+    var ed = initEditor()
+    seedHistory(ed, @["apple pie", "banana split"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "ban"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "banana split"
+
+  test "ctrl+r steps to older matches on repeat":
+    var ed = initEditor()
+    seedHistory(ed, @["one alpha", "two alpha", "three alpha"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "alpha"   # newest match: "three alpha"
+    d.push CtrlR           # step older: "two alpha"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "two alpha"
+
+  test "ctrl+g aborts and restores the draft":
+    var ed = initEditor()
+    seedHistory(ed, @["keepme"])
+    let d = newDriver()
+    d.pushString "draft text"
+    d.push CtrlR
+    d.pushString "keep"    # match loads over the draft
+    d.push CtrlG
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "draft text"
+
+  test "escape accepts the match without submitting":
+    var ed = initEditor()
+    seedHistory(ed, @["hello there"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "there"
+    d.push Esc            # accept; the run ends at input exhaustion
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    # accepted, not submitted: the real prompt is back and the match
+    # stayed in the editor
+    check rowText(d.grid, 0).strip == "> hello there"
+
+  test "a failed search shows the failure banner":
+    var ed = initEditor()
+    seedHistory(ed, @["abc"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "zzz"
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    check rowText(d.grid, 0).startsWith "(failed reverse-i-search)"
+    check "`zzz'" in rowText(d.grid, 0)
+
+  test "the search banner shows the query and the match":
+    var ed = initEditor()
+    seedHistory(ed, @["apple pie"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "app"
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    check rowText(d.grid, 0).startsWith "(reverse-i-search)`app': "
+    check "apple pie" in rowText(d.grid, 0)
+
+  test "ctrl+s searches forward from an older entry":
+    var ed = initEditor()
+    seedHistory(ed, @["alpha one", "alpha two"])
+    let d = newDriver()
+    d.push Up
+    d.push Up            # parked on the oldest entry
+    d.push CtrlS
+    d.pushString "alpha"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "alpha two"
+
+  test "search is ascii-case-insensitive":
+    var ed = initEditor()
+    seedHistory(ed, @["Hello World"])
+    let d = newDriver()
+    d.push CtrlR
+    d.pushString "world"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "Hello World"
+
+  test "an unowned key aborts the search and then acts":
+    var ed = initEditor()
+    seedHistory(ed, @["stash me"])
+    let d = newDriver()
+    d.pushString "typed"
+    d.push CtrlR
+    d.pushString "stash"  # match replaces the buffer
+    d.push CtrlA          # not a search key: abort, restore, then move
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "typed"
+
+  test "alt+p jumps non-incrementally at enter":
+    var ed = initEditor()
+    seedHistory(ed, @["foo bar", "baz qux"])
+    let d = newDriver()
+    d.push AltP
+    d.pushString "qux"
+    d.push Enter          # completes the query and jumps (no submit)
+    d.push Enter          # now submits the jumped-to entry
+    check d.run(ed, prompt = "> ") == "baz qux"
+
+  test "alt+< and alt+> jump to the history extremes":
+    var ed = initEditor()
+    seedHistory(ed, @["a", "b", "c"])
+    let d = newDriver()
+    d.push AltLess
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "a"
+    var ed2 = initEditor()
+    seedHistory(ed2, @["a", "b", "c"])
+    let d2 = newDriver()
+    d2.pushString "x"
+    d2.push AltGreater    # back to the draft
+    d2.push Enter
+    check d2.run(ed2, prompt = "> ") == "x"
+
+suite "minline editor: readline word and mark commands":
+  test "alt+t transposes the last two words at the end":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "one two"
+    d.push AltT
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "two one"
+
+  test "alt+t mid-line drags the word before the cursor over the next":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "foo bar"
+    d.push CtrlA
+    for _ in 1 .. 3: d.push Right   # cursor inside the gap
+    d.push AltT
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "bar foo"
+
+  test "alt+u upcases the word at the cursor":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "abc def"
+    d.push CtrlA
+    d.push AltU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ABC def"
+
+  test "alt+l downcases, alt+c capitalizes":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ABC def"
+    d.push CtrlA
+    d.push AltL      # "ABC" -> "abc", cursor before the space
+    d.push AltC      # skips the space, capitalizes "def"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abc Def"
+
+  test "case commands are rune-safe":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "héllö"
+    d.push CtrlA
+    d.push AltU
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "HÉLLÖ"
+
+  test "ctrl+q inserts the next key literally":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "a"
+    d.push CtrlQ
+    d.push Tab       # a literal tab, not completion
+    d.pushString "b"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "a\tb"
+
+  test "ctrl+] jumps to the next occurrence of the typed char":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "aXbXc"
+    d.push CtrlA
+    d.push CtrlCloseBracket
+    d.pushString "X"
+    d.push CtrlCloseBracket
+    d.pushString "X"
+    d.push CtrlK     # kills from the second X to the end
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "aXb"
+
+  test "set-mark survives plain motion, exchange selects back":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"exchange-point-and-mark": "CtrlO"}.toTable
+    d.pushString "abcd"
+    d.push CtrlAt      # mark at 4
+    d.push CtrlA       # plain motion: the mark must survive
+    d.push @[15]       # Ctrl+O: exchange, select back to the mark
+    expect EOFError:
+      discard d.run(ed, prompt = "> ")
+    check ed.markPos == 0
+    check ed.line.position == 4
+    check ed.selAnchor == 0
+    check selectionText(ed) == "abcd"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "delete-horizontal-space strips the gap at the cursor":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"delete-horizontal-space": "CtrlO"}.toTable
+    d.pushString "a  b"
+    d.push CtrlA
+    d.push Right
+    d.push Right      # parked between the two spaces
+    d.push @[15]
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab"
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "tab-insert puts a literal tab in the buffer":
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"tab-insert": "CtrlO"}.toTable
+    d.pushString "a"
+    d.push @[15]
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "a\t"
+    minline.configuredShortcuts = initTable[string, string]()

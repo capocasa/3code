@@ -132,9 +132,12 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
@@ -440,9 +443,12 @@ input:
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+  ctrl+u        delete to start of line
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  alt+p / n     history search completed at enter
+  alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
