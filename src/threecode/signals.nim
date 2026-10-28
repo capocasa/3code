@@ -19,6 +19,15 @@
 ## repaint before ``requestBackground`` returns: anything painted between
 ## ``kill`` and the actual stop is overwritten by the parent shell's
 ## job-control output on ``fg`` and never repainted.
+##
+## Resume is a screen change out of band: the shell's job-control output
+## scrolled or overwrote whatever the process had painted, so a resume
+## marks the resize flag (repaint on the next poll, like SIGWINCH) and
+## bumps ``backgroundResumeCount`` so the diffing painter can invalidate
+## its model and rewrite instead of skipping unchanged rows. A SIGCONT
+## left queued by an external suspend/resume is drained
+## (``drainPendingResume``) rather than left to satisfy a later suspend's
+## ``sigwait`` before the process has actually stopped.
 
 when defined(posix):
   import posix
@@ -28,6 +37,7 @@ when defined(posix):
   type SigAtomic {.importc: "sig_atomic_t", header: "<signal.h>", pure.} = cint
 
   var resizePendingFlag {.volatile.}: SigAtomic
+  var resumeCount {.volatile.}: SigAtomic
   var SIGWINCH {.importc, header: "<signal.h>".}: cint
   var SIGCONT {.importc, header: "<signal.h>".}: cint
 
@@ -48,6 +58,8 @@ when defined(posix):
     # arrives while no keyhandler is suspended.
     if rawModeValid:
       discard tcsetattr(getFileHandle(stdin), TCSANOW, unsafeAddr rawMode)
+    inc resumeCount
+    resizePendingFlag = 1
 
   proc installResizeHandler*() =
     var sa: Sigaction
@@ -95,6 +107,26 @@ when defined(posix):
   proc clearRawMode*() =
     rawModeValid = false
 
+  proc drainPendingResume*(): bool =
+    ## Dequeue a pending SIGCONT without blocking, if any. A resume from an
+    ## *external* suspend (kill -TSTP, then fg) leaves SIGCONT queued here:
+    ## it is blocked, so nobody's handler consumed it. Left queued, the next
+    ## ``requestBackground`` sigwait would return it instantly — before the
+    ## fresh SIGTSTP even stops the process — and Ctrl-Z would appear to
+    ## freeze instead of backgrounding. Pollers call this each cycle and
+    ## repaint when it fires.
+    var waitSet: Sigset
+    discard sigemptyset(waitSet)
+    discard sigaddset(waitSet, SIGCONT)
+    var info: SigInfo
+    var zero: Timespec
+    if sigtimedwait(waitSet, info, zero) == SIGCONT:
+      inc resumeCount
+      return true
+    false
+
+  proc backgroundResumeCount*(): SigAtomic = resumeCount
+
   proc requestBackground*() =
     ## Restore cooked mode, send SIGTSTP, and block until the process has
     ## been stopped and then resumed (SIGCONT). Raw mode is restored before
@@ -102,6 +134,10 @@ when defined(posix):
     ## before the kernel stops the process, so anything painted before the
     ## stop is clobbered by the shell's job-control output on ``fg``.
     restoreCookedMode()
+    # A SIGCONT queued by an earlier external suspend/resume must not
+    # satisfy the sigwait below: it predates this stop and would return
+    # before the process is stopped (see drainPendingResume).
+    discard drainPendingResume()
     discard posix.kill(posix.getpid(), posix.SIGTSTP)
     # Wait synchronously for SIGCONT. The signal is blocked process-wide, so
     # the kernel queues it rather than delivering it to a handler; sigwait
@@ -114,6 +150,11 @@ when defined(posix):
     discard sigwait(waitSet, sig)
     if rawModeValid:
       discard getFileHandle(stdin).tcSetAttr(TCSANOW, addr rawMode)
+    inc resumeCount
+    # Repaint on resume exactly like a resize: the shell's job-control
+    # output scrolled or overwrote the volatile block while we were
+    # stopped, so the next paint must not be diffed away as a no-op.
+    resizePendingFlag = 1
 
   proc markResizePending*() =
     resizePendingFlag = 1
@@ -141,3 +182,5 @@ else:
   proc restoreCookedMode*() = discard
   proc clearRawMode*() = discard
   proc requestBackground*() = discard
+  proc drainPendingResume*(): bool = false
+  proc backgroundResumeCount*(): int = 0
