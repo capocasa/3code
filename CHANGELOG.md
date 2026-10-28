@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **Plugins can add subcommands and command-line options.** A plugin
+  exporting `tc_register_cli` registers `3code <name>` subcommands
+  (`tc_cli_command` runs them: verbatim args in, output and exit code
+  out) and `--long`/`-s` options the main parser accepts and delivers
+  as one JSON object via `tc_on_cli_options`, before any session work.
+  Names the built-in CLI already owns are refused, `3code -h` lists
+  the additions, and a leading bare word dispatches exactly like
+  `provider` does. To know the surface before argv is parsed, plugins
+  now load (init, `tc_register_cli`, `tc_register_tools`) right after
+  the root check and a tolerant config read, earlier than their
+  hooks fire; `--version`, the sandbox/ACP children and the skills
+  directory stay untouched by a usage error. `:plugins` counts the
+  registered commands.
 - **Ctrl-Z suspends again on kitty-protocol terminals, and coming
   back from background repaints.** The shortcut-table refactor listed
   `suspend` as a command but never registered its handler on POSIX, so
