@@ -828,6 +828,12 @@ proc liveFatPromptFrame(): FooterFrame =
   else:
     currentFrameFromModel()
 
+var lastResumeSeen {.threadvar.}: int
+  ## Resume generation last painted against. When the process comes back
+  ## from a background suspend the shell has scrolled or overwritten the
+  ## volatile block out of band; the diff model is stale even though no
+  ## editor state changed, so the next paint must rewrite every row.
+
 proc diffEditorPaint(ed: var minline.LineEditor) =
   ## The editor's `painter` while the persistent prompt is live: one
   ## keystroke frame through the engine's row-diffing volatile painter,
@@ -843,6 +849,10 @@ proc diffEditorPaint(ed: var minline.LineEditor) =
     return
   if not liveEditorFooterAnchored():
     return
+  let resume = backgroundResumeCount()
+  if resume != lastResumeSeen:
+    lastResumeSeen = resume
+    termengine.invalidatePaintModel()
   termengine.diffEditorFrame(ed, liveFatPromptFrame())
   inputEditorReady.store(true, moRelease)
 
@@ -2403,6 +2413,14 @@ proc inputThreadProc() {.thread.} =
           if consumeResizePending():
             markResizePending()
             raise newException(IOError, "terminal resized")
+          # SIGCONT is blocked, so a resume from an external suspend
+          # (kill -TSTP from elsewhere, then fg) leaves it queued. Drain
+          # it every cycle both to repaint (the shell scrolled the block
+          # away while we were stopped) and to keep the stale signal from
+          # satisfying a later Ctrl-Z sigwait before the stop happens.
+          if drainPendingResume():
+            markResizePending()
+            raise newException(IOError, "terminal resumed")
           if errno == EINTR:
             continue
         -1
