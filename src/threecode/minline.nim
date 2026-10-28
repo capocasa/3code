@@ -3285,6 +3285,8 @@ proc applyShortcuts*(shortcuts: Table[string, string]) =
     CommandProcs["delete-to-boundary-right"] = cmdDeleteToBoundaryRight
     CommandProcs["delete-to-eol"] = cmdDeleteToEol
     CommandProcs["delete-to-bol"] = cmdDeleteToBol
+    when defined(posix):
+      CommandProcs["suspend"] = cmdSuspend
     CommandProcs["transpose-chars"] = cmdTransposeChars
     CommandProcs["undo"] = cmdUndo
     CommandProcs["revert-line"] = cmdRevertLine
@@ -3912,7 +3914,13 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   if (bits and 8) != 0: prefix.add "cmd+"
   if prefix.len == 0 and (bits and 1) != 0:
     prefix = "shift+"          # shift+delete and friends
-  discard dispatchKeyName(ed, prefix & base)
+  let name = prefix & base
+  # Same dispatch + KEYMAP fallback the legacy control-byte path uses:
+  # a binding that lives only in KEYMAP (never registered as a command)
+  # must not silently die under the kitty protocol. This exact hole is
+  # how Ctrl-Z stopped backgrounding on kitty-protocol terminals.
+  if not dispatchKeyName(ed, name) and KEYMAP.hasKey(name):
+    KEYMAP[name](ed)
 
 proc hasPendingEscapeTail(ed: LineEditor): bool =
   ## POSIX terminals send a bare Escape with the same leading byte used

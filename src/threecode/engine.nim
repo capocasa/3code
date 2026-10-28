@@ -897,6 +897,19 @@ proc diffEditorFrame*(e: var TerminalEngine; ed: var minline.LineEditor;
     stdout.flushFile
     e.lastPaintedWidth = termW
 
+proc invalidatePaintModel*(e: var TerminalEngine) =
+  ## Drop the diff model so the next paint rewrites every volatile row
+  ## instead of skipping unchanged ones. Used when the screen changed out
+  ## of band (resume from a background suspend: the shell's job-control
+  ## output scrolled or overwrote the block while the process was
+  ## stopped).
+  e.lastPaintSig = ""
+  e.lastVolatileRows = @[]
+
+proc invalidatePaintModel*() =
+  if not engineOutputEnabled: return
+  defaultEngine.invalidatePaintModel()
+
 proc diffEditorFrame*(ed: var minline.LineEditor; frame: FooterFrame) =
   if not engineOutputEnabled: return
   defaultEngine.diffEditorFrame(ed, frame)

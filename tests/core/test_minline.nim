@@ -1782,6 +1782,19 @@ suite "minline editor: kitty keyboard protocol":
     check d2.run(ed2, prompt = "> ") == ""
     minline.configuredShortcuts = initTable[string, string]()
 
+  when defined(posix):
+    test "suspend is a registered command, not just a legacy keymap key":
+      # Regression lock for Ctrl-Z dying on kitty-protocol terminals: the
+      # kitty CSI-u decoder dispatches by command name only, so a command
+      # that exists in the shortcut defaults but has no registered handler
+      # is a silent no-op there (the legacy 0x1a path masked it by falling
+      # back to KEYMAP). "suspend" must resolve in the command table.
+      var ed = initEditor()
+      let d = newDriver()
+      d.push Enter
+      discard d.run(ed, prompt = "> ")
+      check minline.CommandProcsAll.hasKey("suspend")
+
 # ---------------- Driver: selection ----------------
 
 const
