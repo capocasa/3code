@@ -123,6 +123,41 @@ suite "plugin host":
     pluginOnToolResult("bash", "env", output, code, 12, "")
     check output == "the [redacted] key is here"
 
+  test "cli registration: commands and options, builtins refused":
+    check pluginCliHasCommand("fixturecmd")
+    check not pluginCliHasCommand("provider")
+    let cmds = pluginCliCommands()
+    check cmds.len == 1
+    check cmds[0].name == "fixturecmd"
+    check cmds[0].help == "fixture plugin subcommand"
+    let opts = pluginCliOptions()
+    check opts.len == 2  # provider/model/evil-opt/duplicate all refused
+    check pluginCliFindOption("fixture-opt", '\0') >= 0
+    check pluginCliFindOption("", 'Q') >= 0
+    check pluginCliFindOption("fixture-flag", '\0') >= 0
+    check pluginCliFindOption("model", '\0') == -1
+    check pluginCliFindOption("", 'm') == -1
+    check pluginCliValueShorts() == {'Q'}  # W is a flag, no value
+
+  test "cli subcommand dispatch returns output and code":
+    resetLog()
+    let (outp, code) = pluginCliRunCommand("fixturecmd",
+                                           @["hello", "two words"])
+    check code == 0
+    check outp == "fixturecmd got: [\"hello\",\"two words\"]"
+    check pluginWaitForLog(logPath,
+      proc(l: string): bool = l.startsWith("clicmd|"))
+
+  test "cli options delivered as json":
+    resetLog()
+    pluginsDeliverCliOptions(@[("fixture-opt", "v"),
+                               ("fixture-flag", ""),
+                               ("fixture-opt", "v2")])
+    check pluginWaitForLog(logPath,
+      proc(l: string): bool =
+        "cliopts|" in l and "\"fixture-opt\":\"v2\"" in l and
+        "\"fixture-flag\":true" in l)
+
   test "registered tool advertised and executed":
     check pluginsHaveTool("fixture_echo")
     check not pluginsHaveTool("bash")  # builtin names never registerable

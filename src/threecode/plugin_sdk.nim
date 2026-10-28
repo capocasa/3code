@@ -41,6 +41,12 @@
 ##   init(s: ptr TcState)                 return 0 (value reserved)
 ##   shutdown(s: ptr TcState)
 ##   registerTools(s: ptr TcState)        call s.registerTool N times
+##   registerCli(s: ptr TcState)          call s.registerCliCommand /
+##                                        s.registerCliOption N times
+##   onCliCommand(ev: var TcCliCommandEvent): int32
+##                                        a `3code <name>` subcommand ran
+##   onCliOptions(ev: var TcCliOptionsEvent)
+##                                        plugin options seen on argv
 ##   onPrompt(ev: var TcPromptEvent)
 ##   onSystemPrompt(ev: var TcSysPromptEvent)
 ##   onToolPre(ev: var TcToolPreEvent): cint
@@ -94,6 +100,24 @@ when declared(registerTools):
   proc tc_register_tools*(s: ptr TcState) {.exportc, dynlib, cdecl.} =
     tcEnter(s)
     registerTools(s)
+
+when declared(registerCli):
+  proc tc_register_cli*(s: ptr TcState) {.exportc, dynlib, cdecl.} =
+    tcEnter(s)
+    registerCli(s)
+
+when declared(onCliCommand):
+  proc tc_cli_command*(s: ptr TcState; ev: ptr TcCliCommandEvent): cint {.
+      exportc, dynlib, cdecl.} =
+    tcEnter(s)
+    ev.code = onCliCommand(ev[])
+    0.cint
+
+when declared(onCliOptions):
+  proc tc_on_cli_options*(s: ptr TcState; ev: ptr TcCliOptionsEvent) {.
+      exportc, dynlib, cdecl.} =
+    tcEnter(s)
+    onCliOptions(ev[])
 
 when declared(onPrompt):
   proc tc_on_prompt*(s: ptr TcState; ev: ptr TcPromptEvent) {.

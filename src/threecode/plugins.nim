@@ -87,13 +87,25 @@ type
   HookId* = enum
     hInit, hShutdown, hRegisterTools, hPrompt, hSysPrompt, hToolPre,
     hToolResult, hToolExec, hTurnStart, hTurnEnd, hRetry, hSession,
-    hCompact, hFileWrite
+    hCompact, hFileWrite, hRegisterCli, hCliCommand, hCliOptions
 
   PluginTool* = object
     name*: string
     description*: string
     schema*: string          ## JSON text; parsed host-side on demand
     timeoutMs*: int32
+    owner*: int              ## lib index
+
+  PluginCliCommand* = object
+    name*: string
+    help*: string
+    owner*: int              ## lib index
+
+  PluginCliOption* = object
+    longName*: string
+    shortName*: char         ## '\0' when the option has no short form
+    takesValue*: bool
+    help*: string
     owner*: int              ## lib index
 
   PluginLib* = ref object
@@ -123,11 +135,27 @@ const HookSyms: array[HookId, string] = [
   "tc_on_system_prompt", "tc_on_tool_pre", "tc_on_tool_result",
   "tc_tool_exec", "tc_on_turn_start", "tc_on_turn_end",
   "tc_on_model_retry", "tc_on_session_start", "tc_on_compact",
-  "tc_on_file_write"]
+  "tc_on_file_write", "tc_register_cli", "tc_cli_command",
+  "tc_on_cli_options"]
+
+# Names the option parser and the early subcommand dispatchers already
+# own; a plugin CLI registration colliding with any of these is refused
+# so `3code <word>` keeps meaning exactly one thing.
+const BuiltinCliCommandNames* = [
+  "good", "provider", "sandbox", "sb", "box", "wall", "stdio-relay",
+  "setup", "unsetup"]
+const BuiltinLongOptNames* = [
+  "model", "config", "resume", "session", "interactive", "list", "all",
+  "find", "page", "good", "experimental", "private", "computer",
+  "no-sandbox", "debug", "version", "help", "acp"]
+const BuiltinShortOptChars* = {'m', 's', 'c', 'r', 'i', 'l', 'a', 'f', 'p',
+                               'g', 'x', 'D', 'v', 'h'}
 
 var
   libs: seq[PluginLib]
   regTools: seq[PluginTool]
+  regCliCommands: seq[PluginCliCommand]
+  regCliOptions: seq[PluginCliOption]
   regGen = 0                 # bumped at registration; see regParsed
   regParsedGen = -1          # main-thread mirror of regGen
   regParsed: Table[string, JsonNode]
@@ -135,6 +163,7 @@ var
   hookLive: array[HookId, bool]
   sysPromptCache: Table[string, string]
   registeringLib = -1           # services.registerTool gate
+  registeringCliLib = -1        # services.registerCli* gate
   started = false
 
   pLock: Lock
@@ -222,7 +251,13 @@ proc freeViews(ev: pointer; hook: HookId) =
   of hFileWrite:
     let e = cast[ptr TcFileWriteEvent](ev)
     f(e.path.data); dealloc(e)
-  of hInit, hShutdown, hRegisterTools:
+  of hCliCommand:
+    let e = cast[ptr TcCliCommandEvent](ev)
+    f(e.name.data); f(e.args.data); f(e.output.data); dealloc(e)
+  of hCliOptions:
+    let e = cast[ptr TcCliOptionsEvent](ev)
+    f(e.options.data); dealloc(e)
+  of hInit, hShutdown, hRegisterTools, hRegisterCli:
     discard  # no event block
 
 # -- services (called on the plugin thread) -------------------------
@@ -270,6 +305,56 @@ proc svcRegisterTool(s: ptr TcState; name, description, schemaJson: cstring;
     hookLive[hToolExec] = true
     0.cint
 
+proc cliNameOk(n: string): bool =
+  n.len > 0 and n[0] != '-' and n.allCharsInSet({'a'..'z', '0'..'9', '-'})
+
+proc svcRegisterCliCommand(s: ptr TcState; name, help: cstring): cint {.
+    cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    # See svcRegisterTool for the locking story: written on the plugin
+    # thread under pLock, read by main-thread readers via copies.
+    if registeringCliLib < 0: return 1.cint
+    let n = tcView(TcStr(data: name, len: int32(lenCstring(name))))
+    if not cliNameOk(n): return 2.cint
+    if n in BuiltinCliCommandNames: return 3.cint
+    pLock.acquire()
+    for c in regCliCommands:
+      if c.name == n:
+        pLock.release()
+        return 4.cint
+    regCliCommands.add PluginCliCommand(
+      name: n,
+      help: tcView(TcStr(data: help, len: int32(lenCstring(help)))),
+      owner: registeringCliLib)
+    pLock.release()
+    0.cint
+
+proc svcRegisterCliOption(s: ptr TcState; longName, shortName, help: cstring;
+                          takesValue: cint): cint {.cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if registeringCliLib < 0: return 1.cint
+    let n = tcView(TcStr(data: longName, len: int32(lenCstring(longName))))
+    let sh = tcView(TcStr(data: shortName, len: int32(lenCstring(shortName))))
+    if not cliNameOk(n): return 2.cint
+    if sh.len > 1: return 2.cint
+    if n in BuiltinLongOptNames: return 3.cint
+    let shortCh = if sh.len == 1: sh[0] else: '\0'
+    if shortCh in BuiltinShortOptChars: return 3.cint
+    pLock.acquire()
+    for o in regCliOptions:
+      if o.longName == n or
+          (shortCh != '\0' and o.shortName == shortCh):
+        pLock.release()
+        return 4.cint
+    regCliOptions.add PluginCliOption(
+      longName: n,
+      shortName: shortCh,
+      takesValue: takesValue != 0,
+      help: tcView(TcStr(data: help, len: int32(lenCstring(help)))),
+      owner: registeringCliLib)
+    pLock.release()
+    0.cint
+
 # -- plugin thread --------------------------------------------------
 
 proc runHook(lib: PluginLib; hook: HookId; ev: pointer) =
@@ -289,6 +374,15 @@ proc runHook(lib: PluginLib; hook: HookId; ev: pointer) =
           registeringLib = libs.find(lib)
           cast[TcVoidFn](lib.hooks[hRegisterTools])(s, nil)
           registeringLib = -1
+      of hRegisterCli:
+        if lib.hooks[hRegisterCli] != nil:
+          registeringCliLib = libs.find(lib)
+          cast[TcVoidFn](lib.hooks[hRegisterCli])(s, nil)
+          registeringCliLib = -1
+      of hCliCommand:
+        discard cast[TcIntFn](lib.hooks[hCliCommand])(s, ev)
+      of hCliOptions:
+        cast[TcVoidFn](lib.hooks[hCliOptions])(s, ev)
       of hToolPre:
         let e = cast[ptr TcToolPreEvent](ev)
         e.verdict = cast[TcIntFn](lib.hooks[hToolPre])(s, e)
@@ -509,7 +603,11 @@ proc pluginsDiscoverAndLoad*() =
       lib.hooks[h] = symAddr(handle, cstring(HookSyms[h]))
     lib.statePtr = cast[ptr TcState](alloc0(sizeof(TcState)))
     lib.servicesPtr = cast[ptr TcServices](alloc0(sizeof(TcServices)))
-    lib.servicesPtr[] = TcServices(log: svcLog, registerTool: svcRegisterTool)
+    lib.servicesPtr[] = TcServices(
+      log: svcLog,
+      registerTool: svcRegisterTool,
+      registerCliCommand: svcRegisterCliCommand,
+      registerCliOption: svcRegisterCliOption)
     lib.nameC = tcAlloc(stem.len + 1)
     copyMem(lib.nameC, unsafeAddr stem[0], stem.len)
     lib.statePtr[] = TcState(
@@ -538,6 +636,14 @@ proc pluginsDiscoverAndLoad*() =
     if syncCall(i, hInit, nil, syncTimeoutMs()):
       lib.demoted = true
       noteLoad lib.name & ": tc_init timed out, skipped"
+  # CLI registration must complete before pluginsDiscoverAndLoad
+  # returns: the entry point parses argv right after and needs the
+  # command/option tables. tc_on_cli_options (what the user actually
+  # typed) fires later, once argv has been parsed.
+  for i, lib in libs:
+    if lib.hooks[hRegisterCli] != nil:
+      if syncCall(i, hRegisterCli, nil, syncTimeoutMs()):
+        noteLoad lib.name & ": tc_register_cli timed out"
   for i, lib in libs:
     if lib.hooks[hRegisterTools] != nil:
       if syncCall(i, hRegisterTools, nil, syncTimeoutMs()):
@@ -576,6 +682,94 @@ proc toolOwner(name: string): int =
   for t in snapshotTools():
     if t.name == name: return t.owner
   -1
+
+proc pluginCliCommands*(): seq[PluginCliCommand] =
+  ## Locked copy for the entry point (usage rendering, dispatch).
+  pLock.acquire()
+  result = regCliCommands
+  pLock.release()
+
+proc pluginCliOptions*(): seq[PluginCliOption] =
+  pLock.acquire()
+  result = regCliOptions
+  pLock.release()
+
+proc pluginCliHasCommand*(name: string): bool =
+  for c in pluginCliCommands():
+    if c.name == name: return true
+  false
+
+proc pluginCliFindOption*(longName: string; short: char): int =
+  ## Index into pluginCliOptions() for the given long name (short =
+  ## '\0') or short char (longName = ""), -1 when no plugin owns it.
+  for i, o in pluginCliOptions():
+    if longName != "" and o.longName == longName: return i
+    if longName == "" and short != '\0' and o.shortName == short: return i
+  -1
+
+proc pluginCliValueShorts*(): set[char] =
+  ## Short flags of registered value-taking plugin options; the
+  # entry point's attached-value expander needs them (`-zvalue`).
+  for o in pluginCliOptions():
+    if o.takesValue and o.shortName != '\0': result.incl o.shortName
+
+proc pluginCliRunCommand*(name: string;
+    args: seq[string]): tuple[output: string; code: int] =
+  ## Runs a registered plugin subcommand on its owning lib. The
+  ## budget is the tool-exec one: a subcommand is expected to take as
+  ## long as a tool call. Host-side failures die() (they are usage/
+  ## health errors, not the plugin's exit status); the plugin's own
+  ## output and exit code come back for the caller to print and quit.
+  var owner = -1
+  for c in pluginCliCommands():
+    if c.name == name:
+      owner = c.owner
+      break
+  if owner < 0: die("no plugin owns command '" & name & "'", ExitUsage)
+  if libs[owner].demoted:
+    die("plugin owning '" & name & "' was demoted (too slow)", ExitConfig)
+  var argv = newJArray()
+  for a in args: argv.add %a
+  let ev = cast[ptr TcCliCommandEvent](alloc0(sizeof(TcCliCommandEvent)))
+  ev[] = TcCliCommandEvent(abi: TcAbiVersion,
+                           structSize: sizeof(TcCliCommandEvent).int32)
+  viewFill(ev.name, name)
+  viewFill(ev.args, $argv)
+  mutFill(ev.output, "", CapToolResult)
+  ev.code = 0
+  let t0 = epochTime()
+  if syncCall(owner, hCliCommand, ev, toolExecTimeoutMs(0)):
+    die("plugin command '" & name & "' timed out", 1)
+  traceHook(libs[owner], hCliCommand, (epochTime() - t0) * 1000)
+  result = (tcView(ev.output), ev.code.int)
+  freeViews(ev, hCliCommand)
+
+proc pluginsDeliverCliOptions*(vals: seq[(string, string)]) =
+  ## Fires tc_on_cli_options on every subscribed lib with the options
+  ## collected from argv: JSON object, value string for value options
+  ## and true for flags. No-op when nothing was collected.
+  if vals.len == 0: return
+  if not hookLive[hCliOptions]: return
+  var obj = newJObject()
+  let opts = pluginCliOptions()
+  for (n, v) in vals:
+    var takesValue = true
+    for o in opts:
+      if o.longName == n: takesValue = o.takesValue
+    obj[n] = (if takesValue and v != "": %v else: %true)
+  let text = $obj
+  if text.len > CapArgs:
+    pdbg "plugins: cli options over cap, delivery skipped"
+    return
+  let ev = cast[ptr TcCliOptionsEvent](alloc0(sizeof(TcCliOptionsEvent)))
+  ev[] = TcCliOptionsEvent(abi: TcAbiVersion,
+                           structSize: sizeof(TcCliOptionsEvent).int32)
+  viewFill(ev.options, text)
+  for i in 0 ..< libs.len:
+    let t0 = epochTime()
+    if syncCall(i, hCliOptions, ev, syncTimeoutMs()): break
+    traceHook(libs[i], hCliOptions, (epochTime() - t0) * 1000)
+  freeViews(ev, hCliOptions)
 
 proc pluginsHaveTool*(name: string): bool =
   if not pluginsToolsEnabled: return false
@@ -918,13 +1112,15 @@ proc pluginOnFileWrite*(path: string; bytes: int; kind: int) =
 proc pluginsListBody*(): string =
   ## Plain-text body for the `:plugins` command.
   let tools = snapshotTools()
+  let cliCmds = pluginCliCommands()
   result = "plugins: " & $libs.len & " loaded, " &
     $tools.len & " registered tool(s), " &
+    $cliCmds.len & " cli command(s), " &
     "tools gate " & (if pluginsToolsEnabled: "on" else: "off") & "\n"
   for lib in libs:
     var hooks: seq[string]
     for h in HookId:
-      if h in {hInit, hShutdown, hRegisterTools}: continue
+      if h in {hInit, hShutdown, hRegisterTools, hRegisterCli}: continue
       if lib.hooks[h] != nil: hooks.add HookSyms[h][3 ..^ 1]
     result.add &"- {lib.name}: {lib.hookCalls} calls"
     if lib.strikes > 0:
@@ -936,6 +1132,9 @@ proc pluginsListBody*(): string =
   for t in snapshotTools():
     if t.owner >= 0 and t.owner < libs.len:
       result.add &"- tool {t.name} (plugin {libs[t.owner].name})\n"
+  for c in cliCmds:
+    if c.owner >= 0 and c.owner < libs.len:
+      result.add &"- command {c.name} (plugin {libs[c.owner].name})\n"
   for n in loadNotes:
     result.add "- " & n & "\n"
   if libs.len == 0 and loadNotes.len == 0:

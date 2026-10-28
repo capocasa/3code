@@ -86,8 +86,10 @@ proc expandAttachedValues(args: seq[string]): seq[string] =
   ## space-separated case is handled by the `pending` mechanism in the
   ## parse loop. Boolean-only clusters (`-la`) pass through unchanged.
   ## Must stay in sync with the option table below: every short option
-  ## listed with a value belongs in `valueOpts`.
-  const valueOpts = {'m', 's', 'c', 'r'}
+  ## listed with a value belongs in `valueOpts`, plus the short forms of
+  ## value-taking options registered by plugins (known by the time this
+  ## runs: plugins register their CLI surface before argv is parsed).
+  let valueOpts = {'m', 's', 'c', 'r'} + pluginCliValueShorts()
   for a in args:
     var expanded = false
     if a.len > 2 and a[0] == '-' and a[1] != '-':
@@ -134,6 +136,21 @@ proc usage() {.noreturn.} =
   -h, --help           this message
 
 config: """ & configPath()
+  # Plugin-registered CLI surface: listed only when plugins added one,
+  # so a stock install sees exactly the built-in usage. Same alignment
+  # shape as the built-in rows above (24-col gutter).
+  let cliCmds = pluginCliCommands()
+  let cliOpts = pluginCliOptions()
+  if cliCmds.len > 0 or cliOpts.len > 0:
+    stderr.writeLine ""
+    stderr.writeLine "added by plugins (" & userDataRoot() / "lib & system dirs):"
+    for c in cliCmds:
+      stderr.writeLine alignLeft("  " & c.name, 24) & "# " & c.help
+    for o in cliOpts:
+      var left = "      --" & o.longName
+      if o.shortName != '\0': left.add ", -" & o.shortName
+      if o.takesValue: left.add " VALUE"
+      stderr.writeLine alignLeft(left, 30) & "  # " & o.help
   quit ExitUsage
 
 
@@ -362,11 +379,39 @@ proc main() =
                             rawParams[0].startsWith("--rpc=")):
     minline.terminalRestoreSuppressed = true
     quit(rpcMain(rawParams))
-  # -v/-h must not pay for TLS env, stale-binary walk, or sandbox
-  # sweep. On Windows a debug 3code.exe is tens of MB and those
-  # walks dominate `--version`.
+  # -v must not pay for TLS env, stale-binary walk, or sandbox sweep.
+  # On Windows a debug 3code.exe is tens of MB and those walks dominate
+  # `--version`. -h waits until plugins have registered their CLI
+  # surface so usage lists it, which is why it sits below the load.
   for a in rawParams:
     if a in ["-v", "--version"]: echo Version; return
+  # Root blast radius: plugins are native code loaded before argv is
+  # parsed now (their subcommands and options must be known up front),
+  # so the root refusal has to come first. -v above and the early
+  # subcommands above still answer as root on purpose.
+  refuseRoot()
+  # Plugins register their CLI surface (subcommands, options) at load,
+  # so they load before argv is parsed — much earlier than their hooks
+  # used to fire. A tolerant config read first so `[plugins] disable`
+  # and `lib` gate this load exactly as the late one did; the full
+  # (dying) config parse still runs later at its old spot. The `-c`
+  # pre-scan honors an explicit config file for that gating; the
+  # provider block and the main parser re-read and re-verify it.
+  block:
+    var i = 0
+    while i < rawParams.len:
+      case rawParams[i]
+      of "-c", "--config":
+        if i + 1 < rawParams.len:
+          if configPathOverride == "": configPathOverride = rawParams[i + 1]
+          inc i
+      else:
+        if rawParams[i].startsWith("--config=") and configPathOverride == "":
+          configPathOverride = rawParams[i][9 ..^ 1]
+      inc i
+    discard tryLoadStateOrEmpty(configPath())
+    pluginsDiscoverAndLoad()
+  for a in rawParams:
     if a in ["-h", "--help"]: usage()
   # Non-interactive provider management (see cli.nim). Dispatches with
   # the other early subcommands so its own flags (--key, --models) never
@@ -413,7 +458,6 @@ proc main() =
     sandbox.sweepStaleWallDirs()
   streamexec.sweepStaleBashDirs()
   display.sweepStaleToolOutDirs()
-  refuseRoot()
   # Internal flag for the detached background worker. Run silently and
   # exit before any other startup work (skill extraction, config load).
   let cl = commandLineParams()
@@ -436,6 +480,7 @@ proc main() =
   var pageOpt = ""
   var page = 1
   var interactive = false
+  var pluginOptVals: seq[(string, string)]  # plugin option name -> value
   var p = initOptParser(expandAttachedValues(commandLineParams()))
   for kind, k, v in p.getopt():
     case kind
@@ -479,7 +524,20 @@ proc main() =
       of "page":
         if v != "": pageOpt = v
         else: pending = "page"
-      else: die("unknown option: -" & (if k.len == 1: "" else: "-") & k, ExitUsage)
+      else:
+        # Plugin-registered options: accepted like builtins, collected
+        # here, delivered to the plugins once parsing is done.
+        let pi = if kind == cmdLongOption: pluginCliFindOption(k, '\0')
+                 elif k.len == 1: pluginCliFindOption("", k[0])
+                 else: -1
+        if pi >= 0:
+          let o = pluginCliOptions()[pi]
+          if o.takesValue:
+            if v != "": pluginOptVals.add (o.longName, v)
+            else: pending = "plugin:" & o.longName
+          else:
+            pluginOptVals.add (o.longName, "")
+        else: die("unknown option: -" & (if k.len == 1: "" else: "-") & k, ExitUsage)
     of cmdArgument:
       if pending == "model":
         model = k
@@ -496,19 +554,38 @@ proc main() =
       elif pending == "resume":
         resumeId = k
         pending = ""
+      elif pending.startsWith("plugin:"):
+        pluginOptVals.add (pending[7 ..^ 1], k)
+        pending = ""
       else:
+        # A LEADING bare word that names a plugin subcommand dispatches
+        # verbatim: everything after it is the plugin's to parse (its
+        # own flags, `--` and all), like `provider` above. Later bare
+        # words stay prompt text, so `3code fix the deploy tool` only
+        # dispatches when a plugin claimed the exact first word.
+        if args.len == 0 and pluginCliHasCommand(k):
+          pluginsDeliverCliOptions(pluginOptVals)
+          let (outp, code) = pluginCliRunCommand(k, p.remainingArgs())
+          if outp.len > 0: stdout.writeLine outp
+          quit code
         args.add k
     of cmdEnd: discard
   # --resume's value is optional: bare `-r` still means "resume the
   # latest session for this directory", so an unconsumed pending value
   # (nothing followed, or the next token was another option) is not a
   # usage error.
+  if pending.startsWith("plugin:"):
+    die("option --" & pending[7 ..^ 1] & " requires a value", ExitUsage)
   if pending != "" and pending != "resume":
     die("option --" & pending & " requires a value", ExitUsage)
   if pageOpt != "":
     try: page = parseInt(pageOpt)
     except ValueError: die("page: not a number: " & pageOpt, ExitUsage)
     if page < 1: die("page: must be 1 or more", ExitUsage)
+  # Plugin options collected above reach their owners now, before any
+  # session work: the fast-exit dispatches below (-l/-f) still deliver,
+  # and a prompt run has them in place before the first hook fires.
+  pluginsDeliverCliOptions(pluginOptVals)
 
   # Apply a provisional palette before any colored output (update notices,
   # onboarding). The mode can only be forced to dark/light here; full
@@ -1025,9 +1102,11 @@ proc main() =
         paintInitialPrompt(prof)
     else:
       paintInitialPrompt(prof)
-    # Plugins load after config (they read [plugins]) and before the
-    # first prompt; the session event fires with the final profile and
-    # session path. Messages > 1 means a resumed session, not a fresh
+    # Plugins registered their CLI surface before argv was parsed; for
+    # a run that got this far the load itself already happened there, so
+    # this is usually a no-op (embedding and odd entry points still hit
+    # it). The session event fires with the final profile and session
+    # path. Messages > 1 means a resumed session, not a fresh
     # system-only one.
     pluginsDiscoverAndLoad()
     pluginOnSessionStart(session.savePath, session.cwd, prof.name,
