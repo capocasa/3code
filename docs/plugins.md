@@ -4,9 +4,10 @@
 
 A plugin is a native dynamic library (`.so` on Linux, `.dylib` on macOS,
 `.dll` on Windows) that 3code loads at startup and calls at fixed points
-in its lifecycle: prompts, tool calls, turns, sessions. There is no
-manifest, no registration call, no RPC protocol. The library exports C
-functions; the host probes for them; whichever hooks exist get called.
+in its lifecycle: the command line, prompts, tool calls, turns, sessions.
+There is no manifest, no registration call, no RPC protocol. The
+library exports C functions; the host probes for them; whichever hooks
+exist get called.
 Each `dynlib` carries its own runtime, so a plugin can be written in
 anything that speaks the C ABI, and the reference SDK makes Nim
 one-file simple.
@@ -160,6 +161,50 @@ run unsandboxed in the plugin, like any plugin code. Drop a skill in
 `~/.config/3code/skills/myplugin.md` teaching the model when and how
 to call the tool; that is the whole install convention.
 
+### Adding a subcommand or an option
+
+The same registration pattern reaches the command line. A subcommand
+makes `3code <name> ...` yours; an option adds a `--flag` the main
+parser accepts and hands to your plugin:
+
+```nim
+proc registerCli*(s: ptr TcState) =
+  discard s.registerCliCommand("deploy", "run the deploy pipeline")
+  discard s.registerCliOption("deploy-env", 'E', "target environment",
+                              takesValue = true)
+
+proc onCliCommand*(ev: var TcCliCommandEvent): int32 =
+  let args = parseJson(tcView(ev.args))   # JSON array, verbatim
+  tcAssignStr(ev.output, "deploying to " & $args)
+  0
+
+proc onCliOptions*(ev: var TcCliOptionsEvent) =
+  let opts = parseJson(tcView(ev.options)) # JSON object
+  if opts.hasKey("deploy-env"): target = opts["deploy-env"].getStr
+```
+
+`registerCliCommand`/`registerCliOption` are legal only inside
+`registerCli` (which runs at load, before argv is parsed — that is the
+whole reason plugins now load that early). Names are lowercase
+`a-z0-9-`, one word. Anything the built-in CLI already owns is refused:
+the builtin subcommands (`good`, `provider`, `sandbox`, ...), the
+builtin option names (`--model`, `--resume`, ...) and the builtin short
+letters (`-m`, `-r`, ...), plus your own earlier registrations. Check
+the bool return or `:plugins` to see a refusal.
+
+A registered subcommand dispatches when it is the FIRST bare word on
+the command line; everything after it is yours verbatim (flags,
+sub-subcommands, `--`), like `3code provider` owns its rest. Fill
+`ev.output` and return the exit code; the host prints the output and
+exits with your code. The budget is the tool-exec one (120 s default).
+
+Registered options are accepted wherever builtin options are
+(`--opt value`, `--opt=value`, `-Zvalue` for a registered short) and
+collect into a JSON object delivered once to every plugin exporting
+`tc_on_cli_options`, before any session work: value options as
+strings, flags as `true`. `3code -h` lists both surfaces in an "added
+by plugins" block, so your additions are discoverable.
+
 ### Long work and interruption
 
 A sync hook that runs long gets its default outcome applied without it
@@ -189,6 +234,7 @@ worked example of every hook, heavily commented.
 | `tc_abi_version()` | - | - | probed at load; must equal the host version exactly |
 | `tc_init(s)` | `init(s): cint` | 2 s | once after load, before any hook; return 0 |
 | `tc_register_tools(s)` | `registerTools(s)` | 2 s | once after init |
+| `tc_register_cli(s)` | `registerCli(s)` | 2 s | once after init, before argv is parsed |
 | `tc_shutdown(s)` | `shutdown(s)` | - | at process exit, before unload |
 | `tc_on_prompt(s, ev)` | `onPrompt(ev: var TcPromptEvent)` | 2 s | user submits a prompt |
 | `tc_on_system_prompt(s, ev)` | `onSystemPrompt(ev: var TcSysPromptEvent)` | 2 s | once per provider/model/family (memoized), then cached |
@@ -201,6 +247,8 @@ worked example of every hook, heavily commented.
 | `tc_on_session_start(s, ev)` | `onSessionStart(ev: var TcSessionEvent)` | async | a session loads |
 | `tc_on_compact(s, ev)` | `onCompact(ev: var TcCompactEvent)` | async | history gets summarized |
 | `tc_on_file_write(s, ev)` | `onFileWrite(ev: var TcFileWriteEvent)` | async | write/patch/apply_patch landed |
+| `tc_cli_command(s, ev)` | `onCliCommand(ev: var TcCliCommandEvent): int32` | 120 s default | the user ran `3code <your-subcommand> ...` |
+| `tc_on_cli_options(s, ev)` | `onCliOptions(ev: var TcCliOptionsEvent)` | 2 s | after argv parse, once, when any registered option was given |
 
 Async means fire-and-forget: the host copies a small POD event into a
 bounded queue (256 entries, oldest dropped under pressure) and moves
@@ -245,6 +293,14 @@ and `code`. Your whole job: fill `output`, return the exit code as
 **TcFileWriteEvent**: `path` (project-relative when possible), `bytes`,
 `kind` (0 write, 1 patch, 2 apply_patch).
 
+**TcCliCommandEvent**: `name`; `args` is the JSON array text of the
+arguments that followed the subcommand, verbatim. Out fields:
+`output` (mut, 1 MiB) and `code`. Set `code` by returning it.
+
+**TcCliOptionsEvent**: `options`, the JSON object text of the options
+collected from argv (`{"deploy-env": "prod", "verbose": true}`).
+Read-only.
+
 ## Strings and buffers
 
 `TcStr` is a read-only `data`+`len` view into host memory, not
@@ -278,6 +334,13 @@ host when the user interrupts while your call is in flight), and
   inside `registerTools`. Returns 0 on success, 1 outside registration,
   2 for an empty name, 3 for a builtin tool name, 4 for a duplicate.
   The Nim-side `s.registerTool(...)` wrapper returns a bool.
+- `registerCliCommand(name, help)`: legal only inside `registerCli`.
+  Adds a `3code <name>` subcommand. Same return-code scheme; 3 means a
+  builtin subcommand owns that name, 4 a plugin already registered it.
+- `registerCliOption(longName, shortName, help, takesValue)`: legal only
+  inside `registerCli`. Adds a `--longName` option and, when
+  `shortName` is a non-empty string, a `-x` short form. 3 covers a
+  builtin long name or short letter, 2 a bad name.
 
 The SDK keeps the current call's state pointer in the threadvar
 `tcCurrentState`; `tcCancelled(tcCurrentState)` is the polite way to
@@ -320,3 +383,9 @@ nothing: `structSize` negotiation absorbs them, and both sides treat a
 larger counterpart struct as unknown trailing bytes. Any incompatible
 layout or signature change bumps `TcAbiVersion`, and old plugins are
 refused loudly at load rather than corrupting memory quietly.
+
+`TcServices` has no size field, so a slot added to it later (the CLI
+registration calls above) is safe only for old-plugin-on-new-host; a
+plugin calling a service slot the running host never had reads past
+its allocation. Keep the pluginabi you compile against no newer than
+the 3code that will load you.

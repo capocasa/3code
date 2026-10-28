@@ -255,8 +255,9 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
       s.emit(AgentEvent(kind: aevDone, usage: usage, elapsed: elapsed)),
     retryNotice: proc(msg: string) =
       s.emit(AgentEvent(kind: aevRetry, text: msg))))
-  # Plugins: same lifecycle point as the CLI (after config, before the
-  # first prompt). The session event fires with the final profile.
+  # Plugins: for the CLI they load before argv is parsed (their CLI
+  # surface must exist first); here at session init, before the first
+  # prompt. The session event fires with the final profile.
   pluginsDiscoverAndLoad()
   pluginOnSessionStart(s.state.savePath, s.state.cwd, s.profile.name,
                        s.profile.model, opts.resume or opts.resumeId.len > 0,

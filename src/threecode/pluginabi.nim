@@ -52,12 +52,31 @@ type
   TcServices* = object
     ## Host callables, legal only from a hook or init call on the
     ## plugin thread (except `log`, safe anywhere).
+    ##
+    ## Trailing entries are later additions: a plugin compiled against
+    ## a newer pluginabi than the running host must not call them (the
+    ## host's allocation ends where the old struct did), so keep the
+    ## pluginabi you compile with no newer than the 3code that loads
+    ## you. Older plugins on a newer host are safe and simply never
+    ## see the new slots.
     log*: proc (s: ptr TcState; msg: cstring; len: int32) {.cdecl, gcsafe.}
     registerTool*: proc (s: ptr TcState; name, description, schemaJson: cstring;
                          timeoutMs: int32): cint {.cdecl, gcsafe.}
       ## Legal only inside `tc_register_tools`. `schemaJson` is an
       ## OpenAI function-tool definition. `timeoutMs` caps one exec
       ## (0 = the host default). Returns 0 on success.
+    registerCliCommand*: proc (s: ptr TcState; name, help: cstring): cint {.
+        cdecl, gcsafe.}
+      ## Legal only inside `tc_register_cli`. Adds a `3code <name>`
+      ## subcommand dispatched to `tc_cli_command`. Returns 0 on
+      ## success, 1 outside registration, 2 for a bad name, 3 for a
+      ## builtin subcommand name, 4 for a duplicate.
+    registerCliOption*: proc (s: ptr TcState; longName, shortName, help: cstring;
+                              takesValue: cint): cint {.cdecl, gcsafe.}
+      ## Legal only inside `tc_register_cli`. Adds a `--longName`
+      ## option (plus `-shortName` when non-empty) accepted by the
+      ## main option parser and delivered to `tc_on_cli_options`.
+      ## Same return codes; 2 also covers a bad short name.
 
   TcState* = object
     ## Per-plugin context, host-owned, stable address for the process
@@ -159,6 +178,19 @@ type
     bytes*: int32
     kind*: int32           ## 0 write, 1 patch, 2 apply_patch
 
+  TcCliCommandEvent* = object
+    abi*, structSize*: cint
+    name*: TcStr
+    args*: TcStr           ## JSON array text of the arguments that
+                           ## followed the subcommand, verbatim
+    output*: TcMutStr      ## out: everything the command prints
+    code*: int32           ## out: process exit code
+
+  TcCliOptionsEvent* = object
+    abi*, structSize*: cint
+    options*: TcStr        ## JSON object text: option name -> value
+                           ## string, or true for value-less flags
+
 # Hook proc shapes. Void hooks return nothing; verdict hooks return a
 # cint the host also reads back from `ev.verdict` (the return value
 # wins when they disagree).
@@ -209,3 +241,22 @@ proc registerTool*(s: ptr TcState; name, description, schemaJson: string;
     if src.len == 0: cstring"" else: cast[cstring](addr src[0])
   s.services.registerTool(s, grab(name), grab(description),
                           grab(schemaJson), timeoutMs) == 0
+
+proc registerCliCommand*(s: ptr TcState; name, help: string): bool {.inline.} =
+  ## SDK convenience for `services.registerCliCommand` (legal only
+  ## inside `tc_register_cli`).
+  if s == nil or s.services == nil: return false
+  proc grab(src: string): cstring =
+    if src.len == 0: cstring"" else: cast[cstring](addr src[0])
+  s.services.registerCliCommand(s, grab(name), grab(help)) == 0
+
+proc registerCliOption*(s: ptr TcState; longName: string; shortName: char;
+                        help: string; takesValue = true): bool {.inline.} =
+  ## SDK convenience for `services.registerCliOption` (legal only
+  ## inside `tc_register_cli`). Pass shortName '\0' for none.
+  if s == nil or s.services == nil: return false
+  proc grab(src: string): cstring =
+    if src.len == 0: cstring"" else: cast[cstring](addr src[0])
+  let sh = if shortName == '\0': "" else: $shortName
+  s.services.registerCliOption(s, grab(longName), grab(sh), grab(help),
+                               (if takesValue: 1 else: 0).cint) == 0

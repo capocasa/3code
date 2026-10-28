@@ -15,8 +15,14 @@ proc buildPluginFixtures*(dataRoot: string) =
   createDir(libdir)
   let cwd = getCurrentDir()
   proc build(src, outp: string) =
+    # -p entries stay RELATIVE on purpose: absolute ones are searched
+    # after config-file paths, and in a worktree the parent checkout's
+    # config.nims injects ITS src first — the fixture would then build
+    # against a stale pluginabi and silently test the wrong ABI.
+    # Relative entries resolve against this tree (the suites run from
+    # the project root) and win.
     let cmd = "nim c --noNimblePath --mm:orc --threads:on " &
-      "-d:release -p:" & cwd / "src -p:" & cwd / "tests " &
+      "-d:release -p:src -p:tests " &
       "--app:lib -o:" & outp & " " & src
     let rc = execShellCmd(cmd)
     doAssert rc == 0, "fixture build failed: " & cmd

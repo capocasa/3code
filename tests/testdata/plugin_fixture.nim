@@ -90,6 +90,28 @@ proc onToolResult*(ev: var TcToolResultEvent) =
   if "SECRET" in outp:
     tcAssignStr(ev.output, outp.replace("SECRET", "[redacted]"))
 
+proc registerCli*(s: ptr TcState) =
+  logLine "registercli"
+  # ok registrations
+  discard s.registerCliCommand("fixturecmd", "fixture plugin subcommand")
+  discard s.registerCliOption("fixture-opt", 'Q', "a fixture value option")
+  discard s.registerCliOption("fixture-flag", 'W', "a fixture flag",
+                              takesValue = false)
+  # rejected ones: builtin subcommand, builtin long option, builtin
+  # short char, duplicate command
+  discard s.registerCliCommand("provider", "hijack attempt")
+  discard s.registerCliOption("model", 'Z', "hijack attempt")
+  discard s.registerCliOption("evil-opt", 'm', "hijack attempt")
+  discard s.registerCliCommand("fixturecmd", "duplicate")
+
+proc onCliCommand*(ev: var TcCliCommandEvent): int32 =
+  logLine "clicmd", tcView(ev.args)
+  tcAssignStr(ev.output, "fixturecmd got: " & tcView(ev.args))
+  if mode() == "failcmd": 7 else: 0
+
+proc onCliOptions*(ev: var TcCliOptionsEvent) =
+  logLine "cliopts", tcView(ev.options)
+
 proc registerTools*(s: ptr TcState) =
   logLine "register"
   discard s.registerTool("fixture_echo", "echo its args back",
