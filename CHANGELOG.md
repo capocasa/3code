@@ -2,6 +2,25 @@ Changelog
 
 Unreleased
 
+- **Ctrl-Z suspends again on kitty-protocol terminals, and coming
+  back from background repaints.** The shortcut-table refactor listed
+  `suspend` as a command but never registered its handler on POSIX, so
+  Ctrl-Z lived on only as a legacy fallback keymap entry — a path the
+  kitty keyboard decoder (which the interactive app pushes at startup)
+  never consults. On kitty, Ghostty, WezTerm and friends the key did
+  nothing. The `suspend` command is registered in the command table
+  again, and the kitty decoder now falls back to the same keymap the
+  legacy control-byte path uses, so a binding can never again silently
+  die on one encoding. Resume used to leave the shell's job-control
+  output as the last thing on screen: the row-diffing painter skipped
+  the post-resume repaint as a no-op because no editor state changed.
+  A resume now invalidates the diff model (full repaint of the volatile
+  block, like a resize) and sets the resize flag so the input poller
+  repaints even when the resume was external (`kill -TSTP` from
+  another terminal, then `fg`). A stale SIGCONT from such an external
+  resume is drained instead of being left queued — it used to satisfy
+  the next suspend's `sigwait` before the process had stopped, which
+  looked like Ctrl-Z freezing.
 - **`user_agent`: your build's User-Agent, your wording.** The
   `[settings] user_agent` template (`user-agent` spelling accepted)
   builds the User-Agent header 3code sends on every model request.
