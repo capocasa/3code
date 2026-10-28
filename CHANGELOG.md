@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **`user_agent`: your build's User-Agent, your wording.** The
+  `[settings] user_agent` template (`user-agent` spelling accepted)
+  builds the User-Agent header 3code sends on every model request.
+  Default `3code $version`; variables `$version` (the full build
+  version, e.g. `0.9.2-main-a1b2c3d4a`), `$branch`, `$commit` /
+  `$hash`, `$stage` (`-unstaged` when the build's sources differed
+  from HEAD; each empty when not applicable), `$os`, `$arch`, `$$`
+  for a literal `$`. Unknown `$names` pass through verbatim, and the
+  setting round-trips through the config writer only when set. This
+  replaces the fixed compiled-in string on every surface at once:
+  streaming, non-streaming, the /models ping, the verifier, and the
+  compactor.
 - **Kimi K3.1 Pro runs on every provider that serves it.** Twenty-two
   known-good rows across fourteen hosts (kimi, kimicode, openrouter,
   novita, nanogpt, venice, cheaperinference, tencent, opencodego,
