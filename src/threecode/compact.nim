@@ -264,7 +264,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   var respBody = ""
   try:
     let client = newHttpClient(timeout = 120_000,
-                               userAgent = ModelUserAgent,
+                               userAgent = modelUserAgent(),
                                sslContext = bundledSslContext())
     defer: client.close()
     client.headers["Authorization"] = "Bearer " & p.key

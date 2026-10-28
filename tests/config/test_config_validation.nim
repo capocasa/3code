@@ -166,6 +166,13 @@ suite "config validation: schema (in-process)":
     ]
     check validateConfig(P, entries) == ""
 
+  test "user_agent and user-agent are permitted settings keys":
+    let entries = @[
+      ("settings", "user_agent", "3code $version", 3),
+      ("settings", "user-agent", "3code-test", 4),
+    ]
+    check validateConfig(P, entries) == ""
+
   test "bash is a permitted settings key":
     let entries = @[
       ("settings", "bash", "auto", 3),

@@ -350,7 +350,7 @@ const
                   "bash", "auto-update", "tab-title",
                   "allow-empty-prompt", "allow_empty_prompt",
                   "verifier", "verifier_model", "verifier-model",
-                  "computer"]
+                  "computer", "user_agent", "user-agent"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -673,6 +673,12 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           bashPathOverride = v
         of "bash":
           bashSourcePref = v.strip.toLowerAscii
+        of "user_agent", "user-agent":
+          # Raw `e.value`, not the env-expanded `v`: the `$vars` in the
+          # template belong to modelUserAgent's expansion, not the
+          # environment, and a leading `$os/...` would otherwise be eaten
+          # by expandEnvValue.
+          userAgentTemplate = e.value
         else: discard
       of "search":
         case e.key
@@ -802,10 +808,12 @@ proc mergeForeignEdits(path: string; current: var string,
   # right before the buffer serializes it.
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
        savedWallWarn, savedMaxTimeout, savedColorMode, savedBash,
-       savedBashSrc, savedTabTitle, savedVerifierOn, savedVerifierSpec) =
+       savedBashSrc, savedTabTitle, savedVerifierOn, savedVerifierSpec,
+       savedUserAgent) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
      sandboxWallWarn, maxTimeoutSetting, colorModePref, bashPathOverride,
-     bashSourcePref, tabTitleEnabled, verifierEnabled, verifierModelSpec)
+     bashSourcePref, tabTitleEnabled, verifierEnabled, verifierModelSpec,
+     userAgentTemplate)
   let savedParams = activeParams
   let (diskCurrent, diskProviders, _, _, _, _) =
     try: parseConfigFile(path)
@@ -826,6 +834,7 @@ proc mergeForeignEdits(path: string; current: var string,
   tabTitleEnabled = savedTabTitle
   verifierEnabled = savedVerifierOn
   verifierModelSpec = savedVerifierSpec
+  userAgentTemplate = savedUserAgent
   activeParams = savedParams
   # Same baseline-diff for the `current` line: an instance that never
   # switched in-session still holds the startup value, so a different
@@ -940,6 +949,9 @@ proc writeConfigFile*(path: string, current: string,
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "light"
     buf.add "tone = " & quoteVal(label) & "\n"
+  # Same non-default rule: the compiled `3code $version` UA is not written.
+  if userAgentTemplate != "":
+    buf.add "user_agent = " & quoteVal(userAgentTemplate) & "\n"
   if activeShortcuts.len > 0:
     buf.add "\n[shortcuts]\n"
     for cmd, spec in activeShortcuts:

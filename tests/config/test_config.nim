@@ -1,5 +1,5 @@
 import std/[json, options, os, strutils, tables, times, unittest]
-import threecode/[config, minline, session, types, ui, util]
+import threecode/[config, minline, prompts, session, types, ui, util]
 
 suite "config: [search]":
   var tmp = ""
@@ -800,3 +800,49 @@ suite "config: :resume":
     check messages.len == 1
     # the current session's lock was re-acquired, so releasing still works
     releaseSessionLock(session.savePath)
+
+suite "config: user_agent template":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-useragent.ini"
+    userAgentTemplate = ""
+
+  teardown:
+    removeFile(tmp)
+    userAgentTemplate = ""
+
+  test "modelUserAgent defaults to 3code <full version>":
+    check modelUserAgent() == "3code " & Version
+
+  test "modelUserAgent expands every variable":
+    userAgentTemplate =
+      "$version|$branch|$commit|$hash|$stage|$os/$arch"
+    check modelUserAgent() ==
+      Version & "|" & VersionBranch & "|" & VersionCommit & "|" &
+      VersionCommit & "|" & VersionStage & "|" & hostOS & "/" & hostCPU
+
+  test "unknown variables and $$ pass through":
+    userAgentTemplate = "x $$ $typo"
+    check modelUserAgent() == "x $ $typo"
+
+  test "parseConfigFile reads user_agent and the user-agent spelling":
+    writeFile(tmp, "[settings]\nuser_agent = \"3code-test $branch\"\n")
+    discard parseConfigFile(tmp)
+    check userAgentTemplate == "3code-test $branch"
+    writeFile(tmp, "[settings]\nuser-agent = \"other\"\n")
+    discard parseConfigFile(tmp)
+    check userAgentTemplate == "other"
+
+  test "a template starting with $ survives env expansion":
+    writeFile(tmp, "[settings]\nuser_agent = \"$os build\"\n")
+    discard parseConfigFile(tmp)
+    check userAgentTemplate == "$os build"
+
+  test "writeConfigFile persists user_agent only when set":
+    userAgentTemplate = "custom $version"
+    writeConfigFile(tmp, "p.m", @[])
+    check readFile(tmp).find("user_agent = \"custom $version\"") >= 0
+    userAgentTemplate = ""
+    writeConfigFile(tmp, "p.m", @[])
+    check readFile(tmp).find("user_agent") < 0  # default is not written

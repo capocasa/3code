@@ -193,6 +193,7 @@ Keys under `[settings]`:
 | `verifier_model` | `PROVIDER.MODEL` | the model goal mode's satisfaction check runs on (see [verifier models](manual.html#verifier-models)); a decision model answers typed questions in one request. Not set = the session model checks (the default) |
 | `verifier` | `on`/`off` | enable/disable the selected verifier without clearing it; absent means on while a model is selected |
 | `allow-empty-prompt` | `on`/`off` (default on) | submitting an empty prompt continues the ongoing session: a turn runs on the messages as they stand, appending no user message; `allow_empty_prompt` spelling accepted |
+| `user_agent` | template (default `3code $version`) | User-Agent header sent on every model request. Variables: `$version` (the full build version, e.g. `0.9.2-main-a1b2c3d4a`), `$branch` (`-main`), `$commit` / `$hash` (`-a1b2c3d4`), `$stage` (`-unstaged` when the build's sources differed from HEAD; each empty when not applicable), `$os`, `$arch`, and `$$` for a literal `$`. Unknown `$names` pass through verbatim; `user-agent` spelling accepted |
 
 ### provider
 

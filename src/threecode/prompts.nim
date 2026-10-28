@@ -21,14 +21,33 @@ import types, util, modelname, anthropic, plugins, screen
 # for modules that historically reached it through prompts.
 export types.ThinkBackMode, parseThinkBackMode
 
-# this is expected to be overridden by a more useful value in config.nims
+# these are expected to be overridden by more useful values in config.nims
 const Version* {.strdefine.} = "devel"
+const VersionBranch* {.strdefine.} = ""
+  ## `-<branch>` (e.g. `-main`) on a branch build; empty on a tag.
+const VersionCommit* {.strdefine.} = ""
+  ## `-<short8 commit>`; empty on a tag.
+const VersionStage* {.strdefine.} = ""
+  ## `-unstaged` when the build's sources differed from HEAD.
 
-const ModelUserAgent* = "3code/" & Version
-  ## Sent on every model request (streaming, non-streaming, verify ping,
-  ## summarizer, /models). Providers log UA to identify clients; OpenCode
-  # Zen/Go treat a missing User-Agent as an anonymous client.
+const DefaultUserAgentTemplate* = "3code $version"
 
+proc modelUserAgent*(): string =
+  ## The User-Agent sent on every model request (streaming, non-streaming,
+  ## verify ping, summarizer, /models). Providers log UA to identify
+  ## clients; OpenCode Zen/Go treat a missing User-Agent as an anonymous
+  ## client. Built from the `[settings] user_agent` template, default
+  ## `3code $version`. Variables: `$version` (the full build version,
+  ## itself assembled from `$version$branch$commit$stage` at compile
+  ## time), `$branch`, `$commit` / `$hash`, `$stage` (same parts, empty
+  ## when not applicable), `$os`, `$arch`, `$$` for a literal `$`.
+  ## Unknown `$words` pass through verbatim.
+  let tpl =
+    if userAgentTemplate != "": userAgentTemplate else: DefaultUserAgentTemplate
+  tpl.multiReplace(("$$", "$"), ("$version", Version),
+                   ("$branch", VersionBranch), ("$commit", VersionCommit),
+                   ("$hash", VersionCommit), ("$stage", VersionStage),
+                   ("$os", hostOS), ("$arch", hostCPU))
 
 type
   KnownGoodCombo* = tuple[

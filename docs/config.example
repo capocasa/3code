@@ -32,6 +32,7 @@ current = "ollama.qwen3-coder:480b"
 ; allow-empty-prompt = off ; make an empty submit a no-op again (on by default: Enter on the empty prompt continues the ongoing session, a turn runs with nothing appended)
 ; max_timeout = 1800 ; raise the bash timeout ceiling in seconds (default 600; model-requested timeouts are clamped to it; THREECODE_MAX_TIMEOUT env var wins per run)
 ; sandbox_wall_warn = off ; silence the Windows "wall not set up" warning (host rules in policy, no `3code wall setup-windows` yet)
+; user_agent = "3code $version ($os $arch)" ; User-Agent header sent on model requests. Variables: $version (full build version), $branch (-main), $commit / $hash (-a1b2c3d4), $stage (-unstaged when sources differed from HEAD; each empty when not applicable), $os, $arch, $$ (literal $). Unknown $names pass through. Default: "3code $version"
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: force a bash path (MSYS2 and Git for Windows are auto-detected)
 ; bash = auto  ; which bash to use: auto (default, normal detection order) or a full path to the shell (any OS)
 ;
