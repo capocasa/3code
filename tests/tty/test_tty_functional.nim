@@ -1710,6 +1710,41 @@ max-tokens = "8192"
     defer: tty2.close()
     tty2.expect draftText
 
+  test "quitting with :q leaves no quit-command draft":
+    # Regression: the teardown flush used to snapshot the quit line itself
+    # into the drafts store (the editor still held ":q" when cleanup's final
+    # flush ran), so the next start in the same directory prefilled the
+    # prompt with a command that exits on submit.
+    let root = newFixture("draft_quit_clean")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+
+    # Quit an idle editor with the command. Pre-fix, this wrote a ":q"
+    # sidecar; the filter in saveDraft must leave nothing behind.
+    let tty1 = startStub(root)
+    defer: tty1.close()
+    tty1.expect "❯"
+    tty1.send ":q\n"
+    tty1.expectExit(0, timeoutMs = 5000)
+    check not fileExists(draftPathForDir(root))
+
+    # A store polluted by the old bug is healed at startup instead of being
+    # restored: plant quit-line sidecars in both scopes, under arbitrary
+    # names, and start again.
+    let draftDir = root / "data" / "3code" / "drafts"
+    createDir(draftDir / "pending")
+    writeFile(draftDir / "pending" / "stale.prompt", ":q\n")
+    writeFile(draftDir / "20260101T000000.prompt", ":quit\n")
+    let tty2 = startStub(root)
+    defer: tty2.close()
+    tty2.expect "❯"
+    check not fileExists(draftDir / "pending" / "stale.prompt")
+    check not fileExists(draftDir / "20260101T000000.prompt")
+    # The editor must be empty: a prefilled ":q" would make Ctrl-D inert
+    # (quit-if-empty sees a non-empty buffer) and this exit would hang.
+    tty2.send "\x04"
+    tty2.expectExit(0, timeoutMs = 5000)
+
   # The quiet-watch thread now only fires a hard timeout; there is no
   # intermediate hourglass label. Wait briefly so the spinner is active
   # before exercising cancel.

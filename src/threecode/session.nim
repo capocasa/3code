@@ -240,6 +240,10 @@ proc appendSessionIndex*(cwd, id: string) =
 # Both are plain UTF-8 written atomically (temp + rename) on a debounce while
 # editing, and removed when the prompt is committed.
 
+const QuitLineCommands* = ["exit", "quit", ":q", ":quit", ":exit"]
+  ## Lines that end the REPL instead of reaching the model. Shared with the
+  ## REPL's submit check so a draft can never hold text that quits on submit.
+
 proc draftDir*(): string =
   userDataRoot() / "drafts"
 
@@ -1136,11 +1140,16 @@ proc saveDraft*(session: Session, text: string) =
   ## a cwd to key on (and no savePath).
   if session.savePath == "" and session.cwd == "": return
   let path = currentDraftPath(session)
-  if text.len == 0:
+  # A buffer holding only a quit line is not a draft: quitting snapshots the
+  # editor before teardown, and restoring ":q" would prefill the prompt with
+  # a command that exits on submit. Persist "" so the sidecar is removed,
+  # exactly like an idle editor.
+  let draft = if text.strip in QuitLineCommands: "" else: text
+  if draft.len == 0:
     removeIfExists(path)
     return
   try:
-    writeDraftAtomic(path, text)
+    writeDraftAtomic(path, draft)
   except CatchableError as e:
     stderr.writeLine "3code: draft save failed: " & e.msg
 
@@ -1173,6 +1182,20 @@ proc loadPendingDraft*(cwd: string): string =
   let path = pendingDraftPathFor(cwd)
   if not fileExists(path): return ""
   try: readFile(path) except CatchableError: ""
+
+proc sweepQuitDrafts*() =
+  ## Delete draft sidecars whose whole content is a quit line: the residue the
+  ## teardown flush wrote while the editor still held the `:q` it was quitting
+  ## with. Runs at startup before any restore reads the store. Deleting is
+  ## safe where a stale editor buffer's would not be: the content proves there
+  ## is no work to lose, since submitting such a line quits.
+  for dir in [draftDir(), pendingDraftDir()]:
+    if not dirExists(dir): continue
+    for kind, path in walkDir(dir):
+      if kind != pcFile or not path.endsWith(".prompt"): continue
+      let content = try: readFile(path) except CatchableError: ""
+      if content.strip in QuitLineCommands:
+        removeIfExists(path)
 
 proc clearPendingDraft*(cwd: string) =
   ## Remove the cwd-keyed pending prompt draft for `cwd`. No-op when none
