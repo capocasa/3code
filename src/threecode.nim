@@ -665,6 +665,10 @@ proc main() =
   var messages: JsonNode
   var restoredDraft = ""
 
+  # Heal the drafts store before any restore reads it: quit-command sidecars
+  # the old teardown flush left behind must never prefill the prompt.
+  sweepQuitDrafts()
+
   if resume:
     # `resolveSessionPath` already ran (and bailed) above; recompute the
     # resolved path here without re-validating, since nothing between the two
@@ -1202,7 +1206,7 @@ proc main() =
           if runTurnWithSafetyNet(): break
         continue
       let t = line.strip
-      if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
+      if t in QuitLineCommands: break
       let commandResult = handleCommandResult(line, messages, session, prof, editor)
       if commandResult.recognized:
         if commandResult.disposition == cdModal:
