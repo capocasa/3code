@@ -539,7 +539,7 @@ template AssistantTextStyle*: string = BrightWhiteFg
   ## A template so it re-reads the mode-resolved `BrightWhiteFg` var at
   ## each use instead of snapshotting it at compile time.
 
-proc assistantTextBytes*(bytes: string): string =
+proc assistantTextBytes*(bytes: string; style = AssistantTextStyle): string =
   if bytes.len == 0:
     return ""
   var body = bytes
@@ -548,9 +548,9 @@ proc assistantTextBytes*(bytes: string): string =
     tail.insert($body[^1], 0)
     body.setLen(body.len - 1)
   let styled = body
-    .replace(Reset, Reset & AssistantTextStyle)
-    .replace("\x1b[22m", "\x1b[22m" & AssistantTextStyle)
-  AssistantTextStyle & styled & Reset & tail
+    .replace(Reset, Reset & style)
+    .replace("\x1b[22m", "\x1b[22m" & style)
+  style & styled & Reset & tail
 
 proc captureMarkdownBytes(s: MarkdownState; line = ""; finish = false): string =
   let path = tempDir() / "3code_assistant_md_" & $getCurrentProcessId()
@@ -637,7 +637,7 @@ proc cutPartialTrailingMarker*(content: string): string =
   result.setLen(last)
 
 proc renderAssistantContentBytes*(content: string;
-    bullet = assistantBulletBytes()): string =
+    bullet = assistantBulletBytes(); style = AssistantTextStyle): string =
   ## String form of `renderAssistantContent`: the assistant item body
   ## (bullet + styled markdown) without touching a File. Used by the
   ## controller's transcript path, which owns when the bytes hit the
@@ -684,9 +684,9 @@ proc renderAssistantContentBytes*(content: string;
       commits.add ""
       pendingBlank = false
     if wasFirst:
-      commits.add bullet & assistantTextBytes(body)
+      commits.add bullet & assistantTextBytes(body, style)
     else:
-      commits.add assistantTextBytes(body)
+      commits.add assistantTextBytes(body, style)
   let finish = captureMarkdownBytes(st, finish = true)
   if finish.strip.len > 0:
     if pendingBlank and commits.len > 0:
@@ -850,29 +850,29 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   if elapsedS >= 0: parts.add clockDuration(elapsedS)
   result = parts.join("  ")
 
-const VerifyGlyph* = "⌕"
-  ## The goal-check item marker: a single-cell loupe, the same glyph
-  ## vocabulary as `❯`/`»`/`◎`/`●`, distinguishing the check's item from
-  ## an agent reply at one glance.
+proc goalVerdictStyle*(verdict: GoalVerdictKind): tuple[glyph, color: string] =
+  ## The verdict's own marker and color: green `✓` when satisfied, red
+  ## `✗` for anything else - FEEDBACK and an unreadable verdict alike,
+  ## since a check without a verdict is a failed check, never a pass.
+  if verdict == gvkSatisfied: ("✓", "\x1b[32m")
+  else: ("✗", "\x1b[31m")
 
 proc goalStepBytes*(step: GoalStep): string =
   ## A verifier step in scrollback, rendered exactly like any other
-  ## response item: the `⌕` glyph leads the first row and the prose goes
-  ## through `renderAssistantContentBytes` - the same markdown, colors,
-  ## and wrapping as an agent reply, no special tier. The verdict line
-  ## is already stripped from the prose; its meaning is the icon row
-  ## under the body: green `✓` satisfied, red `✗` not yet.
+  ## response item through `renderAssistantContentBytes` - the same
+  ## markdown and wrapping as an agent reply, no special tier - except
+  ## the whole item speaks the verdict: its icon leads the first row and
+  ## its color carries icon and prose alike, green for satisfied, red
+  ## for not (the `⌕` loupe is retired: it is the web-search icon). The
+  ## verdict line is already stripped from the prose; no trailing icon
+  ## row - the leading one already said it.
+  let (glyph, color) = goalVerdictStyle(step.verdict)
   let body = renderAssistantContentBytes(
-    step.prose, AssistantTextStyle & VerifyGlyph & " " & Reset)
+    step.prose, color & glyph & " " & Reset, color)
   if body.len > 0:
     result.add body & "\r\n"
-  case step.verdict
-  of gvkSatisfied:
-    result.add "\x1b[32m" & "  ✓" & Reset
-  of gvkFeedback:
-    result.add "\x1b[31m" & "  ✗" & Reset
-  of gvkNone:
-    discard
+  elif step.verdict != gvkNone:
+    result.add color & glyph & Reset
 
 proc receiptBytes*(label: string): string =
   ## The single canonical styling for a token receipt row (two-space

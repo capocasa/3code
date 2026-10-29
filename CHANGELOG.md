@@ -2,6 +2,16 @@ Changelog
 
 Unreleased
 
+- **Goal-mode verdicts are terse and speak in color.** The verifier's
+  scrollback item used to lead with the `⌕` loupe — the same glyph as
+  web search — and close with a separate icon row, while the verifier
+  itself was free to write paragraphs. Now the item is the verdict: a
+  green `✓` (satisfied) or red `✗` (anything else — feedback, an
+  unreadable verdict, a verifier failure) leads the first row and its
+  color carries the whole body, and the trailing icon row is gone; a
+  bare verdict still paints its icon alone. The judge preamble now
+  caps the reply: bullet points of at most 10 words each, nothing
+  trivial, at most 200 words in all.
 - **Plugins can add subcommands and command-line options.** A plugin
   exporting `tc_register_cli` registers `3code <name>` subcommands
   (`tc_cli_command` runs them: verbatim args in, output and exit code

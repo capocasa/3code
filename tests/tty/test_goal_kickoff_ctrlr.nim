@@ -138,13 +138,13 @@ suite ":retry and goal kickoff (interactive)":
     # the turn itself, which streams with no further keystroke.
     tty.expectInHistory "GOAL_WORK_DONE"
     # Turn end: detection receipt, then the verifier's reply renders as
-    # a ⌕ scrollback item with the verdict line stripped, and the green
-    # ✓ icon row under it is the confirmation - no 'goal confirmed'
-    # receipt. The session idles with the confirmed record on disk.
+    # a scrollback item that speaks its verdict - green ✓ icon leading,
+    # green text, verdict line stripped - and that ✓ is the
+    # confirmation, no 'goal confirmed' receipt. The session idles with
+    # the confirmed record on disk.
     tty.expectInHistory "goal mode: goal.md detected"
     tty.expectInHistory "all done"
     tty.expectNeverInHistory "VERDICT"
-    tty.expectInHistory "\u2315"
     tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "goal-confirmed.md")
@@ -191,8 +191,8 @@ suite ":retry and goal kickoff (interactive)":
     # receipt, no ◎ item - the detection receipt at turn end names the
     # mode instead). The streamed reply is the proof it ran.
     tty.expectInHistory "GOAL_WORK_DONE"
-    # Turn end: the verifier confirms (the green ✓ icon row under its
-    # ⌕ reply) and retires the file.
+    # Turn end: the verifier confirms (a green ✓ item) and retires the
+    # file.
     tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "goal-confirmed.md")
@@ -250,9 +250,9 @@ suite ":retry and goal kickoff (interactive)":
     tty.expectInHistory "goal mode: goal.md detected"
     tty.send "SURVIVED_KEYS"
     tty.drain(300)
-    # The check shows its work: the verifier's reply prose lands as a ⌕
-    # scrollback item (same rendering as a reply, verdict line stripped)
-    # and the green ✓ icon row closes it before the verdict is honored.
+    # The check shows its work: the verifier's reply prose lands as a
+    # green ✓ scrollback item (same rendering as a reply, verdict line
+    # stripped) before the verdict is honored.
     tty.expectInHistory "checked the tree."
     tty.expectNeverInHistory "VERDICT: SATISFIED"
     tty.expectInHistory "\u2713"
