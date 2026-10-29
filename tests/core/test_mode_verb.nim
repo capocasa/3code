@@ -85,8 +85,6 @@ suite "mode verb (:goal grammar, both modes)":
 
   test "edit re-arms on change, reports unchanged, and validates structure":
     withModeDir proc (dir: string) =
-      check verb(cyberneticMode, "edit") == (false,
-        "no cybernetic active; arm one with :cyber new <text>", false)
       discard startMode(cyberneticMode, "the plan")
       editorMk("""printf '%s\n' '- [x] did it' >> $1""")
       let r = verb(cyberneticMode, "edit")
@@ -105,6 +103,35 @@ suite "mode verb (:goal grammar, both modes)":
       check broken.line.startsWith(
         "a cybernetic plan needs at least one task item")
       check not broken.armed
+
+  test "edit with no mode file creates it (arm or clean no-op)":
+    withModeDir proc (dir: string) =
+      # An editor that writes nothing leaves no trace: no arm, no stray
+      # empty file, no cancelled-record rename for a mode never armed.
+      editorMk("true")
+      check verb(goalMode, "edit") == (true,
+        "goal not armed (nothing written to goal.md)", false)
+      check not fileExists(GoalFileName)
+      check not fileExists(GoalCancelledName)
+      # An editor that removes the created file is the same no-op.
+      editorMk("""rm $1""")
+      check verb(goalMode, "edit") == (true,
+        "goal not armed (nothing written to goal.md)", false)
+      check not fileExists(GoalFileName)
+      # A writing editor arms straight from the created file.
+      editorMk("""printf '%s\n' 'from scratch' > $1""")
+      check verb(goalMode, "edit") == (true, "", true)
+      check readFile(GoalFileName).strip == "from scratch"
+      check cancelGoal().ok
+      # The created-file write is still an arm: a live OTHER mode
+      # refuses it before the editor ever runs.
+      discard startMode(cyberneticMode, "the plan")
+      editorMk("""printf '%s\n' 'nope' > $1""")
+      check verb(goalMode, "edit") == (false,
+        "cybernetic.md (cybernetic mode) is already active; harness " &
+          "modes are mutually exclusive - cancel it first with :cyber!",
+        false)
+      check not fileExists(GoalFileName)
 
   test "edit removing the file cancels; emptying it clears":
     withModeDir proc (dir: string) =

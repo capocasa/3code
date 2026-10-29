@@ -85,7 +85,11 @@ proc classifyCommand*(cmd: string): CommandKind =
   let c = colonForm(cmd).strip
   if c.len == 0 or c[0] != ':':
     return ckUnknown
-  let sp = c.find({' ', '\t'})
+  # Any whitespace splits name from argument, not just spaces/tabs: a
+  # pasted `:goal\n\n<text>` keeps the name `:goal` and the text as the
+  # argument instead of growing the name to `:goal\n\ngoal` (unknown
+  # command).
+  let sp = c.find(Whitespace)
   var name = if sp < 0: c else: c[0 ..< sp]
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   let parts = arg.splitWhitespace()
@@ -1958,18 +1962,44 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
         # starts immediately below it.
         result.armed = true
   elif parts[0] == "edit" and parts.len == 1:
+    # `edit` opens the file even when it has to be created: an empty
+    # buffer in $VISUAL/$EDITOR beats a usage error. Creating the file is
+    # still an arm-shaped write, so a live OTHER mode refuses exactly
+    # like `new` would; and a file this command created that the editor
+    # leaves empty (or removes) is dropped, not renamed - there is no
+    # mode to retire, and a stray empty file would arm one anyway
+    # (bare existence is the whole protocol).
+    var created = false
     if not fileExists(m.fileName):
-      result.ok = false
-      result.line = "no " & m.name & " active; arm one with " & m.verb &
-        " new <text>"
-    else:
+      let other = conflictingMode(m)
+      if other.name != "":
+        result.ok = false
+        result.line = other.fileName & " (" & other.name & " mode) is " &
+          "already active; harness modes are mutually exclusive - cancel " &
+          "it first with " & other.verb & "!"
+      else:
+        try:
+          writeFile(m.fileName, "")
+          created = true
+        except OSError, IOError:
+          result.ok = false
+          result.line = getCurrentExceptionMsg()
+    if result.ok:
       let before = readModeText(m)
       let editor = getEnv("VISUAL", getEnv("EDITOR",
         when defined(windows): "notepad" else: "vi"))
       let code = execShellCmd(editor & " " & quoteShell(m.fileName))
+      proc createdLeftEmpty(): bool =
+        created and (not fileExists(m.fileName) or
+          readModeText(m).strip.len == 0)
       if code != 0:
         result.ok = false
         result.line = "editor exited with status " & $code
+        if createdLeftEmpty(): discard tryRemoveFile(m.fileName)
+      elif createdLeftEmpty():
+        if fileExists(m.fileName): discard tryRemoveFile(m.fileName)
+        result.line = m.name & " not armed (nothing written to " &
+          m.fileName & ")"
       elif not fileExists(m.fileName):
         result.line = m.name & " cancelled (" & m.fileName &
           " removed in the editor)"
@@ -2020,7 +2050,10 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   let c = colonForm(cmd).strip
   if c.len == 0 or c[0] != ':':
     return CommandResult(recognized: false)
-  let sp = c.find({' ', '\t'})
+  # Same whitespace split as `classifyCommand`: a newline after the verb
+  # (a pasted multi-line `:goal\n\n<text>`) is the separator, not part
+  # of the command name.
+  let sp = c.find(Whitespace)
   var name = if sp < 0: c else: c[0 ..< sp]
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   let parts = arg.splitWhitespace()

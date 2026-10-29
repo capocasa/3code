@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **`:goal edit` creates the file it edits, and a pasted multi-line
+  `:goal` arms instead of erroring.** `:goal edit` refused with
+  "no goal active" when goal.md did not exist; now it creates the empty
+  file and opens it in $VISUAL/$EDITOR — saving text arms straight from
+  the editor, while leaving it empty (or removing it) is a clean no-op
+  that leaves no file behind, and a live other harness mode still
+  refuses the arm. Separately, a `:goal` whose first line ends at the
+  verb (a pasted multi-line goal: `:goal`, blank line, then the text)
+  died as "unknown command" because the command name was split on
+  spaces and tabs only, so the newline and the next line's first word
+  leaked into the name; the split now takes any whitespace, making the
+  verb `:goal` and every following line the goal text. Same two fixes
+  for `:cyber`.
 - **Goal-mode verdicts are terse and speak in color.** The verifier's
   scrollback item used to lead with the `⌕` loupe — the same glyph as
   web search — and close with a separate icon row, while the verifier
