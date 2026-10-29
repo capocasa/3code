@@ -343,26 +343,35 @@ suite "goal check loop (canned verdicts, no provider)":
 
 suite "verifier steps in scrollback":
   test "the check renders through the regular response path":
-    # The verify glyph leads the first row exactly where `●` leads a
-    # reply, and the prose is markdown-rendered by the same walk - raw
-    # markdown never reaches the screen.
-    let b = goalStepBytes(GoalStep(prose: "before **bold** after"))
-    check b.startsWith(AssistantTextStyle & VerifyGlyph & " " & Reset &
-      AssistantTextStyle & "before")
+    # The verdict icon leads the first row exactly where `●` leads a
+    # reply, the whole item carries the verdict color, and the prose is
+    # markdown-rendered by the same walk - raw markdown never reaches
+    # the screen.
+    let b = goalStepBytes(
+      GoalStep(prose: "before **bold** after", verdict: gvkSatisfied))
+    check b.startsWith("\x1b[32m" & "✓ " & Reset &
+      "\x1b[32m" & "before")
     check "**bold**" notin b
-    check "\x1b[22m" & AssistantTextStyle & " after" in b
+    check "\x1b[22m" & "\x1b[32m" & " after" in b
     check GreyFg notin b
 
-  test "the verdict is an icon row, never the contract text":
+  test "the verdict is the leading icon and the item color, never the contract text":
     let ok = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkSatisfied))
-    check "\x1b[32m" & "  ✓" & Reset in ok
+    check "\x1b[32m✓" in ok
+    check "\x1b[31m" notin ok
     check "VERDICT" notin ok
     let no = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkFeedback))
-    check "\x1b[31m" & "  ✗" & Reset in no
+    check "\x1b[31m✗" in no
+    check "\x1b[32m" notin no
     check "VERDICT" notin no
-    # A note with no verdict shows the block alone.
-    check goalStepBytes(GoalStep(prose: "verifier off")).len > 0
-    check "✓" notin goalStepBytes(GoalStep(prose: "verifier off"))
+    # No trailing icon row anymore: the item ends with the prose.
+    for b in [ok, no]:
+      check not b.endsWith("✓" & Reset)
+      check not b.endsWith("✗" & Reset)
+    # A note with no verdict reads as not-yet: red ✗, never a green ✓.
+    let note = goalStepBytes(GoalStep(prose: "verifier off"))
+    check "\x1b[31m✗" in note
+    check "✓" notin note
 
   test "the verdict line is stripped from the reply before display":
     check stripVerdictLine("all done\nVERDICT: SATISFIED") == "all done"
@@ -374,4 +383,6 @@ suite "verifier steps in scrollback":
 
   test "a bare-verdict reply still shows its verdict icon":
     check goalStepBytes(GoalStep(prose: "", verdict: gvkSatisfied)) ==
-      "\x1b[32m" & "  ✓" & Reset
+      "\x1b[32m" & "✓" & Reset
+    check goalStepBytes(GoalStep(prose: "", verdict: gvkFeedback)) ==
+      "\x1b[31m" & "✗" & Reset

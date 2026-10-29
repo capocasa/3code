@@ -90,7 +90,7 @@ suite "cyber mode surfaces (interactive)":
     # The arm is quiet (the echoed command says it), so the streamed
     # reply is the proof the kickoff turn ran with no further keystroke.
     tty.expectInHistory "PLAN_WORK_DONE"
-    # Turn end: detection receipt, then the verifier's ✓ icon row - no
+    # Turn end: detection receipt, then the verifier's green ✓ item - no
     # confirmed receipt - and the plan retires on disk.
     tty.expectInHistory "cybernetic mode: cybernetic.md detected"
     tty.expectInHistory "\u2713"

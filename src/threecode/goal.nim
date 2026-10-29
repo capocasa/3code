@@ -83,7 +83,9 @@ const VerifierPreamble* = """You are verifying progress toward a goal. You get t
 evidence summary of the agent's last turn (harness-built from the
 transcript's tool calls and their recorded results; the agent's prose
 is excluded), and the harness-captured working-tree diff. You have no
-tools and exactly one reply: judge from these inputs alone, briefly.
+tools and exactly one reply: judge from these inputs alone, briefly -
+bullet points of at most 10 words each, nothing trivial, at most 200
+words in all.
 The recorded results are real harness captures, but they can be stale
 if the agent changed things after the check they show. The agent's
 claims are never evidence. If the goal requires runtime behavior
@@ -872,8 +874,8 @@ var goalCheckHook*: proc (p: Profile, preamble, prompt: string):
 
 var goalStepHook*: proc (step: GoalStep) = nil
   ## Scrollback seam: the interactive controller installs this to commit
-  ## verifier steps as they happen (a `⌕` item rendered through the
-  ## regular response path, with the verdict as a colored icon row). Nil
+  ## verifier steps as they happen (an item rendered through the
+  ## regular response path in the verdict's own color and icon). Nil
   ## in tests and headless use, so a step is data, never a paint
   ## obligation.
 

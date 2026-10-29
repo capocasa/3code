@@ -1228,11 +1228,11 @@ with the verifier's feedback. Satisfied, the harness renames the file to
 `goal-confirmed.md` (the record of the run) and idles. The check has no
 tools and no rounds: orientation is the harness's job, so the check is one
 model call. And it shows its work: the verifier's reply lands in scrollback
-as an item of its own, led by a `⌕` glyph and rendered exactly like any
-other response — same markdown, same wrapping — with the verdict line
-stripped and replaced by an icon row under the reply: a green `✓` when
-the goal is satisfied, a red `✗` when it is not. Nothing the harness
-runs is ever silent.
+as an item of its own, rendered exactly like any other response — same
+markdown, same wrapping — with the verdict line stripped and the verdict
+spoken by the item itself: a green `✓` leading green text when the goal
+is satisfied, a red `✗` leading red text when it is not. Nothing the
+harness runs is ever silent.
 
 ### Verifier models
 
@@ -1254,8 +1254,8 @@ check asks it two questions — is the goal satisfied, and what is the most
 important gap — and turns the answers into the same verdict/feedback the
 text verifier produces: `p(satisfied)` at or above 0.75 confirms the goal,
 anything else sends the agent back in with the gap as its direction. The
-decision lands in scrollback as a `⌕` item with the model's own numbers
-and the same verdict icon row as a text check.
+decision lands in scrollback as an item in the verdict's own color with
+the model's own numbers, exactly like a text check.
 
 These models never appear in ordinary model lists (`:model`, completion,
 the provider wizard): they cannot run a turn, they only judge one, so

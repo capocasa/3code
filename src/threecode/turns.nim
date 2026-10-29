@@ -1698,8 +1698,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           termengine.noteNonMessageTail(conflictReceipt, messages.len)
           commitTranscriptBytes(conflictReceipt, true)
       # Verifier steps land in scrollback as they happen: same commit
-      # path as the receipts around them, a `⌕` item rendered like a
-      # reply with the verdict as a colored icon row closing it.
+      # path as the receipts around them, an item rendered like a reply
+      # that speaks its verdict in color, icon first, through and
+      # through.
       goalStepHook = proc (step: GoalStep) =
         let stepBytes = goalStepBytes(step)
         termengine.noteNonMessageTail(stepBytes, journalAnchorMessagesLen)
