@@ -3856,8 +3856,9 @@ commands:
                       goal until it is satisfied (file retired to
                       goal-confirmed.md)
   :goal new TEXT      same, but bawks when a goal is already active
-  :goal edit          revise goal.md in $VISUAL/$EDITOR (changed text
-                      restarts goal work immediately)
+  :goal edit          revise goal.md in $VISUAL/$EDITOR, creating it
+                      when missing (changed text restarts goal work
+                      immediately)
   :goal cancel        cancel the active goal (same as :goal!)
   :goal! TEXT         replace an active goal and restart toward it
   :goal!              cancel the active goal (retires to goal-cancelled.md;
@@ -3868,7 +3869,8 @@ commands:
                       orientation in every kickoff and check (retired to
                       cybernetic-confirmed.md)
   :cyber new TEXT     same, but bawks when a plan is already active
-  :cyber edit         revise cybernetic.md in $VISUAL/$EDITOR
+  :cyber edit         revise cybernetic.md in $VISUAL/$EDITOR,
+                      creating it when missing
   :cyber cancel       cancel the active plan (same as :cyber!; retires to
                       cybernetic-cancelled.md)
   :cyber! TEXT        replace an active plan and restart toward it

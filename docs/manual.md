@@ -1272,7 +1272,8 @@ skipped with a visible note — the check falls back to the session model
 rather than going silent.
 
 The file is the whole interface. Edit `goal.md` mid-run to steer (`:goal
-edit` opens it in `$VISUAL/$EDITOR`; the next check reads it fresh), delete
+edit` opens it in `$VISUAL/$EDITOR`, creating it when missing; the next check
+reads it fresh), delete
 it to end goal mode silently, interrupt to pause. Arming starts work
 immediately: `:goal <text>` writes the file and sends the agent off in the
 same breath, no extra prompt needed — and a `goal.md` that is already on

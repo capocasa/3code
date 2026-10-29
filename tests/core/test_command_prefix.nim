@@ -81,6 +81,19 @@ suite "command prefix resolution":
       check none.recognized and not none.ok
       check "no goal active" in none.body
 
+  test "a pasted multi-line :goal arms the whole text":
+    withCommandDir:
+      # The empty rest of the first line after `:goal` (a newline, not a
+      # space) must not leak into the command name: the verb is `:goal`
+      # and every following line is the goal text.
+      let cmd = ":goal\n\ngoal description\non several alines"
+      check classifyCommand(cmd) == ckMutating
+      let r = handleCommandResult(cmd, messages, session, prof, editor)
+      check r.recognized and r.ok
+      check r.name == "goal"
+      check r.startGoalTurn
+      check readFile(GoalFileName) == "goal description\non several alines\n"
+
   test "bare :goal shows the live goal text":
     withCommandDir:
       discard handleCommandResult(":goal make it so", messages, session,
@@ -149,12 +162,30 @@ suite "goal command verbs":
       check none.recognized and not none.ok
       check "no goal active" in none.body
 
-  test ":goal edit without a live goal is an error":
-    withCommandDir:
-      let r = handleCommandResult(":goal edit", messages, session, prof,
-                                  editor)
-      check r.recognized and not r.ok
-      check "no goal active" in r.body
+  when defined(posix):
+    test ":goal edit without a live goal creates and opens it":
+      withCommandDir:
+        let src = getTempDir() / "goal_edit_new.txt"
+        writeFile(src, "fresh goal\n")
+        putEnv("EDITOR", "cp " & src)
+        defer: delEnv("EDITOR")
+        let r = handleCommandResult(":goal edit", messages, session, prof,
+                                    editor)
+        check r.recognized and r.ok
+        check r.startGoalTurn
+        check readFile(GoalFileName).strip == "fresh goal"
+
+    test ":goal edit creating nothing arms nothing":
+      withCommandDir:
+        putEnv("EDITOR", "true")
+        defer: delEnv("EDITOR")
+        let r = handleCommandResult(":goal edit", messages, session, prof,
+                                    editor)
+        check r.recognized and r.ok
+        check not r.startGoalTurn
+        check "not armed" in r.body
+        check not fileExists(GoalFileName)
+        check not fileExists(GoalCancelledName)
 
   when defined(posix):
     test ":goal edit rewrites the live goal in $EDITOR":
