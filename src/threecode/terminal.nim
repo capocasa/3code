@@ -37,7 +37,7 @@ proc acquireTerminalWrite*() =
 
 proc tryAcquireTerminalWrite*(): bool =
   ## Non-blocking variant of `acquireTerminalWrite` for cross-thread
-  ## readers that must never stall on the render path (the draft flusher,
+  ## readers that must never stall on the render path (the draft snapshot,
   ## which can also be driven from a signal-triggered cleanup). Returns
   ## false when the lock is held elsewhere; nothing is acquired then.
   if terminalLockDepth == 0:
