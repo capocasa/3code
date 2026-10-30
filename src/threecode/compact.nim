@@ -5,6 +5,10 @@
 ## `SummarizeKeepRecent` messages. Summarization is lossy and expensive, so
 ## it runs at most once per turn, only when the context crosses the
 ## threshold.
+##
+## The same meta-call machinery powers `:btw`: a side question about the
+## conversation answered in one shot over the live history, whose answer
+## never enters the context.
 
 import std/[httpclient, json, strutils]
 import plugins
@@ -180,25 +184,36 @@ proc collapseForSummary*(payload: JsonNode): JsonNode =
     else:
       result.add m
 
-proc callSummarizer(p: Profile, messages: JsonNode): string =
-  ## Fires a single meta-call to the model with a dedicated summarizer
-  ## system prompt and no tools. Returns "" on any failure.
-  when defined(providerStub):
-    return stubNextSummarizerReply(messages)
+const
+  BtwMaxTokens* = 2000
+  BtwSystemPrompt* = """You are answering a side question ("btw") about an ongoing coding session. The messages below are the conversation so far, followed by the user's question as the final user message. Answer that question from the conversation's content. Be brief and direct; no filler, no follow-up questions. This exchange is a private aside: it never enters the conversation, so the next real turn will not have seen it."""
+
+proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
+                  trailingUser: string, maxTokens: int,
+                  label: string): string =
+  ## Fires a single non-streaming meta-call to the model with a dedicated
+  ## system prompt and no tools, over the live history plus an optional
+  ## trailing user message. `messages` is read-only here: the payload is
+  ## a copy, so the call leaves the live conversation untouched. Returns
+  ## "" on any failure.
   if p.name == "" or p.url == "" or p.key == "" or p.model == "": return ""
-  # Build a trimmed payload: the summarizer prompt + every non-system
-  # message from the live conversation. Tool_call messages are allowed —
-  # most OpenAI-compatible providers accept them in chat completions even
-  # without a tools parameter as long as the tool/assistant pairing is
-  # intact.
+  # Build a trimmed payload: the meta prompt + every non-system message
+  # from the live conversation (+ the trailing question). Tool_call
+  # messages are allowed — most OpenAI-compatible providers accept them
+  # in chat completions even without a tools parameter as long as the
+  # tool/assistant pairing is intact.
   var payload = newJArray()
-  payload.add %*{"role": "system", "content": SummarizerSystemPrompt}
+  payload.add %*{"role": "system", "content": systemPrompt}
   if messages != nil and messages.kind == JArray:
     for i in 0 ..< messages.len:
       let m = messages[i]
       if i == 0 and m.kind == JObject and m{"role"}.getStr == "system":
         continue
       payload.add m
+  if trailingUser.len > 0:
+    payload.add %*{"role": "user", "content": trailingUser}
+  when defined(providerStub):
+    return stubNextSummarizerReply(payload)
   # Copy before mutation: `messages` is the live history; payload entries
   # share its JsonNode refs, so deleting fields below must not hit it.
   var payload2 = newJArray()
@@ -248,7 +263,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     body = %*{
       "model": (if proBase != "": proBase else: p.model),
       "input": payload,
-      "max_output_tokens": SummarizeMaxTokens,
+      "max_output_tokens": maxTokens,
       "stream": false
     }
     endpoint = p.url & "/responses"
@@ -256,7 +271,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     body = %*{
       "model": p.model,
       "messages": payload,
-      maxTokensField(p): SummarizeMaxTokens,
+      maxTokensField(p): maxTokens,
       "stream": false
     }
     endpoint = p.url & "/chat/completions"
@@ -281,17 +296,17 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     status = resp.code.int
     respBody = resp.body
   except CatchableError as e:
-    stderr.writeLine "3code: summarize: " & e.msg
+    stderr.writeLine "3code: " & label & ": " & e.msg
     return ""
   if status != 200:
-    stderr.writeLine "3code: summarize: api " & $status
+    stderr.writeLine "3code: " & label & ": api " & $status
     return ""
   let j = try: parseJson(respBody)
           except CatchableError as e:
-            stderr.writeLine "3code: summarize: " & e.msg
+            stderr.writeLine "3code: " & label & ": " & e.msg
             return ""
   if "error" in j:
-    stderr.writeLine "3code: summarize: " & $j["error"]
+    stderr.writeLine "3code: " & label & ": " & $j["error"]
     return ""
   if useResponses:
     let output = j{"output"}
@@ -323,6 +338,17 @@ proc decideContextAction*(promptTokens, windowTokens, msgCount: int,
   if promptTokens <= 0 or windowTokens <= 0: return caNone
   if promptTokens.float <= threshold * windowTokens.float: return caNone
   if msgCount >= keepRecent + 4: caSummarize else: caNone
+
+proc callSummarizer(p: Profile, messages: JsonNode): string =
+  metaCallOnce(p, messages, SummarizerSystemPrompt, "", SummarizeMaxTokens,
+               "summarize")
+
+proc askBtw*(question: string, messages: JsonNode, p: Profile): string =
+  ## Side-channel question about the conversation: one meta-call with the
+  ## live history as read-only context and the question as the final user
+  ## message. The answer comes back for display only — callers must not
+  ## append it (or the question) to `messages`.
+  metaCallOnce(p, messages, BtwSystemPrompt, question, BtwMaxTokens, "btw")
 
 proc summarizeHistory*(messages: JsonNode, p: Profile,
                       keepRecent = SummarizeKeepRecent): int =

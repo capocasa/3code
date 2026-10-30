@@ -91,6 +91,7 @@ names, model names, and paths where supported.
 | `:session` | show this session's ID (for `--resume=ID`) |
 | `:resume` | list this directory's sessions; `:resume ID` swaps the running 3code onto that session |
 | `:summarize` | collapse old turns into a synthetic recap |
+| `:btw Q` | ask the model a side question about the conversation; answer shown in the terminal, never enters the context |
 | `:version` | show the running 3code version |
 | `:sandbox` / `:sb` | show the active filesystem sandbox rules |
 | `:sandbox on/off` | toggle sandbox enforcement |
