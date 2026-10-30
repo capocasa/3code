@@ -3884,6 +3884,8 @@ commands:
   :resume             list sessions of this directory, pick with :resume <id>
   :resume ID          swap this running 3code onto saved session ID
   :summarize          collapse old turns into a synthetic recap (meta model call)
+  :btw QUESTION       ask the model a side question about this conversation;
+                      the answer shows here and never enters the context
   :version            show the running 3code version
   :sandbox (:sb)      show the active filesystem sandbox rules
   :sandbox show       (same)

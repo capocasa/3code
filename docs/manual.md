@@ -1170,6 +1170,19 @@ task must continue but the context has become expensive:
 If the old work is no longer relevant, clear it. A fresh context is safer than
 a summary of things the model no longer needs.
 
+`:btw` asks the model a side question about the conversation — "what did that
+error mean?", "why did we pick the parser rewrite?" — without touching the
+context:
+
+```
+:btw why did we skip the cache in that last change?
+```
+
+The question and its answer are printed to your terminal only. Neither
+becomes a message: the next turn the model sees is exactly the conversation
+you had before asking, so a `:btw` costs no context window (only the one
+meta-call it took to answer).
+
 ## Chunked mode
 
 For a large mechanical task, ask the model to split the work into files. Each

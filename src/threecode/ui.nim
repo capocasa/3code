@@ -18,7 +18,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 const CommandNames* = [":help", ":tokens", ":clear", ":goal", ":cyber", ":model",
                       ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":verifier",
-                      ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
+                      ":show", ":log", ":sessions", ":session", ":resume", ":summarize", ":btw",
                       ":version", ":sandbox", ":sb", ":retry", ":private", ":computer",
                       ":quit", ":exit"]
 
@@ -143,6 +143,11 @@ proc classifyCommand*(cmd: string): CommandKind =
     else: ckMutating
   of ":clear", ":resume", ":summarize":
     ckMutating
+  of ":btw":
+    # Bare `:btw` is a usage hint (safe); any text fires a meta-call over
+    # the live history, which must queue behind a running turn like any
+    # other network command.
+    if parts.len == 0: ckSafeImmediate else: ckMutating
   of ":quit", ":exit":
     ckQuit
   else:
@@ -2388,6 +2393,24 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             (if n == 1: "" else: "s") &
             " into a synthetic recap"
           saveSession(session, messages)
+    of ":btw":
+      # Side question about the conversation: one meta-call over the live
+      # history, answer shown here. Neither the question nor the answer
+      # enters `messages`, so the next real turn starts as if it never
+      # happened.
+      if arg.strip.len == 0:
+        ok = false
+        respErr "usage: :btw <question>"
+      elif prof.name == "":
+        ok = false
+        respErr "no provider configured. use :provider add"
+      else:
+        let answer = askBtw(arg, messages, prof)
+        if answer.strip.len == 0:
+          ok = false
+          respErr "no answer (the side-question call failed; see stderr)"
+        else:
+          resp answer
     else:
       ok = false
       let suggestion = nearestCommand(name)
