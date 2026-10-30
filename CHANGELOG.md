@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **`:sandbox allow|readonly|deny|ask` rewrites the existing rule for
+  that target where it sits instead of stacking a new one at the
+  end.** The policy is ordered last-match-wins, so appending a flipped
+  rule silently moved it behind every later rule: flipping `deny /` to
+  `ask /` that way would swallow the `allow /tmp` written after it.
+  Now a rule command for a target the file already covers (paths match
+  on their normalized absolute form, hosts on the host:port pair)
+  replaces that rule in place and stacked duplicates for one target
+  collapse into the first, while a new target still appends at the
+  end; the order you wrote is the order that is enforced. Ask-gate
+  grants keep appending on purpose, so an approved command's `allow`
+  still wins over any later deny.
 - **`:goal edit` creates the file it edits, and a pasted multi-line
   `:goal` arms instead of erroring.** `:goal edit` refused with
   "no goal active" when goal.md did not exist; now it creates the empty
