@@ -232,6 +232,8 @@ when not defined(windows):
         check compacted  # the compaction path (per-summarizer SSL ctx) ran
         check maxMsgs <= 40  # history stayed bounded
         let slope = rssEnd - rssWarmup
+        echo "rss warmup ", rssWarmup, "kB end ", rssEnd,
+             "kB slope ", slope, "kB over ", Turns - WarmupTurn, " turns"
         checkpoint "rss warmup " & $rssWarmup & "kB end " & $rssEnd &
                    "kB slope " & $slope & "kB over " & $(Turns - WarmupTurn) & " turns"
         check slope < RssSlopeCeilingKb
