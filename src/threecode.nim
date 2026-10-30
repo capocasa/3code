@@ -312,11 +312,9 @@ proc cleanup() {.noconv.} =
     sandbox.stopWall()
   # Final best-effort save of the prompt draft so a kill/power-off/SIGTERM
   # never loses a half-typed prompt. flushDraftNow uses tryAcquire inside so it
-  # is safe to call from a signal handler on any thread. The flusher thread is
-  # only signaled to stop (never joined): a signal can be delivered to the
-  # flusher thread itself, and joining oneself would deadlock. exit() tears it
-  # down like the other background threads.
-  fatprompt.stopDraftFlusher()
+  # is safe to call from a signal handler on any thread. Mid-typing saves are
+  # key-press debounced on the input thread (see the draft debounce block in
+  # fatprompt/runtime.nim); this is the unconditional last word.
   fatprompt.flushDraftNow()
   releaseActiveSessionLock()
   releaseActiveDirLock()

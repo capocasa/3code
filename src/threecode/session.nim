@@ -1131,6 +1131,20 @@ proc removeIfExists(path: string) =
   if fileExists(path):
     try: removeFile(path) except OSError: discard
 
+proc draftAtSentenceEnd*(text: string): bool =
+  ## True when `text` ends at a sentence boundary: a terminal `.`, `!` or
+  ## `?` optionally followed by trailing spaces, or a completed line (a
+  ## trailing newline) in a multi-line buffer. This gates the debounced
+  ## draft save — mid-sentence text is not worth a disk write, since the
+  ## shutdown flush (`flushDraftNow`) still captures it on the way out.
+  let n = text.len
+  if n == 0: return false
+  if text[n - 1] == '\n': return true
+  var i = n - 1
+  while i >= 0 and text[i] in {' ', '\t', '\r'}: dec i
+  if i < 0: return false
+  text[i] in {'.', '!', '?'}
+
 proc saveDraft*(session: Session, text: string) =
   ## Persist the current prompt-editor text as an atomic draft sidecar so an
   ## unexpected shutdown never loses a half-typed prompt. Writes to whichever
