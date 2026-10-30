@@ -915,6 +915,19 @@ suite "session: prompt draft sidecar":
     let sess = Session(savePath: savePath, cwd: "/home/user/project")
     check currentDraftPath(sess) == draftPathFor(savePath)
 
+  test "draftAtSentenceEnd accepts completed sentences only":
+    # The debounced save fires only when the buffer ends at a sentence
+    # boundary, so mid-sentence text never hits the disk.
+    check draftAtSentenceEnd("half-typed prompt about to be lost.")
+    check draftAtSentenceEnd("really?!")
+    check draftAtSentenceEnd("done. ")              # trailing space is fine
+    check draftAtSentenceEnd("first line.\n")       # completed line
+    check not draftAtSentenceEnd("half-typed prompt")
+    check not draftAtSentenceEnd("half-typed prompt about to be")
+    check not draftAtSentenceEnd("")
+    check not draftAtSentenceEnd("   ")
+    check not draftAtSentenceEnd("wait, not yet,")
+
   test "saveDraft writes the pending path before the .3log exists":
     let sess = Session(savePath: tmpDir / "3code" / "sessions" / "20250101T120000.3log",
                        cwd: "/home/user/project")

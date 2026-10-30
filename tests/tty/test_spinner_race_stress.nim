@@ -97,8 +97,8 @@ suite "spinner runs through backoff while typing":
     # The guiLoop spinner repaints the volatile block through
     # repaintLiveContent while live content streams, the input thread
     # cancels a queued prompt (ESC/CTRL-C clears the draft editor state)
-    # and the draft flusher snapshots the editor buffer, all against the
-    # same LineEditor. The flusher used to read `line.text` under
+    # and the debounced draft save snapshots the editor buffer, all
+    # against the same LineEditor. The save path used to read `line.text` under
     # inputStateLock instead of the terminal write lock, racing the
     # string payload's refcount with the input thread's mutation and
     # corrupting the heap (guiLoop repaintLiveContent SIGSEGV in

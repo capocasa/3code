@@ -124,15 +124,20 @@ var guiThread: Thread[string]
 
 var apiCancelWatcherStarted = false
 
-# --- Prompt draft flusher: snapshots the editor text to a draft sidecar on a
-#     debounce so an unexpected shutdown never loses a half-typed prompt. It
-#     reads the module-level editor/session globals under inputStateLock (the
-#     same model as the bar-tick thread) instead of capturing them in a
-#     closure. It is signaled to stop but never joined on cleanup (see below).
-var draftDirty: Atomic[bool]
-var draftFlusherStop: Atomic[bool]
-var draftFlusherThread: Thread[void]
-var draftFlusherRunning = false
+# Draft debounce window: after a key press changes the buffer, the save
+# waits out this much typing silence (plus the input poll's own tick)
+# before writing the sidecar. See the debounce block next to
+# `snapshotAndSaveDraft` below.
+const DraftDebounceS* = 0.75
+
+proc draftSaveDue*(armed: bool; idleFor: float; text: string): bool =
+  ## Decision core of the debounced draft save, kept pure so tests can pin
+  ## the contract: armed by a key press that changed the buffer, typing
+  ## quiet for at least DraftDebounceS, and the buffer ends at a sentence
+  ## boundary (or is empty, which clears a stale sidecar rather than
+  ## leaving one behind).
+  armed and idleFor >= DraftDebounceS and
+    (text.len == 0 or draftAtSentenceEnd(text))
 
 var inputState*: InputState
 var inputStateLock*: Lock
@@ -1390,33 +1395,34 @@ proc stopBarTick*(): int =
   setAnimMode(amIdle)
   return elapsed
 
-# --- Prompt draft flusher loop -------------------------------------------
+# --- Prompt draft debounce ----------------------------------------------
 #
-# The editor's `onMutate` only sets a dirty flag (it runs on the input thread
-# and must stay fast). This thread owns the actual disk write. It sleeps on a
-# short debounce and, when the flag is set, snapshots the live editor/session
-# under inputStateLock — the same access pattern the bar-tick thread uses.
-#
-# Like the other background threads, it is NOT joined from cleanup: a signal
-# may be delivered to this thread, and a thread joining itself deadlocks.
-# cleanup() calls flushDraftNow() for a final synchronous save instead, and
-# exit() tears the thread down. The stop flag lets the loop wind down promptly
-# on a graceful shutdown regardless.
+# There is no flusher thread and no interval save. The save is armed by an
+# actual key press — the editor's `onMutate`, which fires as each key changes
+# the buffer, sets the armed flag — and fired by the input thread's own
+# no-key-waiting path (the POSIX poll timeout, the Windows readiness loop),
+# which is reached only when typing has paused. `maybeSaveDraft` (defined
+# inside inputThreadProc, where the debounce state lives) additionally gates
+# on the buffer ending at a sentence boundary, so a disk write happens only
+# after a sentence completes AND typing goes briefly quiet. cleanup() still
+# calls flushDraftNow() for a final synchronous save on the way out.
 
 proc snapshotAndSaveDraft() =
   ## Take a consistent (session path, editor text) snapshot and persist it as
-  ## a draft. Called from the flusher thread and the synchronous final flush.
+  ## a draft. Called from the synchronous final flush in cleanup (possibly
+  ## from a signal handler on any thread); the debounced mid-typing save runs
+  ## on the input thread itself via `maybeSaveDraft`.
   ## The editor's buffer belongs to the terminal write lock (the input thread
   ## mutates `line.text` under it via preMutate/postMutate, and the GUI thread
   ## reads it there in renderFooter); reading it under inputStateLock alone
   ## raced the shared string payload's refcount cell and corrupted the heap
   ## (the guiLoop repaintLiveContent SIGSEGV in eqStrings on glibc;
   ## hardened_malloc aborts on Android). The payload-fresh copy means the
-  ## flusher thread never touches a cell the input thread owns, not even at
+  ## saving thread never touches a cell the input thread owns, not even at
   ## `text`'s destroy or at saveDraft's by-value copy. tryAcquire keeps a
   ## flush triggered from a signal handler (cleanup) non-blocking: the
-  ## snapshot is skipped and retried on the next tick when either lock is
-  ## held.
+  ## snapshot is skipped and the lock holder's own save (or the next
+  ## cleanup pass) covers it when either lock is held.
   var sessionPtr: ptr Session = nil
   var text = ""
   if tryAcquire(inputStateLock):
@@ -1433,35 +1439,11 @@ proc snapshotAndSaveDraft() =
   if sessionPtr != nil and sessionPtr[].savePath != "":
     saveDraft(sessionPtr[], text)
 
-proc draftFlusherLoop() {.thread.} =
-  while not draftFlusherStop.load(moRelaxed):
-    if draftDirty.load(moAcquire):
-      draftDirty.store(false, moRelease)
-      {.cast(gcsafe).}:
-        try: snapshotAndSaveDraft()
-        except CatchableError: discard
-    sleep 250
-
-proc ensureDraftFlusherStarted*() =
-  ## Start the background draft flusher once. Idempotent. Started alongside
-  ## the persistent input thread so it is alive for the whole editing session.
-  if draftFlusherRunning: return
-  draftFlusherStop.store(false, moRelaxed)
-  createThread(draftFlusherThread, draftFlusherLoop)
-  draftFlusherRunning = true
-
-proc stopDraftFlusher*() =
-  ## Signal the flusher thread to stop (non-blocking; does not join). Safe to
-  ## call from any thread, including the flusher thread itself, since it never
-  ## waits on the thread. The loop checks the flag and exits within one sleep.
-  draftFlusherStop.store(true, moRelaxed)
-
 proc flushDraftNow*() =
   ## Persist the current draft synchronously. Called from cleanup as the last
   ## reliable save before teardown. No-op when no session path exists yet;
   ## otherwise writes unconditionally — we are shutting down, so a redundant
   ## write is cheap insurance against losing the in-flight prompt.
-  draftDirty.store(false, moRelease)
   {.cast(gcsafe).}:
     try: snapshotAndSaveDraft()
     except CatchableError: discard
@@ -2297,6 +2279,33 @@ proc inputThreadProc() {.thread.} =
     if inputEditor == nil:
       return
     let edPtr = inputEditor
+    # Draft debounce state, owned by this thread (only it mutates the
+    # buffer). `onMutate` arms a save as each key press changes the text;
+    # the no-key-waiting paths in `getCh` below fire it once typing has
+    # been quiet past DraftDebounceS and the buffer ends at a sentence
+    # boundary (or is empty, which clears a stale sidecar).
+    var draftArmed = false
+    var draftLastKeyAt = 0.0
+    proc maybeSaveDraft() =
+      # Tick from the no-key-waiting paths in `getCh` below: fire the armed
+      # save when the pause outlasts the debounce and the buffer ends at a
+      # sentence boundary (or is empty, clearing a stale sidecar). A nil or
+      # lock-contended session leaves it armed for the next tick.
+      if not draftArmed: return
+      let text = freshString(edPtr[].line.text)
+      if not draftSaveDue(draftArmed, epochTime() - draftLastKeyAt, text): return
+      var sessionPtr: ptr Session = nil
+      if tryAcquire(inputStateLock):
+        try:
+          sessionPtr = inputSession
+        finally:
+          release inputStateLock
+      if sessionPtr == nil: return
+      draftArmed = false
+      try:
+        saveDraft(sessionPtr[], text)
+      except CatchableError:
+        discard
     proc inputRunning(): bool =
       acquire inputStateLock
       try:
@@ -2398,12 +2407,17 @@ proc inputThreadProc() {.thread.} =
             sleep(5)
             continue
           if pendingInput.len > 0 or fillPending(200.cint):
+            draftLastKeyAt = epochTime()
             result = pendingInput[0]
             pendingInput.delete(0)
             return
-          # fillPending returned false. If stdin hit EOF, surface it as
+          # fillPending returned false: no key for a poll window, i.e. a
+          # pause in typing. Tick the draft debounce — the armed save fires
+          # here once the pause outlasts DraftDebounceS and the buffer ends
+          # at a sentence boundary. Then, if stdin hit EOF, surface it as
           # -1 so readLineWith raises EOFError; otherwise it was just a
           # poll timeout / SIGWINCH, so keep looping.
+          maybeSaveDraft()
           if stdinEof:
             return -1
           # SIGWINCH is caught with SA_RESTART, so poll() is restarted
@@ -2488,9 +2502,30 @@ proc inputThreadProc() {.thread.} =
             sleep(5)
             continue
           if drainedChar != -1:
+            draftLastKeyAt = epochTime()
             result = drainedChar
             drainedChar = -1
             return result
+          if vtInputEnabled:
+            # Readiness loop instead of a blocking getchr so pauses in
+            # typing keep ticking the draft debounce, mirroring the POSIX
+            # poll timeout above. `consoleVtByteReady` is the honest
+            # "getchr returns a byte right now" probe; `_kbhit` counts
+            # charless records (key-ups), so the legacy-console path below
+            # must keep its blocking read.
+            while inputRunning():
+              if minline.consoleVtByteReady():
+                draftLastKeyAt = epochTime()
+                return getchr().int
+              maybeSaveDraft()
+              sleep(50)
+            return -1
+          # Legacy console: no honest readiness probe. Tick the debounce
+          # just before parking in the blocking read — the buffer has been
+          # untouched since the pause began, so a settled, sentence-complete
+          # draft saves here; a fast typist is still inside the window.
+          maybeSaveDraft()
+          draftLastKeyAt = epochTime()
           return getchr().int
         -1
       let hasPendingInput: minline.HasPendingInputProc = nil
@@ -2511,14 +2546,10 @@ proc inputThreadProc() {.thread.} =
       termengine.writeRaw(s)
 
     edPtr[].onMutate = proc(ed: var minline.LineEditor) =
-      acquire inputStateLock
-      try:
-        discard
-      finally:
-        release inputStateLock
-      # Mark the prompt draft dirty so the flusher thread persists the current
-      # editor text on its debounce. No I/O here — the input thread stays fast.
-      draftDirty.store(true, moRelease)
+      # A key press changed the buffer: arm the debounced draft save. No I/O
+      # here — the input thread stays fast; the save fires from `getCh` once
+      # typing pauses past DraftDebounceS and a sentence has completed.
+      draftArmed = true
     edPtr[].onBackspaceAtJoin = proc(ed: var minline.LineEditor): bool =
       # Backspace at the buffer's left edge with a queued item above joins
       # the two, exactly like deleting a newline between two lines of a
@@ -2970,7 +3001,6 @@ proc ensureInputThreadStarted*() =
     inputEditorReady.store(false, moRelease)
     createThread(inputThread, inputThreadProc)
     inputThreadRunning = true
-    ensureDraftFlusherStarted()
     let deadline = epochTime() + 0.5
     while not inputEditorReady.load(moAcquire) and epochTime() < deadline:
       sleep 5

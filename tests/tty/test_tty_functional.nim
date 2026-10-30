@@ -1675,15 +1675,19 @@ max-tokens = "8192"
     writeStubResponses(root, %*[])
 
     # Phase 1: start an idle REPL and type a prompt WITHOUT submitting it.
-    let draftText = "important unsent prompt"
+    # The debounced save is key-press triggered and fires only once a
+    # sentence has completed and typing pauses, so the draft ends at a
+    # sentence boundary and the wait outlasts the debounce window.
+    let draftText = "important unsent prompt."
     let tty1 = startStub(root)
     tty1.expect "❯"
     tty1.send draftText
     tty1.expect draftText
-    # Wait past the 250ms flusher debounce so the draft reaches disk. No turn
-    # has run, so this is the pre-first-turn case: the draft lands under the
-    # cwd-keyed pending path; the reserved .3log has no committed messages.
-    sleep 800
+    # DraftDebounceS (750ms) plus the 200ms poll tick granularity: the save
+    # lands within ~1s of the last key. No turn has run, so this is the
+    # pre-first-turn case: the draft lands under the cwd-keyed pending path;
+    # the reserved .3log has no committed messages.
+    sleep 1500
     tty1.drain(100)
     let draftPath = draftPathForDir(root)
     check fileExists(draftPath)
