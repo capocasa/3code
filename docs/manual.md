@@ -1711,7 +1711,10 @@ Use an editor or the sandbox commands:
 
 `:sandbox edit` tries `$VISUAL`, then `$EDITOR`, then the platform default.
 Changes take effect when the editor exits. Rule commands store project paths in
-portable `./foo` form and reload immediately.
+portable `./foo` form and reload immediately. A rule command for a target the
+file already covers rewrites that rule where it sits instead of stacking a new
+one at the end; the order you wrote is the order that is enforced, and moving a
+rule would silently change what falls under it (the last matching rule wins).
 
 `:sandbox off` disables filesystem and network enforcement for the session.
 The setting is stored as `sandbox = off` in `[settings]`. Use `:sandbox on` to
