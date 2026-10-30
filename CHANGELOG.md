@@ -2,6 +2,47 @@ Changelog
 
 Unreleased
 
+- **The prompt draft save is key-press debounced, not interval-polled.**
+  A dedicated flusher thread woke every 250ms to check a dirty flag; now
+  the save is armed by the key presses that change the buffer and fired by
+  the input thread's own no-key-waiting path, so it happens only after a
+  sentence completes (`.`, `!`, `?`, or a line break) AND typing has been
+  briefly quiet (750ms debounce). Steady typing and mid-sentence pauses
+  write nothing; the unconditional final flush on shutdown still captures
+  whatever was on the way out, and the crash-restore behavior is
+  unchanged.
+- **The mode file is the whole mode: kickoff turns are gone.** Goal
+  mode (and cybernetic with it) had grown a second arming path
+  beside the file: a `startGoalTurn` flag in the UI made every
+  `:goal <text>` arm append a harness-autosent kickoff prompt and run
+  a turn at once, and a `goal.md` already on disk when the session
+  opened fired the same kickoff before the first prompt. Both are
+  gone. Existence is the mode and the turn-end boundary in turns.nim
+  is its only consumer: `:goal <text>` writes the file and answers
+  with one receipt line (the mode's counts ride it for `:cyber`), a
+  `goal.md` present at startup does nothing at all, and the first
+  check runs at the end of the first turn — send any prompt, or an
+  empty Enter (it runs a turn on the conversation as it stands), and
+  the loop takes over from there. The kickoff message builders, the
+  `◎` replay marker, and the `startGoalTurn` plumbing are deleted
+  with it; discipline baselines (the mode-file snapshot and the
+  change-log count) now bind at turn start instead of arm time, so
+  the first check after an arm still judges that turn's own delta.
+- **Goal verdicts read as a dim quote block, and the verifier is
+  terser.** The check's scrollback item carried its verdict in a
+  color flood - icon and prose alike saturated green or red. Now only
+  the leading icon speaks the verdict (green `✓` satisfied, red `✗`
+  anything else) while the prose sits in the dim tier behind a
+  continuous vertical rule, wrapped rows keeping the rule aligned
+  under the icon:
+
+      ✓ | this is the
+        | verdict text
+
+  The judge preamble caps the reply at 40 words (was bullet points
+  under a 200-word ceiling), so the block stays a quote, not a
+  report. A satisfied goal now retires `goal.md` to `achieved.md`
+  (was `goal-confirmed.md`) - the record's name says what happened.
 - **`:btw` asks the model a side question about the conversation without
   it entering the context.** `:btw why did we pick the parser rewrite?`
   fires one meta-call over the live history (a dedicated aside system
@@ -53,16 +94,6 @@ Unreleased
   leaked into the name; the split now takes any whitespace, making the
   verb `:goal` and every following line the goal text. Same two fixes
   for `:cyber`.
-- **Goal-mode verdicts are terse and speak in color.** The verifier's
-  scrollback item used to lead with the `⌕` loupe — the same glyph as
-  web search — and close with a separate icon row, while the verifier
-  itself was free to write paragraphs. Now the item is the verdict: a
-  green `✓` (satisfied) or red `✗` (anything else — feedback, an
-  unreadable verdict, a verifier failure) leads the first row and its
-  color carries the whole body, and the trailing icon row is gone; a
-  bare verdict still paints its icon alone. The judge preamble now
-  caps the reply: bullet points of at most 10 words each, nothing
-  trivial, at most 200 words in all.
 - **Plugins can add subcommands and command-line options.** A plugin
   exporting `tc_register_cli` registers `3code <name>` subcommands
   (`tc_cli_command` runs them: verbatim args in, output and exit code
