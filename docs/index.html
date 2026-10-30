@@ -16,10 +16,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA3XAAAN1wFCKJt4AAAAB3RJTUUH4QQQEwksSS9ZWwAAAk1JREFUWMPtll2ITVEUx39nn/O7Y5qR8f05wtCUUr6ZIS++8pEnkZInPImneaCQ5METNdOkeFBKUhMPRIkHKfEuUZSUlGlKPN2TrgfncpvmnntnmlEyq1Z7t89/rf9a6+y99oZxGZf/XeIq61EdtgKXgdXA0xrYAvBjOIF1AI9zvjcC74BSpndrJPkBWDScTF8Aa4E3wDlgHbASaANmVqlcCnwHvgDvgVfAJ+AikAAvgfVZwLnSVZHZaOuKoQi3ZOMi4NkYkpe1p4J7A8BpYAD49hfIy/oqG0+hLomiKP2L5L+1ubn5115S+3OAn4EnwBlgMzCjyt6ZAnQCJ4A7wOs88iRJHvw50HoujuPBoCKwHWiosy8MdfZnAdcHk8dxXFJ3VQbQlCTJvRBCGdRbD4M6uc5glpY3eAihpN5S5w12diSEcCCEcKUO4ljdr15T76ur1FDDLIQQ3qv71EdDOe3Kxj3leRXyk+pxdWnFWod6Wt2bY3de3aSuUHcPBVimHs7mK9WrmeOF6lR1o9qnzskh2ar2qm1qizpfXaPeVGdlmGN5pb09qMxz1Xb1kLqgzn1RyH7JUXW52lr5e/Kqi9qpto7V1atuUzfnARrV7jEib1T76gG2qxdGmXyiekkt1GswPTtek0aBfJp6YySGBfWg2tPQ0FAYgf1stUfdmdcjarbYJEniKIq6gY/Aw+zWHAC+p2labGpqiorFYgGYCEzN7oQdQClN07O1/EfDyGgC0ALMBdYAi4FyK+4H3gLPsxfR1zRNi+NP7nH5J+QntnXe5B5mpfQAAAAASUVORK5CYII=">
 
 <!-- CSS -->
-<link rel="stylesheet" type="text/css" href="nimdoc.out.css?v=2.2.12">
+<link rel="stylesheet" type="text/css" href="nimdoc.out.css?v=2.4.0">
 
 <!-- JS -->
-<script type="text/javascript" src="dochack.js?v=2.2.12"></script>
+<script type="text/javascript" src="dochack.js?v=2.4.0"></script>
 </head>
 <body>
   <div class="document" id="documentId">
@@ -760,7 +760,7 @@ Inside the fence, only clients that speak the proxy variables get out: <tt class
 :sandbox deny ./secrets
 :sandbox on
 :sandbox off</pre></p>
-<p><tt class="docutils literal"><span class="pre">:sandbox edit</span></tt> tries <tt class="docutils literal"><span class="pre">$VISUAL</span></tt>, then <tt class="docutils literal"><span class="pre">$EDITOR</span></tt>, then the platform default. Changes take effect when the editor exits. Rule commands store project paths in portable <tt class="docutils literal"><span class="pre">./foo</span></tt> form and reload immediately.</p>
+<p><tt class="docutils literal"><span class="pre">:sandbox edit</span></tt> tries <tt class="docutils literal"><span class="pre">$VISUAL</span></tt>, then <tt class="docutils literal"><span class="pre">$EDITOR</span></tt>, then the platform default. Changes take effect when the editor exits. Rule commands store project paths in portable <tt class="docutils literal"><span class="pre">./foo</span></tt> form and reload immediately. A rule command for a target the file already covers rewrites that rule where it sits instead of stacking a new one at the end; the order you wrote is the order that is enforced, and moving a rule would silently change what falls under it (the last matching rule wins).</p>
 <p><tt class="docutils literal"><span class="pre">:sandbox off</span></tt> disables filesystem and network enforcement for the session. The setting is stored as <tt class="docutils literal"><span class="pre">sandbox = off</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt>. Use <tt class="docutils literal"><span class="pre">:sandbox on</span></tt> to restore enforcement. The one-shot equivalent is the <tt class="docutils literal"><span class="pre">--no-sandbox</span></tt> flag, and <tt class="docutils literal"><span class="pre">3code sandbox --policy FILE restrict -- CMD</span></tt> runs a single command under a policy without starting the REPL.</p>
 <p>To allow the full filesystem, replace the policy with <tt class="docutils literal"><span class="pre">allow /</span></tt>. Without host rules, the network is unrestricted too. This is yolo mode. 3code makes you ask for it explicitly and will not have the bright idea on its own.</p>
 
@@ -848,7 +848,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-29 10:28:50 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-29 22:47:01 UTC</small>
       </div>
     </div>
   </div>

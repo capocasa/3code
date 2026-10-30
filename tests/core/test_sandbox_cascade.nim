@@ -11,9 +11,10 @@ discard """
   # the mtime-driven `reloadIfChanged` that picks up mid-session
   # policy edits.
 """
-import std/[unittest, os, times, strutils]
+import std/[unittest, os, times, strutils, json]
 import threecode/sandbox
 import threecode/types
+import threecode/[minline, ui]
 
 # Use platform-appropriate absolute paths so the test is meaningful on
 # both Unix and Windows. On Windows a bare "/opt" is not absolute (no
@@ -204,6 +205,172 @@ suite "single active policy file":
     check text.contains("deny ~/dl\n")
     check text.contains("readonly " & varDir.replace(DirSep, '/') & "\n")
     check projDir notin text.splitLines[^4..^1].join("\n")
+
+  test "appendRule replaces an existing rule at its line, in place":
+    # Order is meaning in this policy (last match wins), so flipping a
+    # verb must not move the rule behind later rules: `:sandbox ask /`
+    # over `deny /` used to re-stack the rule at the end and swallow
+    # every allow written after it.
+    let (home, projDir) = newFixture("inplace")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile,
+      "deny " & opt & "\nallow " & varDir & "\nallow ./\n")
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      check appendRule(repoFile, opt, akAsk)
+    finally:
+      setCurrentDir(oldCwd)
+    check readFile(repoFile) ==
+      "ask " & opt.replace(DirSep, '/') & "\n" &
+      "allow " & varDir.replace(DirSep, '/') & "\n" &
+      "allow ./\n"
+
+  test "appendRule matches a rule written in another spelling":
+    # `./foo` in the file and the absolute <proj>/foo from the command
+    # are the same rule: the written line keeps its place and spelling
+    # is what the command wrote.
+    let (home, projDir) = newFixture("spelling")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile,
+      "allow ./\nallow ./foo\ndeny " & varDir & "\n")
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      check appendRule(repoFile, projDir / "foo", akDeny)
+    finally:
+      setCurrentDir(oldCwd)
+    check readFile(repoFile) ==
+      "allow ./\ndeny ./foo\ndeny " & varDir.replace(DirSep, '/') & "\n"
+
+  test "appendRule collapses stacked duplicates for one target":
+    # Files edited by the old strip-and-append behavior can carry two
+    # rules for one target; a flip replaces the first and drops the
+    # rest instead of keeping the stale one around.
+    let (home, projDir) = newFixture("dedup")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile,
+      "deny " & opt & "\nallow ./\nallow " & opt & "\n")
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      check appendRule(repoFile, opt, akReadOnly)
+    finally:
+      setCurrentDir(oldCwd)
+    check readFile(repoFile) ==
+      "readonly " & opt.replace(DirSep, '/') & "\nallow ./\n"
+
+  test "appendRule flips host rules in place too":
+    let (home, projDir) = newFixture("hostflip")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile,
+      "allow github.com:443\nallow ./\ndeny evil.com\n")
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      check appendRule(repoFile, "github.com:443", akDeny)
+    finally:
+      setCurrentDir(oldCwd)
+    check readFile(repoFile) ==
+      "deny github.com:443\nallow ./\ndeny evil.com\n"
+
+  test "editPolicy runs $VISUAL on the file and reloads":
+    # `cp SRC` as $VISUAL makes the editor append the policy path as
+    # its second argument, so the "editor" rewrites the file in one
+    # shot: exactly what a real editor leaving the file changed must
+    # achieve for the reload to matter.
+    let (home, projDir) = newFixture("edit")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      putEnv("VISUAL", "")
+      removeDir(home.parentDir)
+    let edited = home / "edited-policy"
+    writeFile(edited, "deny " & opt & "\nallow ./\n")
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "allow " & opt & "\nallow ./\n")
+    when defined(windows):
+      putEnv("VISUAL", "copy /y " & quoteShell(edited))
+    else:
+      putEnv("VISUAL", "cp " & quoteShell(edited))
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      let msg = editPolicy(repoFile)
+      check msg == "sandbox updated: edited " & repoFile
+      # The file carries the editor's version...
+      check readFile(repoFile) == "deny " & opt & "\nallow ./\n"
+      # ...and the reload made it the live policy.
+      check renderSandbox(current).contains(
+        "deny      " & opt.replace(DirSep, '/'))
+    finally:
+      setCurrentDir(oldCwd)
+
+  when defined(posix):
+    test "editPolicy reports a failing editor":
+      let (home, projDir) = newFixture("editfail")
+      defer:
+        putEnv("XDG_CONFIG_HOME", "")
+        putEnv("VISUAL", "")
+        removeDir(home.parentDir)
+      let repoFile = repoPolicyPath(projDir)
+      writeFile(repoFile, "allow ./\n")
+      putEnv("VISUAL", "false")
+      let oldCwd = getCurrentDir()
+      setCurrentDir(projDir)
+      try:
+        check editPolicy(repoFile) == "error: editor exited with status 1"
+      finally:
+        setCurrentDir(oldCwd)
+
+  test "handleCommandResult drives the :sandbox verbs on the file":
+    # The REPL glue the UI runs, headless: the rule verbs and edit must
+    # land the same file effects as the direct proc tests above.
+    let (home, projDir) = newFixture("dispatch")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      putEnv("VISUAL", "")
+      removeDir(home.parentDir)
+    let edited = home / "edited-policy"
+    writeFile(edited, "deny " & opt & "\nallow ./\n")
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "deny " & opt & "\nallow " & varDir & "\n")
+    putEnv("VISUAL", "cp " & quoteShell(edited))
+    var messages = %* []
+    var session = Session()
+    var prof = Profile()
+    var editor: minline.LineEditor
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      block askVerb:
+        let r = handleCommandResult(":sb ask " & opt, messages, session,
+                                    prof, editor)
+        check r.ok
+        check r.body.contains("sandbox updated: ask " &
+          opt.replace(DirSep, '/'))
+        check readFile(repoFile) ==
+          "ask " & opt.replace(DirSep, '/') & "\n" &
+          "allow " & varDir.replace(DirSep, '/') & "\n"
+      block editVerb:
+        let r = handleCommandResult(":sandbox edit", messages, session,
+                                    prof, editor)
+        check r.ok
+        check r.body.contains("sandbox updated: edited")
+        check readFile(repoFile) == "deny " & opt & "\nallow ./\n"
+    finally:
+      setCurrentDir(oldCwd)
 
   test "renderSandbox contracts project and home paths":
     let (home, projDir) = newFixture("contract")
