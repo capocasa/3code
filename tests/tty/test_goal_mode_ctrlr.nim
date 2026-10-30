@@ -9,11 +9,11 @@ discard """
 ##   `requestTurnRetry`, and the retry backoff must break immediately
 ##   when it lands (the transport-level contract is covered by
 ##   tests/stream; this is the wiring).
-## - Goal kickoff: `:goal TEXT` at the idle prompt must start goal
-##   achievement immediately (a harness-autosent turn, no second prompt),
-##   and the turn-end verifier must then confirm and retire goal.md.
-##   A goal.md already on disk at startup must arm the same way: the
-##   kickoff turn runs with no keystroke at all.
+## - Goal mode wiring: the file is the whole mode. `:goal TEXT` writes
+##   goal.md and answers with the arm receipt - no turn runs - and the
+##   turn-end verifier then confirms and retires goal.md to achieved.md.
+##   A goal.md already on disk at startup must do nothing at all: the
+##   first prompt is the first turn, and only its end runs the check.
 import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
@@ -50,7 +50,7 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "THREECODE_STUB_STREAM", val: "1"),
   ]
 
-suite ":retry and goal kickoff (interactive)":
+suite ":retry and goal mode (interactive)":
   test ":retry during a 429 backoff retries immediately":
     let root = newFixture("ctrl_r_backoff")
     writeConfiguredProvider(root)
@@ -89,12 +89,12 @@ suite ":retry and goal kickoff (interactive)":
     check elapsed < 5.0
     tty.expectAlive()
 
-  test ":goal TEXT kicks off goal work immediately, verifier confirms":
+  test ":goal TEXT arms; the next turn's end confirms and retires":
     let root = newFixture("goal_kickoff")
     writeConfiguredProvider(root)
     check not fileExists(root / "run" / "goal.md")
-    # Response 1 goes to the kickoff turn; response 2 is the turn-end
-    # verifier side call (satisfied verdict retires goal.md).
+    # Response 1 goes to the user's first prompt; response 2 is the
+    # turn-end verifier side call (satisfied verdict retires goal.md).
     writeFile(root / "run" / "stub_responses.json", $(%*[
       {"role": "assistant", "preStreamDelayMs": 50,
        "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
@@ -129,38 +129,41 @@ suite ":retry and goal kickoff (interactive)":
     tty.send "\n"
     tty.expect "usage"
     tty.drain(100)
-    tty.send ":goal make the stub say GOAL_WORK_DONE"
-    tty.expect ":goal make the stub say GOAL_WORK_DONE"
+    tty.send ":goal make the stub say the word"
+    tty.expect ":goal make the stub say the word"
     tty.send "\n"
     tty.drain(100)
-    # The arm is quiet - no response line, no armed receipt, no ◎ item:
-    # the echoed command already says it. The proof the kickoff ran is
-    # the turn itself, which streams with no further keystroke.
+    # The arm is the file plus one receipt line - no turn runs, the
+    # proof being that no model reply streams before a prompt is sent.
+    tty.expectInHistory "goal armed (goal.md)"
+    tty.expectNeverInHistory "GOAL_WORK_DONE"
+    tty.send "go"
+    tty.send "\n"
     tty.expectInHistory "GOAL_WORK_DONE"
     # Turn end: detection receipt, then the verifier's reply renders as
-    # a scrollback item that speaks its verdict - green ✓ icon leading,
-    # green text, verdict line stripped - and that ✓ is the
-    # confirmation, no 'goal confirmed' receipt. The session idles with
-    # the confirmed record on disk.
+    # a dim quote block led by the green ✓ icon (verdict line stripped);
+    # that ✓ is the confirmation, no 'goal confirmed' receipt. The
+    # session idles with the achieved record on disk.
     tty.expectInHistory "goal mode: goal.md detected"
     tty.expectInHistory "all done"
     tty.expectNeverInHistory "VERDICT"
     tty.expectInHistory "\u2713"
     tty.drain(300)
-    check fileExists(root / "run" / "goal-confirmed.md")
+    check fileExists(root / "run" / "achieved.md")
     check not fileExists(root / "run" / "goal.md")
     tty.expectAlive()
 
-  test "goal.md present at startup kicks off with no keystroke":
-    let root = newFixture("goal_startup_kickoff")
+  test "goal.md present at startup does nothing until work runs":
+    let root = newFixture("goal_startup_inert")
     writeConfiguredProvider(root)
     # goal.md is written before the session starts - how a user (or any
     # other tool) arms a goal without ever touching :goal. Startup must
-    # load it and send the agent off in the same breath.
+    # leave it inert: no turn runs, the file just sits armed.
     writeFile(root / "run" / "goal.md", "make the stub say GOAL_WORK_DONE\n")
-    # Response 1 goes to the kickoff turn; response 2 is the turn-end
-    # verifier side call (satisfied verdict retires goal.md); response 3
-    # answers the follow-up prompt that proves the session idles normally.
+    # Response 1 goes to the user's first prompt; response 2 is the
+    # turn-end verifier side call (satisfied verdict retires goal.md);
+    # response 3 answers the follow-up prompt that proves the session
+    # idles normally.
     writeFile(root / "run" / "stub_responses.json", $(%*[
       {"role": "assistant", "preStreamDelayMs": 50,
        "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
@@ -186,19 +189,26 @@ suite ":retry and goal kickoff (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Nothing is typed: the startup detection arms the goal and the
-    # kickoff turn runs on its own, quiet like the :goal path (no armed
-    # receipt, no ◎ item - the detection receipt at turn end names the
-    # mode instead). The streamed reply is the proof it ran.
+    # Nothing is typed yet and nothing happens: no kickoff turn, no
+    # detection receipt, no model call. The armed file alone is inert.
+    tty.drain(400)
+    tty.expectNeverInHistory "GOAL_WORK_DONE"
+    tty.expectNeverInHistory "goal mode: goal.md detected"
+    check fileExists(root / "run" / "goal.md")
+    # The first prompt is the first turn; its end is what arms the
+    # check - detection receipt, verifier, and the retirement to
+    # achieved.md all hang off that boundary.
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
     tty.expectInHistory "GOAL_WORK_DONE"
-    # Turn end: the verifier confirms (a green ✓ item) and retires the
-    # file.
+    tty.expectInHistory "goal mode: goal.md detected"
     tty.expectInHistory "\u2713"
     tty.drain(300)
-    check fileExists(root / "run" / "goal-confirmed.md")
+    check fileExists(root / "run" / "achieved.md")
     check not fileExists(root / "run" / "goal.md")
     # The session is back to an ordinary idle prompt: a typed prompt
-    # answers normally, and no second kickoff fires.
+    # answers normally, and no second turn fires on its own.
     tty.send "still here"
     tty.expect "still here"
     tty.send "\n"
@@ -208,14 +218,14 @@ suite ":retry and goal kickoff (interactive)":
   test "verifier reply lands in scrollback; keys typed during the check survive":
     let root = newFixture("goal_verify_reply")
     writeConfiguredProvider(root)
-    # Response 1: the kickoff reply. Response 2: a slow toolless verifier
-    # call (one reply, no tool rounds) whose prose lands as a dim step in
-    # scrollback; keystrokes typed right after the turn receipt ride out
-    # the whole check in the editor. Response 3: the reply to the user's
-    # next prompt, submitted AFTER the check: the text typed mid-check
-    # must still be in the editor, proving the side call never ate keys
-    # (the tool stdin watcher used to arm for its bash rounds and
-    # swallow everything).
+    # Response 1: the first turn's reply. Response 2: a slow toolless
+    # verifier call (one reply, no tool rounds) whose prose lands as a
+    # dim quote block in scrollback; keystrokes typed right after the
+    # turn receipt ride out the whole check in the editor. Response 3:
+    # the reply to the user's next prompt, submitted AFTER the check:
+    # the text typed mid-check must still be in the editor, proving the
+    # side call never ate keys (the tool stdin watcher used to arm for
+    # its bash rounds and swallow everything).
     writeFile(root / "run" / "stub_responses.json", $(%*[
       {"role": "assistant", "preStreamDelayMs": 50,
        "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
@@ -241,22 +251,26 @@ suite ":retry and goal kickoff (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    tty.send ":goal make the stub say GOAL_WORK_DONE"
+    tty.send ":goal make the stub say the word"
+    tty.send "\n"
+    tty.drain(100)
+    tty.expectInHistory "goal armed (goal.md)"
+    tty.expectNeverInHistory "GOAL_WORK_DONE"
+    tty.send "go"
     tty.send "\n"
     tty.expectInHistory "GOAL_WORK_DONE"
-    # The receipt commits before the side call; the verifier's slow model
-    # call is running by the moment it lands, so these keystrokes must
-    # ride out the whole check in the editor buffer.
-    tty.expectInHistory "goal mode: goal.md detected"
+    # The turn has ended and the verifier's slow model call (1500ms
+    # delay) is already running, so these keystrokes must ride out the
+    # whole check in the editor buffer.
     tty.send "SURVIVED_KEYS"
     tty.drain(300)
     # The check shows its work: the verifier's reply prose lands as a
-    # green ✓ scrollback item (same rendering as a reply, verdict line
-    # stripped) before the verdict is honored.
+    # ✓-led dim quote block (verdict line stripped) before the verdict
+    # is honored.
     tty.expectInHistory "checked the tree."
     tty.expectNeverInHistory "VERDICT: SATISFIED"
     tty.expectInHistory "\u2713"
-    check fileExists(root / "run" / "goal-confirmed.md")
+    check fileExists(root / "run" / "achieved.md")
     check not fileExists(root / "run" / "goal.md")
     # Submit the buffer that lived through the check: the echoed prompt
     # only appears if every keystroke survived the side call.
@@ -291,6 +305,10 @@ suite ":retry and goal kickoff (interactive)":
     tty.expect "\u276f"
     tty.send ":goal work toward it"
     tty.send "\n"
+    tty.drain(100)
+    tty.expectInHistory "goal armed (goal.md)"
+    tty.send "go"
+    tty.send "\n"
     tty.expectInHistory "GOAL_WORK_DONE"
     tty.expectInHistory "goal mode: goal.md detected"
     # Ctrl-C while the verifier's slow model call runs: the interrupt is
@@ -301,5 +319,5 @@ suite ":retry and goal kickoff (interactive)":
     tty.expectInHistory "interrupted by user"
     tty.drain(300)
     check fileExists(root / "run" / "goal.md")
-    check not fileExists(root / "run" / "goal-confirmed.md")
+    check not fileExists(root / "run" / "achieved.md")
     tty.expectAlive()

@@ -91,7 +91,7 @@ suite "command prefix resolution":
       let r = handleCommandResult(cmd, messages, session, prof, editor)
       check r.recognized and r.ok
       check r.name == "goal"
-      check r.startGoalTurn
+      check "goal armed" in r.body
       check readFile(GoalFileName) == "goal description\non several alines\n"
 
   test "bare :goal shows the live goal text":
@@ -101,7 +101,6 @@ suite "command prefix resolution":
       let r = handleCommandResult(":g", messages, session, prof, editor)
       check r.recognized and r.ok
       check "make it so" in r.body
-      check not r.startGoalTurn
 
   test "other commands accept and ignore the bang":
     check classifyCommand(":q!") == ckQuit
@@ -118,14 +117,15 @@ suite "goal command verbs":
   var prof = Profile()
   var editor: LineEditor
 
-  test ":goal TEXT arms quietly and flags the immediate kickoff":
+  test ":goal TEXT arms and answers with the one arm receipt":
     withCommandDir:
       let r = handleCommandResult(":goal make it so", messages, session,
                                   prof, editor)
       check r.recognized and r.ok
-      check r.startGoalTurn
-      # No response body: the `:goal make it so` echo already says it.
-      check r.body == ""
+      # The receipt is the whole announcement: no kickoff turn follows,
+      # the file is armed and the next turn end runs the check.
+      check r.body == "goal armed (goal.md); the check runs when each " &
+        "turn ends\n"
       check readFile(GoalFileName).strip == "make it so"
 
   test ":goal new is the balking synonym":
@@ -133,12 +133,11 @@ suite "goal command verbs":
       let r = handleCommandResult(":goal new first goal", messages, session,
                                   prof, editor)
       check r.recognized and r.ok
-      check r.startGoalTurn
+      check "goal armed" in r.body
       check readFile(GoalFileName).strip == "first goal"
       let balk = handleCommandResult(":goal new second goal", messages,
                                      session, prof, editor)
       check balk.recognized and not balk.ok
-      check not balk.startGoalTurn
       check ":goal!" in balk.body
       check readFile(GoalFileName).strip == "first goal"
       let usage = handleCommandResult(":goal new", messages, session, prof,
@@ -154,7 +153,6 @@ suite "goal command verbs":
       let r = handleCommandResult(":goal cancel", messages, session, prof,
                                   editor)
       check r.recognized and r.ok
-      check not r.startGoalTurn
       check GoalCancelledName in r.body
       check readFile(GoalCancelledName).strip == "doomed"
       let none = handleCommandResult(":goal cancel", messages, session, prof,
@@ -172,7 +170,7 @@ suite "goal command verbs":
         let r = handleCommandResult(":goal edit", messages, session, prof,
                                     editor)
         check r.recognized and r.ok
-        check r.startGoalTurn
+        check "goal armed" in r.body
         check readFile(GoalFileName).strip == "fresh goal"
 
     test ":goal edit creating nothing arms nothing":
@@ -182,7 +180,6 @@ suite "goal command verbs":
         let r = handleCommandResult(":goal edit", messages, session, prof,
                                     editor)
         check r.recognized and r.ok
-        check not r.startGoalTurn
         check "not armed" in r.body
         check not fileExists(GoalFileName)
         check not fileExists(GoalCancelledName)
@@ -200,8 +197,7 @@ suite "goal command verbs":
         let r = handleCommandResult(":goal edit", messages, session, prof,
                                     editor)
         check r.recognized and r.ok
-        check r.startGoalTurn
-        check r.body == ""
+        check "goal armed" in r.body
         check readFile(GoalFileName).strip == "edited text"
 
     test ":goal edit with an emptied file cancels the goal":
@@ -215,7 +211,6 @@ suite "goal command verbs":
         let r = handleCommandResult(":goal edit", messages, session, prof,
                                     editor)
         check r.recognized and r.ok
-        check not r.startGoalTurn
         check GoalCancelledName in r.body
         check not fileExists(GoalFileName)
 
@@ -230,7 +225,6 @@ suite "goal command verbs":
         let r = handleCommandResult(":goal edit", messages, session, prof,
                                     editor)
         check r.recognized and r.ok
-        check not r.startGoalTurn
         check "unchanged" in r.body
         check readFile(GoalFileName).strip == "stable text"
 

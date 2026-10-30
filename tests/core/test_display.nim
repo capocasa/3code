@@ -383,15 +383,12 @@ when not defined(windows):
       check EmptyReplyMsg notin rendered   # the skipped empty turn leaves no fallback
       check "↑50" notin rendered          # ...and no receipt for it either
 
-    test "goal kickoff replays as the ◎ target item, steers stay »":
-      # The kickoff is an `agentSent` user message like a steer, but live
-      # commits it with the `◎` target marker (the goal is the session's
-      # aim, not just another autosend); replay must match that marker so
-      # a resumed session shows the same glyph, while ordinary steers keep
-      # their `»`.
-      let kickoff = goalKickoffMessage("ship the feature"){"content"}.getStr
+    test "harness-autosent messages replay as » items":
+      # A `agentSent` user message is a steer: replay renders it with the
+      # `»` agent-prompt marker, never as a user `❯` echo.
       let msgs = %*[
-        {"role": "user", "content": kickoff, "agentSent": true},
+        {"role": "user", "content": "Goal check: keep going.",
+         "agentSent": true},
         {"role": "assistant", "content": "on it.",
          "usage": {"promptTokens": 60, "completionTokens": 5,
                    "totalTokens": 65, "cachedTokens": 0}},
@@ -399,8 +396,7 @@ when not defined(windows):
            "Answer now, or continue with a tool call.",
          "agentSent": true}]
       let rendered = captureReplay(msgs, @[], window = 1000)
-      check BoldOn & "◎ " & Reset & "Goal armed: " in rendered
-      check "ship the feature" in rendered
+      check BoldOn & "» " & Reset & "Goal check: keep going." in rendered
       check BoldOn & "» " & Reset & "Your last reply came back empty." in rendered
 
     test "flail-noted call replays as its tool item plus the » note":

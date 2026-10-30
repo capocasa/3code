@@ -68,10 +68,6 @@ type
     plainBody*: bool
     clearFooter*: bool
     disposition*: CommandDisposition
-    startGoalTurn*: bool
-      ## Set by every :goal path that armed or re-armed `goal.md`: the
-      ## controller answers by immediately running a goal-kickoff turn
-      ## instead of waiting for the next turn boundary.
 
 var wizardReadLineHook*: WizardReadLineHook
 var wizardVerifyCancelHook*: WizardVerifyCancelHook
@@ -1920,11 +1916,11 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
   ## line out: bare = status, bare with `!` or `cancel` = retire,
   ## `new TEXT` / bare TEXT = arm (balking at a live mode without `!`),
   ## `edit` = revise the live file in $VISUAL/$EDITOR. A successful arm
-  ## answers with an empty line - the command echo already says it and
-  ## the kickoff turn follows at once. `armed` mirrors the old
-  ## `armGoal`: every arm/re-arm path sets it so the controller kicks
-  ## the mode's work off immediately instead of waiting for the next
-  ## turn boundary.
+  ## answers with an empty line here - the controller adds the one
+  ## receipt line (the arm receipt with the mode's counts) on top of
+  ## it. `armed` marks every arm/re-arm path so that receipt is the
+  ## whole announcement: the file is armed, nothing runs until the
+  ## next turn ends.
   result.ok = true
   if parts.len == 0 and not forced:
     if fileExists(m.fileName):
@@ -1957,9 +1953,8 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
         result.ok = false
         result.line = gerr
       else:
-        # No response line on a successful arm: the `:verb <text>` echo
-        # in scrollback already carries the words, and the kickoff turn
-        # starts immediately below it.
+        # No response line of the verb's own: the controller's arm
+        # receipt is the announcement.
         result.armed = true
   elif parts[0] == "edit" and parts.len == 1:
     # `edit` opens the file even when it has to be created: an empty
@@ -2103,7 +2098,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                          disposition: cdModal)
   var ok = true
   var body = ""
-  var armGoal = false
   template resp(b: string) = body.add cmdResponseS(b)
   template respErr(b: string) = body.add cmdErrorS(b)
   block dispatch:
@@ -2142,17 +2136,21 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           ok = false
     of ":goal", ":cyber":
       # The mode-verb grammar lives in `modeVerbResult`; the command name
-      # picks the registry entry (`:goal` #1, `:cyber` #2). Every arm sets
-      # `startGoalTurn` so the controller kicks the mode's work off
-      # immediately instead of waiting for the next turn boundary.
+      # picks the registry entry (`:goal` #1, `:cyber` #2). An arm answers
+      # with the one receipt line there is: no kickoff follows it, the
+      # file itself is armed and the next turn end runs the check.
       let m = if name == ":cyber": cyberneticMode else: goalMode
       let r = modeVerbResult(m, parts, arg, forced)
       if not r.ok:
         ok = false
         respErr r.line
+      elif r.armed:
+        let counts = m.taskCounts(readModeText(m))
+        resp m.name & " armed (" & m.fileName &
+          (if counts.len > 0: ", " & counts else: "") &
+          "); the check runs when each turn ends"
       elif r.line.len > 0:
         resp r.line
-      armGoal = r.armed
     of ":help", ":?":
       body.add renderHelpS()
     of ":tokens":
@@ -2405,5 +2403,4 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                 body: body,
                 plainBody: ok,
                 clearFooter: ok and title == "profile",
-                disposition: disposition,
-                startGoalTurn: armGoal)
+                disposition: disposition)

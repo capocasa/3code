@@ -27,10 +27,8 @@ proc synthMode(): ModeDesc =
     givenUpName: "synth-given-up.md",
     validate: proc (body: string): string = "",
     composeBody: proc (text: string): string = text.strip & "\n",
-    kickoffMessage: proc (body: string): JsonNode = newJNull(),
     feedbackMessage: proc (body, fb: string): JsonNode = newJNull(),
-    taskCounts: proc (body: string): string = "",
-    kickoffDisplay: proc (body: string): string = body.strip)
+    taskCounts: proc (body: string): string = "")
 
 proc withSynthMode(body: proc ()) =
   ## Register a second mode for the duration of one test; the registry
@@ -119,11 +117,6 @@ suite "cybernetic skeleton (the :cyber writer)":
     check body.count("## Current state") == 1
     check validatePlanBody(body) == ""
 
-  test "a heading title is honored; text without one uses the first line":
-    check planTitle(cyberSkeleton("# T\n- [ ] t")) == "T"
-    check planTitle("# First heading\n\n- [ ] x") == "First heading"
-    check planTitle("No heading at all\n\n- [ ] x") == "No heading at all"
-
 suite "cybernetic mode entry":
   test "registered as entry #2 with file, verb, retirement names":
     check modeRegistry.len >= 2
@@ -169,19 +162,6 @@ suite "cybernetic mode entry":
       check fileExists(CyberConfirmedName)
       check not fileExists(CyberFileName)
 
-  test "kickoff message carries counts and names the next task":
-    let body = "# P\n\n- [x] a\n- [ ] b\n- [ ] c\n\n## Current state\n\ns"
-    let msg = cyberKickoffMessage(body)
-    check msg{"role"}.getStr == "user"
-    check msg{"agentSent"}.getBool(false)
-    let c = msg{"content"}.getStr
-    check c.startsWith(GoalKickoffPrefix & CyberFileName)
-    check "(3 tasks, 1 done)" in c
-    check body in c
-    check "next unchecked task: \"b\"" in c
-    # The shared kickoff prefix is what replay matches to the `◎` item;
-    # its rendering is covered by the goal kickoff tests.
-
   test "feedback message orients on the plan and states the duties":
     let body = "# P\n\n- [ ] a\n\n## Current state\n\ns"
     let msg = cyberFeedbackMessage(body, "tests missing")
@@ -192,13 +172,10 @@ suite "cybernetic mode entry":
     check "## Current state" in c
     check "when this turn ends" in c
 
-  test "counts and display hooks on the descriptor":
+  test "counts hook on the descriptor":
     let body = "# Parse plans\n\n- [x] a\n- [ ] b\n\n## Current state\n\ns"
     check cyberneticMode.taskCounts(body) == "2 tasks, 1 done"
-    check cyberneticMode.kickoffDisplay(body) ==
-      "Parse plans - 2 tasks, 1 done; next: b"
     check goalMode.taskCounts("anything") == ""
-    check goalMode.kickoffDisplay("  the goal text  ") == "the goal text"
 
   test "conflictingMode names a second file on disk":
     withModeDir proc (dir: string) =

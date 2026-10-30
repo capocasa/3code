@@ -62,8 +62,8 @@ suite "mode verb (:goal grammar, both modes)":
     withModeDir proc (dir: string) =
       check verb(cyberneticMode, "new") == (false,
         "usage: :cyber new <text>", false)
-      # A successful arm answers with no line: the command echo already
-      # says it and the kickoff turn follows at once.
+      # A successful arm answers with no line of the verb's own: the
+      # controller's arm receipt is the announcement.
       check verb(cyberneticMode, "new first plan") == (true, "", true)
       check verb(cyberneticMode, "new second plan") == (false,
         "cybernetic.md is already active; use :cyber! to replace it",
