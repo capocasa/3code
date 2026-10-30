@@ -85,9 +85,10 @@
 <tr><td>4 kB</td><td>3.2 s</td><td>0.25 s</td><td>+3.4 MB</td></tr>
 <tr><td>8 kB</td><td>5.2 s</td><td>0.25 s</td><td>+3.5 MB</td></tr>
 <tr><td>16 kB</td><td>10.7 s</td><td>2.0 s</td><td>+3.8 MB</td></tr>
-<tr><td>32 kB</td><td>22.4 s</td><td><blockquote class="markdown-quote"><p>5 s</p></blockquote>
+<tr><td>24 kB</td><td>15.0 s</td><td>12.1 s</td><td>+4.1 MB</td></tr>
+<tr><td>32 kB</td><td>22.4 s</td><td><blockquote class="markdown-quote"><p>180 s, still not done</p></blockquote>
 </td><td>+3.3 MB</td></tr>
-</table><p>(120 kB measured separately: about 60-90 s of child CPU to commit the echo, RSS still ~13 MB.) Both the per-piece editor reflow while pasting and the scrollback commit of the multi-thousand-column echo row grow faster than linear. Memory stays bounded; a big paste into 3code will not OOM you, but pasting a 100 kB log blob will pin a core for a minute. That is a render-path cost, not a leak, and it is the one finding here worth a follow-up issue.</p>
+</table><p>Feed cost grows smoothly (~0.7 s/kB, the editor reflowing the growing line per piece). Submit cost falls off a cliff instead: 8 kB answers in a quarter second, 24 kB in twelve seconds, and a 32 kB single-line paste was still grinding its scrollback echo commit after three minutes (about 12% of one core, mostly parked in ticker repaints between bursts; RSS flat at 14.4 MB the whole time). Whatever wraps and commits the echoed prompt row is worse than quadratic in line length. Memory stays bounded; a big paste into 3code will not OOM you, but anything past a few tens of kB on one line will pin the render path for minutes. That is the one finding here worth a follow-up issue.</p>
 
 <h2 id="reproducing">Reproducing</h2><p><pre class="listing"># stub binary + probe (release config)
 nim c --skipParentCfg --noNimblePath -d:release --opt:size \
@@ -106,7 +107,7 @@ nim c -r tests/api/test_memory_leak.nim</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-30 11:58:01 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-30 12:06:34 UTC</small>
       </div>
     </div>
   </div>

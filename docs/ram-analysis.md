@@ -141,15 +141,19 @@ idle session:
 | 4 kB | 3.2 s | 0.25 s | +3.4 MB |
 | 8 kB | 5.2 s | 0.25 s | +3.5 MB |
 | 16 kB | 10.7 s | 2.0 s | +3.8 MB |
-| 32 kB | 22.4 s | > 5 s | +3.3 MB |
+| 24 kB | 15.0 s | 12.1 s | +4.1 MB |
+| 32 kB | 22.4 s | > 180 s, still not done | +3.3 MB |
 
-(120 kB measured separately: about 60-90 s of child CPU to commit the
-echo, RSS still ~13 MB.) Both the per-piece editor reflow while
-pasting and the scrollback commit of the multi-thousand-column echo
-row grow faster than linear. Memory stays bounded; a big paste into
-3code will not OOM you, but pasting a 100 kB log blob will pin a core
-for a minute. That is a render-path cost, not a leak, and it is the
-one finding here worth a follow-up issue.
+Feed cost grows smoothly (~0.7 s/kB, the editor reflowing the growing
+line per piece). Submit cost falls off a cliff instead: 8 kB answers
+in a quarter second, 24 kB in twelve seconds, and a 32 kB single-line
+paste was still grinding its scrollback echo commit after three
+minutes (about 12% of one core, mostly parked in ticker repaints
+between bursts; RSS flat at 14.4 MB the whole time). Whatever wraps
+and commits the echoed prompt row is worse than quadratic in line
+length. Memory stays bounded; a big paste into 3code will not OOM you,
+but anything past a few tens of kB on one line will pin the render
+path for minutes. That is the one finding here worth a follow-up issue.
 
 ## Reproducing
 
