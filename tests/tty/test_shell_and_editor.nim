@@ -266,6 +266,39 @@ suite "shell command and edit-in-editor":
     tty.expect "\u276f"
     echo "  PASS: Ctrl+X Ctrl+E edit-in-editor"
 
+  test ":sandbox edit edits the policy in $VISUAL and reloads":
+    let root = newFixture("sandbox_edit")
+    writeConfiguredProvider(root)
+    writeStubResponses(root)
+    # A policy the editor will extend by one rule; its presence in the
+    # next :sandbox dump proves both the file write and the reload.
+    writeFile(root / "run" / ".sandbox", "allow ./\ndeny ./secrets\n")
+    let marker = root / "sandbox_edit_marker"
+    let editor = root / "editor-append.sh"
+    writeFile(editor,
+      "#!/bin/sh\necho 'allow ./from-editor' >> \"$1\"\ntouch " & marker & "\n")
+    discard chmod(editor, 0o755)
+    let tty = startStub(root, editor)
+    defer: tty.close()
+
+    tty.expect "\u276f"
+
+    tty.typeText ":sandbox edit"
+    tty.send "\n"
+
+    require waitForFile(marker)
+    tty.drain(300)
+    tty.expectInHistory "sandbox updated: edited"
+    check readFile(root / "run" / ".sandbox") ==
+      "allow ./\ndeny ./secrets\nallow ./from-editor\n"
+
+    tty.typeText ":sandbox"
+    tty.send "\n"
+    tty.drain(300)
+    tty.expectInHistory "from-editor"
+    tty.expect "\u276f"
+    echo "  PASS: :sandbox edit"
+
 proc ptyEchoes(s: TtySession): bool =
   ## The pty's termios as the child left it: ECHO + ICANON must both be on
   ## after exit, or the shell the user lands in eats keystrokes (gh #56).

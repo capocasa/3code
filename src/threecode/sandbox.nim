@@ -544,16 +544,76 @@ proc ensureRepoPolicy*(dir: string): bool =
 proc renderSandbox*(p: Policy): string =
   renderPolicy(p, getCurrentDir())
 
+proc targetKey(target: string; projectDir: string): string =
+  ## The identity a rule line is matched on, mirroring sandwall's
+  ## replaceAccess: paths compare on their normalized absolute form
+  ## (so `./foo` and `<proj>/foo` are the same rule), hosts on the
+  ## (host, port) pair.
+  if classifyTarget(target) == rkPath:
+    "\x01" & normalizePolicyPath(target, projectDir)
+  else:
+    try:
+      let (h, p) = parseHost(target)
+      "\x00" & h & ":" & $p
+    except ValueError:
+      "\x00\x01" & target  # unparseable: can never match a rule line
+
+proc upsertRule(text, target, verb: string; projectDir: string): string =
+  ## `text` with `verb target` in place of the first existing rule for
+  ## `target` (later duplicates for it drop), or appended at the end
+  ## when none exists. Sandwall's replaceAccess strips the old line and
+  ## appends the new one, moving the rule behind every later rule; the
+  ## policy is ordered last-match-wins, so flipping `deny /` to `ask /`
+  ## that way would swallow the `allow /tmp` written after it. Keeping
+  ## the line's position keeps what the user wrote meaningful.
+  let key = targetKey(target, projectDir)
+  var lines = text.splitLines
+  # splitLines yields a phantom empty tail for newline-terminated text;
+  # drop it or it would round-trip into a growing stack of blank lines.
+  if lines.len > 0 and lines[^1].len == 0: lines.setLen(lines.len - 1)
+  result = ""
+  var replaced = false
+  for raw in lines:
+    let line = raw.strip(leading = true, trailing = false)
+    var isMatch = false
+    if line.len > 0 and line[0] != '#':
+      let first = line.split(Whitespace, 1)[0]
+      if first in ["allow", "deny", "readonly", "ask"]:
+        let rest = line[first.len .. ^1].strip(leading = true, trailing = false)
+        if targetKey(rest, projectDir) == key:
+          isMatch = true
+          if not replaced:
+            result.add verb & (if target.len > 0: " " & target else: "") & "\n"
+            replaced = true
+    if not isMatch:
+      result.add raw & "\n"
+  if not replaced:
+    result.add verb & (if target.len > 0: " " & target else: "") & "\n"
+
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
-  ## Append a rule to the repo policy file, materializing it from the
-  ## user file first when absent. Used by `:sandbox allow|deny|readonly`.
-  ## After appending, reload so the change is live for the next check.
+  ## Set a rule in the repo policy file, materializing it from the user
+  ## file first when absent. Used by `:sandbox allow|readonly|deny|ask`.
+  ## A rule for the same target keeps its line's position (upsertRule);
+  ## a new target appends at the end. Either way, reload so the change
+  ## is live for the next check.
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(sandboxFile.parentDir): return false
-  result = sandwall.appendRule(sandboxFile, argPath, access,
-    getCurrentDir())
-  if result:
-    current = loadPolicy(getCurrentDir())
+  let word =
+    case access
+    of akDeny: "deny"
+    of akReadOnly: "readonly"
+    of akWritable: "allow"
+    of akAsk: "ask"
+  var t = argPath
+  if t.len > 0 and classifyTarget(t) == rkPath:
+    t = contractPath(normalizePolicyPath(t, getCurrentDir()), getCurrentDir())
+  try:
+    let text = if fileExists(sandboxFile): readFile(sandboxFile) else: ""
+    writeFile(sandboxFile, upsertRule(text, t, word, getCurrentDir()))
+  except CatchableError:
+    return false
+  current = loadPolicy(getCurrentDir())
+  true
 
 # ------------------------------------------------------------- ask gate
 #
@@ -638,8 +698,11 @@ proc deniedAskPath*(cmd, rawOut: string): string =
 proc grantAskAllow*(target: string): bool =
   ## Persist `allow <target>` into the active policy file and reload, so
   ## the grant outlives the session and the retried bash child (which
-  ## re-reads the file at launch) enforces it. Ask rules only ever come
-  ## from a policy file, so a missing file here is the can't-happen
+  ## re-reads the file at launch) enforces it. Unlike the `:sandbox`
+  ## verbs this appends at the end on purpose: the grant must win over
+  ## any rule, including a deny written after the ask rule it replaces,
+  ## or the approved command would just fail again. Ask rules only ever
+  ## come from a policy file, so a missing file here is the can't-happen
   ## guard; false means "no grant, treat as denied".
   let f = activePolicyPath(getCurrentDir())
   if not fileExists(f): return false
