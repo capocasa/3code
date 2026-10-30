@@ -1258,7 +1258,8 @@ In practice:
   (Zig's global cache is `~/.cache/zig`; on Windows
   `~/AppData/Local/zig`). On macOS `javac` runs out of the box: the
   JVM's own startup needs (a `kern.grade_cputype` sysctl the kernel
-  classifies as a write, and opendirectoryd user lookups) ride the
+  classifies as a write, opendirectoryd user lookups, and the
+  dirhelper mach lookup behind `confstr` temp-dir queries) ride the
   sandbox profile itself, and the JDK homes under your home are
   read-only (`~/Library/Java`, `~/.jdks`, `~/.sdkman/candidates`;
   system JVMs under `/Library/Java` and brew's `/opt` were already
@@ -1338,7 +1339,10 @@ deny ./secrets
 
 Rules are read from top to bottom and the last matching path rule wins. In this
 example the project is writable, `/var` is read-only, and `./secrets` is denied.
-Everything else is denied because unmatched paths are denied by default.
+Everything else is denied because unmatched paths are denied by default. On
+macOS the kernel-enforced denies carry the message tag `sandbox_3code`, so `log
+show --predicate 'eventMessage CONTAINS "sandbox_3code"'` picks out this
+sandbox's denials from every other sandboxed process on the machine.
 
 Blank lines and lines beginning with `#` are ignored. An access word only has
 special meaning when followed by whitespace or the end of the line, so a host

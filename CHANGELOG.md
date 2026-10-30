@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **Java runs in the macOS sandbox again (#64).** The JVM's first
+  startup call is a `confstr` temp-dir lookup, which on macOS resolves
+  through the `com.apple.bsd.dirhelper` mach service - a lookup the
+  sandbox's `(deny default)` blocked, so every `java` hung on a
+  mach_msg before `main` (the warp report's stack trace). The profile
+  (sandwall 0.5.13) now allows that one global name, alongside the
+  `kern.grade_cputype` and opendirectoryd allows it already shipped.
+  The default deny is also message-tagged (`sandbox_3code`), so a deny
+  in `log show` during debugging names 3code instead of hiding among
+  every other sandboxed process on the machine.
+
 - **3code owns the tty's output discipline (gh #54).** A shell left
   `-opost` by a crashed CLI or `stty -opost` used to break every wrapped
   row: with `OPOST` off, `ONLCR` is inert, so the bare `\n` 3code writes
