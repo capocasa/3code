@@ -1245,14 +1245,17 @@ summary of what the turn actually did (files, patches, commands — never the
 agent's own claims), and the working-tree diff, judges from those inputs
 alone and answers with a verdict. Not satisfied, the agent is sent back in
 with the verifier's feedback. Satisfied, the harness renames the file to
-`goal-confirmed.md` (the record of the run) and idles. The check has no
+`achieved.md` (the record of the run) and idles. The check has no
 tools and no rounds: orientation is the harness's job, so the check is one
 model call. And it shows its work: the verifier's reply lands in scrollback
-as an item of its own, rendered exactly like any other response — same
-markdown, same wrapping — with the verdict line stripped and the verdict
-spoken by the item itself: a green `✓` leading green text when the goal
-is satisfied, a red `✗` leading red text when it is not. Nothing the
-harness runs is ever silent.
+as a dim quote block of its own — a vertical rule down the left, the
+verdict spoken by the leading icon alone — with the verdict line stripped:
+
+    ✓ | this is the
+      | verdict text
+
+A green `✓` when the goal is satisfied, a red `✗` when it is not. Nothing
+the harness runs is ever silent.
 
 ### Verifier models
 
@@ -1291,16 +1294,16 @@ glance. A verifier that stops resolving (provider removed, key gone) is
 skipped with a visible note — the check falls back to the session model
 rather than going silent.
 
-The file is the whole interface. Edit `goal.md` mid-run to steer (`:goal
+The file is the whole interface — existence is the mode, and the turn-end
+check is the mode's only machinery. Edit `goal.md` mid-run to steer (`:goal
 edit` opens it in `$VISUAL/$EDITOR`, creating it when missing; the next check
 reads it fresh), delete
-it to end goal mode silently, interrupt to pause. Arming starts work
-immediately: `:goal <text>` writes the file and sends the agent off in the
-same breath, no extra prompt needed — and a `goal.md` that is already on
-disk when 3code starts arms identically: the session loads it and the
-kickoff turn runs at once, before the first prompt. The arm itself is
-quiet (the echoed command is the whole announcement); a session resumed
-from file replays the kickoff prompt under its `◎` marker. `:goal cancel` (or
+it to end goal mode silently, interrupt to pause. Arming runs nothing:
+`:goal <text>` writes the file and answers with one receipt line, and a
+`goal.md` that is already on disk when 3code starts does nothing at all —
+the session idles at the prompt until you send one (an empty Enter is
+enough: it runs a turn on the conversation as it stands, and that turn's
+end runs the first check). `:goal cancel` (or
 `:goal!`) cancels
 the active goal, retiring the file to `goal-cancelled.md` (`:goal new
 <text>` is the balking synonym that refuses a live goal, `:goal! <text>`

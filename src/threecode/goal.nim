@@ -8,24 +8,21 @@
 ## walks the registry and never names a mode itself. goal mode is
 ## entry #1; `cybernetic.md` is entry #2. One mode, one file, one verb.
 ##
-## `goal.md` in the project root keeps a session on one goal. Arming is
-## immediate: every `:goal` write path (TEXT, `new`, `edit`, force
-## replace) appends a harness-autosent kickoff prompt and runs the turn
-## at once instead of waiting for the next turn boundary — and a
-## `goal.md` already on disk when the session opens is armed the same
-## way: startup detection sends the same kickoff turn before the first
-## prompt. The only other
-## hook is the end-call boundary in `turns.nim`: when the turn's final
-## model call completes and the harness is about to hand the prompt back
-## to the user, it stats `goal.md`; bare existence activates (v1 waives
-## marker sniff and name-collision handling). A side-call verifier (the
+## `goal.md` in the project root keeps a session on one goal. The file
+## IS the mode: no flag, no kickoff, nothing at startup — a `goal.md`
+## already on disk when the session opens does nothing until work runs.
+## The one hook is the end-call boundary in `turns.nim`: when the turn's
+## final model call completes and the harness is about to hand the
+## prompt back to the user, it stats `goal.md`; bare existence activates
+## (v1 waives marker sniff and name-collision handling). A side-call
+## verifier (the
 ## session's own model by default; a dedicated verification-class model
 ## when one is configured via `:verifier`, e.g. a System One decision
 ## model like Jev) judges the
 ## goal text against harness-built evidence from the just-finished
 ## turn plus the harness-captured working-tree diff. FEEDBACK sends
 ## the agent back in; SATISFIED renames the file to
-## `goal-confirmed.md` and the session idles normally. Bare `:goal!`
+## `achieved.md` and the session idles normally. Bare `:goal!`
 ## cancels into `goal-cancelled.md`. No per-tool-call checks, no
 ## system-prompt changes: the continuation message carries everything.
 ##
@@ -34,11 +31,11 @@
 
 import std/[algorithm, json, options, os, osproc, sequtils, strformat,
            strutils, tables]
-import types, util, prompts, api, streamexec, config, actions
+import types, util, prompts, api, config, actions
 
 const
-  GoalFileName* = "goal.md"                 ## existence activates goal mode
-  GoalConfirmedName* = "goal-confirmed.md"   ## the satisfied record
+  GoalFileName* = "goal.md"            ## existence activates goal mode
+  GoalConfirmedName* = "achieved.md"   ## the satisfied record
   GoalCancelledName* = "goal-cancelled.md"  ## the user-cancelled record
   GoalGivenUpName* = "goal-given-up.md"      ## reserved: nothing writes it
                                              ## yet; a failing harness retries
@@ -52,9 +49,6 @@ const
   EvidenceResultCap* = 240  ## per-call result head ceiling
   GoalDiffCapBytes* = 8000  ## working-tree diff feed ceiling
   GoalDiffMaxUntracked* = 24  ## untracked files diffed before the elision note
-  GoalKickoffPrefix* = "Goal armed: "  ## opens the kickoff message; replay
-                                        ## matches it to pick the `◎` marker
-
 type
   GoalVerdictKind* = enum
     gvkNone      ## output carried no contract line; never counts as satisfied
@@ -84,8 +78,7 @@ evidence summary of the agent's last turn (harness-built from the
 transcript's tool calls and their recorded results; the agent's prose
 is excluded), and the harness-captured working-tree diff. You have no
 tools and exactly one reply: judge from these inputs alone, briefly -
-bullet points of at most 10 words each, nothing trivial, at most 200
-words in all.
+at most 40 words, nothing trivial.
 The recorded results are real harness captures, but they can be stale
 if the agent changed things after the check they show. The agent's
 claims are never evidence. If the goal requires runtime behavior
@@ -154,18 +147,6 @@ proc goalFeedbackMessage*(feedback: string): JsonNode =
        "satisfied. Verifier feedback:\n\n" & feedback &
        "\n\nAddress it and keep working toward the goal; the " &
        "satisfaction check runs again when this turn ends."}
-
-proc goalKickoffMessage*(goalText: string): JsonNode =
-  ## The harness-autosent prompt that starts goal achievement immediately
-  ## after `goal.md` is written, instead of waiting for the next turn
-  ## boundary. Same `agentSent` marking as the feedback continuation, so
-  ## replay renders it as a `◎` item and no provider sees the marker.
-  %*{"role": "user", "agentSent": true,
-     "content": GoalKickoffPrefix & GoalFileName & " in this repository now " &
-       "states the session's goal:\n\n" & goalText.strip &
-       "\n\nStart working toward it now. A satisfaction check runs when " &
-       "each turn ends and sends you back in with feedback until the " &
-       "goal is met."}
 
 # ---------- cybernetic plan format ----------
 
@@ -322,16 +303,6 @@ proc currentStateSection*(body: string; cap = 1500): string =
   else:
     result = result.strip & "\n"
 
-proc planTitle*(body: string): string =
-  ## The plan's title: the first heading if there is one, else the
-  ## first non-empty line.
-  for l in body.splitLines:
-    let s = l.strip
-    if s.len == 0: continue
-    if s.startsWith("#"): return s.strip(true, false, {'#'}).strip
-    return s
-  CyberFileName
-
 proc cyberSkeleton*(text: string): string =
   ## `:cyber <text>` authoring: the first line titles the plan (a `#`
   ## heading if given), bulleted or checkbox lines become task items,
@@ -370,30 +341,6 @@ proc cyberSkeleton*(text: string): string =
     for p in prose: result.add p & "\n"
   else:
     result.add "Not begun.\n"
-
-proc cyberKickoffMessage*(body: string): JsonNode =
-  ## The cybernetic kickoff: same shape and `agentSent` marking as the
-  ## goal kickoff, but plan-aware — the counts ride the header and the
-  ## orientation paragraph names the next unchecked task, so direction
-  ## comes from the harness, not model vibes.
-  let plan = parsePlan(body)
-  let counts = planCountsLine(plan)
-  let next = nextUncheckedText(plan)
-  var content = GoalKickoffPrefix & CyberFileName &
-    " in this repository now states the session's plan"
-  if counts.len > 0: content.add " (" & counts & ")"
-  content.add ":\n\n" & body.strip
-  if next.len > 0:
-    content.add "\n\nStart with the next unchecked task: \"" & next &
-      "\" (first unchecked task in file order). Check off each task " &
-      "as it completes, record what the step taught under ## Current " &
-      "state, and keep working through the plan in order."
-  elif plan.tasks.len > 0:
-    content.add "\n\nEvery task in the plan is already checked; the " &
-      "verifier confirms the work or names what still lies."
-  content.add "\n\nA satisfaction check runs when each turn ends and " &
-    "sends you back in with feedback until the plan is complete."
-  %*{"role": "user", "agentSent": true, "content": content}
 
 proc cyberRolloverMessage*(body: string): JsonNode =
   ## The rollover handoff: after a context collapse the fresh context
@@ -435,9 +382,9 @@ proc cyberFeedbackMessage*(body, feedback: string): JsonNode =
 
 # ---------- mode registry ----------
 
-# Defined after the goal kickoff/feedback builders so the entry can
-# reference them; the registry itself is a var so tests (and later
-# embedders) can extend it.
+# Defined after the goal feedback builders so the entry can reference
+# them; the registry itself is a var so tests (and later embedders) can
+# extend it.
 type
   ModeDesc* = object
     ## One harness mode: the trigger file that arms it, the `:` verb
@@ -455,15 +402,12 @@ type
       ## a teaching error that refuses the arm.
     composeBody*: proc (text: string): string
       ## `:<verb> <text>` -> the file body to write.
-    kickoffMessage*: proc (body: string): JsonNode
     feedbackMessage*: proc (body, fb: string): JsonNode
       ## The FEEDBACK continuation; takes the current file body so a
       ## mode can orient (name the next step) on its own structure.
     taskCounts*: proc (body: string): string
-      ## Counts line for the arm receipt and the kickoff marker, e.g.
-      ## `3 tasks, 1 done`; "" when the mode has no task structure.
-    kickoffDisplay*: proc (body: string): string
-      ## The scrollback kickoff item body under the `◎` marker.
+      ## Counts line for the arm receipt, e.g. `3 tasks, 1 done`; ""
+      ## when the mode has no task structure.
     structureGuard*: proc (post: string): string
       ## Turn-boundary duty: mid-run structure loss returns the full
       ## restore-the-plan continuation content (no side call runs);
@@ -558,10 +502,8 @@ let goalMode* = ModeDesc(
   givenUpName: GoalGivenUpName,
   validate: proc (body: string): string = "",
   composeBody: proc (text: string): string = text.strip & "\n",
-  kickoffMessage: goalKickoffMessage,
   feedbackMessage: proc (body, fb: string): JsonNode = goalFeedbackMessage(fb),
   taskCounts: proc (body: string): string = "",
-  kickoffDisplay: proc (body: string): string = body.strip,
   structureGuard: proc (post: string): string = "",
   updateNote: proc (worked: bool; pre, post: string): string = "",
   verifierFeed: proc (pre, post: string): string = "",
@@ -578,16 +520,8 @@ let cyberneticMode* = ModeDesc(
   givenUpName: CyberGivenUpName,
   validate: validatePlanBody,
   composeBody: cyberSkeleton,
-  kickoffMessage: cyberKickoffMessage,
   feedbackMessage: cyberFeedbackMessage,
   taskCounts: proc (body: string): string = planCountsLine(parsePlan(body)),
-  kickoffDisplay: (proc (body: string): string =
-    let plan = parsePlan(body)
-    let counts = planCountsLine(plan)
-    result = planTitle(body)
-    if counts.len > 0: result.add " - " & counts
-    let next = nextUncheckedText(plan)
-    if next.len > 0: result.add "; next: " & next),
   structureGuard: (proc (post: string): string =
     let err = validatePlanBody(post)
     if err.len == 0: return ""
@@ -639,7 +573,7 @@ proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
   startMode(goalMode, text, force, dir)
 
 proc completeGoal*(dir = "."): bool =
-  ## The retirement path: `mv goal.md goal-confirmed.md`.
+  ## The retirement path: `mv goal.md achieved.md`.
   completeMode(goalMode, dir)
 
 proc cancelGoal*(dir = "."): tuple[ok: bool, err: string] =

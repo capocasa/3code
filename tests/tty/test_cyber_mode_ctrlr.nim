@@ -4,10 +4,10 @@ discard """
 ## Interactive coverage for the cybernetic mode surfaces that unit suites
 ## cannot reach (they live behind the input thread and the idle REPL
 ## loop): the `:cyber` verb at the live prompt (skeleton write, bare
-## status, usage errors, force replace), the plan-aware kickoff marker
-## and receipts with task counts, startup detection of a cybernetic.md
-## that was already on disk, retirement to cybernetic-confirmed.md, and
-## the mutual-exclusivity refusal when both mode files exist.
+## status, usage errors, force replace), the arm receipt with task
+## counts, a cybernetic.md that was already on disk staying inert until
+## work runs, retirement to cybernetic-confirmed.md, and the
+## mutual-exclusivity refusal when both mode files exist.
 import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
@@ -51,12 +51,13 @@ proc reply(content: string; delayMs = 50): JsonNode =
                 "totalTokens": 7, "cachedTokens": 0}}
 
 suite "cyber mode surfaces (interactive)":
-  test ":cyber TEXT arms a plan skeleton and kicks off with counts":
+  test ":cyber TEXT arms a plan skeleton; the receipt carries the counts":
     let root = newFixture("cyber_kickoff")
     writeConfiguredProvider(root)
     check not fileExists(root / "run" / "cybernetic.md")
-    # Response 1 goes to the kickoff turn; response 2 is the turn-end
-    # verifier side call (satisfied verdict retires cybernetic.md).
+    # Response 1 goes to the user's first prompt; response 2 is the
+    # turn-end verifier side call (satisfied verdict retires
+    # cybernetic.md).
     writeFile(root / "run" / "stub_responses.json", $(%*[
       reply("PLAN_WORK_DONE"),
       reply("all done\nVERDICT: SATISFIED"),
@@ -83,12 +84,17 @@ suite "cyber mode surfaces (interactive)":
     tty.send "\n"
     tty.expect "usage"
     tty.drain(100)
-    tty.send ":cyber make the stub say PLAN_WORK_DONE"
-    tty.expect ":cyber make the stub say PLAN_WORK_DONE"
+    tty.send ":cyber make the stub say the word"
+    tty.expect ":cyber make the stub say the word"
     tty.send "\n"
     tty.drain(100)
-    # The arm is quiet (the echoed command says it), so the streamed
-    # reply is the proof the kickoff turn ran with no further keystroke.
+    # The arm is the file plus one receipt line carrying the parsed
+    # counts - no turn runs, the proof being that no model reply streams
+    # before a prompt is sent.
+    tty.expectInHistory "cybernetic armed (cybernetic.md, 1 task, 0 done)"
+    tty.expectNeverInHistory "PLAN_WORK_DONE"
+    tty.send "go"
+    tty.send "\n"
     tty.expectInHistory "PLAN_WORK_DONE"
     # Turn end: detection receipt, then the verifier's green ✓ item - no
     # confirmed receipt - and the plan retires on disk.
@@ -99,16 +105,17 @@ suite "cyber mode surfaces (interactive)":
     check not fileExists(root / "run" / "cybernetic.md")
     tty.expectAlive()
 
-  test "cybernetic.md present at startup kicks off with no keystroke":
-    let root = newFixture("cyber_startup_kickoff")
+  test "cybernetic.md present at startup does nothing until work runs":
+    let root = newFixture("cyber_startup_inert")
     writeConfiguredProvider(root)
-    # A cybernetic.md written before the session starts arms exactly like
-    # `:cyber` did: startup detection loads it and sends the agent off.
+    # A cybernetic.md written before the session starts sits armed and
+    # inert: nothing runs until a prompt starts a turn.
     writeFile(root / "run" / "cybernetic.md",
       "# Plan\n\n- [ ] make the stub say PLAN_WORK_DONE\n\n" &
       "## Current state\n\nNot begun.\n")
-    # Response 1: kickoff turn. Response 2: verifier (SATISFIED retires
-    # the plan). Response 3: the follow-up prompt proving idle.
+    # Response 1: the user's first prompt. Response 2: verifier
+    # (SATISFIED retires the plan). Response 3: the follow-up prompt
+    # proving idle.
     writeFile(root / "run" / "stub_responses.json", $(%*[
       reply("PLAN_WORK_DONE"),
       reply("all done\nVERDICT: SATISFIED"),
@@ -124,13 +131,22 @@ suite "cyber mode surfaces (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Quiet startup kickoff like goal mode's; the reply is the proof.
+    # Nothing is typed yet and nothing happens: no turn, no detection
+    # receipt, no model call. The armed file alone is inert.
+    tty.drain(400)
+    tty.expectNeverInHistory "PLAN_WORK_DONE"
+    tty.expectNeverInHistory "cybernetic mode: cybernetic.md detected"
+    # The first prompt is the first turn; its end runs the check and
+    # retires the plan.
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
     tty.expectInHistory "PLAN_WORK_DONE"
     tty.expectInHistory "\u2713"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
-    # Back to an ordinary idle prompt, no second kickoff.
+    # Back to an ordinary idle prompt, no second turn.
     tty.send "still here"
     tty.expect "still here"
     tty.send "\n"
@@ -141,10 +157,10 @@ suite "cyber mode surfaces (interactive)":
     let root = newFixture("cyber_exclusive")
     writeConfiguredProvider(root)
     # goal.md AND cybernetic.md on disk at startup: goal mode (registry
-    # entry #1) arms, the conflict receipt teaches instead of silently
-    # dropping the plan. Responses: goal kickoff, goal verifier
-    # (SATISFIED retires goal.md), then :cyber! replaces the stale plan
-    # and ITS kickoff + verifier run.
+    # entry #1) arms at the first turn end, the conflict receipt teaches
+    # instead of silently dropping the plan. Responses: the goal turn,
+    # the goal verifier (SATISFIED retires goal.md to achieved.md), then
+    # :cyber! replaces the stale plan and its turn + verifier run.
     writeFile(root / "run" / "goal.md", "say GOAL_DONE\n")
     writeFile(root / "run" / "cybernetic.md",
       "- [ ] stale hand-written plan\n\n## Current state\n\ns\n")
@@ -165,19 +181,26 @@ suite "cyber mode surfaces (interactive)":
 
     tty.expect "\u276f"
     # goal mode wins the registry walk; the refusal names both verbs.
+    tty.send "go"
+    tty.send "\n"
     tty.expectInHistory "GOAL_DONE"
     tty.expectInHistory "cybernetic.md is also on disk but goal mode is active; harness modes are mutually exclusive (:goal! cancels goal mode, then :cyber arms the plan)"
     tty.expectInHistory "\u2713"
     tty.drain(300)
-    # goal.md is retired; the stale cybernetic.md is now the live plan
-    # and bare :cyber shows it.
+    # goal.md is retired (to achieved.md); the stale cybernetic.md is
+    # now the live plan and bare :cyber shows it.
     tty.send ":cyber"
     tty.send "\n"
     tty.expect "stale hand-written plan"
     tty.drain(100)
-    # Force replace through the verb, then the plan runs to completion.
+    # Force replace through the verb; the arm answers with its receipt
+    # and the next prompt's turn runs the plan to completion.
     tty.send ":cyber! make the stub say PLAN_WORK_DONE"
     tty.expect ":cyber! make the stub say PLAN_WORK_DONE"
+    tty.send "\n"
+    tty.drain(100)
+    tty.expectInHistory "cybernetic armed (cybernetic.md, 1 task, 0 done)"
+    tty.send "go"
     tty.send "\n"
     tty.expectInHistory "PLAN_WORK_DONE"
     tty.expectInHistory "\u2713"
@@ -191,11 +214,11 @@ suite "cyber mode surfaces (interactive)":
     let root = newFixture("cyber_verb_exclusive")
     writeConfiguredProvider(root)
     # The one idle window where goal.md is still live: interrupt. The
-    # startup kickoff turn is Ctrl-C'd mid-stream (the check is skipped,
-    # goal stays armed), and at the idle prompt :cyber must refuse with
-    # the teaching error instead of arming a second mode. Responses: the
-    # slow aborted kickoff (consumed at selection), then the :cyber
-    # kickoff and its verifier.
+    # first turn is Ctrl-C'd mid-stream (the check is skipped, goal
+    # stays armed), and at the idle prompt :cyber must refuse with the
+    # teaching error instead of arming a second mode. Responses: the
+    # slow aborted turn (consumed at selection), then the :cyber turn
+    # and its verifier.
     writeFile(root / "run" / "goal.md", "say GOAL_DONE\n")
     writeFile(root / "run" / "stub_responses.json", $(%*[
       reply("never streams", delayMs = 8000),
@@ -212,9 +235,10 @@ suite "cyber mode surfaces (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Startup detection kicks goal work off; Ctrl-C mid-stream pauses
-    # it. The kickoff is quiet, so wait out the pre-stream delay's start
-    # before interrupting.
+    # Startup is inert; the prompt starts the goal turn, and Ctrl-C
+    # mid-stream pauses it before the reply lands.
+    tty.send "go"
+    tty.send "\n"
     tty.drain(400)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
@@ -228,13 +252,18 @@ suite "cyber mode surfaces (interactive)":
     tty.expectInHistory "goal.md (goal mode) is already active; harness modes are mutually exclusive - cancel it first with :goal!"
     tty.drain(200)
     check not fileExists(root / "run" / "cybernetic.md")
-    # Cancel goal, then the same verb arms cleanly and runs to done.
+    # Cancel goal, then the same verb arms cleanly (receipt, no turn)
+    # and the next prompt runs it to done.
     tty.send ":goal!"
     tty.send "\n"
     tty.expectInHistory "goal cancelled (goal.md renamed to goal-cancelled.md)"
     tty.drain(200)
     tty.send ":cyber arm my plan"
     tty.expect ":cyber arm my plan"
+    tty.send "\n"
+    tty.drain(100)
+    tty.expectInHistory "cybernetic armed (cybernetic.md"
+    tty.send "go"
     tty.send "\n"
     tty.expectInHistory "PLAN_WORK_DONE"
     tty.expectInHistory "\u2713"
@@ -279,9 +308,12 @@ suite "cyber mode direction machinery (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Kickoff turn: a real mutation runs (the bash output lands in the
-    # session change log too, powering work-happened), the plan file
-    # stays untouched. A reads-only turn would owe no update note.
+    # First turn (the prompt is what starts it - the file alone is
+    # inert): a real mutation runs (the bash output lands in the session
+    # change log too, powering work-happened), the plan file stays
+    # untouched. A reads-only turn would owe no update note.
+    tty.send "go"
+    tty.send "\n"
     tty.expectInHistory "real work"
     # Turn end: FEEDBACK from the verifier AND the discipline note, one
     # continuation carrying both.
@@ -326,6 +358,8 @@ suite "cyber mode direction machinery (interactive)":
       tty.close()
 
     tty.expect "\u276f"
+    tty.send "go"
+    tty.send "\n"
     # The rewrite lands; the boundary catches the broken format before
     # any verifier call.
     tty.expectInHistory "rewrote it"
@@ -345,7 +379,8 @@ suite "cyber mode rollover (interactive)":
     let root = newFixture("cyber_rollover")
     writeConfiguredProvider(root)
     # Six tool rounds cross decideContextAction's message floor (12 =
-    # system + kickoff + 5 pairs + the 6th reply); the 6th reply's usage
+    # system + the starting prompt + 5 pairs + the 6th reply); the 6th
+    # reply's usage
     # crosses the token threshold (11k of the stub's 12k window), so the
     # harness collapses - and the summarizer meta-call is served from the
     # same canned queue (stubNextSummarizerReply). The rollover handoff
@@ -380,7 +415,10 @@ suite "cyber mode rollover (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Six tool rounds run; the sixth crosses the threshold.
+    # The prompt starts the work; six tool rounds run and the sixth
+    # crosses the threshold.
+    tty.send "go"
+    tty.send "\n"
     tty.expectInHistory "work 6"
     # The collapse receipt, then the rollover: receipted like every
     # harness act, with the plan's counts.

@@ -3851,22 +3851,21 @@ commands:
                       session (vision models only; a one-time note enters
                       the chat)
   :goal               show the active goal (goal.md in this directory)
-  :goal TEXT          write goal.md and immediately start working toward
-                      it: a read-only verifier keeps the session on the
-                      goal until it is satisfied (file retired to
-                      goal-confirmed.md)
+  :goal TEXT          write goal.md and arm goal mode: while the file
+                      exists, a read-only verifier checks at every turn
+                      end and sends the agent back until the goal is
+                      satisfied (file retired to achieved.md)
   :goal new TEXT      same, but bawks when a goal is already active
   :goal edit          revise goal.md in $VISUAL/$EDITOR, creating it
-                      when missing (changed text restarts goal work
-                      immediately)
+                      when missing (the next turn's check reads it fresh)
   :goal cancel        cancel the active goal (same as :goal!)
   :goal! TEXT         replace an active goal and restart toward it
   :goal!              cancel the active goal (retires to goal-cancelled.md;
                       interrupt only skips one satisfaction check)
   :cyber              show the active plan (cybernetic.md in this directory)
-  :cyber TEXT         write a cybernetic.md plan skeleton and start on it
-                      at once: harness-directed checkboxes and next-step
-                      orientation in every kickoff and check (retired to
+  :cyber TEXT         write a cybernetic.md plan skeleton and arm it:
+                      harness-directed checkboxes and next-step
+                      orientation in every check (retired to
                       cybernetic-confirmed.md)
   :cyber new TEXT     same, but bawks when a plan is already active
   :cyber edit         revise cybernetic.md in $VISUAL/$EDITOR,

@@ -858,21 +858,36 @@ proc goalVerdictStyle*(verdict: GoalVerdictKind): tuple[glyph, color: string] =
   else: ("✗", "\x1b[31m")
 
 proc goalStepBytes*(step: GoalStep): string =
-  ## A verifier step in scrollback, rendered exactly like any other
-  ## response item through `renderAssistantContentBytes` - the same
-  ## markdown and wrapping as an agent reply, no special tier - except
-  ## the whole item speaks the verdict: its icon leads the first row and
-  ## its color carries icon and prose alike, green for satisfied, red
-  ## for not (the `⌕` loupe is retired: it is the web-search icon). The
-  ## verdict line is already stripped from the prose; no trailing icon
-  ## row - the leading one already said it.
+  ## A verifier step in scrollback: a dim quote block with a vertical
+  ## rule, led by the verdict's own icon - green `✓` satisfied, red `✗`
+  ## anything else (FEEDBACK, an unreadable verdict, a failed check
+  ## alike, since a check without a verdict is a failed check). Only the
+  ## icon carries the verdict color; the rule and the prose sit in the
+  ## dim tier, a quote of the verifier's words rather than a reply:
+  ##
+  ##   ✓ | this is the
+  ##     | verdict text
+  ##
+  ## Rows join under one continuous rule so the block reads as one
+  ## voice. The verdict line is already stripped from the prose; a bare
+  ## verdict paints its icon alone.
   let (glyph, color) = goalVerdictStyle(step.verdict)
-  let body = renderAssistantContentBytes(
-    step.prose, color & glyph & " " & Reset, color)
-  if body.len > 0:
-    result.add body & "\r\n"
-  elif step.verdict != gvkNone:
-    result.add color & glyph & Reset
+  if step.prose.strip.len == 0:
+    if step.verdict != gvkNone:
+      result.add color & glyph & Reset
+    return
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - 5)
+  var first = true
+  for line in step.prose.strip.splitLines:
+    if line.strip.len == 0: continue
+    for chunk in wrapAnsi(line, bodyW):
+      if first:
+        result.add color & glyph & Reset & " "
+        first = false
+      else:
+        result.add "  "
+      result.add GreyFg & "| " & chunk & Reset & "\r\n"
 
 proc receiptBytes*(label: string): string =
   ## The single canonical styling for a token receipt row (two-space

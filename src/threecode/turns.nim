@@ -965,6 +965,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   # retries) shares one header value.
   let sid = sessionIdFromPath(session.savePath)
   conversationId = if sid != "": sid else: oneShotSessionId()
+  # Discipline baselines bind at turn start: the armed mode's file bytes
+  # and the change-log count as the turn begins. Arming no longer runs a
+  # kickoff turn that would bind them at write time, so the first check
+  # after an arm still judges this turn's own delta (the boundary
+  # re-baselines after each check for the next turn).
+  let startMode = activeMode(session.cwd)
+  if not noMode(startMode):
+    session.modeSnapshot = readModeText(startMode, session.cwd)
+    if session.readCache != nil:
+      session.changeCountStart = session.readCache.changes.len
   while true:
     var usage: Usage
     var msg: JsonNode

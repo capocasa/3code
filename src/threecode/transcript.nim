@@ -6,7 +6,7 @@
 
 import std/[json, strutils, tables]
 
-import actions, display, fatprompt, goal, session, types, util, images
+import actions, display, fatprompt, session, types, util, images
 import engine as termengine
 
 export isEmptyReplyMsg
@@ -57,13 +57,6 @@ proc userPromptItem*(line: string): TranscriptItem =
 
 proc agentPromptItem*(line: string): TranscriptItem =
   TranscriptItem(kind: tiAgentPrompt, marker: "»", body: line,
-                 attachSeparator: false)
-
-proc goalPromptItem*(line: string): TranscriptItem =
-  ## The goal kickoff: same harness-voice tier as a steer but a target
-  ## marker, so the goal text reads as the session's aim, not another
-  ## autosend.
-  TranscriptItem(kind: tiAgentPrompt, marker: "◎", body: line,
                  attachSeparator: false)
 
 proc assistantItem*(content: string): TranscriptItem =
@@ -201,13 +194,10 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         continue
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
-      # A harness-autosent steer renders as the `»` agent-prompt item the
-      # live path committed, never as a user `❯` echo; the goal kickoff
-      # keeps its `◎` target marker instead.
+      # A harness-autosent continuation renders as the `»` agent-prompt
+      # item the live path committed, never as a user `❯` echo.
       let item =
-        if m{"agentSent"}.getBool(false):
-          if c.startsWith(GoalKickoffPrefix): goalPromptItem(c)
-          else: agentPromptItem(c)
+        if m{"agentSent"}.getBool(false): agentPromptItem(c)
         else: userPromptItem(c)
       # No length truncation: the live path echoes the full submitted line
       # (wrapped at terminal width by `formatUserPromptItem`), so the replay
@@ -440,9 +430,7 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
       let item =
-        if m{"agentSent"}.getBool(false):
-          if c.startsWith(GoalKickoffPrefix): goalPromptItem(c)
-          else: agentPromptItem(c)
+        if m{"agentSent"}.getBool(false): agentPromptItem(c)
         else: userPromptItem(c)
       emit anchor, formatItem(item)
     of "assistant":

@@ -4,7 +4,7 @@
 ## text line plus the `goalCheckHook` seam make the whole loop testable
 ## with canned verdicts and no provider.
 
-import std/[json, os, osproc, strutils, tempfiles, unittest]
+import std/[json, os, osproc, sequtils, strutils, tempfiles, unittest]
 import threecode/goal
 import threecode/display
 import threecode/util except dumpIssue
@@ -77,7 +77,7 @@ suite "goal mode":
     check parseVerdict("VERDICT: FEEDBACK:  ").kind == gvkNone
     check parseVerdict("VERDICT: FEEDBACK:").kind == gvkNone
 
-  test "completion renames goal.md to goal-confirmed.md":
+  test "completion renames goal.md to achieved.md":
     withGoalDir proc (dir: string) =
       writeFile(GoalFileName, "the goal\n")
       check completeGoal()
@@ -99,17 +99,6 @@ suite "goal mode":
     check "agentSent" notin $wire
     # The persisted session renders it `user +agent`, so replay shows a `»`
     # item instead of a user echo.
-    var session: Session
-    check "user +agent" in renderSession(session, %*[msg])
-
-  test "kickoff prompt carries the goal and the same autosent marking":
-    let msg = goalKickoffMessage("ship the feature")
-    check msg{"role"}.getStr == "user"
-    check msg{"agentSent"}.getBool(false)
-    check "ship the feature" in msg{"content"}.getStr
-    check "Start working toward it now" in msg{"content"}.getStr
-    let wire = stripInternalFields(%*[msg])
-    check "agentSent" notin $wire
     var session: Session
     check "user +agent" in renderSession(session, %*[msg])
 
@@ -342,32 +331,35 @@ suite "goal check loop (canned verdicts, no provider)":
     check r.verdict.kind == gvkNone
 
 suite "verifier steps in scrollback":
-  test "the check renders through the regular response path":
-    # The verdict icon leads the first row exactly where `●` leads a
-    # reply, the whole item carries the verdict color, and the prose is
-    # markdown-rendered by the same walk - raw markdown never reaches
-    # the screen.
-    let b = goalStepBytes(
-      GoalStep(prose: "before **bold** after", verdict: gvkSatisfied))
-    check b.startsWith("\x1b[32m" & "✓ " & Reset &
-      "\x1b[32m" & "before")
-    check "**bold**" notin b
-    check "\x1b[22m" & "\x1b[32m" & " after" in b
-    check GreyFg notin b
-
-  test "the verdict is the leading icon and the item color, never the contract text":
+  test "the check is a dim quote block led by the verdict icon":
+    # Only the icon carries the verdict color; the rule and the prose
+    # sit in the dim tier. The rule is continuous across wrapped rows,
+    # aligned under the icon:
+    #   ✓ | this is the
+    #     | verdict text
     let ok = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkSatisfied))
-    check "\x1b[32m✓" in ok
+    check ok == "\x1b[32m" & "✓" & Reset & " " & GreyFg & "| checked." &
+      Reset & "\r\n"
     check "\x1b[31m" notin ok
-    check "VERDICT" notin ok
     let no = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkFeedback))
-    check "\x1b[31m✗" in no
+    check no == "\x1b[31m" & "✗" & Reset & " " & GreyFg & "| checked." &
+      Reset & "\r\n"
     check "\x1b[32m" notin no
-    check "VERDICT" notin no
-    # No trailing icon row anymore: the item ends with the prose.
     for b in [ok, no]:
-      check not b.endsWith("✓" & Reset)
-      check not b.endsWith("✗" & Reset)
+      check "VERDICT" notin b
+
+  test "wrapped rows keep one continuous rule under the icon":
+    # A long prose wraps; every row after the first indents two spaces
+    # so its `|` sits exactly under the first row's rule, and the dim
+    # tier spans rule and text alike.
+    let words = repeat("word ", 60)
+    let b = goalStepBytes(GoalStep(prose: words, verdict: gvkSatisfied))
+    let rows = b.split("\r\n").filterIt(it.len > 0)
+    check rows.len > 1
+    check rows[0].startsWith("\x1b[32m" & "✓" & Reset & " " & GreyFg & "| ")
+    for row in rows[1 ..^ 1]:
+      check row.startsWith("  " & GreyFg & "| ")
+      check "\x1b[32m" notin row
     # A note with no verdict reads as not-yet: red ✗, never a green ✓.
     let note = goalStepBytes(GoalStep(prose: "verifier off"))
     check "\x1b[31m✗" in note
