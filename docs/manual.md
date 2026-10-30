@@ -1014,11 +1014,18 @@ model:
   the transcript shows `· read img logo.png 1920x1080 -> 1280x720`, and the
   follow-up message carries the pixels.
 
-Which models can see: the ones `--good` marks as vision-capable. The mark
+Which models can see: the ones `--good` marks as `(vision)`. The mark
 is earned. Every curated combo was probed with a real image (grok looked
 at a button and said "Button."). Two exceptions stay off: nebius, whose
 proxy rejects image parts outright, and the claude line, whose wire path
 has no image translation yet.
+
+DeepSeek sees on the V4.1 Flash ids — first-party `deepseek.deepseek-flash`
+and every host's `deepseek-v4.1-flash` row — and on the `v4-flash-vision-exp`
+hostings that still serve it. The V4/V3 ids (`deepseek-v4-flash`,
+`deepseek-v4-pro`, `v3.2`, `deepseek-chat`) are text-only weights, and the
+dated `-1017` gateway snapshots stay unmarked until a live image probe
+earns them: `[params] vision = "on"` opts one in after you've probed it.
 
 You can overrule the mark with `[params] vision = "off"` or `"on"` (set
 via `:provider edit`). Nothing fails quietly either way: on a model

@@ -562,7 +562,7 @@ suite "display: truncated tool output expansion":
   test "fileUrl percent-encodes non-URL bytes":
     check fileUrl("/tmp/a b/T1.log") == "file:///tmp/a%20b/T1.log"
 when not defined(windows):
-  import std/[json, os]
+  import std/[json, os, sequtils]
   import threecode/[transcript, images]
 
   suite "display: image read replay and :show":
@@ -640,6 +640,34 @@ when not defined(windows):
       check "(screenshot)" notin outp
       check "computer use on" notin outp
       check "base64" notin outp
+
+    test "--good marks the vision-capable combos":
+      # The listing is the discovery surface for "which model can see
+      # images" (the manual says so); deepseek's see/no-see split is the
+      # motivating case: deepseek-flash sees, the V4/V3 ids do not.
+      proc captureGood(): string =
+        let outPath = getTempDir() / ("tc_good_" & $getCurrentProcessId())
+        let saved = stdout
+        let f = open(outPath, fmWrite)
+        stdout = f
+        try:
+          printKnownGood()
+        finally:
+          stdout.flushFile
+          stdout = saved
+          close(f)
+        result = readFile(outPath)
+        removeFile(outPath)
+      let listing = captureGood()
+      let flash = listing.splitLines.filterIt(
+        it.strip.startsWith("deepseek.deepseek-flash"))
+      require flash.len == 1
+      check "(vision)" in flash[0]
+      let pro = listing.splitLines.filterIt(
+        it.strip.startsWith("deepseek.deepseek-v4-pro"))
+      require pro.len == 1
+      check "(vision)" notin pro[0]
+      check "(vision) = can see images" in listing
 
     test ":show renders the whole receipt, never the base64":
       let receipt = "image tiny.png 16x12 PNG -> delivered 16x12 JPEG; " &

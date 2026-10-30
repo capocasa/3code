@@ -16,10 +16,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA3XAAAN1wFCKJt4AAAAB3RJTUUH4QQQEwksSS9ZWwAAAk1JREFUWMPtll2ITVEUx39nn/O7Y5qR8f05wtCUUr6ZIS++8pEnkZInPImneaCQ5METNdOkeFBKUhMPRIkHKfEuUZSUlGlKPN2TrgfncpvmnntnmlEyq1Z7t89/rf9a6+y99oZxGZf/XeIq61EdtgKXgdXA0xrYAvBjOIF1AI9zvjcC74BSpndrJPkBWDScTF8Aa4E3wDlgHbASaANmVqlcCnwHvgDvgVfAJ+AikAAvgfVZwLnSVZHZaOuKoQi3ZOMi4NkYkpe1p4J7A8BpYAD49hfIy/oqG0+hLomiKP2L5L+1ubn5115S+3OAn4EnwBlgMzCjyt6ZAnQCJ4A7wOs88iRJHvw50HoujuPBoCKwHWiosy8MdfZnAdcHk8dxXFJ3VQbQlCTJvRBCGdRbD4M6uc5glpY3eAihpN5S5w12diSEcCCEcKUO4ljdr15T76ur1FDDLIQQ3qv71EdDOe3Kxj3leRXyk+pxdWnFWod6Wt2bY3de3aSuUHcPBVimHs7mK9WrmeOF6lR1o9qnzskh2ar2qm1qizpfXaPeVGdlmGN5pb09qMxz1Xb1kLqgzn1RyH7JUXW52lr5e/Kqi9qpto7V1atuUzfnARrV7jEib1T76gG2qxdGmXyiekkt1GswPTtek0aBfJp6YySGBfWg2tPQ0FAYgf1stUfdmdcjarbYJEniKIq6gY/Aw+zWHAC+p2labGpqiorFYgGYCEzN7oQdQClN07O1/EfDyGgC0ALMBdYAi4FyK+4H3gLPsxfR1zRNi+NP7nH5J+QntnXe5B5mpfQAAAAASUVORK5CYII=">
 
 <!-- CSS -->
-<link rel="stylesheet" type="text/css" href="nimdoc.out.css?v=2.2.12">
+<link rel="stylesheet" type="text/css" href="nimdoc.out.css?v=2.4.0">
 
 <!-- JS -->
-<script type="text/javascript" src="dochack.js?v=2.2.12"></script>
+<script type="text/javascript" src="dochack.js?v=2.4.0"></script>
 </head>
 <body>
   <div class="document" id="documentId">
@@ -491,7 +491,8 @@ brave-key = &quot;...&quot;</pre></p>
 <ul class="simple"><li><strong>Attach</strong>: put <tt class="docutils literal"><span class="pre">@mockup.png</span></tt> in your prompt. The image rides the message as an image block (not 64 KB of inlined binary), the echo shows <tt class="docutils literal"><span class="pre">@mockup.png [image attached]</span></tt>, and the model answers about what it sees.</li>
 <li><strong>Read</strong>: the model calls <tt class="docutils literal"><span class="pre">read</span></tt> on an image path — e.g. to inspect its own rendered output — and the image rides the next message. The tool result is a one-line text receipt (<tt class="docutils literal"><span class="pre">image logo.png 1920x1080 PNG -&gt; delivered 1280x720 JPEG; attached below</span></tt>), the transcript shows <tt class="docutils literal"><span class="pre">· read img logo.png 1920x1080 -&gt; 1280x720</span></tt>, and the follow-up message carries the pixels.</li>
 </ul>
-<p>Which models can see: the ones <tt class="docutils literal"><span class="pre">--good</span></tt> marks as vision-capable. The mark is earned. Every curated combo was probed with a real image (grok looked at a button and said &quot;Button.&quot;). Two exceptions stay off: nebius, whose proxy rejects image parts outright, and the claude line, whose wire path has no image translation yet.</p>
+<p>Which models can see: the ones <tt class="docutils literal"><span class="pre">--good</span></tt> marks as <tt class="docutils literal"><span class="pre">(vision)</span></tt>. The mark is earned. Every curated combo was probed with a real image (grok looked at a button and said &quot;Button.&quot;). Two exceptions stay off: nebius, whose proxy rejects image parts outright, and the claude line, whose wire path has no image translation yet.</p>
+<p>DeepSeek sees on the V4.1 Flash ids — first-party <tt class="docutils literal"><span class="pre">deepseek.deepseek-flash</span></tt> and every host's <tt class="docutils literal"><span class="pre">deepseek-v4.1-flash</span></tt> row — and on the <tt class="docutils literal"><span class="pre">v4-flash-vision-exp</span></tt> hostings that still serve it. The V4/V3 ids (<tt class="docutils literal"><span class="pre">deepseek-v4-flash</span></tt>, <tt class="docutils literal"><span class="pre">deepseek-v4-pro</span></tt>, <tt class="docutils literal"><span class="pre">v3.2</span></tt>, <tt class="docutils literal"><span class="pre">deepseek-chat</span></tt>) are text-only weights, and the dated <tt class="docutils literal"><span class="pre">-1017</span></tt> gateway snapshots stay unmarked until a live image probe earns them: <tt class="docutils literal"><span class="pre">[params] vision = &quot;on&quot;</span></tt> opts one in after you've probed it.</p>
 <p>You can overrule the mark with <tt class="docutils literal"><span class="pre">[params] vision = &quot;off&quot;</span></tt> or <tt class="docutils literal"><span class="pre">&quot;on&quot;</span></tt> (set via <tt class="docutils literal"><span class="pre">:provider edit</span></tt>). Nothing fails quietly either way: on a model without vision, <tt class="docutils literal"><span class="pre">@x.png</span></tt> and <tt class="docutils literal"><span class="pre">read x.png</span></tt> both fail with a hint naming a model that has it.</p>
 <p>Delivery is budgeted, not original: images are re-encoded once to JPEG q85 inside a 1280 px box and a 190 KB base64 budget, with a quality-then-scale ladder shrinking further until it fits. The delivered bytes are written under the session's image dir and re-used verbatim, so a resumed session re-sends identical bytes and the provider's prompt cache stays hot. At most 3 images attach per message and 4 per turn; repeated reads of the same image count as flailing.</p>
 <p>Session files store <tt class="docutils literal"><span class="pre">image &lt;path&gt; &lt;sha1&gt;</span></tt> records, never base64. On resume the image re-embeds from disk when file and checksum still match; otherwise it becomes an <tt class="docutils literal"><span class="pre">[image stale: name]</span></tt> note. Compaction collapses old image blocks to <tt class="docutils literal"><span class="pre">[image WxH]</span></tt> text notes — summaries never carry image blobs.</p>
@@ -848,7 +849,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-29 10:28:50 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-30 10:05:05 UTC</small>
       </div>
     </div>
   </div>

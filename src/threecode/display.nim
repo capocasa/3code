@@ -1006,11 +1006,15 @@ proc printKnownGood*() =
       elif c.version.len > 0: c.version
       else: c.variant
     let tag = if v.len > 0: c.family & " " & v else: c.family
-    echo "  ", id.alignLeft(maxId), "  ", tag
+    # Same "(vision)" suffix the :model picker paints, so the listing
+    # answers "which of these can see images" without a second command.
+    let vis = if c.vision: "  (vision)" else: ""
+    echo "  ", id.alignLeft(maxId), "  ", tag, vis
   echo ""
   echo "pass any of these to --model, e.g. 3code --model ", KnownGoodCombos[0].provider,
        ".", KnownGoodCombos[0].model
-  echo "other combos require --experimental."
+  echo "other combos require --experimental. (vision) = can see images " &
+       "(@img.png, read on image files)."
 
 const SessionListCap* = 20
   ## Newest sessions shown by `printSessionList` / `-l` / `:sessions`.

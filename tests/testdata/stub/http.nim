@@ -27,6 +27,11 @@
 
 var httpStubResponseIdx = 0
 
+var lastHttpStubBody* = ""
+  ## The request body of the most recent `callHttp` the stub served, so
+  ## tests can assert what actually went on the wire (e.g. that image
+  ## content blocks survive a family's request mutations).
+
 proc loadHttpStubResponses(): seq[JsonNode] =
   let path = block:
     let override = getEnv("THREECODE_HTTP_STUB_RESPONSES")
@@ -124,6 +129,7 @@ proc callHttpStub(url, key, bodyStr: string; baseLabel: string;
   ## Self-contained: does not depend on the provider stub's failure helpers
   ## so the two stubs can be used independently (http stub tests the
   ## network layer; provider stub tests everything else).
+  lastHttpStubBody = bodyStr
   # Same entry contract as the real transports: a `:retry` that is still
   # set when the request starts aborts it as a retry-now marker (nothing
   # has shipped, so the resend is duplication-free). callModel clears a
