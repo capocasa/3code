@@ -2,6 +2,32 @@ Changelog
 
 Unreleased
 
+- **`:btw` asks the model a side question about the conversation without
+  it entering the context.** `:btw why did we pick the parser rewrite?`
+  fires one meta-call over the live history (a dedicated aside system
+  prompt, the conversation, the question as the final user message) and
+  prints the answer to the terminal. Neither the question nor the answer
+  is appended to the session's messages, so the next real turn — and
+  the context window it pays for — is exactly the conversation from
+  before the aside. Bare `:btw` is a usage hint; with no provider
+  configured it fails like `:summarize` does.
+- **DeepSeek vision: verified working, and `--good` now shows the eye.**
+  `deepseek.deepseek-flash` (V4.1 Flash, native vision) delivers image
+  content end to end — `@img.png` attaches, `read` on an image returns
+  the receipt and rides the pixels on the follow-up user message, and
+  the wire request carries the `image_url` block verbatim next to the
+  family's own knobs (`thinking.type` + temperature 0.0 first-party,
+  `reasoning_effort` on the hosted vLLM stacks, `reasoning_content`
+  backfill on assistant history). Verified against a live local
+  endpoint capturing the outgoing body; a new httpStub suite
+  (`tests/stream/test_vision_wire.nim`) locks the invariant in, and
+  fails the moment any family mutation flattens a content array.
+  Text-only weights (`deepseek-v4-flash`, `v4-pro`, `v3.2`,
+  `deepseek-chat`) keep refusing with the vision hint. To make the
+  see/no-see split visible, `--good` / `3code good` now paints the
+  same `(vision)` suffix the `:model` picker uses (the manual always
+  said it marked them; the listing never did), and the manual's
+  "Which models can see" names the DeepSeek ids that see.
 - **`:sandbox allow|readonly|deny|ask` rewrites the existing rule for
   that target where it sits instead of stacking a new one at the
   end.** The policy is ordered last-match-wins, so appending a flipped
