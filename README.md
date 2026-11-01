@@ -41,7 +41,6 @@ As a heavy command-line and no-chrome tiling window manager user, everything els
 
 | provider | model | |
 |---|---|---|
-| [opencode](https://opencode.ai/) | deepseek | free deepseek agentic coding |
 | [z.ai coding plan](https://z.ai/) | glm-5.3 | the economical coding plan, used to develop 3code |
 | [tensorx](https://tensorx.ai) | glm-5.3 | EU-native |
 
