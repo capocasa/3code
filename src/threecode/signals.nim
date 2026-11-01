@@ -32,12 +32,29 @@
 when defined(posix):
   import posix
   import std/termios
+  import std/volatile
   import util
 
   type SigAtomic {.importc: "sig_atomic_t", header: "<signal.h>", pure.} = cint
 
-  var resizePendingFlag {.volatile.}: SigAtomic
-  var resumeCount {.volatile.}: SigAtomic
+  # Plain storage plus volatileLoad/volatileStore, not ``{.volatile.}``: the
+  # IC backend's extern declaration for a {.volatile.} global drops the
+  # qualifier and the C compiler rejects the redeclaration.
+  var resizePendingFlag: SigAtomic
+  var resumeCount: SigAtomic
+
+  proc setResizePending() {.inline.} =
+    volatileStore(addr resizePendingFlag, 1)
+
+  proc takeResizePending(): bool {.inline.} =
+    if volatileLoad(addr resizePendingFlag) != 0:
+      volatileStore(addr resizePendingFlag, 0)
+      true
+    else:
+      false
+
+  proc bumpResumeCount() {.inline.} =
+    volatileStore(addr resumeCount, volatileLoad(addr resumeCount) + 1)
   var SIGWINCH {.importc, header: "<signal.h>".}: cint
   var SIGCONT {.importc, header: "<signal.h>".}: cint
 
@@ -48,7 +65,7 @@ when defined(posix):
   var contBlocked = false
 
   proc winchHandler(sig: cint) {.noconv.} =
-    resizePendingFlag = 1
+    setResizePending()
 
   proc contHandler(sig: cint) {.noconv.} =
     # Reached only for an *external* suspend (kill -TSTP from another
@@ -58,8 +75,8 @@ when defined(posix):
     # arrives while no keyhandler is suspended.
     if rawModeValid:
       discard tcsetattr(getFileHandle(stdin), TCSANOW, unsafeAddr rawMode)
-    inc resumeCount
-    resizePendingFlag = 1
+    bumpResumeCount()
+    setResizePending()
 
   proc installResizeHandler*() =
     var sa: Sigaction
@@ -121,11 +138,12 @@ when defined(posix):
     var info: SigInfo
     var zero: Timespec
     if sigtimedwait(waitSet, info, zero) == SIGCONT:
-      inc resumeCount
+      bumpResumeCount()
       return true
     false
 
-  proc backgroundResumeCount*(): SigAtomic = resumeCount
+  proc backgroundResumeCount*(): SigAtomic =
+    volatileLoad(addr resumeCount)
 
   proc requestBackground*() =
     ## Restore cooked mode, send SIGTSTP, and block until the process has
@@ -150,19 +168,17 @@ when defined(posix):
     discard sigwait(waitSet, sig)
     if rawModeValid:
       discard getFileHandle(stdin).tcSetAttr(TCSANOW, addr rawMode)
-    inc resumeCount
+    bumpResumeCount()
     # Repaint on resume exactly like a resize: the shell's job-control
     # output scrolled or overwrote the volatile block while we were
     # stopped, so the next paint must not be diffed away as a no-op.
-    resizePendingFlag = 1
+    setResizePending()
 
   proc markResizePending*() =
-    resizePendingFlag = 1
+    setResizePending()
 
   proc consumeResizePending*(): bool =
-    if resizePendingFlag != 0:
-      resizePendingFlag = 0
-      return true
+    takeResizePending()
 
 else:
   var resizePendingFlag: bool
