@@ -2,6 +2,13 @@ Changelog
 
 Unreleased
 
+- **`--ic:on` debug builds link.** Nim's IC backend emits the
+  extern pre-declaration of a `{.volatile.}` global without the volatile
+  qualifier, and the C compiler rejects the mismatched redeclaration.
+  The two signal-handler flags in `signals.nim` are now plain
+  `sig_atomic_t` globals accessed through `volatileLoad`/`volatileStore`,
+  which produces the same volatile C accesses without a volatile-qualified
+  variable, so incremental debug builds link.
 - **The prompt draft save is key-press debounced, not interval-polled.**
   A dedicated flusher thread woke every 250ms to check a dirty flag; now
   the save is armed by the key presses that change the buffer and fired by
