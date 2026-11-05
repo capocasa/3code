@@ -49,9 +49,14 @@ proc askEnv(root: string; askTimeoutMs: int): seq[EnvVar] =
     (key: "THREECODE_ASK_TIMEOUT_MS", val: $askTimeoutMs),
   ]
 
-proc startAskSession(root: string; askTimeoutMs: int): TtySession =
+proc startAskSession(root: string; askTimeoutMs: int;
+                      tmpDir = ""): TtySession =
+  var env = askEnv(root, askTimeoutMs)
+  if tmpDir.len > 0:
+    for i in 0 ..< env.len:
+      if env[i].key == "TMPDIR": env[i].val = tmpDir
   newTtySession(ensureStubBinary(), args = ["-x", "-i"], cwd = root / "run",
-                env = askEnv(root, askTimeoutMs), keepHistory = false)
+                env = env, keepHistory = false)
 
 proc typeText(s: TtySession; text: string) =
   for ch in text:
@@ -136,6 +141,35 @@ suite "sandbox ask prompt":
     check not fileExists(root / "run" / "vault" / "out.txt")
     tty.expect "\u276f"
     echo "  PASS: timeout declines"
+
+  test "f grant works with the network wall active (host rule in policy)":
+    let root = newFixture("fenced")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    # A host rule turns on the network wall (per-run proxy): the exact
+    # configuration whose ask grant crashed before the sync guard (the
+    # proxy policy file lived under the deleted per-run bash dir).
+    let sf = root / "run" / ".sandbox"
+    writeFile(sf, readFile(sf) & "deny evil.example\n")
+    # The wall proxy binds an AF_UNIX socket under TMPDIR; the fixture's
+    # deep tests/testdata path overflows sockaddr_un's 108 bytes, so the
+    # fenced launch dies before any denial. A short /tmp TMPDIR keeps the
+    # socket path legal.
+    let shortTmp = getTempDir() / ("3code_askfence_" & $getCurrentProcessId())
+    if dirExists(shortTmp): removeDir(shortTmp)
+    createDir(shortTmp)
+    let tty = startAskSession(root, 20_000, shortTmp)
+    defer: tty.close()
+
+    tty.expect "\u276f"
+    runShellCmd(tty, "echo granted > vault/fenced.txt")
+
+    tty.expectInHistory "sandbox ask:", 30_000
+    tty.sendAskKey 'f'
+    tty.expectInHistory "allowed ./vault - retrying", 30_000
+    check waitForFileContent(root / "run" / "vault" / "fenced.txt", "granted\n")
+    tty.expect "\u276f"
+    echo "  PASS: f grant under the network wall"
 
   test "hard deny never asks":
     let root = newFixture("harddeny")

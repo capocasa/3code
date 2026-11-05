@@ -238,8 +238,14 @@ proc wallProxyPort*(): uint16 =
 
 proc syncWallProxyPolicy*(projectDir: string) =
   ## Rewrite the proxy's policy file after a reload; the proxy
-  ## hot-reloads on mtime.
+  ## hot-reloads on mtime. The bound dir is a per-run bash tmp dir that
+  ## runStreamingBash's finally deletes; once it is gone the proxy is
+  ## stale by construction and the next fenced launch rebinds it with
+  ## fresh policy text anyway, so the write is skipped instead of
+  ## raising out of the caller (the sandbox-ask grant retries a fenced
+  ## command exactly in this window and used to die with "cannot open").
   if wallProxy.port == 0 or wallProxyBoundDir.len == 0: return
+  if not dirExists(wallProxyBoundDir): return
   writeFile(wallProxyBoundDir / "policy", wallPolicyText(projectDir))
 
 proc stopWall*() =

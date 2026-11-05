@@ -1637,8 +1637,14 @@ proc cmdSandboxSettingSelect(target: string): string =
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLnS("sandbox: " & (if sandboxEnabled: "on" else: "off") &
+  result = hintLnS("sandbox: " & (if sandboxEnabled: "on" else: "off") &
     "  (on = enforce the .sandbox policy, off = run unconfined)")
+  # `sandbox.active` is only set at session init, so a mid-session `on`
+  # cannot arm enforcement for the running session; say so instead of
+  # letting the user believe bash is already fenced (asks included).
+  if sandboxEnabled and not sandbox.active:
+    result.add hintLnS(
+      "this session stays unconfined; enforcement starts at the next launch")
 
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
