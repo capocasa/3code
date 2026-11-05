@@ -1,5 +1,309 @@
 Changelog
 
+Unreleased
+
+- **Sandbox `ask`: one-key approval for the gray zone.** `:sandbox ask
+  P` denies exactly like `:sandbox deny P`, but when a sandboxed bash
+  command is blocked on an ask-protected path, 3code puts one question
+  in the tool output view - `sandbox ask: ~/vault/notes/x.md is
+  ask-protected.  [f] ~/vault  [d] ~  [n]o  (60s)` - and one key answers
+  it: `f` allows the ask-protected path (the `ask` rule's own target),
+  `d` the directory around it, `n` keeps the denial. A grant is written
+  into the active policy file, so it sticks for the session and beyond;
+  no answer within 60 seconds counts as `n`, and the failed command is
+  never retried without an explicit grant. The sandbox stays kernel-
+  enforced and silent for everything else: `ask` covers the paths you
+  would probably allow if you were watching (a browser profile, a notes
+  vault) where `deny` costs a manual policy edit and `allow` feels too
+  broad unattended.
+
+- **The sandbox ask covers the `read`/`write`/`patch` tools, not just
+  bash.** An `ask` rule used to redeem only a failed bash command; a
+  model `write` to an ask-protected path just denied. The file tools
+  know their exact target, so they ask before running - `sandbox ask:
+  ./vault/out.txt is ask-protected. [f] ./vault [d] ./ [n]o (60s)` -
+  and on `f`/`d` the grant is written, the call runs under the widened
+  policy, and the decision is recorded in the tool result (`[sandbox
+  ask: user allowed ./vault; tool retried]`) exactly like the bash
+  convention; `n`, a timeout, or a headless session keeps the plain
+  denial. Hard denies still never ask. The ask gate also no longer
+  races the editor: an answer key pressed while a turn is running used
+  to land in the prompt draft about half the time, because only the
+  gate's own poll window diverted keys; every input path now diverts
+  while the gate is armed.
+
+- **The sandbox ask covers `apply_patch` too.** The last file-tool gap:
+  `apply_patch` carries its paths per-op inside the patch body, so the
+  pre-emptive hook never saw them and gpt-oss profiles (its canonical
+  mutation tool) were effectively bash-only. The gate now parses the
+  ops up front and asks once per distinct `ask` rule root before any op
+  executes (a patch touching three vault files is one question, nothing
+  partial hits the disk), with the first op path under each root as the
+  display target. A declined or timed-out root does not abort the patch:
+  its ops fail their per-op policy denial while ops under granted roots
+  proceed, and each decision lands in the tool result as its own
+  `[sandbox ask: ...]` line. Unparseable patches and hard denies still
+  never ask.
+
+- **The sandbox ask answers on Windows consoles too.** The ask gate
+  was posix-only (a hard `false` predicate); on Windows it now arms
+  whenever the input thread owns a real console handle - ConPTY,
+  Windows Terminal, and legacy conhost all qualify, mintty's pipes do
+  not - and the input thread diverts the one-key answer on all three
+  read paths (the VT readiness loop, which previously spun without
+  re-checking the gate, the legacy blocking read, and bytes already
+  buffered). Verified end-to-end on a real ConPTY session against the
+  sandwall restricted-user backend: git-bash denial text is still
+  `Permission denied`, root grants take effect through the ACL
+  enforcement, and the full ask tty suite (bash and tool legs) passes;
+  on hosts without the fence the suite's bash legs probe-and-skip (a
+  sandboxed command cannot fail there), the tool legs run everywhere.
+  Also un-broke the Windows cross-build under Nim 2.4: a `when`/`elif`
+  in `fileLinkUrl` carried a runtime condition, which 2.2 tolerated and
+  2.4 rejects.
+
+- **An ask grant survives the wall proxy.** Granting through the ask
+  gate rewrites the policy under a running fenced bash session whose
+  proxy binds a per-run tmp dir; that dir is deleted when the command
+  exits, and the stale-policy rewrite used to die with `cannot open`.
+  The proxy policy write is now skipped once its bound dir is gone
+  (the next fenced launch rebinds with fresh policy text), so the
+  granted retry runs. `:sandbox on` mid-session also says so when it
+  cannot arm the fence for the running session (enforcement starts at
+  the next launch) instead of letting you believe bash is already
+  fenced.
+
+- **`:sandbox allow|readonly|deny|ask` rewrites the existing rule for
+  that target where it sits instead of stacking a new one at the
+  end.** The policy is ordered last-match-wins, so appending a flipped
+  rule silently moved it behind every later rule: flipping `deny /` to
+  `ask /` that way would swallow the `allow /tmp` written after it.
+  Now a rule command for a target the file already covers (paths match
+  on their normalized absolute form, hosts on the host:port pair)
+  replaces that rule in place and stacked duplicates for one target
+  collapse into the first, while a new target still appends at the
+  end; the order you wrote is the order that is enforced. Ask-gate
+  grants keep appending on purpose, so an approved command's `allow`
+  still wins over any later deny.
+
+- **The prompt editor grows a readline suite.** Kills feed a kill ring
+  (`C-y` yanks, `M-y` pops, `M-.` yanks the last arg of the previous
+  command), `C-_`/`Ctrl-/` undoes in typing-run groups with `M-r`
+  reverting the line, `C-r`/`C-s` search history incrementally
+  (`M-p`/`M-n` recall at Enter, `M-<`/`M->` jump to the extremes), and
+  the word commands land: `M-t` transpose, `M-u`/`M-l`/`M-c` case,
+  `C-q` quoted insert, `C-]` character search, plus set-mark and
+  exchange-point-and-mark. The `:help` rows, the manual key table and
+  the config example document the full surface, and Ctrl+U now deletes
+  to the start of the line instead of the whole buffer.
+
+- **The prompt draft save is key-press debounced, not interval-polled.**
+  A dedicated flusher thread woke every 250ms to check a dirty flag; now
+  the save is armed by the key presses that change the buffer and fired by
+  the input thread's own no-key-waiting path, so it happens only after a
+  sentence completes (`.`, `!`, `?`, or a line break) AND typing has been
+  briefly quiet (750ms debounce). Steady typing and mid-sentence pauses
+  write nothing; the unconditional final flush on shutdown still captures
+  whatever was on the way out, and the crash-restore behavior is
+  unchanged.
+
+- **Drafts never persist quit lines.** A quit that did not take (an
+  unknown command, a refused exit) used to survive as the prompt draft
+  on disk and resurrect at the next launch; quit lines are never saved
+  now and stale quit-line drafts are swept at startup.
+
+- **Ctrl-Z suspends again on kitty-protocol terminals, and coming
+  back from background repaints.** The shortcut-table refactor listed
+  `suspend` as a command but never registered its handler on POSIX, so
+  Ctrl-Z lived on only as a legacy fallback keymap entry — a path the
+  kitty keyboard decoder (which the interactive app pushes at startup)
+  never consults. On kitty, Ghostty, WezTerm and friends the key did
+  nothing. The `suspend` command is registered in the command table
+  again, and the kitty decoder now falls back to the same keymap the
+  legacy control-byte path uses, so a binding can never again silently
+  die on one encoding. Resume used to leave the shell's job-control
+  output as the last thing on screen: the row-diffing painter skipped
+  the post-resume repaint as a no-op because no editor state changed.
+  A resume now invalidates the diff model (full repaint of the volatile
+  block, like a resize) and sets the resize flag so the input poller
+  repaints even when the resume was external (`kill -TSTP` from
+  another terminal, then `fg`). A stale SIGCONT from such an external
+  resume is drained instead of being left queued — it used to satisfy
+  the next suspend's `sigwait` before the process had stopped, which
+  looked like Ctrl-Z freezing.
+
+- **A real SIGINT at an idle prompt now quits, like `:q`.**
+  `installInterruptHook` replaces Nim's die-on-SIGINT handler with
+  the turn-interrupt hook, so `kill -INT` from outside (a supervisor
+  like mpx, or a wrapping script) while 3code sat idle was swallowed
+  whole: the process lived on and the supervisor escalated to SIGKILL,
+  which skips every terminal-restore path. The hook still means
+  "cancel the turn" while a turn runs; the controller's prompt read
+  consumes the flag afterwards so an interrupt that already cancelled
+  its turn cannot also quit the prompt that turn returns to.
+
+- **3code owns the tty's output discipline (gh #54).** A shell left
+  `-opost` by a crashed CLI or `stty -opost` used to break every wrapped
+  row: with `OPOST` off, `ONLCR` is inert, so the bare `\n` 3code writes
+  kept the previous row's column and paragraphs, tables, and the startup
+  box art drifted right into unreadability. 3code now restores
+  `OPOST|ONLCR` on the tty before the first paint and stops clearing
+  `OPOST` in the editor's raw-mode switch, so rows render at column 0
+  whatever the parent left behind - and the shell handed back at exit is
+  readable too.
+
+- **Quitting no longer leaves the terminal in no-echo mode after an
+  edit-in-editor round-trip.** Alt+E / Ctrl+X Ctrl+E hands the terminal
+  to `$VISUAL`/`$EDITOR` and re-applies raw mode when the editor
+  returns; it also replaced the cooked termios snapshot that exit
+  cleanup restores with that raw mode. Every quit afterwards
+  "restored" raw mode, so the shell the user landed in echoed nothing
+  until `reset`. The snapshot now survives the round-trip (gh #56).
+
+- **Cmd+A selects all (#57).** The `select-all` command - present
+  since the selection work but bound to no key - now ships bound to
+  `CmdA`, so on macOS the Command key gets its usual meaning with no
+  config: terminals that speak the kitty keyboard protocol (kitty,
+  Ghostty, iTerm2, WezTerm, foot, Warp) report the chord and the whole
+  buffer highlights; everywhere else the key stays inert and the
+  Ctrl/Shift defaults are untouched. `select-all = ""` unbinds it
+  like any other command.
+
+- **A width change re-breaks the committed transcript above the
+  prompt.** Committed rows are hard-wrapped at the width they were
+  painted at, so a resize used to leave them to the terminal's own
+  reflow, which breaks mid-word and strands stale tails. The engine now
+  journals committed transcript content as it is written
+  (`noteCommittedRows`), and a
+  width-only resize repaints that tail window re-wrapped at the new
+  width: word-boundary breaks, every row within the new width (each row
+  EL-terminated so a shorter row clears the stale tail of the wider row
+  it replaces), every word present exactly once and in order - which the
+  resize shakedown now asserts across 104/60/80 cols. The window is read
+  only while the main thread is parked in the input wait, never while a
+  modal wizard owns the screen; Windows stays frozen-rows because
+  ConPTY's resize model already full-repaints.
+
+- **Vertical cursor movement no longer repaints (and no longer crawls)
+  on a pasted multi-line draft.** Two causes stacked: Up/Down picked
+  their target with one `cursorVisual` - itself a full row-model walk -
+  per rune boundary, which is quadratic in the buffer (a 200-line
+  pasted draft spent 20+ seconds per arrow key), and every motion
+  keystroke then erased and repainted the entire editor block on top.
+  `verticalTarget` now finds the same target in one pass over the row
+  model (verified against the old scan over a fixed corpus plus 400
+  random fuzz buffers), and `moveOnlyRedraw` handles cursor-only
+  keystrokes - left/right, up/down, word, home/end, buffer start/end -
+  by walking the terminal cursor from the old cell to the new one: no
+  erase, no prompt re-emit, a handful of bytes whatever the buffer
+  size. The interactive app's drawn-caret path is unchanged (its
+  row-diff painter already rewrites only the rows whose cells
+  changed).
+
+- **Prompt-cache affinity on OpenAI Responses (gh #58).** The ↻ slot in
+  the token bar was mostly absent on ChatGPT subscriptions because the
+  cache misses were real, not a display bug: OpenAI's prompt cache is
+  sharded and only serves hits when consecutive requests land on the
+  same shard, and 3code sent none of the affinity signals that pin that
+  routing (the Codex CLI sends a stable `prompt_cache_key` body field
+  and a `session_id` header). Every /responses request now carries the
+  conversation id (the `.3log` session id - stable across turns and
+  resume, rotating on `:clear`) as `prompt_cache_key`, and `chatgpt`
+  profiles additionally send it as the `session_id` header on the Codex
+  backend, exactly matching what the first-party client pins. One-shot
+  calls (verify, summarize) send neither; nothing is reused across
+  them. First-party openai profiles get the body field (a documented
+  public parameter); other providers never see it.
+
+- **More clickable links wherever a file is named (#60).** The `r`,
+  `w`, and `p` banners now hyperlink their path as an OSC 8 `file://`
+  URL - click a read/write/patch banner to open the file itself,
+  live viewport, transcript replay, and `:log` alike (terminals
+  without OSC 8 still show the bare path). A patch's full diff
+  always lands in the log dir as `T<n>.diff` with a linked
+  `T<n>.diff ↗` row, even when the diff fit in the transcript
+  un-truncated - one click from something `git apply` / `patch -R`
+  can consume; the dumped file is the complete diff, first banner
+  line included. And markdown links in model prose that point at
+  paths instead of URLs - `Created [some-plan.md](some-plan.md).` -
+  resolve against the project directory into working `file://`
+  links instead of printing as literal markup (`#anchors` and
+  unknown schemes still pass through verbatim).
+
+- **`.NET` builds work in the macOS sandbox (#55).** Writable paths
+  now carry their unix-socket rights in the seatbelt profile
+  (sandwall 0.5.12): `system-socket` for AF_UNIX creation, plus
+  `network-bind`/`network-outbound` scoped under each granted path.
+  Seatbelt gates those as network operations no file rule reaches, so
+  `allow /tmp` left MSBuild worker nodes and the dotnet diagnostic
+  server socket-dead - the same wall codex and claude-code hit
+  (openai/codex#12702, claude-code #41254). Read-only paths get
+  connect only (`readonly /var/run/docker.sock` is now the shape for
+  a service socket), denied paths lose their sockets with their
+  files, and fenced builds keep their local IPC while TCP stays
+  loopback-only. The manual ships the `dotnet` recipe (NuGet cache
+  writable, NuGet config readable), an end-to-end test drives
+  `dotnet build` through `3code sandbox` under exactly that policy,
+  and on Linux nothing changed - Landlock already granted socket
+  binds on writable paths.
+
+- **`--ic:on` debug builds link.** Nim's IC backend emits the
+  extern pre-declaration of a `{.volatile.}` global without the volatile
+  qualifier, and the C compiler rejects the mismatched redeclaration.
+  The two signal-handler flags in `signals.nim` are now plain
+  `sig_atomic_t` globals accessed through `volatileLoad`/`volatileStore`,
+  which produces the same volatile C accesses without a volatile-qualified
+  variable, so incremental debug builds link.
+
+- **`user_agent`: your build's User-Agent, your wording.** The
+  `[settings] user_agent` template (`user-agent` spelling accepted)
+  builds the User-Agent header 3code sends on every model request.
+  Default `3code $version`; variables `$version` (the full build
+  version, e.g. `0.9.2-main-a1b2c3d4a`), `$branch`, `$commit` /
+  `$hash`, `$stage` (`-unstaged` when the build's sources differed
+  from HEAD; each empty when not applicable), `$os`, `$arch`, `$$`
+  for a literal `$`. Unknown `$names` pass through verbatim, and the
+  setting round-trips through the config writer only when set. This
+  replaces the fixed compiled-in string on every surface at once:
+  streaming, non-streaming, the /models ping, and the
+  compactor.
+
+- **`force_timeout` pins the bash cap for slow boxes.** `[settings]
+  force_timeout` (seconds) overrides every model-requested `timeout`
+  and the default: each bash run gets exactly this cap, for models
+  that never ask for enough time on a slow machine. `max_timeout`
+  still raises the ceiling for models that do ask; when both are set
+  `force_timeout` wins. It replaces the `THREECODE_MAX_TIMEOUT` env
+  var, which is gone.
+
+- **DeepSeek system prompt teaches the tools' real semantics (community t/9).**
+  DeepSeek 4.1 Flash kept mangling `patch` calls - mismatched `search`
+  blocks, invented failure stories about "collapsed lines", fallbacks to
+  Python one-liners, loop-detector trips - even after 0.8.3 taught the
+  harness every Frankenstein edit syntax it produced. A user rewrote the
+  prompt's Tools section at the harness level and the flailing stopped.
+  That rewrite now ships in the DeepSeek preamble, condensed to each fact
+  once: `exit=N` markers, tail-truncated output, the `read` 250-line cap
+  and 2KB line skip, first-match-only `patch` with unique context, the
+  exact/indent/whitespace ladder `fuzzyReplaceFirst` really applies (and
+  the note that names the strategy a non-exact match used), verbatim-
+  from-disk `search` text, and the all-or-nothing edit transaction. Every
+  claim is enforced code in `actions.nim`/`util.nim`; content and a
+  9.9KB terseness bound are pinned by new setup tests (+1.2KB on the old
+  preamble, not the +2.7KB of the verbatim forum version).
+
+- **The system prompt override is documented and un-gated.** The
+  `system_prompt` profile key replaces the built-in prompt verbatim
+  and no longer needs `--experimental`; the reference documents what
+  you give up with it (the tool semantics and skills scaffolding ride
+  the built-in prompts).
+
+- **Six new providers in the known-good table.** vercel (the AI
+  Gateway, GLM and DeepSeek at list price or below), volccode (the
+  Volcengine Ark Coding Plan), alibabatoken / alibabatoken-cn (the
+  Alibaba Model Studio token plan), engy (verified-inference open
+  weights, cheapest DS 4.1 flash anywhere), aihubmix and cortecs.
+
 0.8.4  macOS startup crash fixed (ad-hoc signing), OpenSSL static-linked
        with the CA bundle embedded, javac compiles in the macOS sandbox,
        output wraps in-app instead of relying on terminal luck, kitty
