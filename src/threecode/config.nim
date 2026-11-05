@@ -336,6 +336,7 @@ const
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
+                  "force_timeout", "force-timeout",
                   "browserfetch",
                   "tone", "mode", "bash_path", "bash-path",
                   "bash", "auto-update", "tab-title",
@@ -406,7 +407,8 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
-      if ent.key in ["max_timeout", "max-timeout"]:
+      if ent.key in ["max_timeout", "max-timeout",
+                     "force_timeout", "force-timeout"]:
         try: discard parseInt(ent.value.strip)
         except ValueError:
           return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
@@ -587,6 +589,9 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           # so a parse failure here is unreachable in practice.
           try: maxTimeoutSetting = v.strip.parseInt
           except ValueError: discard
+        of "force_timeout", "force-timeout":
+          try: forceTimeoutSetting = v.strip.parseInt
+          except ValueError: discard
         of "tone", "mode":
           # `auto` detects the background (default); `dark`/`light` force a
           # palette. `mode`/`bright` are the legacy spellings and stay
@@ -725,11 +730,11 @@ proc mergeForeignEdits(path: string; current: var string,
   # (e.g. `:streaming off`) would be reverted by the stale disk value
   # right before the buffer serializes it.
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
-       savedWallWarn, savedMaxTimeout, savedColorMode, savedBash,
-       savedBashSrc, savedTabTitle, savedUserAgent) =
+       savedWallWarn, savedMaxTimeout, savedForceTimeout, savedColorMode,
+       savedBash, savedBashSrc, savedTabTitle, savedUserAgent) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
-     sandboxWallWarn, maxTimeoutSetting, colorModePref, bashPathOverride,
-     bashSourcePref, tabTitleEnabled, userAgentTemplate)
+     sandboxWallWarn, maxTimeoutSetting, forceTimeoutSetting, colorModePref,
+     bashPathOverride, bashSourcePref, tabTitleEnabled, userAgentTemplate)
   let savedParams = activeParams
   let (diskCurrent, diskProviders, _, _, _, _) =
     try: parseConfigFile(path)
@@ -744,6 +749,7 @@ proc mergeForeignEdits(path: string; current: var string,
   patientRetryEnabled = savedPatient
   sandboxWallWarn = savedWallWarn
   maxTimeoutSetting = savedMaxTimeout
+  forceTimeoutSetting = savedForceTimeout
   colorModePref = savedColorMode
   bashPathOverride = savedBash
   bashSourcePref = savedBashSrc
@@ -850,6 +856,8 @@ proc writeConfigFile*(path: string, current: string,
   # Bare number, not a quoted literal: the reader parseInts the raw value.
   if maxTimeoutSetting > 0 and maxTimeoutSetting != MaxBashTimeout:
     buf.add "max_timeout = " & $maxTimeoutSetting & "\n"
+  if forceTimeoutSetting > 0:
+    buf.add "force_timeout = " & $forceTimeoutSetting & "\n"
   # Persist the colour tone only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "light"

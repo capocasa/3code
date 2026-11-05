@@ -139,7 +139,8 @@ Keys under `[settings]`:
 | `tone` | `auto`/`dark`/`light` (default auto) | color palette selection; `auto` detects the terminal background via OSC 11. The legacy key `mode` and value `bright` still work |
 | `bash_path` | full path | Windows only: force a specific bash; auto-detection order is `bash_path`, PortableGit, Git for Windows, MSYS2, legacy msys64 tree |
 | `bash` | `auto` or full path (default auto) | any OS: a full path overrides all detection; `auto` keeps the normal order |
-| `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted, and `THREECODE_MAX_TIMEOUT` (below) wins for one run |
+| `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted |
+| `force_timeout` | seconds | every bash run gets exactly this cap, regardless of what the model requested (or omitted); `force-timeout` spelling accepted. When set it wins over both the model's `timeout` and `max_timeout`, and is the setting for slow boxes and models that never ask for enough |
 | `browserfetch` | `on`/`off` (default off) | when a plain `web_fetch` returns a JS shell (almost no text survives tag stripping), redo the fetch in a shared headless Chrome (one browser per machine on 127.0.0.1:9223, one tab per fetch) and return the rendered text |
 | `auto-update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit |
 | `user_agent` | template (default `3code $version`) | User-Agent header sent on every model request. Variables: `$version` (the full build version), `$branch` (`-main`), `$commit` / `$hash` (`-a1b2c3d4`), `$stage` (`-unstaged` when the build's sources differed from HEAD; each empty when not applicable), `$os`, `$arch`, and `$$` for a literal `$`. Unknown `$names` pass through verbatim; `user-agent` spelling accepted |
@@ -220,7 +221,6 @@ unbinds a command.
 | --- | --- |
 | `XDG_CONFIG_HOME` | relocates the config root: config file, user skills, global prompts |
 | `XDG_DATA_HOME` | relocates the data root: sessions, history, auth tokens, builtin skills |
-| `THREECODE_MAX_TIMEOUT` | bash timeout ceiling for this run; wins over `max_timeout` |
 | `THREECODE_ALLOW_ROOT` | set to 1 to allow running as root (POSIX; refused otherwise) |
 
 Both XDG variables work on every platform, including Windows, and expect
