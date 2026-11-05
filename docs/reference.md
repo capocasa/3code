@@ -188,7 +188,8 @@ Keys under `[settings]`:
 | `tone` | `auto`/`dark`/`light` (default auto) | color palette selection; `auto` detects the terminal background via OSC 11. The legacy key `mode` and value `bright` still work |
 | `bash_path` | full path | Windows only: force a specific bash; auto-detection order is `bash_path`, PortableGit, Git for Windows, MSYS2, legacy msys64 tree |
 | `bash` | `auto` or full path (default auto) | any OS: a full path overrides all detection; `auto` keeps the normal order |
-| `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted, and `THREECODE_MAX_TIMEOUT` (below) wins for one run |
+| `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted |
+| `force_timeout` | seconds | every bash run gets exactly this cap, regardless of what the model requested (or omitted); `force-timeout` spelling accepted. When set it wins over both the model's `timeout` and `max_timeout`, and is the setting for slow boxes and models that never ask for enough |
 | `browserfetch` | `on`/`off` (default off) | when a plain `web_fetch` returns a JS shell (almost no text survives tag stripping), redo the fetch in a shared headless Chrome (one browser per machine on 127.0.0.1:9223, one tab per fetch) and return the rendered text |
 | `auto-update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit |
 | `verifier_model` | `PROVIDER.MODEL` | the model goal mode's satisfaction check runs on (see [verifier models](manual.html#verifier-models)); a decision model answers typed questions in one request. Not set = the session model checks (the default) |
@@ -285,7 +286,6 @@ in [plugins](plugins.html).
 | --- | --- |
 | `XDG_CONFIG_HOME` | relocates the config root: config file, user skills, global prompts |
 | `XDG_DATA_HOME` | relocates the data root: sessions, history, auth tokens, builtin skills |
-| `THREECODE_MAX_TIMEOUT` | bash timeout ceiling for this run; wins over `max_timeout` |
 | `THREECODE_ALLOW_ROOT` | set to 1 to allow running as root (POSIX; refused otherwise) |
 | `THREECODE_PLUGIN_SYNC_MS` | sync-hook deadline override in ms (default 2000) |
 | `THREECODE_PLUGIN_TOOL_MS` | plugin tool-exec default timeout in ms (default 120000) |

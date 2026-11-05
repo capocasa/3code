@@ -120,6 +120,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">:session</span></tt></td><td>show this session's ID (for <tt class="docutils literal"><span class="pre">--resume=ID</span></tt>)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:resume</span></tt></td><td>list this directory's sessions; <tt class="docutils literal"><span class="pre">:resume ID</span></tt> swaps the running 3code onto that session</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:summarize</span></tt></td><td>collapse old turns into a synthetic recap</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:btw Q</span></tt></td><td>ask the model a side question about the conversation; answer shown in the terminal, never enters the context</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:version</span></tt></td><td>show the running 3code version</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox</span></tt> / <tt class="docutils literal"><span class="pre">:sb</span></tt></td><td>show the active filesystem sandbox rules</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox on/off</span></tt></td><td>toggle sandbox enforcement</td></tr>
@@ -190,7 +191,8 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <tr><td><tt class="docutils literal"><span class="pre">tone</span></tt></td><td><tt class="docutils literal"><span class="pre">auto</span></tt>/<tt class="docutils literal"><span class="pre">dark</span></tt>/<tt class="docutils literal"><span class="pre">light</span></tt> (default auto)</td><td>color palette selection; <tt class="docutils literal"><span class="pre">auto</span></tt> detects the terminal background via OSC 11. The legacy key <tt class="docutils literal"><span class="pre">mode</span></tt> and value <tt class="docutils literal"><span class="pre">bright</span></tt> still work</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">bash_path</span></tt></td><td>full path</td><td>Windows only: force a specific bash; auto-detection order is <tt class="docutils literal"><span class="pre">bash_path</span></tt>, PortableGit, Git for Windows, MSYS2, legacy msys64 tree</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">bash</span></tt></td><td><tt class="docutils literal"><span class="pre">auto</span></tt> or full path (default auto)</td><td>any OS: a full path overrides all detection; <tt class="docutils literal"><span class="pre">auto</span></tt> keeps the normal order</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">max_timeout</span></tt></td><td>seconds (default 600)</td><td>raises the ceiling the bash tool clamps every <tt class="docutils literal"><span class="pre">timeout</span></tt> request to; <tt class="docutils literal"><span class="pre">max-timeout</span></tt> spelling accepted, and <tt class="docutils literal"><span class="pre">THREECODE_MAX_TIMEOUT</span></tt> (below) wins for one run</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">max_timeout</span></tt></td><td>seconds (default 600)</td><td>raises the ceiling the bash tool clamps every <tt class="docutils literal"><span class="pre">timeout</span></tt> request to; <tt class="docutils literal"><span class="pre">max-timeout</span></tt> spelling accepted</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">force_timeout</span></tt></td><td>seconds</td><td>every bash run gets exactly this cap, regardless of what the model requested (or omitted); <tt class="docutils literal"><span class="pre">force-timeout</span></tt> spelling accepted. When set it wins over both the model's <tt class="docutils literal"><span class="pre">timeout</span></tt> and <tt class="docutils literal"><span class="pre">max_timeout</span></tt>, and is the setting for slow boxes and models that never ask for enough</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">browserfetch</span></tt></td><td><tt class="docutils literal"><span class="pre">on</span></tt>/<tt class="docutils literal"><span class="pre">off</span></tt> (default off)</td><td>when a plain <tt class="docutils literal"><span class="pre">web_fetch</span></tt> returns a JS shell (almost no text survives tag stripping), redo the fetch in a shared headless Chrome (one browser per machine on 127.0.0.1:9223, one tab per fetch) and return the rendered text</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">auto-update</span></tt></td><td><tt class="docutils literal"><span class="pre">true</span></tt>/<tt class="docutils literal"><span class="pre">false</span></tt></td><td>self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">verifier_model</span></tt></td><td><tt class="docutils literal"><span class="pre">PROVIDER.MODEL</span></tt></td><td>the model goal mode's satisfaction check runs on (see <a class="reference external" href="manual.html#verifier-models">verifier models</a>); a decision model answers typed questions in one request. Not set = the session model checks (the default)</td></tr>
@@ -245,7 +247,6 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <h2 id="environment-variables">Environment variables</h2><table border="1" class="docutils"><tr><th>variable</th><th>effect</th></tr>
 <tr><td><tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt></td><td>relocates the config root: config file, user skills, global prompts</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">XDG_DATA_HOME</span></tt></td><td>relocates the data root: sessions, history, auth tokens, builtin skills</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">THREECODE_MAX_TIMEOUT</span></tt></td><td>bash timeout ceiling for this run; wins over <tt class="docutils literal"><span class="pre">max_timeout</span></tt></td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">THREECODE_ALLOW_ROOT</span></tt></td><td>set to 1 to allow running as root (POSIX; refused otherwise)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">THREECODE_PLUGIN_SYNC_MS</span></tt></td><td>sync-hook deadline override in ms (default 2000)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">THREECODE_PLUGIN_TOOL_MS</span></tt></td><td>plugin tool-exec default timeout in ms (default 120000)</td></tr>
@@ -265,7 +266,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-30 10:05:18 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-05 09:56:26 UTC</small>
       </div>
     </div>
   </div>

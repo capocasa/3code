@@ -4,7 +4,10 @@
 ## `experimentalEnabled` is a global because every module that validates a
 ## profile needs it, and threading it through every call site is noise.
 
-import std/[json, options, os, strutils, tables, times]
+import std/[json, options, strutils, tables, times]
+when defined(windows):
+  # os is needed only by the ConPTY relay window in `exitWith`
+  import std/os
 import images
 
 var experimentalEnabled*: bool = false
@@ -142,19 +145,22 @@ const
 var maxTimeoutSetting* = 0
   ## `[settings] max_timeout` in seconds; 0 keeps the compiled default.
 
+var forceTimeoutSetting* = 0
+  ## `[settings] force_timeout` in seconds; 0 lets the model's `timeout`
+  ## requests govern. When set, every bash run gets exactly this cap.
+
 proc maxBashTimeoutSecs*(): int =
   ## The current ceiling a `timeout` request is clamped to. Precedence:
-  ## `THREECODE_MAX_TIMEOUT` (per run) > `[settings] max_timeout` >
-  ## `MaxBashTimeout`. Read at call time so the ceiling can change
-  ## without a rebuild.
-  try: getEnv("THREECODE_MAX_TIMEOUT").parseInt
-  except CatchableError:
-    if maxTimeoutSetting > 0: maxTimeoutSetting else: MaxBashTimeout
+  ## `[settings] max_timeout` > `MaxBashTimeout`. Read at call time so
+  ## the ceiling can change without a rebuild.
+  if maxTimeoutSetting > 0: maxTimeoutSetting else: MaxBashTimeout
 
 proc bashTimeoutSecs*(req: int): int =
   ## Resolve the run cap (seconds) from a model-requested value.
-  ## Missing/zero/negative → default; any value above the ceiling
-  ## is clamped to it.
+  ## `force_timeout`, when set, replaces the model's request entirely;
+  ## otherwise missing/zero/negative → default, and any value above the
+  ## ceiling is clamped to it.
+  if forceTimeoutSetting > 0: return forceTimeoutSetting
   let v = if req > 0: req else: DefaultBashTimeout
   let cap = maxBashTimeoutSecs()
   if v > cap: cap else: v
