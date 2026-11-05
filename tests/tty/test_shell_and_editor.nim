@@ -32,9 +32,10 @@ family = "glm"
 models = "stub-model"
 """)
 
-proc stubEnv(root, responsesPath, editor: string): seq[EnvVar] =
+proc stubEnv(root, responsesPath, editor: string;
+               sandboxOn = false): seq[EnvVar] =
   createDir(root / "tmp")
-  @[
+  result = @[
     (key: "TERM", val: "xterm-256color"),
     (key: "PATH", val: getEnv("PATH")),
     (key: "HOME", val: root),
@@ -44,6 +45,11 @@ proc stubEnv(root, responsesPath, editor: string): seq[EnvVar] =
     (key: "VISUAL", val: editor),
     (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
   ]
+  # The stub skips sandbox init by default (REPL legs want the
+  # pre-sandbox timing); the :sandbox legs need the policy actually
+  # loaded, like the ask suite.
+  if sandboxOn:
+    result.add (key: "THREECODE_STUB_SANDBOX", val: "1")
 
 proc writeStubResponses(root: string) =
   writeFile(root / "run" / "stub_responses.json", $(%*[
@@ -53,9 +59,10 @@ proc writeStubResponses(root: string) =
                 "totalTokens": 7, "cachedTokens": 0}}
   ]))
 
-proc startStub(root, editor: string): TtySession =
+proc startStub(root, editor: string; sandboxOn = false): TtySession =
   newTtySession(ensureStubBinary(), args = ["-x", "-i"], cwd = root / "run",
-                env = stubEnv(root, root / "run" / "stub_responses.json", editor),
+                env = stubEnv(root, root / "run" / "stub_responses.json", editor,
+                              sandboxOn),
                 keepHistory = false)
 
 proc sendAltChord(s: TtySession; letter: char) =
@@ -278,7 +285,7 @@ suite "shell command and edit-in-editor":
     writeFile(editor,
       "#!/bin/sh\necho 'allow ./from-editor' >> \"$1\"\ntouch " & marker & "\n")
     discard chmod(editor, 0o755)
-    let tty = startStub(root, editor)
+    let tty = startStub(root, editor, sandboxOn = true)
     defer: tty.close()
 
     tty.expect "\u276f"
