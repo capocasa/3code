@@ -177,15 +177,29 @@ if [ -s "$SNAP" ]; then
   echo "--------------------"
 fi
 
+# Failure attribution as a workflow annotation: the failing tests and the
+# watchdog state land in the run's check annotations, where they are
+# readable from the UI and the API without downloading job logs.
+emit_failure_annotation() {
+  [ -n "${GITHUB_ACTIONS:-}" ] || return 0
+  {
+    sed 's/\x1b\[[0-9;]*m//g' "$FAILS" "$SNAP" 2>/dev/null
+    sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aE 'FAIL:|FAILURE!|Tests passed' | tail -n 30
+  } | head -c 3000 | awk 'BEGIN{ORS="%0A"} {gsub(/%/, "%25"); print}' > "$FAILS.ann"
+  printf '::error title=%s::%s\n' "$1" "$(cat "$FAILS.ann")"
+}
+
 if [ "$timed_out" -eq 1 ]; then
   echo "ERROR: testament timed out after ${TIMEOUT_SECS}s; attribution above."
   echo "Full log retained at $LOG"
+  emit_failure_annotation "testament timed out after ${TIMEOUT_SECS}s"
   trap - EXIT
   exit 1
 fi
 
 if [ "$rc" -ne 0 ]; then
   echo "testament failed (exit $rc); full log retained at $LOG"
+  emit_failure_annotation "testament failed (exit $rc)"
   trap - EXIT
   exit "$rc"
 fi
