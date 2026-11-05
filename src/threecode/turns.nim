@@ -544,6 +544,88 @@ proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
   result.code = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
   result.diff = stub{"diff"}.getStr("")
 
+proc runAskGate*(deniedPath: string; renderLine: proc(line: string);
+    retry: proc(): tuple[output: string, code: int, diff: string];
+    retryNoun: string): tuple[fired: bool, granted: bool, marker: string,
+    result: tuple[output: string, code: int, diff: string]] =
+  ## The interactive half of the sandbox ask gate, shared by the bash
+  ## viewport and the file tools: render the question, wait for the one
+  ## decisive key diverted from the input thread (fatprompt
+  ## requestAskKey), and on f/d rewrite the ask rule to allow and run
+  ## `retry` once. The caller owns the entry conditions (an ask-covered
+  ## denied path) and how the marker lands in the tool output; on
+  ## anything but a grant the original denial stands and the caller's
+  ## unretried result is the verdict.
+  # The zero-init result (fired=false, empty marker) is the not-covered
+  # verdict the callers break on.
+  let rootPath = sandbox.askRuleRoot(deniedPath)
+  if rootPath.len == 0: return
+  # Narrow offer = the ask rule root (a file grant under an ask
+  # DIRECTORY cannot pierce the Linux mount mask, so the root is
+  # the narrowest grant that takes effect); broad offer = the
+  # root's parent directory, one level up.
+  let broadPath = parentDir(rootPath)
+  renderLine("sandbox ask: " & sandbox.askPathDisplay(deniedPath) &
+    " is ask-protected.  [f] " & sandbox.askPathDisplay(rootPath) &
+    "  [d] " & sandbox.askPathDisplay(broadPath) &
+    "  [n]o  (" & $(askTimeoutMs() div 1000) & "s)")
+  let key = requestAskKey()
+  var marker = ""
+    # The model-visible record of the decision, appended to the tool
+    # output after any retry (each side sees what was decided and
+    # whether a retry happened).
+  var granted = false
+  var retried: tuple[output: string, code: int, diff: string]
+  if key == 'f' or key == 'd':
+    let target = if key == 'd': broadPath else: rootPath
+    if sandbox.grantAskAllow(target):
+      granted = true
+      renderLine("· allowed " & sandbox.askPathDisplay(target) &
+        " - retrying")
+      retried = retry()
+      marker = "user allowed " & sandbox.askPathDisplay(target) &
+        "; " & retryNoun & " retried"
+    else:
+      renderLine("· policy update failed; not retried")
+      marker = "policy update failed; not retried"
+  else:
+    let why =
+      if key == '\0': "no answer before timeout"
+      else: "declined by user"
+    renderLine("· " & why & "; not retried")
+    marker = why & "; not retried"
+  (true, granted, marker, retried)
+
+proc toolAskGateApplies(act: Action): bool =
+  ## Pre-emptive mirror of the bash ask gate for the file tools: the
+  ## denied target is known exactly (act.path), so the question fires
+  ## before the in-process checkRawPath denial instead of scraping an
+  ## error line afterwards. Only ask-covered paths ask; hard denies,
+  ## apply_patch (per-op paths, not act.path) and headless sessions
+  ## fall through to the plain denial.
+  act.kind in {akRead, akWrite, akPatch} and
+    sandboxEnabled and sandbox.active and askGateAvailable() and
+    sandbox.askCoveredPath(act.path)
+
+proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
+    visionDir: string): tuple[output: string, code: int, diff: string] =
+  ## The file-tool ask flow: ask first, run once. A grant retries (here:
+  ## runs) the action under the widened policy; anything else runs it
+  ## under the ask rule so the denial itself reaches the model, with the
+  ## decision marker appended either way (same convention as bash). The
+  ## question renders as committed transcript lines: unlike bash there
+  ## is no live viewport to ride, and the line must be on screen before
+  ## the user can answer.
+  let plain = proc(): tuple[output: string, code: int, diff: string] =
+    runAction(act, cache, vision, visionDir)
+  let gate = runAskGate(act.path,
+    proc(line: string) = commitTranscriptBytes(noteLnS(line), true),
+    plain, "tool")
+  result = if gate.granted: gate.result else: plain()
+  if result.output.len > 0 and not result.output.endsWith("\n"):
+    result.output.add "\n"
+  result.output.add "[sandbox ask: " & gate.marker & "]"
+
 proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
                           idx: int; streamedOutputShown: ptr bool):
     tuple[output: string, code: int, diff: string] =
@@ -621,46 +703,18 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
         if not askGateAvailable(): break askGate
         let deniedPath = sandbox.deniedAskPath(act.body, result.output)
         if deniedPath.len == 0: break askGate
-        # Narrow offer = the ask rule root (a file grant under an ask
-        # DIRECTORY cannot pierce the Linux mount mask, so the root is
-        # the narrowest grant that takes effect); broad offer = the
-        # root's parent directory, one level up.
-        let rootPath = sandbox.askRuleRoot(deniedPath)
-        if rootPath.len == 0: break askGate
-        let broadPath = parentDir(rootPath)
-        view.addLine("sandbox ask: " & sandbox.askPathDisplay(deniedPath) &
-          " is ask-protected.  [f] " & sandbox.askPathDisplay(rootPath) &
-          "  [d] " & sandbox.askPathDisplay(broadPath) &
-          "  [n]o  (" & $(askTimeoutMs() div 1000) & "s)")
-        renderView()
-        let key = requestAskKey()
-        var marker = ""
-          # The model-visible record of the decision, appended to the
-          # tool output after any retry (each side sees what was decided
-          # and whether a retry happened).
-        if key == 'f' or key == 'd':
-          let target = if key == 'd': broadPath else: rootPath
-          if sandbox.grantAskAllow(target):
-            view.addLine("· allowed " & sandbox.askPathDisplay(target) &
-              " - retrying")
-            renderView()
-            result = runActionStreaming(act, cache, onLine)
-            marker = "user allowed " & sandbox.askPathDisplay(target) &
-              "; command retried"
-          else:
-            view.addLine("· policy update failed; not retried")
-            renderView()
-            marker = "policy update failed; not retried"
-        else:
-          let why =
-            if key == '\0': "no answer before timeout"
-            else: "declined by user"
-          view.addLine("· " & why & "; not retried")
-          renderView()
-          marker = why & "; not retried"
+        let gate = runAskGate(deniedPath,
+          proc(line: string) =
+            view.addLine(line)
+            renderView(),
+          proc(): tuple[output: string, code: int, diff: string] =
+            runActionStreaming(act, cache, onLine),
+          "command")
+        if not gate.fired: break askGate
+        if gate.granted: result = gate.result
         if result.output.len > 0 and not result.output.endsWith("\n"):
           result.output.add "\n"
-        result.output.add "[sandbox ask: " & marker & "]"
+        result.output.add "[sandbox ask: " & gate.marker & "]"
       setCommandStatusActive(false)
       view.setExitCode(result.code)
       renderView()
@@ -1449,6 +1503,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
               else:
                 if toolStub != nil and toolStub.kind == JObject:
                   stubToolCallResult(toolStub)
+                elif toolAskGateApplies(act):
+                  runActionWithAskGate(act, session.readCache, p.vision,
+                                       sessionImageDir(session.savePath))
                 else:
                   runAction(act, session.readCache, p.vision,
                             sessionImageDir(session.savePath))

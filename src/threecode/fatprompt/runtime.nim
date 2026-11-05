@@ -2407,6 +2407,16 @@ proc inputThreadProc() {.thread.} =
             sleep(5)
             continue
           if pendingInput.len > 0 or fillPending(200.cint):
+            # A byte that lands in this poll window after the gate branch's
+            # own poll timed out must still divert: once a turn has released
+            # the idle-submit park the editor path is live, and without this
+            # re-check the ask answer races into the draft (the `:!` flow
+            # never sees it because the park keeps only the gate branch
+            # polling).
+            if askGatePending.load(moAcquire):
+              discard askGateConsume(pendingInput[0])
+              pendingInput.delete(0)
+              continue
             draftLastKeyAt = epochTime()
             result = pendingInput[0]
             pendingInput.delete(0)

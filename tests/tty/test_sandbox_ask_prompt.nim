@@ -5,9 +5,11 @@ discard """
   ## init (REPL tests want the pre-sandbox timing); THREECODE_STUB_
   ## SANDBOX=1 opts this suite back in so the ask rules are enforced
   ## for real. `:! CMD` rides the same runBashWithViewport ask gate a
-  ## model bash call takes, without stubbing the model turn.
+  ## model bash call takes, without stubbing the model turn; the
+  ## write-tool tests pin the file-tool dispatch hook with a stubbed
+  ## one-write model turn.
 """
-import std/[os, posix, strutils, times, unittest]
+import std/[json, os, posix, strutils, times, unittest]
 import tty_expect
 import stub_helpers
 
@@ -36,9 +38,9 @@ family = "glm"
 models = "stub-model"
 """)
 
-proc askEnv(root: string; askTimeoutMs: int): seq[EnvVar] =
+proc askEnv(root: string; askTimeoutMs: int; responses = ""): seq[EnvVar] =
   createDir(root / "tmp")
-  @[
+  result = @[
     (key: "TERM", val: "xterm-256color"),
     (key: "PATH", val: getEnv("PATH")),
     (key: "HOME", val: root),
@@ -48,10 +50,23 @@ proc askEnv(root: string; askTimeoutMs: int): seq[EnvVar] =
     (key: "THREECODE_STUB_SANDBOX", val: "1"),
     (key: "THREECODE_ASK_TIMEOUT_MS", val: $askTimeoutMs),
   ]
+  if responses.len > 0:
+    result.add (key: "THREECODE_STUB_RESPONSES", val: responses)
+
+proc writeTurnResponses(root: string; path, body: string) =
+  ## A one-write model turn: the first stub response issues the write
+  ## tool call, the second ends the turn with plain content.
+  writeFile(root / "run" / "stub_responses.json", $(%*[
+    {"content": "", "tool_calls": [{
+      "id": "call_1", "type": "function",
+      "function": {"name": "write",
+                   "arguments": $(%*{"path": path, "body": body})}}]},
+    {"content": "saved"}
+  ]))
 
 proc startAskSession(root: string; askTimeoutMs: int;
-                      tmpDir = ""): TtySession =
-  var env = askEnv(root, askTimeoutMs)
+                      tmpDir = ""; responses = ""): TtySession =
+  var env = askEnv(root, askTimeoutMs, responses)
   if tmpDir.len > 0:
     for i in 0 ..< env.len:
       if env[i].key == "TMPDIR": env[i].val = tmpDir
@@ -74,6 +89,19 @@ proc runShellCmd(s: TtySession; cmd: string) =
   s.typeText ":! " & cmd
   s.send "\n"
   s.drain(200)
+
+proc waitForSessionText(root, want: string; timeoutMs = 10_000): bool =
+  ## Wait until the saved session records `want`. Write tool items paint
+  ## only the diff on screen, so the model-visible ask marker and denial
+  ## must be asserted where they actually land: the tool message content.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline:
+    for f in walkFiles(root / "data" / "3code" / "sessions" / "*.3log"):
+      try:
+        if want in readFile(f): return true
+      except CatchableError: discard
+    sleep(50)
+  false
 
 proc waitForFileContent(path, want: string; timeoutMs = 10_000): bool =
   let deadline = epochTime() + timeoutMs.float / 1000.0
@@ -170,6 +198,52 @@ suite "sandbox ask prompt":
     check waitForFileContent(root / "run" / "vault" / "fenced.txt", "granted\n")
     tty.expect "\u276f"
     echo "  PASS: f grant under the network wall"
+
+  test "model write tool asks; f grants and the write lands":
+    let root = newFixture("tool_allow")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    writeTurnResponses(root, "vault/out.txt", "granted\n")
+    let tty = startAskSession(root, 20_000,
+                              responses = root / "run" / "stub_responses.json")
+    defer: tty.close()
+
+    tty.expect "\u276f"
+    tty.send "save it\n"
+    tty.expectInHistory "sandbox ask:", 30_000
+    tty.expectInHistory "is ask-protected"
+    tty.expectInHistory "[n]o"
+
+    tty.sendAskKey 'f'
+    tty.expectInHistory "allowed ./vault - retrying", 10_000
+    check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
+    check waitForSessionText(root,
+      "[sandbox ask: user allowed ./vault; tool retried]")
+    tty.expectInHistory "saved"
+    tty.expect "\u276f"
+    echo "  PASS: write tool f grants and retries"
+
+  test "model write tool asks; n keeps the denial":
+    let root = newFixture("tool_deny")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    writeTurnResponses(root, "vault/out.txt", "nope\n")
+    let tty = startAskSession(root, 20_000,
+                              responses = root / "run" / "stub_responses.json")
+    defer: tty.close()
+
+    tty.expect "\u276f"
+    tty.send "save it\n"
+    tty.expectInHistory "sandbox ask:", 30_000
+    tty.sendAskKey 'n'
+    tty.expectInHistory "declined by user; not retried", 10_000
+    check waitForSessionText(root, "is denied by the policy")
+    check waitForSessionText(root,
+      "[sandbox ask: declined by user; not retried]")
+    tty.drain(300)
+    check not fileExists(root / "run" / "vault" / "out.txt")
+    tty.expect "\u276f"
+    echo "  PASS: write tool n declines"
 
   test "hard deny never asks":
     let root = newFixture("harddeny")
