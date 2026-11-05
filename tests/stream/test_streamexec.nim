@@ -395,6 +395,30 @@ suite "streamexec: no external timeout dependency":
     check elapsed < 6.0
     check "timed out" in o
 
+suite "streamexec: force_timeout":
+  # The config-level resolution rules are covered in
+  # tests/config/test_config_extra.nim; these prove the cap actually
+  # reaches the process and the model-facing note changes tone.
+  teardown:
+    forceTimeoutSetting = 0
+
+  test "force_timeout replaces the model's request entirely":
+    forceTimeoutSetting = 2
+    let act = Action(kind: akBash, body: "sleep 30", timeoutSecs: 30)
+    let started = epochTime()
+    let (o, code, _) = runActionStreaming(act, nil, nil)
+    let elapsed = epochTime() - started
+    check code == 124
+    check elapsed < 6.0
+    check "force_timeout" in o
+
+  test "force_timeout applies when the model omits timeout":
+    forceTimeoutSetting = 2
+    let act = Action(kind: akBash, body: "sleep 30")
+    let (_, code, cap) = runStreamingBash(act, nil, nil)
+    check cap == 2
+    check code == 124
+
 when defined(windows):
   suite "streamexec: Windows bash resolution":
     # Issue #34: a Windows user with Git for Windows but no installer-run

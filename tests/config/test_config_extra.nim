@@ -7,12 +7,12 @@ suite "config: [settings] max_timeout":
   setup:
     tmp = getTempDir() / "3code-test-maxtimeout.ini"
     maxTimeoutSetting = 0
-    delEnv("THREECODE_MAX_TIMEOUT")
+    forceTimeoutSetting = 0
 
   teardown:
     removeFile(tmp)
     maxTimeoutSetting = 0
-    delEnv("THREECODE_MAX_TIMEOUT")
+    forceTimeoutSetting = 0
 
   test "parse sets the ceiling and maxBashTimeoutSecs reads it":
     writeFile(tmp, "[settings]\nmax_timeout = 900\n")
@@ -24,12 +24,6 @@ suite "config: [settings] max_timeout":
     writeFile(tmp, "[settings]\nmax-timeout = 1800\n")
     discard parseConfigFile(tmp)
     check maxTimeoutSetting == 1800
-
-  test "THREECODE_MAX_TIMEOUT overrides the config value":
-    writeFile(tmp, "[settings]\nmax_timeout = 900\n")
-    discard parseConfigFile(tmp)
-    putEnv("THREECODE_MAX_TIMEOUT", "1200")
-    check maxBashTimeoutSecs() == 1200
 
   test "unset keeps the compiled default":
     check maxBashTimeoutSecs() == MaxBashTimeout
@@ -54,6 +48,60 @@ suite "config: [settings] max_timeout":
     maxTimeoutSetting = MaxBashTimeout
     writeConfigFile(tmp, "", @[])
     check not readFile(tmp).contains("max_timeout")
+
+suite "config: [settings] force_timeout":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-forcetimeout.ini"
+    maxTimeoutSetting = 0
+    forceTimeoutSetting = 0
+
+  teardown:
+    removeFile(tmp)
+    maxTimeoutSetting = 0
+    forceTimeoutSetting = 0
+
+  test "parse sets it and bashTimeoutSecs returns it for any request":
+    writeFile(tmp, "[settings]\nforce_timeout = 1800\n")
+    discard parseConfigFile(tmp)
+    check forceTimeoutSetting == 1800
+    check bashTimeoutSecs(0) == 1800
+    check bashTimeoutSecs(120) == 1800
+    check bashTimeoutSecs(3600) == 1800
+
+  test "hyphen spelling accepted":
+    writeFile(tmp, "[settings]\nforce-timeout = 1800\n")
+    discard parseConfigFile(tmp)
+    check forceTimeoutSetting == 1800
+
+  test "force wins over max_timeout":
+    writeFile(tmp, "[settings]\nmax_timeout = 900\nforce_timeout = 300\n")
+    discard parseConfigFile(tmp)
+    check maxBashTimeoutSecs() == 900
+    check bashTimeoutSecs(600) == 300
+
+  test "without force, requests clamp to the ceiling and default":
+    check bashTimeoutSecs(0) == DefaultBashTimeout
+    check bashTimeoutSecs(300) == 300
+    check bashTimeoutSecs(9999) == MaxBashTimeout
+
+  test "non-numeric value rejected by the schema":
+    let m = validateConfig(tmp, @[("settings", "force_timeout", "soon", 3)])
+    check m == tmp & ":3: bad value 'soon' for 'force_timeout' in [settings] " &
+           "(expected a whole number of seconds)"
+
+  test "writer persists force_timeout as a bare number and round-trips":
+    forceTimeoutSetting = 1800
+    writeConfigFile(tmp, "", @[])
+    check readFile(tmp).contains("\nforce_timeout = 1800\n")
+    forceTimeoutSetting = 0
+    discard parseConfigFile(tmp)
+    check forceTimeoutSetting == 1800
+
+  test "writer omits force_timeout when unset":
+    writeConfigFile(tmp, "", @[])
+    check not readFile(tmp).contains("force_timeout")
 
 suite "config: [settings] browserfetch":
   var tmp = ""

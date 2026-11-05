@@ -891,7 +891,12 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     body.add outClip
     if not outClip.endsWith("\n"): body.add "\n"
   if code == 124:
-    body.add &"[timed out after {cap}s. This is your own setting, not a system limit: pass timeout={maxBashTimeoutSecs()} (or any value up to that) and rerun. Or background the work.]"
+    if forceTimeoutSetting > 0:
+      body.add &"[timed out after {cap}s. The user's force_timeout setting " &
+                "overrides any timeout you pass, so a bigger one will not " &
+                "help; background the work and poll its log instead.]"
+    else:
+      body.add &"[timed out after {cap}s. This is your own setting, not a system limit: pass timeout={maxBashTimeoutSecs()} (or any value up to that) and rerun. Or background the work.]"
   elif code > 0:
     let verdict = semanticExitNote(cmd, code, body)
     if verdict.len > 0: body.add verdict
