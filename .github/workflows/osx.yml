@@ -98,7 +98,7 @@ jobs:
         # (-d:embeddedCaCertPath), so neither slice build nor the tarball
         # ships it as a file anymore.
         run: |
-          CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
+          CACERT_SHA256=427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285
           curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
             https://curl.se/ca/cacert.pem -o cacert.pem
           echo "${CACERT_SHA256}  cacert.pem" | shasum -a 256 -c -
