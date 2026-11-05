@@ -193,9 +193,9 @@ jobs:
         # is propagated. The old `for c in ...; testament cat` loop ran
         # categories sequentially and, worse, a single hung test stalled
         # the pipe so the step showed nothing after it.
-        # 2400s, not 1800: the tty category runs alone after the parallel
-        # categories, and green runs already sit at 1796s of the old 1800s cap
-        # (arm64, Oct 6); any slow runner tips it over and the timeout, not a
-        # test, fails the job (same commit passed and failed in one batch).
-        run: sh tests/tools/ci_tests.sh 2400
-        timeout-minutes: 45
+        # 3600s, not 2400: the suite kept growing and both linux runners
+        # tipped over the 2400 cap (2687s/2449s, Nov 5), failing the job
+        # on the timeout, not a test. Same class of bump as 1800->2400
+        # (green arm64 sat at 1796s of the old 1800s cap, Oct 6).
+        run: sh tests/tools/ci_tests.sh 3600
+        timeout-minutes: 65

@@ -259,10 +259,11 @@ jobs:
         # runner, pass explicit categories to serialize them.
         # Dispatch-only bypass: tty timing tests are marginal on the 3-core
         # macos-15 runner; run-tests=false validates build+packaging alone.
-        # 2400s, not 1800: the tty category runs alone after the parallel
-        # categories, and green runs measured 1763s of the old 1800s cap
-        # (Oct 6); a slow runner tips it over and the timeout, not a test,
-        # fails the job.
+        # 3600s + PER_TEST_SECS=720: the suite grew past the 2400s cap and
+        # the 3-core runner's slowest tty test brushes the 480s per-test
+        # watchdog (422s measured on a faster box); the global bump is the
+        # same class as 1800->2400, the per-test bump keeps a legitimate
+        # slow test from being killed as a hang.
         if: github.event_name != 'workflow_dispatch' || inputs.run-tests
         # OPENSSL_STATIC + THREECODE_TEST_NIMFLAGS make the test-rebuilt
         # 3code binary statically linked too, so spawned test children
@@ -270,8 +271,8 @@ jobs:
         env:
           OPENSSL_STATIC: ${{ github.workspace }}/openssl-static/darwin64-arm64
           THREECODE_TEST_NIMFLAGS: -d:staticSsl
-        run: sh tests/tools/ci_tests.sh 2400
-        timeout-minutes: 45
+        run: PER_TEST_SECS=720 sh tests/tools/ci_tests.sh 3600
+        timeout-minutes: 65
 
       - name: Package
         # Deterministic archive: entry order from a sorted list, mtimes
