@@ -2,6 +2,20 @@ Changelog
 
 Unreleased
 
+- **The sandbox ask covers the `read`/`write`/`patch` tools, not just
+  bash.** An `ask` rule used to redeem only a failed bash command; a
+  model `write` to an ask-protected path just denied. The file tools
+  know their exact target, so they ask before running - `sandbox ask:
+  ./vault/out.txt is ask-protected. [f] ./vault [d] ./ [n]o (60s)` -
+  and on `f`/`d` the grant is written, the call runs under the widened
+  policy, and the decision is recorded in the tool result (`[sandbox
+  ask: user allowed ./vault; tool retried]`) exactly like the bash
+  convention; `n`, a timeout, or a headless session keeps the plain
+  denial. Hard denies still never ask. The ask gate also no longer
+  races the editor: an answer key pressed while a turn is running used
+  to land in the prompt draft about half the time, because only the
+  gate's own poll window diverted keys; every input path now diverts
+  while the gate is armed.
 - **`--ic:on` debug builds link.** Nim's IC backend emits the
   extern pre-declaration of a `{.volatile.}` global without the volatile
   qualifier, and the C compiler rejects the mismatched redeclaration.
