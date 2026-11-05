@@ -369,14 +369,14 @@ proc fileSig*(path: string): (Time, int) =
   except CatchableError: (Time(), 0)
 
 type
-  V4AOpKind = enum vkAdd, vkUpdate, vkDelete
-  V4AOp = object
-    kind: V4AOpKind
-    path: string
-    body: string                  ## vkAdd: full content
-    edits: seq[(string, string)]  ## vkUpdate: one (search, replace) per hunk
+  V4AOpKind* = enum vkAdd, vkUpdate, vkDelete
+  V4AOp* = object
+    kind*: V4AOpKind
+    path*: string
+    body*: string                 ## vkAdd: full content
+    edits*: seq[(string, string)]  ## vkUpdate: one (search, replace) per hunk
 
-proc parseV4APatch(text: string): seq[V4AOp] =
+proc parseV4APatch*(text: string): seq[V4AOp] =
   ## Parse Codex's V4A format (`*** Begin Patch ... *** End Patch`) into a
   ## sequence of file operations. Tolerant: hunks may omit the `@@` anchor;
   ## context lines may omit the leading space (some emitters do).
