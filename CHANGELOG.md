@@ -16,6 +16,22 @@ Unreleased
   to land in the prompt draft about half the time, because only the
   gate's own poll window diverted keys; every input path now diverts
   while the gate is armed.
+- **The sandbox ask answers on Windows consoles too.** The ask gate
+  was posix-only (a hard `false` predicate); on Windows it now arms
+  whenever the input thread owns a real console handle - ConPTY,
+  Windows Terminal, and legacy conhost all qualify, mintty's pipes do
+  not - and the input thread diverts the one-key answer on all three
+  read paths (the VT readiness loop, which previously spun without
+  re-checking the gate, the legacy blocking read, and bytes already
+  buffered). Verified end-to-end on a real ConPTY session against the
+  sandwall restricted-user backend: git-bash denial text is still
+  `Permission denied`, root grants take effect through the ACL
+  enforcement, and the full ask tty suite (bash and tool legs) passes;
+  on hosts without the fence the suite's bash legs probe-and-skip (a
+  sandboxed command cannot fail there), the tool legs run everywhere.
+  Also un-broke the Windows cross-build under Nim 2.4: a `when`/`elif`
+  in `fileLinkUrl` carried a runtime condition, which 2.2 tolerated and
+  2.4 rejects.
 - **`--ic:on` debug builds link.** Nim's IC backend emits the
   extern pre-declaration of a `{.volatile.}` global without the volatile
   qualifier, and the C compiler rejects the mismatched redeclaration.

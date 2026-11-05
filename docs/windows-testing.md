@@ -75,6 +75,16 @@ The following were previously disabled and are now **enabled and adapted**
   platform would require plumbing a hook through `display.nim` so
   `hintLn` writes to a caller-supplied `File`.
 
+- `tests/tty/test_sandbox_ask_prompt.nim` — the sandbox ask suite runs
+  on Windows (ConPTY one-key divert, Windows `isatty` predicate on the
+  console handle). Its tool legs (write ask/grant/deny) are policy-driven
+  in-process and run everywhere; its bash legs probe the confinement
+  backend once (`sandbox restrict <dir> -- cmd /c exit 0`) and skip when
+  it is absent, because without the sandwall fence a sandboxed bash child
+  cannot fail on an ask path and no ask can fire. CI runners have no
+  fence, so CI exercises the tool legs; a fenced host (the beck VM) runs
+  everything.
+
 Each still-skipped test carries a `disabled:` spec pointing back here. When
 you see that spec, this document is the "why" and the "how to fix".
 
