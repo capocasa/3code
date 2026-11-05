@@ -103,24 +103,36 @@ proc sendAskKey(s: TtySession; key: char) =
 var bashBackendCache = -1
 
 proc bashSandboxWorks(): bool =
-  ## Whether `sandbox restrict` can actually confine a child on this
-  ## host (Landlock/Seatbelt yes; Windows needs the sandwall fence).
-  ## The bash ask legs only fire when a sandboxed command can FAIL on
-  ## an ask path, so they skip instead of failing where the backend is
-  ## absent. Mirrors the probe pattern of the `box` suite in
-  ## test_cli_args.
+  ## Whether the ask enforcement the bash legs depend on actually bites
+  ## on this host: their denial comes from the policy's ask rule, which
+  ## on posix is a user-namespace mount mask over the ask subtree - and
+  ## hosts without unprivileged userns (CI containers, hardened boxes)
+  ## print a warning and continue WITHOUT sub-path deny enforcement, so
+  ## the write succeeds and the legs would fail on the missing EACCES
+  ## instead of skipping. The probe therefore reproduces the legs'
+  ## exact dependency: a policy-driven restrict with an ask rule, a
+  ## write into the ask dir, and a denial in the output. Mirrors the
+  ## probe pattern of the `box` suite in test_cli_args.
   if bashBackendCache >= 0: return bashBackendCache == 1
   let tmp = getTempDir() / ("ask_backend_" & $getCurrentProcessId())
-  try: createDir(tmp) except CatchableError: discard
+  try: removeDir(tmp) except CatchableError: discard
+  createDir(tmp / "vault")
+  writeFile(tmp / ".sandbox", "deny /\nallow ./\nask ./vault\n")
+  let probe = tmp / "vault" / "confine_probe_out"
   when defined(windows):
-    let cmd = "cmd /c exit 0"
+    let cmd = "cmd /c echo x > " & probe.quoteShell
   else:
-    let cmd = "true"
-  let quoted = "\"" & ensureStubBinary() & "\" sandbox restrict " & tmp &
-    " -- " & cmd
+    let cmd = "sh -c " & ("echo x > " & probe).quoteShell
+  let quoted = "\"" & ensureStubBinary() & "\" sandbox --policy " &
+    (tmp / ".sandbox").quoteShell & " restrict -- " & cmd
   try:
+    let r = execCmdEx(quoted)
+    # "denied" separates a real confinement denial (posix "Permission
+    # denied"/"Operation not permitted", windows "Access is denied")
+    # from a restrict that failed to launch the child at all.
     bashBackendCache =
-      if execCmdEx(quoted).exitCode == 0: 1 else: 0
+      if r.exitCode != 0 and not fileExists(probe) and
+          "denied" in r.output.toLowerAscii: 1 else: 0
   except CatchableError:
     bashBackendCache = 0
   try: removeDir(tmp) except CatchableError: discard
