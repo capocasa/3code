@@ -544,20 +544,17 @@ proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
   result.code = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
   result.diff = stub{"diff"}.getStr("")
 
-proc runAskGate*(deniedPath: string; renderLine: proc(line: string);
-    retry: proc(): tuple[output: string, code: int, diff: string];
-    retryNoun: string): tuple[fired: bool, granted: bool, marker: string,
-    result: tuple[output: string, code: int, diff: string]] =
-  ## The interactive half of the sandbox ask gate, shared by the bash
-  ## viewport and the file tools: render the question, wait for the one
-  ## decisive key diverted from the input thread (fatprompt
-  ## requestAskKey), and on f/d rewrite the ask rule to allow and run
-  ## `retry` once. The caller owns the entry conditions (an ask-covered
-  ## denied path) and how the marker lands in the tool output; on
-  ## anything but a grant the original denial stands and the caller's
-  ## unretried result is the verdict.
-  # The zero-init result (fired=false, empty marker) is the not-covered
-  # verdict the callers break on.
+proc askGateDecide(deniedPath: string; renderLine: proc(line: string);
+    retryNoun: string): tuple[fired: bool, granted: bool, marker: string] =
+  ## The interactive half of the sandbox ask gate: render the question,
+  ## wait for the one decisive key diverted from the input thread
+  ## (fatprompt requestAskKey), and on f/d rewrite the ask rule's root
+  ## (or its parent) to allow via sandbox.grantAskAllow. No retry runs
+  ## here: callers that have something to rerun use runAskGate, callers
+  ## that ask pre-emptively (apply_patch) run their single action after
+  ## all asks are decided. The marker records the decision for the tool
+  ## output; the zero-init result (fired=false) is the not-covered
+  ## verdict the callers break on.
   let rootPath = sandbox.askRuleRoot(deniedPath)
   if rootPath.len == 0: return
   # Narrow offer = the ask rule root (a file grant under an ask
@@ -571,18 +568,16 @@ proc runAskGate*(deniedPath: string; renderLine: proc(line: string);
     "  [n]o  (" & $(askTimeoutMs() div 1000) & "s)")
   let key = requestAskKey()
   var marker = ""
-    # The model-visible record of the decision, appended to the tool
-    # output after any retry (each side sees what was decided and
-    # whether a retry happened).
+  # The model-visible record of the decision, appended to the tool
+  # output after any retry (each side sees what was decided and
+  # whether a retry happened).
   var granted = false
-  var retried: tuple[output: string, code: int, diff: string]
   if key == 'f' or key == 'd':
     let target = if key == 'd': broadPath else: rootPath
     if sandbox.grantAskAllow(target):
       granted = true
       renderLine("· allowed " & sandbox.askPathDisplay(target) &
         " - retrying")
-      retried = retry()
       marker = "user allowed " & sandbox.askPathDisplay(target) &
         "; " & retryNoun & " retried"
     else:
@@ -594,37 +589,95 @@ proc runAskGate*(deniedPath: string; renderLine: proc(line: string);
       else: "declined by user"
     renderLine("· " & why & "; not retried")
     marker = why & "; not retried"
-  (true, granted, marker, retried)
+  (true, granted, marker)
+
+proc runAskGate*(deniedPath: string; renderLine: proc(line: string);
+    retry: proc(): tuple[output: string, code: int, diff: string];
+    retryNoun: string): tuple[fired: bool, granted: bool, marker: string,
+    result: tuple[output: string, code: int, diff: string]] =
+  ## askGateDecide plus the one retry: shared by the bash viewport and
+  ## the single-path file tools. The caller owns the entry conditions
+  ## (an ask-covered denied path) and how the marker lands in the tool
+  ## output; on anything but a grant the original denial stands and the
+  ## caller's unretried result is the verdict.
+  let decide = askGateDecide(deniedPath, renderLine, retryNoun)
+  if not decide.fired: return
+  var retried: tuple[output: string, code: int, diff: string]
+  if decide.granted: retried = retry()
+  (decide.fired, decide.granted, decide.marker, retried)
 
 proc toolAskGateApplies(act: Action): bool =
   ## Pre-emptive mirror of the bash ask gate for the file tools: the
   ## denied target is known exactly (act.path), so the question fires
   ## before the in-process checkRawPath denial instead of scraping an
-  ## error line afterwards. Only ask-covered paths ask; hard denies,
-  ## apply_patch (per-op paths, not act.path) and headless sessions
-  ## fall through to the plain denial.
-  act.kind in {akRead, akWrite, akPatch} and
-    sandboxEnabled and sandbox.active and askGateAvailable() and
+  ## error line afterwards. apply_patch carries its paths per-op in the
+  ## V4A body (act.path is empty), so it asks when ANY op lands under
+  ## an ask rule. Only ask-covered paths ask; hard denies, unparseable
+  ## patches and headless sessions fall through to the plain denial.
+  if not (sandboxEnabled and sandbox.active and askGateAvailable()):
+    return false
+  case act.kind
+  of akRead, akWrite, akPatch:
     sandbox.askCoveredPath(act.path)
+  of akApplyPatch:
+    # A parse error or zero ops asks nothing: the plain run surfaces
+    # that error exactly as before the gate existed.
+    var ops: seq[V4AOp]
+    try:
+      ops = parseV4APatch(act.body)
+    except ValueError:
+      return false
+    if ops.len == 0: return false
+    for op in ops:
+      if op.path.len > 0 and sandbox.askCoveredPath(op.path):
+        return true
+    false
+  else:
+    false
 
 proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
     visionDir: string): tuple[output: string, code: int, diff: string] =
   ## The file-tool ask flow: ask first, run once. A grant retries (here:
   ## runs) the action under the widened policy; anything else runs it
   ## under the ask rule so the denial itself reaches the model, with the
-  ## decision marker appended either way (same convention as bash). The
-  ## question renders as committed transcript lines: unlike bash there
-  ## is no live viewport to ride, and the line must be on screen before
-  ## the user can answer.
-  let plain = proc(): tuple[output: string, code: int, diff: string] =
-    runAction(act, cache, vision, visionDir)
-  let gate = runAskGate(act.path,
-    proc(line: string) = commitTranscriptBytes(noteLnS(line), true),
-    plain, "tool")
-  result = if gate.granted: gate.result else: plain()
+  ## decision marker appended either way (same convention as bash).
+  ## apply_patch asks once per DISTINCT ask rule root before any op
+  ## executes, so nothing partial hits the disk and a declined root
+  ## fails only its own ops in the per-op denial below. The question
+  ## renders as committed transcript lines: unlike bash there is no
+  ## live viewport to ride, and the line must be on screen before the
+  ## user can answer.
+  let renderLine = proc(line: string) =
+    commitTranscriptBytes(noteLnS(line), true)
+  var markers: seq[string]
+  if act.kind == akApplyPatch:
+    var ops: seq[V4AOp]
+    try:
+      ops = parseV4APatch(act.body)
+    except ValueError:
+      discard
+    # First-seen order; the first op path under each root is the
+    # display target ("patch touching three vault files" asks once).
+    var roots: seq[string]
+    var display: seq[string]
+    for op in ops:
+      if op.path.len == 0 or not sandbox.askCoveredPath(op.path): continue
+      let r = sandbox.askRuleRoot(op.path)
+      if r.len == 0: continue
+      if roots.find(r) < 0:
+        roots.add r
+        display.add op.path
+    for deniedPath in display:
+      let decide = askGateDecide(deniedPath, renderLine, "tool")
+      if decide.fired: markers.add decide.marker
+  else:
+    let decide = askGateDecide(act.path, renderLine, "tool")
+    if decide.fired: markers.add decide.marker
+  result = runAction(act, cache, vision, visionDir)
   if result.output.len > 0 and not result.output.endsWith("\n"):
     result.output.add "\n"
-  result.output.add "[sandbox ask: " & gate.marker & "]"
+  if markers.len > 0:
+    result.output.add "[sandbox ask: " & markers.join("]\n[sandbox ask: ") & "]"
 
 proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
                           idx: int; streamedOutputShown: ptr bool):

@@ -67,6 +67,19 @@ proc writeTurnResponses(root: string; path, body: string) =
     {"content": "saved"}
   ]))
 
+proc writeApplyPatchResponses(root: string; body: string) =
+  ## A one-apply_patch model turn: the first stub response issues the
+  ## apply_patch tool call (the glm family aliases it to akApplyPatch,
+  ## the same dispatch a gpt-oss profile uses), the second ends the
+  ## turn with plain content.
+  writeFile(root / "run" / "stub_responses.json", $(%*[
+    {"content": "", "tool_calls": [{
+      "id": "call_1", "type": "function",
+      "function": {"name": "apply_patch",
+                   "arguments": $(%*{"input": body})}}]},
+    {"content": "saved"}
+  ]))
+
 proc startAskSession(root: string; askTimeoutMs: int;
                       tmpDir = ""; responses = ""): TtySession =
   var env = askEnv(root, askTimeoutMs, responses)
@@ -285,6 +298,89 @@ suite "sandbox ask prompt":
     check not fileExists(root / "run" / "vault" / "out.txt")
     tty.expect "\u276f"
     echo "  PASS: write tool n declines"
+
+  test "model apply_patch asks; f grants and the add lands":
+    let root = newFixture("tool_apply_allow")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    writeApplyPatchResponses(root, "*** Begin Patch\n" &
+      "*** Add File: vault/ap.txt\n+granted\n*** End Patch\n")
+    let tty = startAskSession(root, 20_000,
+                              responses = root / "run" / "stub_responses.json")
+    defer: tty.close()
+
+    tty.expect "\u276f"
+    tty.send "patch it\n"
+    tty.expectInHistory "sandbox ask:", 30_000
+    tty.expectInHistory "is ask-protected"
+    tty.expectInHistory "[n]o"
+
+    tty.sendAskKey 'f'
+    tty.expectInHistory "allowed ./vault - retrying", 10_000
+    check waitForFileContent(root / "run" / "vault" / "ap.txt", "granted\n")
+    check waitForSessionText(root,
+      "[sandbox ask: user allowed ./vault; tool retried]")
+    tty.expectInHistory "saved"
+    tty.expect "\u276f"
+    echo "  PASS: apply_patch f grants and the add lands"
+
+  test "model apply_patch mixed ops; n denies only the ask root":
+    let root = newFixture("tool_apply_deny")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    writeApplyPatchResponses(root, "*** Begin Patch\n" &
+      "*** Add File: vault/ap_a.txt\n+nope\n" &
+      "*** Add File: open_b.txt\n+yes\n*** End Patch\n")
+    let tty = startAskSession(root, 20_000,
+                              responses = root / "run" / "stub_responses.json")
+    defer: tty.close()
+
+    tty.expect "\u276f"
+    tty.send "patch it\n"
+    tty.expectInHistory "sandbox ask:", 30_000
+    tty.sendAskKey 'n'
+    tty.expectInHistory "declined by user; not retried", 10_000
+    check waitForFileContent(root / "run" / "open_b.txt", "yes\n")
+    tty.drain(300)
+    check not fileExists(root / "run" / "vault" / "ap_a.txt")
+    check waitForSessionText(root, "vault/ap_a.txt")
+    check waitForSessionText(root, "is denied by the policy")
+    check waitForSessionText(root,
+      "[sandbox ask: declined by user; not retried]")
+    tty.expect "\u276f"
+    echo "  PASS: apply_patch n denies only the ask root"
+
+  test "model apply_patch two ask roots ask sequentially":
+    let root = newFixture("tool_apply_multi")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    createDir(root / "run" / "vault2")
+    let sf = root / "run" / ".sandbox"
+    writeFile(sf, readFile(sf) & "ask ./vault2\n")
+    writeApplyPatchResponses(root, "*** Begin Patch\n" &
+      "*** Add File: vault/ap1.txt\n+one\n" &
+      "*** Add File: vault2/ap2.txt\n+two\n*** End Patch\n")
+    let tty = startAskSession(root, 20_000,
+                              responses = root / "run" / "stub_responses.json")
+    defer: tty.close()
+
+    tty.expect "\u276f"
+    tty.send "patch it\n"
+    tty.expectInHistory "vault/ap1.txt is ask-protected", 30_000
+    tty.sendAskKey 'f'
+    tty.expectInHistory "allowed ./vault - retrying", 10_000
+    tty.expectInHistory "vault2/ap2.txt is ask-protected", 10_000
+    tty.sendAskKey 'n'
+    tty.expectInHistory "declined by user; not retried", 10_000
+    check waitForFileContent(root / "run" / "vault" / "ap1.txt", "one\n")
+    tty.drain(300)
+    check not fileExists(root / "run" / "vault2" / "ap2.txt")
+    check waitForSessionText(root,
+      "[sandbox ask: user allowed ./vault; tool retried]")
+    check waitForSessionText(root,
+      "[sandbox ask: declined by user; not retried]")
+    tty.expect "\u276f"
+    echo "  PASS: apply_patch two roots ask sequentially"
 
   test "hard deny never asks":
     if bashSandboxWorks():

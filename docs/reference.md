@@ -98,7 +98,7 @@ names, model names, and paths where supported.
 | `:sandbox allow T` | add a writable/connectable rule |
 | `:sandbox readonly P` | add a read-only rule |
 | `:sandbox deny T` | add a deny rule |
-| `:sandbox ask P` | deny P, but offer a one-key approval (`f` file / `d` dir / `n` no) when a sandboxed command or a `read`/`write`/`patch` call is blocked on P |
+| `:sandbox ask P` | deny P, but offer a one-key approval (`f` file / `d` dir / `n` no) when a sandboxed command or a `read`/`write`/`patch`/`apply_patch` call is blocked on P |
 | `:sandbox edit` | open the policy file in `$VISUAL`/`$EDITOR`, reload on quit |
 | `:plugins` | list loaded plugin libraries, hooks, call counts, registered tools |
 | `:plugin debug on/off` | trace every plugin call to `THREECODE_DEBUG_LOG` (or stderr) |

@@ -1337,8 +1337,8 @@ does not stop on trivialities.
 
 The one exception is the `ask` verb. An `ask` rule denies exactly like
 `deny`, but when a sandboxed bash command fails on an ask-protected path,
-or a `read`/`write`/`patch` call targets one, 3code puts one question
-on screen:
+or a `read`/`write`/`patch`/`apply_patch` call targets one, 3code puts one
+question on screen:
 
     sandbox ask: ~/vault/notes/x.md is ask-protected.  [f] ~/vault  [d] ~  [n]o  (60s)
 
@@ -1351,7 +1351,13 @@ explicit grant. The file tools ask before running (the target path is
 known exactly, so there is no failed call first); bash asks after the
 denial, because the blocked path only surfaces in the command's error
 output. Either way the model sees the decision recorded in the tool
-result. Use `ask` for the gray zone: paths you would probably
+result. A `read` of a file that does not exist still asks (the denial
+hides existence, and skipping the ask would leak exactly that under a
+policy written to gate it); a skill read of an ask path asks mid-load and
+commits silently when answered. An `apply_patch` with ops under several
+ask roots asks once per root, before any op runs.
+
+Use `ask` for the gray zone: paths you would probably
 allow if you were watching, like a browser profile or a notes vault, where
 `deny` would cost a manual policy edit and `allow` feels too broad
 unattended.
