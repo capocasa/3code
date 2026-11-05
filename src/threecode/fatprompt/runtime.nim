@@ -25,6 +25,7 @@ when defined(windows):
       WinBool {.stdcall, dynlib: "kernel32",
       importc: "SetConsoleCtrlHandler".}
   proc conioKbhit(): cint {.header: "<conio.h>", importc: "_kbhit".}
+  proc c_isatty(fd: cint): cint {.header: "<io.h>", importc: "_isatty".}
 import ../types, ../util, ../compact, ../display, ../minline,
   ../signals, ../terminal as termui, ../session
 import ../tabtitle
@@ -312,10 +313,15 @@ proc askTimeoutMs*(): int =
 
 proc askGateAvailable*(): bool =
   ## Whether an ask can be answered in this session: the input thread
-  ## must be the active stdin reader on a real tty. Headless sessions
-  ## (no input thread, piped stdin) never ask; the denial stands as-is.
+  ## must be the active stdin reader on a real tty (a console handle on
+  ## Windows, which is what ConPTY, Windows Terminal and legacy conhost
+  ## all present; mintty pipes report not-a-tty and never ask, like any
+  ## other headless session). Headless sessions (no input thread, piped
+  ## stdin) never ask; the denial stands as-is.
   when defined(posix):
     inputThreadRunning and isatty(STDIN_FILENO) == 1
+  elif defined(windows):
+    inputThreadRunning and c_isatty(0.cint) != 0
   else:
     false
 
@@ -2415,6 +2421,30 @@ proc inputThreadProc() {.thread.} =
               drainedChar = first
               break
             startupDrainDone = true
+          # The ask gate outranks everything below, mirroring the posix
+          # branch: while it is armed every byte goes to askGateConsume
+          # and none reach the editor. VT input has an honest readiness
+          # probe (consoleVtByteReady) so the wait can poll; a legacy
+          # console has none and parks in the blocking read, and a gate
+          # that disarms mid-read hands the byte to the editor via
+          # drainedChar instead of swallowing it.
+          if askGatePending.load(moAcquire):
+            if drainedChar != -1:
+              discard askGateConsume(drainedChar)
+              drainedChar = -1
+            elif vtInputEnabled:
+              if minline.consoleVtByteReady():
+                discard askGateConsume(getchr().int)
+              else:
+                sleep(20)
+            else:
+              let b = getchr().int
+              if b != -1:
+                if askGatePending.load(moAcquire):
+                  discard askGateConsume(b)
+                else:
+                  drainedChar = b
+            continue
           if inputIdleLinePending.load(moAcquire) and
              not inputModalActive.load(moAcquire):
             sleep(5)
@@ -2430,21 +2460,31 @@ proc inputThreadProc() {.thread.} =
             # poll timeout above. `consoleVtByteReady` is the honest
             # "getchr returns a byte right now" probe; `_kbhit` counts
             # charless records (key-ups), so the legacy-console path below
-            # must keep its blocking read.
-            while inputRunning():
+            # must keep its blocking read. The loop condition also watches
+            # the ask gate: this inner loop would otherwise spin without
+            # re-reaching the gate branch at the top, and an armed ask's
+            # answer key would reach the editor instead.
+            while inputRunning() and not askGatePending.load(moAcquire):
               if minline.consoleVtByteReady():
                 draftLastKeyAt = epochTime()
                 return getchr().int
               maybeSaveDraft()
               sleep(50)
+            if inputRunning(): continue
             return -1
           # Legacy console: no honest readiness probe. Tick the debounce
           # just before parking in the blocking read — the buffer has been
           # untouched since the pause began, so a settled, sentence-complete
-          # draft saves here; a fast typist is still inside the window.
+          # draft saves here; a fast typist is still inside the window. A
+          # gate armed while the read was parked diverts the byte instead
+          # of handing it to the editor.
           maybeSaveDraft()
           draftLastKeyAt = epochTime()
-          return getchr().int
+          let b = getchr().int
+          if askGatePending.load(moAcquire) and b != -1:
+            discard askGateConsume(b)
+            continue
+          return b
         -1
       let hasPendingInput: minline.HasPendingInputProc = nil
 

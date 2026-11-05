@@ -873,11 +873,11 @@ proc fileLinkUrl*(path, baseDir: string): string =
     # is absolute and resolves below, while on posix the same shape is
     # scheme-like garbage that must pass through verbatim, not join
     # onto the project dir as a phantom file.
-    when not defined(windows):
-      return ""
-    elif colon != 1:
-      for k in 0 ..< colon:
-        if path[k] notin {'a'..'z', 'A'..'Z', '0'..'9', '+', '.', '-'}: return ""
+    when defined(windows):
+      # Only a drive letter (`C:\cfg`, colon == 1) is a path there;
+      # every other `x:y` shape is scheme-like garbage.
+      if colon != 1: return ""
+    else:
       return ""
   var p = path
   if p.startsWith("~/"):
