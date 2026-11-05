@@ -397,18 +397,13 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
     of "user":
       let raw = m{"content"}
       if raw != nil and raw.kind == JArray:
-        let text = userTextBlocks(raw).strip
-        if text.startsWith("attached: ") and "(image read)" in text:
-          continue
-        let c = stripPreamble(text).strip & " [image attached]"
-        emit anchor, formatItem(userPromptItem(c))
+        # Array content only arises for image-bearing messages, which are
+        # not on this branch; there is nothing text to replay.
         continue
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
       let item =
-        if m{"agentSent"}.getBool(false):
-          if c.startsWith(GoalKickoffPrefix): goalPromptItem(c)
-          else: agentPromptItem(c)
+        if m{"agentSent"}.getBool(false): agentPromptItem(c)
         else: userPromptItem(c)
       emit anchor, formatItem(item)
     of "assistant":

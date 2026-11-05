@@ -612,8 +612,8 @@ proc toolAskGateApplies(act: Action): bool =
   else:
     false
 
-proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
-    visionDir: string): tuple[output: string, code: int, diff: string] =
+proc runActionWithAskGate(act: Action; cache: ReadCache):
+    tuple[output: string, code: int, diff: string] =
   ## The file-tool ask flow: ask first, run once. A grant retries (here:
   ## runs) the action under the widened policy; anything else runs it
   ## under the ask rule so the denial itself reaches the model, with the
@@ -650,7 +650,7 @@ proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
   else:
     let decide = askGateDecide(act.path, renderLine, "tool")
     if decide.fired: markers.add decide.marker
-  result = runAction(act, cache, vision, visionDir)
+  result = runAction(act, cache)
   if result.output.len > 0 and not result.output.endsWith("\n"):
     result.output.add "\n"
   if markers.len > 0:
@@ -1396,8 +1396,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
                 if toolStub != nil and toolStub.kind == JObject:
                   stubToolCallResult(toolStub)
                 elif toolAskGateApplies(act):
-                  runActionWithAskGate(act, session.readCache, p.vision,
-                                       sessionImageDir(session.savePath))
+                  runActionWithAskGate(act, session.readCache)
                 else:
                   runAction(act, session.readCache)
           except CatchableError as e:
