@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **The sandbox ask covers `apply_patch` too.** The last file-tool gap:
+  `apply_patch` carries its paths per-op inside the patch body, so the
+  pre-emptive hook never saw them and gpt-oss profiles (its canonical
+  mutation tool) were effectively bash-only. The gate now parses the
+  ops up front and asks once per distinct `ask` rule root before any op
+  executes (a patch touching three vault files is one question, nothing
+  partial hits the disk), with the first op path under each root as the
+  display target. A declined or timed-out root does not abort the patch:
+  its ops fail their per-op policy denial while ops under granted roots
+  proceed, and each decision lands in the tool result as its own
+  `[sandbox ask: ...]` line. Unparseable patches and hard denies still
+  never ask.
 - **The sandbox ask covers the `read`/`write`/`patch` tools, not just
   bash.** An `ask` rule used to redeem only a failed bash command; a
   model `write` to an ask-protected path just denied. The file tools
