@@ -135,12 +135,27 @@ when defined(posix):
     var waitSet: Sigset
     discard sigemptyset(waitSet)
     discard sigaddset(waitSet, SIGCONT)
-    var info: SigInfo
-    var zero: Timespec
-    if sigtimedwait(waitSet, info, zero) == SIGCONT:
+    when defined(macosx):
+      # macOS never implemented sigtimedwait (no realtime-signal
+      # extensions), so drain in two steps: sigpending never blocks,
+      # and a SIGCONT that is already queued satisfies sigwait
+      # instantly - the same non-blocking consume the zero-timespec
+      # sigtimedwait performs on the other platforms.
+      var pendingSet: Sigset
+      discard sigemptyset(pendingSet)
+      discard sigpending(pendingSet)
+      if sigismember(pendingSet, SIGCONT) == 0: return false
+      var sig: cint = 0
+      discard sigwait(waitSet, sig)
       bumpResumeCount()
       return true
-    false
+    else:
+      var info: SigInfo
+      var zero: Timespec
+      if sigtimedwait(waitSet, info, zero) == SIGCONT:
+        bumpResumeCount()
+        return true
+      false
 
   proc backgroundResumeCount*(): SigAtomic =
     volatileLoad(addr resumeCount)
