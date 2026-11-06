@@ -12,6 +12,15 @@
 ##
 ## Shape:
 ## * temp dirs and the project dir are writable;
+## * the process's own stdio aliases (/dev/stdin, /dev/stdout,
+##   /dev/stderr) are writable. Model-built command lines reference
+##   them constantly (`tool > /dev/stdout`, `foo --infile /dev/stdin`),
+##   and when stdio is a tty the alias resolves to the tty device
+##   (/dev/pts/*), which no baseline grants - without these lines every
+##   such access dies with EPERM. The backends canonicalize at restrict
+##   time in the child, so the rule lands on whatever fd 0/1/2 actually
+##   are (tty device, or a no-op when they are pipes, which the kernel
+##   already lets through);
 ## * the dependency and build caches the covered toolchains keep
 ##   under $HOME are writable, because those homes are disposable by
 ##   specification or construction (~/.cache is defined by the XDG
@@ -80,6 +89,9 @@ elif defined(macosx):
 deny /
 allow /tmp
 allow /var/tmp
+allow /dev/stdin
+allow /dev/stdout
+allow /dev/stderr
 allow ./
 allow ~/go
 allow ~/.cache
@@ -107,6 +119,9 @@ else:
 deny /
 allow /tmp
 allow /var/tmp
+allow /dev/stdin
+allow /dev/stdout
+allow /dev/stderr
 allow ./
 allow ~/go
 allow ~/.cache
