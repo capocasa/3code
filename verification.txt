@@ -1,0 +1,62 @@
+############################################################
+# PHASE 1 (fix present): nimble build
+############################################################
+$ nimble build ; echo $? -> 0
+-rwxrwxr-x 1 carlo carlo 5317200 Nov  6 14:58 ./3code
+
+############################################################
+# PHASE 2 (fix present): nimble test tests/core/test_sandbox_devstd.nim
+############################################################
+$ nimble test tests/core/test_sandbox_devstd.nim ; echo $? -> 0
+[32mPASS: [36mtests/core/test_sandbox_devstd.nim c                        [34m ( 5.77 sec)[0m
+Tests passed: 1 / 1 <br />
+Tests skipped: 0 / 1 <br />
+
+############################################################
+# PHASE 3 (defaults.nim reverted to HEAD): nimble test tests/core/test_sandbox_devstd.nim
+############################################################
+git diff --stat src/threecode/defaults.nim (empty = HEAD):
+$ nimble test tests/core/test_sandbox_devstd.nim ; echo $? -> 1   (nonzero = fails without the fix)
+[31mFAIL: [36mtests/core/test_sandbox_devstd.nim c                        [34m ( 5.85 sec)[0m
+  [FAILED] default policy allows the stdio aliases
++  [FAILED] default policy allows the stdio aliases
+  [FAILED] stdio aliases work on a tty through the real backend
++  [FAILED] stdio aliases work on a tty through the real backend
+FAILURE! total: 1 passed: 0 skipped: 0 failed: 1
++head: cannot open '/dev/stdin' for reading: Permission denied
+head: cannot open '/dev/stdin' for reading: Permission denied
++sh: 1: cannot create /dev/stdout: Permission denied
+sh: 1: cannot create /dev/stdout: Permission denied
+
+############################################################
+# PHASE 4 (fix restored): nimble build + nimble test tests/core/test_sandbox_devstd.nim
+############################################################
+git diff --stat src/threecode/defaults.nim (15 insertions = fix):
+ src/threecode/defaults.nim | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+$ nimble build ; echo $? -> 0
+$ nimble test tests/core/test_sandbox_devstd.nim ; echo $? -> 0
+[32mPASS: [36mtests/core/test_sandbox_devstd.nim c                        [34m ( 5.73 sec)[0m
+Tests passed: 1 / 1 <br />
+Tests skipped: 0 / 1 <br />
+-rwxrwxr-x 1 carlo carlo 9698512 Nov  6 15:00 ./3code
+
+############################################################
+# SUMMARY (all via nimble build / nimble test)
+############################################################
+fix present : nimble build exit=0 ; nimble test exit=0 (PASS)
+HEAD reverted: nimble test exit=1 (FAIL, the issue symptom)
+fix restored: nimble build exit=0 ; nimble test exit=0 (PASS)
+ M CHANGELOG.md
+ M docs/manual.md
+ M src/threecode/defaults.nim
+?? goal.md
+?? issue-68.md
+?? tests/core/test_sandbox_devstd.nim
+?? verification.txt
+
+--- final confirmation (canonical commands, rerun) ---
+nimble build exit: 0 ; 3code binary present (5317200 bytes)
+nimble test tests/core/test_sandbox_devstd.nim exit: 0
+PASS: tests/core/test_sandbox_devstd.nim c (5.70 sec)
+Tests passed: 1 / 1   skipped: 0 / 1

@@ -1463,6 +1463,9 @@ On macOS, Linux, and other POSIX systems, the built-in policy is:
 deny /
 allow /tmp
 allow /var/tmp
+allow /dev/stdin
+allow /dev/stdout
+allow /dev/stderr
 allow ./
 allow ~/go
 allow ~/.cache
@@ -1488,7 +1491,11 @@ caches, not wander through other user files. System programs, libraries,
 configuration, and device files get a read-only baseline so commands can still
 run, and the version-control config lines exist because git aborts every
 command when `~/.gitconfig` exists but is unreadable. `allow *` leaves the
-network open.
+network open. The `/dev/std*` lines exist because model-built command lines
+reference the process's own stdio aliases all the time
+(`tool > /dev/stdout`, `foo --infile /dev/stdin`); they are re-opens of
+descriptors the process already holds, and when stdio is a terminal the alias
+resolves to the terminal device, which no baseline grants.
 
 On Windows, the built-in policy is:
 

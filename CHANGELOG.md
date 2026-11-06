@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **The sandbox default allows `/dev/stdin`, `/dev/stdout`, and
+  `/dev/stderr` (gh #68).** Model-built command lines reference the
+  process's own stdio aliases all the time (`tool > /dev/stdout`,
+  `foo --infile /dev/stdin`), and the accesses are safe by construction:
+  each is a re-open of a descriptor the process already holds. But when
+  stdio sits on a terminal, the alias resolves to the terminal device
+  (`/dev/pts/*`), which neither the default policy nor the sandbox
+  baseline granted - every such command died with `Permission denied`.
+  The three aliases now ship in the built-in default; the backends
+  canonicalize rule paths at restrict time in the child, so the grant
+  lands on whatever fd 0/1/2 actually are. Pipe-backed stdio needed no
+  rule (the kernel never fenced anonymous inodes) and is unchanged,
+  as is everything else under `/dev`.
 - **The sandbox ask covers `apply_patch` too.** The last file-tool gap:
   `apply_patch` carries its paths per-op inside the patch body, so the
   pre-emptive hook never saw them and gpt-oss profiles (its canonical
