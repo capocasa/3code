@@ -16,6 +16,19 @@ when defined(posix):
   const binName = "3code"
   proc binPath(): string = getCurrentDir() / binName
 
+  var backendCache = -1
+
+  proc sandboxBackendWorks(): bool =
+    ## Landlock needs prctl(NO_NEW_PRIVS), which some container seccomp
+    ## profiles deny outright (EPERM, seen on the arm64 CI image): there
+    ## the restrict machinery cannot engage at all, and both legs would
+    ## fail on the machinery instead of the contract under test.
+    if backendCache >= 0: return backendCache == 1
+    backendCache =
+      if execCmdEx(binPath().quoteShell & " sandbox restrict " &
+          getTempDir().quoteShell & " -- true").exitCode == 0: 1 else: 0
+    backendCache == 1
+
   proc runSandboxed(policy, workDir: string; cmd: openArray[string]):
       tuple[output: string, exitCode: int] =
     let p = startProcess(binPath(), args = @["sandbox", "--policy", policy,
@@ -33,7 +46,7 @@ when defined(posix):
   suite "sandbox unix sockets":
     test "writable path grants bind, connect, and accept":
       let py = findExe("python3")
-      if py.len == 0:
+      if py.len == 0 or not sandboxBackendWorks():
         skip()
       else:
         let dir = getTempDir() / ("3code-unixsock-" & $getCurrentProcessId())
@@ -70,7 +83,7 @@ print('SOCKET-OK')
       # fatal on an unreadable config. The policy is the manual's
       # dotnet recipe (NuGet cache writable, NuGet config readable).
       let dn = findExe("dotnet")
-      if dn.len == 0:
+      if dn.len == 0 or not sandboxBackendWorks():
         skip()
       else:
         # target whatever major.minor the installed SDK is, so the
@@ -97,7 +110,8 @@ print('SOCKET-OK')
         # binds its diagnostic and MSBuild node sockets, and on macOS
         # runners that is /var/folders, not /tmp.
         writeFile(pol, &"deny /\nallow {getTempDir()}\nallow {dir}\n" &
-          "allow ~/.nuget/packages\nreadonly ~/.nuget/NuGet\nallow *\n")
+          "allow ~/.nuget/packages\nreadonly ~/.nuget/NuGet\n" &
+          "allow ~/.dotnet\nallow *\n")
         let r = runSandboxed(pol, dir, [dn, "build", "-nologo"])
         check r.exitCode == 0
         check "Build succeeded" in r.output

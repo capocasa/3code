@@ -16,8 +16,14 @@ import threecode/[actions, api, library, prompts, screen, session, types]
 const stubbed = defined(providerStub)
 
 proc x11Ready(): bool =
-  getEnv("DISPLAY").len > 0 and findExe("xdotool").len > 0 and
-    ["import", "maim", "scrot"].anyIt(findExe(it).len > 0)
+  # The platform table in screen.nim arms only X11; on macOS/Windows
+  # ensureComputerUse refuses (backend unimplemented), so the e2e flow
+  # cannot run there no matter what tools the image ships.
+  when defined(macosx) or defined(windows):
+    false
+  else:
+    getEnv("DISPLAY").len > 0 and findExe("xdotool").len > 0 and
+      ["import", "maim", "scrot"].anyIt(findExe(it).len > 0)
 
 proc newFixture(name: string): string =
   result = getTempDir() / ("3code_cushot_" & name & "_" & $getCurrentProcessId())

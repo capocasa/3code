@@ -1556,8 +1556,10 @@ line is given when the paths move.
 
     NuGet dies on an unreadable config (`~/.nuget/NuGet/NuGet.Config`
     can hold feed tokens, so it is readable, not writable - the same
-    treatment `~/.gitconfig` gets), and the package cache is the only
-    writable dot it needs: `~/.dotnet` writes are optional. MSBuild's
+    treatment `~/.gitconfig` gets), and the package cache and
+    `~/.dotnet` are the writable dots it needs (SDK 10 writes a
+    first-run `*.toolpath.sentinel` there; without it a build on a
+    fresh machine dies). MSBuild's
     worker nodes and the dotnet diagnostic server bind unix sockets
     in the temp dir, which is writable by default; the socket rights
     ride the writable grant (sandwall 0.5.12). Inside a fenced
