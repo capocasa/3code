@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **An empty message now means "continue" on every embedding surface,
+  not just the terminal.** Embedders (the GUI via `--rpc`, editors via
+  `--acp`) used to get an error back for an empty prompt, exactly the
+  message a client sends after a cancelled turn to say "keep going".
+  `AgentSession.prompt("")` (or whitespace) now runs a turn on the
+  conversation exactly as it stands - no user message appended to the
+  session or the scrollback, no `user` event row on the RPC stream, no
+  `user_message_chunk` over ACP - and an empty `POST /prompt` body or
+  `session/prompt` array means the same. An empty prompt on a fresh
+  session with no conversation yet is an error (`no conversation to
+  continue yet`), matching what the terminal's Enter-on-empty-line
+  gesture (already in) does.
 - **A system command run during a turn no longer ends the turn: the
   model is sent back in once the command has run.** A `:command`
   typed while the model was mid-loop in a tool batch (an `:!` shell
