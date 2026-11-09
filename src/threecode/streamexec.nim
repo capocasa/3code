@@ -21,10 +21,15 @@ when defined(windows):
 var wallWarnShown = false  ## one Windows wall warning per run
 
 proc shPath(): string =
-  ## POSIX shell path. Android/Termux has no /bin/sh; $PREFIX/bin/sh is
-  ## the same dash/bash the interactive shell uses. A `bash_path` or
-  ## `bash` config value that names an existing file wins, so
-  ## the same setting works on every OS.
+  ## POSIX interpreter for the bash tool. A `bash_path` or `bash`
+  ## config value that names an existing file wins, so the same
+  ## setting works on every OS. Otherwise a real bash: the tool's
+  ## contract (and every prompt) says bash, while /bin/sh is dash on
+  ## Debian/Ubuntu, which drops the bash-only constructs models write
+  ## (`PIPESTATUS`, `[[ ]]`, multiline heredocs) in confusing ways
+  ## (community thread 15). Last resort is sh: Termux has no /bin/sh
+  ## ($PREFIX/bin/sh is the interactive shell, and bash may be
+  ## unbundled), and Alpine's busybox sh is the only shell there is.
   when declared(bashPathOverride):
     if bashPathOverride.len > 0 and fileExists(bashPathOverride):
       return bashPathOverride
@@ -32,6 +37,12 @@ proc shPath(): string =
     if bashSourcePref.len > 0 and bashSourcePref != "auto" and
         fileExists(bashSourcePref):
       return bashSourcePref
+  block:
+    let exe = findExe("bash")
+    if exe.len > 0: return exe
+  for cand in ["/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash",
+               "/opt/homebrew/bin/bash"]:
+    if fileExists(cand): return cand
   when defined(android):
     getEnv("PREFIX", "/data/data/com.termux/files/usr") & "/bin/sh"
   else:
@@ -713,16 +724,18 @@ export DEBIAN_FRONTEND=noninteractive
   let cap = bashTimeoutSecs(act.timeoutSecs)
   var p =
     when defined(posix):
-      let wrapped = &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
+      let shell = shPath()
+      let wrapped = &"exec \"{shell}\" \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
       # Sandbox: when the global sandbox is active, re-exec *this* binary
       # as `3code sandbox restrict ...` so it forks, setsid()s, applies the
-      # OS-native restriction (Landlock/Seatbelt), and exec()s sh. box calls
-      # setsid() itself before exec, so the sh process is its own
+      # OS-native restriction (Landlock/Seatbelt), and exec()s the shell.
+      # box calls
+      # setsid() itself before exec, so the shell process is its own
       # session/group leader and the cancel/timeout signal-the-pgroup path
-      # still works: we signal box's pid (== sh's pid after exec), the group
-      # leader. The backend is compiled in, so `procboxExe` is just our own
-      # path and is always set when `active`; the unconfined setsid fallback
-      # below only runs when the sandbox is off entirely.
+      # still works: we signal box's pid (== the shell's pid after exec),
+      # the group leader. The backend is compiled in, so `procboxExe` is
+      # just our own path and is always set when `active`; the unconfined
+      # setsid fallback below only runs when the sandbox is off entirely.
       if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
         # The box subprocess loads the policy files itself (--policy), so
         # every launch enforces the freshest file contents; no mtime
@@ -740,11 +753,11 @@ export DEBIAN_FRONTEND=noninteractive
         args.add "restrict"
         # No explicit writable paths: those come from the policy
         # inside box (a fully-locked policy simply yields none, which
-        # box accepts). The script temp dir is read-only; sh only reads
-        # the script, never writes there.
+        # box accepts). The script temp dir is read-only; the shell only
+        # reads the script, never writes there.
         args.add ["--ro", tmp]
         args.add "--"
-        args.add shPath()
+        args.add shell
         args.add "-c"
         args.add wrapped
         # Network wall: host rules in the policy mean the box child is
@@ -765,7 +778,7 @@ export DEBIAN_FRONTEND=noninteractive
             args.add "restrict"
             args.add tmp
             args.add "--"
-            args.add shPath()
+            args.add shell
             args.add "-c"
             args.add wrapped
             env = newStringTable()  # case-sensitive on posix; env names differ by case
@@ -795,10 +808,10 @@ export DEBIAN_FRONTEND=noninteractive
         # Unconfined path: sandbox off or no working backend.
         let setsidExe = findExe("setsid")
         if setsidExe.len > 0:
-          startProcess(setsidExe, args = [shPath(), "-c", wrapped],
+          startProcess(setsidExe, args = [shell, "-c", wrapped],
                        options = {poStdErrToStdOut, poUsePath})
         else:
-          startProcess(shPath(), args = ["-c", wrapped],
+          startProcess(shell, args = ["-c", wrapped],
                        options = {poStdErrToStdOut, poUsePath})
     else:
       let b = resolveBash()

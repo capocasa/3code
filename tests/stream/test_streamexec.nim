@@ -446,3 +446,58 @@ when defined(windows):
       let (output, code, _) = runStreamingBash(act, nil, nil)
       check code == 0
       check "hello" in output
+
+when defined(posix):
+  import threecode/sandbox
+
+  suite "streamexec: sandboxed bash parity":
+    test "PIPESTATUS and heredoc survive the sandboxed path":
+      # community.3code thread 15: on a Debian box the bash tool ran its
+      # command through /bin/sh (dash) on both the fenced and unfenced
+      # paths, so bash-only constructs models write (PIPESTATUS,
+      # multiline heredocs) died in confusing ways while the tool
+      # contract, the prompts, and the Windows path all say bash. Both
+      # exec paths resolve one interpreter now, so the sandboxed run
+      # must answer byte-identically to the unconfined one.
+      let bin = getCurrentDir() / "3code"
+      if not fileExists(bin) or not sandbox.backendWorks(bin):
+        skip()
+      else:
+        let dir = getTempDir() /
+          ("3code-bashparity-" & $getCurrentProcessId() & "-" &
+            $epochTime().int64)
+        createDir(dir)
+        # Paths only, no host rules: the contract under test is the
+        # interpreter, so the wall-proxy leg stays out of the run.
+        writeFile(dir / ".sandbox", "deny /\nallow " & dir & "\n")
+        let prevDir = getCurrentDir()
+        let saved = (sandboxEnabled, sandbox.active, sandbox.procboxExe,
+                     sandbox.current)
+        setCurrentDir(dir)
+        sandbox.current = sandbox.loadPolicy(dir)
+        sandbox.active = true
+        sandbox.procboxExe = bin
+        defer:
+          setCurrentDir(prevDir)
+          (sandboxEnabled, sandbox.active, sandbox.procboxExe,
+              sandbox.current) = saved
+          removeDir(dir)
+        let body = "(exit 3) | cat\n" &
+          "echo \"pipestatus=${PIPESTATUS[0]}-${PIPESTATUS[1]}\"\n" &
+          "read -r got <<'EOF'\nheredoc payload\nEOF\n" &
+          "echo \"heredoc=$got\"\n"
+        let act = Action(kind: akBash, body: body)
+        let (boxed, codeBoxed, _) = runStreamingBash(act, nil, nil)
+        # Unconfined leg: the setsid path a sandbox-off run takes.
+        sandbox.active = false
+        let (plain, codePlain, _) = runStreamingBash(act, nil, nil)
+        check codeBoxed == 0
+        check codePlain == 0
+        check boxed == plain
+        check "pipestatus=3-0" in boxed
+        check "heredoc=heredoc payload" in boxed
+else:
+  suite "streamexec: sandboxed bash parity":
+    test "posix-only contract":
+      # The Windows path already resolves a real bash (suite above).
+      skip()
