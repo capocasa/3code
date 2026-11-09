@@ -12,8 +12,8 @@
       }
     },
     "sandwall": {
-      "version": "0.5.12",
-      "vcsRevision": "a00a83bd4d52e1c763e2bc094403782d08b8d2d9",
+      "version": "0.5.13",
+      "vcsRevision": "1773754dc9b804c1138fa68f5a0b7b2090817cbe",
       "url": "https://github.com/capocasa/sandwall",
       "downloadMethod": "git",
       "dependencies": [

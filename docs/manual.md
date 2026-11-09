@@ -1690,16 +1690,23 @@ allowlist or a blocklist.
 On Linux and macOS, fenced commands reach the network through a local CONNECT
 and SOCKS5 allowlist proxy. Linux puts the command in a network namespace;
 macOS confines it to loopback with Seatbelt. 3code sets the standard proxy
-variables and a Git SSH proxy command for the child process. Denied HTTP
-connections return 403.
+variables for the child process, and routes two proxy-unaware clients
+itself: git gets an SSH proxy command, and ``ssh`` is shadowed by a wrapper
+that tunnels through the wall proxy (``scp``, ``sftp`` and ``rsync`` spawn
+``ssh`` and ride along). Every TCP protocol is carried the same way - the
+allowlist decides per host and port, loopback targets included (on Linux
+they go through the proxy too; the fenced namespace has no loopback of the
+host's). Denied HTTP connections return 403; denied SSH targets fail with
+a ``proxy denied`` message from the wrapper.
 
 .. note::
 
-   Inside the fence, only clients that speak the proxy variables get out:
-   ``curl``, ``wget``, git over HTTPS, package managers. ``ping`` (ICMP)
-   and ``host``/``dig`` (their own DNS queries) ignore the proxy and fail:
-   the fenced namespace has no route off the machine, and name resolution
-   happens at the proxy. REST over HTTP(S) only, for now.
+   Inside the fence, only clients that reach the proxy get out: ``curl``,
+   ``wget``, git, package managers, ``ssh`` through its wrapper. ``ping``
+   (ICMP) and ``host``/``dig`` (their own DNS queries) still fail: the
+   fenced namespace has no route off the machine, and name resolution
+   happens at the proxy. TCP only - anything UDP or ICMP needs its own
+   adapter.
 
 On Windows, host rules require one admin setup command:
 

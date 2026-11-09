@@ -10,7 +10,7 @@
 ##   proxy   - foreground CONNECT+SOCKS5 allowlist proxy (the parent
 ##             3code process uses the in-library startWallProxy
 ##             instead; this subcommand is for standalone/debug use)
-##   connect - SOCKS5 stdio pump for git ProxyCommand
+##   connect - SOCKS5 stdio pump for ssh/git ProxyCommand
 ##   wfp-probe - internal: egress probe run AS the sandwall user
 
 when defined(posix):
