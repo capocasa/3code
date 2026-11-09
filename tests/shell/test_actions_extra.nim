@@ -25,6 +25,20 @@ suite "actions: previewCmd":
   test "short command unchanged":
     check previewCmd("git status") == "git status"
 
+suite "actions: previewCmdLines":
+  test "single-line command unchanged":
+    check previewCmdLines("git status", 3) == "git status"
+
+  test "maxLines 1 matches previewCmd":
+    let body = "  ls -la\nother"
+    check previewCmdLines(body, 1) == previewCmd(body)
+
+  test "shows the first N lines when longer":
+    check previewCmdLines("one\ntwo\nthree\nfour", 2) == "one\ntwo"
+
+  test "whole command when it fits":
+    check previewCmdLines("one\ntwo", 5) == "one\ntwo"
+
 suite "actions: bannerFor":
   test "bash shows preview":
     let act = Action(kind: akBash, body: "ls -la /tmp")

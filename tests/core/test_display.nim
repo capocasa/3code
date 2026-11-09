@@ -2,6 +2,7 @@ import std/[os, strutils, times, unittest]
 import threecode/display
 import threecode/types
 import threecode/util
+import threecode/actions
 
 suite "display: assistant rendering":
   test "assistant reply text is bright white across lines":
@@ -692,3 +693,117 @@ when not defined(windows):
       check "delivered 16x12" in s
       check "attached below" in s
       check "base64" notin s
+
+
+suite "display: multiline bash command banner and :cmd":
+  # A multiline bash command used to show only its first line in the `$`
+  # banner, with no signal the rest existed. The banner now carries the
+  # first `banner_lines` lines plus a linked `+N lines` tail (the T<idx>.cmd
+  # dump holds the whole command), and `:cmd [N]` / `:cmd N edit` reveal it
+  # in the transcript / $VISUAL.
+  setup:
+    bannerLinesSetting = 1
+  teardown:
+    bannerLinesSetting = 1
+    if dirExists(toolOutDir()): removeDir(toolOutDir())
+
+  const mlCmd = "echo one\necho two\necho three\necho four"
+
+  test "default: first line plus linked +N tail and a .cmd dump":
+    let body = cmdBannerBody(mlCmd, 7)
+    check body.startsWith("echo one\n")
+    check "+3 lines" in body
+    check "\x1b]8;;file://" in body
+    check "T7.cmd ↗" in body
+    check readFile(toolOutDir() / "T7.cmd") == mlCmd
+
+  test "banner_lines widens the preview":
+    bannerLinesSetting = 3
+    let body = cmdBannerBody(mlCmd, 7)
+    check body.startsWith("echo one\necho two\necho three\n")
+    check "+1 line" in body
+    check "echo four" notin body
+
+  test "command that fits carries no tail or dump":
+    bannerLinesSetting = 3
+    let body = cmdBannerBody("echo one\necho two", 7)
+    check body == "echo one\necho two"
+    check "+1 line" notin body
+    check not fileExists(toolOutDir() / "T7.cmd")
+
+  test "no tool index keeps a plain tail (:! pass)":
+    let body = cmdBannerBody(mlCmd, 0)
+    check "+3 lines" in body
+    check "file://" notin body
+
+  test "toolBannerBytes renders the lines as banner rows":
+    bannerLinesSetting = 3
+    let bytes = toolBannerBytes("echo one", akBash, 0, command = mlCmd,
+                                idx = 7)
+    check "$ echo one" & Reset & "\r\n" in bytes
+    check "  echo two" & Reset & "\r\n" in bytes
+    check "  echo three" & Reset & "\r\n" in bytes
+    check "+1 line" in bytes
+    check "echo four" notin bytes
+
+  test "act form of toolTranscriptBytes routes the command through":
+    # The live commit and the session replay both render through this
+    # form; a multiline command must keep its banner lines on both.
+    bannerLinesSetting = 2
+    let act = Action(kind: akBash, body: mlCmd)
+    let bytes = toolTranscriptBytes(act, "one\n", 0, 3)
+    check "$ echo one" & Reset & "\r\n" in bytes
+    check "  echo two" & Reset & "\r\n" in bytes
+    check "+2 lines" in bytes
+
+  test "single-line command renders exactly as before":
+    let bytes = toolBannerBytes("git status", akBash, 0,
+                                command = "git status", idx = 1)
+    check bytes == OffWhiteFg & "$ git status" & Reset & "\r\n"
+
+  test ":cmd resolves the last bash call and explicit N":
+    let log = @[
+      ToolRecord(banner: "seq 3", command: "seq 3", output: "1\n",
+        code: 0, kind: akBash),
+      ToolRecord(banner: "src/foo.nim", output: "body", code: 0,
+        kind: akRead),
+      ToolRecord(banner: "git status", command: "git status",
+        output: "", code: 0, kind: akBash),
+    ]
+    let (last, errLast) = resolveBashCmd("", log)
+    check errLast == ""
+    check last == 2
+    check resolveBashCmd("1", log) == (0, "")
+    check resolveBashCmd("3", log) == (2, "")
+    # T2 is the read between them: N names the tool-call index, not the
+    # bash-ordinal.
+    let (n2, errN2) = resolveBashCmd("2", log)
+    check n2 == -1
+    check "not a bash command" in errN2
+
+  test ":cmd rejects non-bash and out-of-range picks":
+    let log = @[
+      ToolRecord(banner: "src/foo.nim", output: "body", code: 0,
+        kind: akRead),
+      ToolRecord(banner: "git status", command: "git status",
+        output: "", code: 0, kind: akBash),
+    ]
+    let (badKind, errKind) = resolveBashCmd("1", log)
+    check badKind == -1
+    check "not a bash command" in errKind
+    let (oob, errOob) = resolveBashCmd("9", log)
+    check oob == -1
+    check "out of range" in errOob
+
+  test ":cmd body prints the whole command":
+    let log = @[ToolRecord(banner: previewCmd(mlCmd), command: mlCmd,
+      output: "one\n", code: 0, kind: akBash)]
+    let body = showCmdS("", log)
+    check "── T1  echo one" in body
+    check "echo two" in body
+    check "echo four" in body
+
+  test ":cmd without bash commands hints":
+    let log = @[ToolRecord(banner: "src/foo.nim", output: "body",
+      code: 0, kind: akRead)]
+    check "no bash commands" in showCmdS("1", log)

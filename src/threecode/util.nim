@@ -1198,22 +1198,32 @@ func wrapAnsi*(s: string, width: int): seq[string] =
 
 const BannerMaxRows* = 3
 
-func bannerWrapRows*(prefix, body: string; termW: int): seq[string] =
+proc bannerMaxRows*(): int =
+  ## The banner row cap: the stock 3, or the user's `banner_lines` setting
+  ## plus its `+N lines` tail row when that asks for a taller multiline
+  ## command banner.
+  max(BannerMaxRows, bannerLinesSetting + 1)
+
+func bannerWrapRows*(prefix, body: string; termW: int;
+                     maxRows = BannerMaxRows): seq[string] =
   ## Wrap a tool banner (icon + command/path) across the terminal width,
   ## mirroring how output lines wrap. The `prefix` (e.g. "$ ") occupies
   ## the first row; continuation rows align under the body with a 2-space
+  ## indent. A body may carry multiple logical lines (a multiline bash
+  ## command preview): each line after the first starts at the continuation
   ## indent. Wide terminals show the whole banner; narrow ones wrap instead
-  ## of clipping. After `BannerMaxRows` rows the remainder is dropped with an
+  ## of clipping. After `maxRows` rows the remainder is dropped with an
   ## ellipsis so an extremely long banner cannot take over the fat prompt.
   let firstW = max(1, termW - visibleWidth(prefix))
   let contW = max(1, termW - 2)
   var first = true
-  for chunk in charWrapAnsi(body, if first: firstW else: contW):
-    if result.len >= BannerMaxRows:
-      result[^1] = utf8ByteCut(result[^1], max(1, result[^1].len - 1)) & "…"
-      return
-    result.add (if first: prefix else: "  ") & chunk
-    first = false
+  for line in body.splitLines:
+    for chunk in charWrapAnsi(line, if first: firstW else: contW):
+      if result.len >= maxRows:
+        result[^1] = utf8ByteCut(result[^1], max(1, result[^1].len - 1)) & "…"
+        return
+      result.add (if first: prefix else: "  ") & chunk
+      first = false
 
 func isMdTableRow*(line: string): bool =
   ## A markdown-table row both opens and closes with a `|`. Rejects

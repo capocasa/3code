@@ -831,29 +831,7 @@ xx
 
   ○1%  ↑210  ↓20  0
 ❯
-===== 855 =====
-
-  ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ run bash checks
-
-● Running bash checks.
-
-$ printf 'ok-one\nok-two\n'
-  ok-one
-  ok-two
-
-Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
-  bad-one
-  bad-two
-  bad-three
+===== frame 52 =====
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 3 lines omitted · T3.log ↗
@@ -872,10 +850,33 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxx
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxx
+
+$ echo ml-one
+  echo ml-two
+  echo ml-three
+  … +2 lines · T6.cmd ↗
+  ml-one
+  ml-two
+  ml-three
+  ml-four
+  ml-five
   ○1%  ↑130  ↓18  0
 
 ● Bash checks complete.
   ○1%  ↑210  ↓20  0
 
+❯ :cmd 6
+
+── T6  echo ml-one
+  echo ml-one
+  echo ml-two
+  echo ml-three
+  echo ml-four
+  echo ml-five
+
+❯ :cmd 6 edit
+
+T6.cmd opened in capture_cmd.sh
+
   ○1%
-❯
+❯ █

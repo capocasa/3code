@@ -1,5 +1,6 @@
 import std/[json, hashes, os, strutils, unicode, unittest]
 import threecode/util
+import threecode/types
 
 suite "util: utf8ByteCut":
   test "truncates ASCII within limit":
@@ -262,6 +263,37 @@ suite "util: charWrapAnsi":
       "z\x1b]8;;\x1b\\"]
     check charWrapAnsi("ab\x1b]8;;u\x1b\\cd\x1b]8;;\x1b\\", 4) ==
       @["ab\x1b]8;;u\x1b\\cd\x1b]8;;\x1b\\"]
+
+suite "util: bannerWrapRows":
+  setup:
+    bannerLinesSetting = 1
+  teardown:
+    bannerLinesSetting = 1
+
+  test "single line: prefix on the first row only":
+    check bannerWrapRows("$ ", "git status", 80) == @["$ git status"]
+
+  test "long single line wraps with continuation indent":
+    let rows = bannerWrapRows("$ ", "x".repeat(20), 10)
+    check rows == @["$ " & "x".repeat(8), "  " & "x".repeat(8),
+                    "  " & "x".repeat(4)]
+
+  test "multiline body indents every later line":
+    check bannerWrapRows("$ ", "echo one\necho two", 80) ==
+      @["$ echo one", "  echo two"]
+
+  test "multiline body wraps per line, not across lines":
+    check bannerWrapRows("$ ", "aa\nbb", 4) == @["$ aa", "  bb"]
+
+  test "row cap defaults to BannerMaxRows with ellipsis":
+    let rows = bannerWrapRows("$ ", "a\nb\nc\nd", 80)
+    check rows.len == 3
+    check rows[^1].endsWith("…")
+
+  test "banner_lines lifts the cap":
+    bannerLinesSetting = 5
+    check bannerWrapRows("$ ", "a\nb\nc\nd", 80, bannerMaxRows()) ==
+      @["$ a", "  b", "  c", "  d"]
 
 suite "util: visibleWidth unicode":
   test "ASCII counts as 1":

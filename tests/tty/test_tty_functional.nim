@@ -40,19 +40,13 @@ proc newFixture(name: string): string =
   createDir(result / "data")
   createDir(result / "run")
 
-proc writeConfiguredProvider(root: string) =
+proc writeConfiguredProvider(root: string; extraSettings = "") =
   createDir(root / "xdg" / "3code")
-  writeFile(root / "xdg" / "3code" / "config", """
-[settings]
-current = "stub.stub-model"
-
-[provider]
-name = "stub"
-url = "stub://provider"
-key = "stub"
-family = "glm"
-models = "stub-model"
-""")
+  var cfg = "[settings]\ncurrent = \"stub.stub-model\"\n"
+  cfg.add extraSettings
+  cfg.add "\n[provider]\nname = \"stub\"\nurl = \"stub://provider\"\n"
+  cfg.add "key = \"stub\"\nfamily = \"glm\"\nmodels = \"stub-model\"\n"
+  writeFile(root / "xdg" / "3code" / "config", cfg)
 
 proc writeHarnessProviders(root: string) =
   createDir(root / "xdg" / "3code")
@@ -193,10 +187,14 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
 
 proc startStub(root: string; args: openArray[string] = ["-x", "-i"];
                cols = DefaultTtyCols; rows = DefaultTtyRows;
-               responsesPath = ""): TtySession =
+               responsesPath = "";
+               extraEnv: openArray[EnvVar] = []): TtySession =
   let resp = if responsesPath.len > 0: responsesPath else: root / "run" / "stub_responses.json"
+  var env = stubEnv(root, resp)
+  for e in extraEnv:
+    env.add e
   newTtySession(ensureStubBinary(), args = args, cwd = root / "run",
-                env = stubEnv(root, resp), cols = cols, rows = rows)
+                env = env, cols = cols, rows = rows)
 
 proc sendAltChord(s: TtySession; letter: char) =
   ## Write ESC + letter as a single 2-byte burst to the PTY master,
@@ -3209,113 +3207,166 @@ max-tokens = "8192"
     tty.expectCount("Reply to queued prompt.", 1, where = "screen")
 
   test "bash tool success and nonzero exit":
-    let root = newFixture("bash_tool_visual_test")
-    writeConfiguredProvider(root)
-    writeStubResponses(root, %*[
-      {
-        "role": "assistant",
-        "content": "Running bash checks.",
-        "contentChunks": ["Running bash checks."],
-        "tool_calls": [
-          toolCall("call_success", "bash", %*{
-            "command": "printf 'ok-one\\nok-two\\n'"
-          }, %*{
-            "stream": ["ok-one", "ok-two"],
-            "output": "ok-one\nok-two\n",
-            "code": 0
-          }),
-          toolCall("call_failure", "bash", %*{
-            "command": "printf 'bad-one\\nbad-two\\nbad-three\\n'; exit 7"
-          }, %*{
-            "stream": ["bad-one", "bad-two", "bad-three"],
-            "output": "bad-one\nbad-two\nbad-three\n",
-            "code": 7
-          }),
-          toolCall("call_scroll", "bash", %*{
-            "command": "printf 'scroll-1\\nscroll-2\\nscroll-3\\nscroll-4\\nscroll-5\\nscroll-6\\nscroll-7\\nscroll-8\\nscroll-9\\nscroll-10\\n'"
-          }, %*{
-            "stream": [
-              "scroll-1",
-              "scroll-2",
-              "scroll-3",
-              "scroll-4",
-              "scroll-5",
-              "scroll-6",
-              "scroll-7",
-              "scroll-8",
-              "scroll-9",
-              "scroll-10"
-            ],
-            "output": "scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n",
-            "code": 0
-          }),
-          toolCall("call_slow", "bash", %*{
-            "command": "sleep 3; printf 'slow-done\\n'"
-          }, %*{
-            "stream": ["slow-done"],
-            "output": "slow-done\n",
-            "code": 0
-          }),
-          toolCall("call_long", "bash", %*{
-            "command": "echo " & "x".repeat(120)
-          }, %*{
-            "stream": ["x".repeat(120)],
-            "output": "x".repeat(120) & "\n",
-            "code": 0
-          })
-        ],
-        "usage": {
-          "promptTokens": 130,
-          "completionTokens": 18,
-          "totalTokens": 148,
-          "cachedTokens": 0
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "bash_tool_visual":
+      check true
+    else:
+      let root = newFixture("bash_tool_visual_test")
+      writeConfiguredProvider(root, "banner_lines = 3\n")
+      writeStubResponses(root, %*[
+        {
+          "role": "assistant",
+          "content": "Running bash checks.",
+          "contentChunks": ["Running bash checks."],
+          "tool_calls": [
+            toolCall("call_success", "bash", %*{
+              "command": "printf 'ok-one\\nok-two\\n'"
+            }, %*{
+              "stream": ["ok-one", "ok-two"],
+              "output": "ok-one\nok-two\n",
+              "code": 0
+            }),
+            toolCall("call_failure", "bash", %*{
+              "command": "printf 'bad-one\\nbad-two\\nbad-three\\n'; exit 7"
+            }, %*{
+              "stream": ["bad-one", "bad-two", "bad-three"],
+              "output": "bad-one\nbad-two\nbad-three\n",
+              "code": 7
+            }),
+            toolCall("call_scroll", "bash", %*{
+              "command": "printf 'scroll-1\\nscroll-2\\nscroll-3\\nscroll-4\\nscroll-5\\nscroll-6\\nscroll-7\\nscroll-8\\nscroll-9\\nscroll-10\\n'"
+            }, %*{
+              "stream": [
+                "scroll-1",
+                "scroll-2",
+                "scroll-3",
+                "scroll-4",
+                "scroll-5",
+                "scroll-6",
+                "scroll-7",
+                "scroll-8",
+                "scroll-9",
+                "scroll-10"
+              ],
+              "output": "scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n",
+              "code": 0
+            }),
+            toolCall("call_slow", "bash", %*{
+              "command": "sleep 3; printf 'slow-done\\n'"
+            }, %*{
+              "stream": ["slow-done"],
+              "output": "slow-done\n",
+              "code": 0
+            }),
+            toolCall("call_long", "bash", %*{
+              "command": "echo " & "x".repeat(120)
+            }, %*{
+              "stream": ["x".repeat(120)],
+              "output": "x".repeat(120) & "\n",
+              "code": 0
+            }),
+            # A multiline command: the banner used to show only its first line
+            # with no hint the rest existed. Under banner_lines = 3 it shows
+            # the first three lines and a linked `+2 lines` tail; `:cmd` then
+            # reveals the whole command, `:cmd edit` hands it to $VISUAL.
+            toolCall("call_multiline", "bash", %*{
+              "command": "echo ml-one\necho ml-two\necho ml-three" &
+                         "\necho ml-four\necho ml-five"
+            }, %*{
+              "stream": ["ml-one", "ml-two", "ml-three", "ml-four", "ml-five"],
+              "output": "ml-one\nml-two\nml-three\nml-four\nml-five\n",
+              "code": 0
+            })
+          ],
+          "usage": {
+            "promptTokens": 130,
+            "completionTokens": 18,
+            "totalTokens": 148,
+            "cachedTokens": 0
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Bash checks complete.",
+          "contentChunks": ["Bash checks complete."],
+          "usage": {
+            "promptTokens": 210,
+            "completionTokens": 20,
+            "totalTokens": 230,
+            "cachedTokens": 0
+          }
         }
-      },
-      {
-        "role": "assistant",
-        "content": "Bash checks complete.",
-        "contentChunks": ["Bash checks complete."],
-        "usage": {
-          "promptTokens": 210,
-          "completionTokens": 20,
-          "totalTokens": 230,
-          "cachedTokens": 0
-        }
-      }
-    ])
+      ])
 
-    # 48 rows: the test content sits at the 40-row default boundary, and the
-    # intentional prompt-echo separator blank (emitUserSubmit's \r\n\r\n,
-    # transcriptOwnsSpacing=true) would scroll the `╭─╮` banner off the grid.
-    # Headroom keeps the whole transcript visible. Per-test sizing is an
-    # established pattern (see the cols=18 test above).
-    let tty = startStub(root, rows = 48)
-    defer:
-      tty.writeFrameArtifact(root / "frames.txt")
-      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
-      tty.close()
+      # 48 rows: the test content sits at the 40-row default boundary, and the
+      # intentional prompt-echo separator blank (emitUserSubmit's \r\n\r\n,
+      # transcriptOwnsSpacing=true) would scroll the `╭─╮` banner off the grid.
+      # Headroom keeps the whole transcript visible. Per-test sizing is an
+      # established pattern (see the cols=18 test above).
+      # $VISUAL for the `:cmd N edit` step below: the script copies the dump
+      # path it receives as $1 into captured_cmd.txt, proving the external
+      # viewer is handed the full command text.
+      let captureSh = root / "run" / "capture_cmd.sh"
+      writeFile(captureSh, "#!/bin/sh\ncat \"$1\" > \"" &
+        (root / "run" / "captured_cmd.txt") & "\"\n")
+      setFilePermissions(captureSh, {fpUserRead, fpUserWrite, fpUserExec})
+      let tty = startStub(root, rows = 48,
+        extraEnv = @[(key: "VISUAL", val: captureSh)])
+      defer:
+        tty.writeFrameArtifact(root / "frames.txt")
+        tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+        tty.close()
 
-    tty.expect "❯"
-    tty.send "run bash checks\n"
-    tty.expectInHistory "Running bash checks."
-    tty.expectInHistory "$ printf 'ok-one"
-    tty.expectInHistory "ok-two"
-    tty.expectInHistory "Ø printf 'bad-one"
-    tty.expectInHistory "bad-three"
-    tty.expectInHistory "$ printf 'scroll-1"
-    tty.expectInHistory "scroll-10"
-    tty.expectInHistory "$ sleep 3; printf 'slow-done"
-    tty.expectInHistory "slow-done"
-    # A long bash command wraps to fill the terminal width instead of being
-    # clipped at a fixed column. The full command is present in scrollback,
-    # split across rows; its tail (well past the old 64-char clip) is visible.
-    tty.expectInHistory "echo xxxxxxxxxx"
-    tty.expectInHistory "Bash checks complete."
-    tty.expectTokenBar(["○", "↑210", "↓20"])
-    tty.drain(200)
-    tty.expectFinalFrameArtifact(
-      BashToolVisualTestFrames,
-      root / "bash_tool_visual_test_actual.txt")
+      tty.expect "❯"
+      tty.send "run bash checks\n"
+      tty.expectInHistory "Running bash checks."
+      tty.expectInHistory "$ printf 'ok-one"
+      tty.expectInHistory "ok-two"
+      tty.expectInHistory "Ø printf 'bad-one"
+      tty.expectInHistory "bad-three"
+      tty.expectInHistory "$ printf 'scroll-1"
+      tty.expectInHistory "scroll-10"
+      tty.expectInHistory "$ sleep 3; printf 'slow-done"
+      tty.expectInHistory "slow-done"
+      # A long bash command wraps to fill the terminal width instead of being
+      # clipped at a fixed column. The full command is present in scrollback,
+      # split across rows; its tail (well past the old 64-char clip) is visible.
+      tty.expectInHistory "echo xxxxxxxxxx"
+      # The multiline command's banner: first three lines (banner_lines = 3),
+      # each continuation row at the banner indent, then the linked tail row
+      # naming the two hidden lines. The hidden lines' command text is nowhere
+      # on screen or in the raw byte stream yet.
+      tty.expectInHistory "$ echo ml-one"
+      tty.expectInHistory "echo ml-two"
+      tty.expectInHistory "echo ml-three"
+      tty.expectInHistory "+2 lines"
+      tty.expectNeverInHistory "echo ml-four"
+      tty.expectInHistory "Bash checks complete."
+      tty.expectTokenBar(["○", "↑210", "↓20"])
+      # `:cmd N` prints the whole command, elided lines included. Split
+      # send (text, echo wait, Enter): one burst right after a turn's end
+      # races the idle transition and can drop the line onto the model path.
+      tty.send ":cmd 6"
+      tty.expect ":cmd 6"
+      tty.send "\n"
+      tty.expectInHistory "echo ml-four"
+      tty.expectInHistory "echo ml-five"
+      # `:cmd N edit` hands the full command text to $VISUAL: the capture
+      # script receives the T6.cmd dump path as $1 and copies the file. The
+      # captured bytes must be the exact command, proving the external view
+      # carries the whole multiline text.
+      tty.send ":cmd 6 edit"
+      tty.expect ":cmd 6 edit"
+      tty.send "\n"
+      tty.expectInHistory "T6.cmd opened in"
+      let captured = try: readFile(root / "run" / "captured_cmd.txt")
+                     except CatchableError: ""
+      require captured == "echo ml-one\necho ml-two\necho ml-three" &
+                          "\necho ml-four\necho ml-five"
+      tty.drain(200)
+      tty.expectFinalFrameArtifact(
+        BashToolVisualTestFrames,
+        root / "bash_tool_visual_test_actual.txt")
 
   test "bash tool output does not flicker blank on commit":
     # Regression: when a streaming bash tool completed, the live viewport was

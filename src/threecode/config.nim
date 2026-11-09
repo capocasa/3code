@@ -105,6 +105,11 @@ var activeParams*: seq[ParamsRec]
   ## Every `[params]` section from the active config, in file order. Kept
   ## so `writeConfigFile` can persist them and `buildProfile` can resolve
   ## the entry matching the current (provider, model).
+var activeConfigWarnings*: seq[string]
+  ## Unknown-key notices from the last `parseConfigFile` run. Startup
+  ## callers print them once; the mid-session re-parse in `writeConfigFile`
+  ## refreshes them silently — repeating the same file's warning under the
+  ## live TUI would be noise, not news.
 var activeSearchKey*: string = ""
   ## The key for the *active* search engine, resolved at config load from
   ## the engine-specific `[search] exa-key` / `brave-key` (or the matching
@@ -346,6 +351,7 @@ const
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
                   "force_timeout", "force-timeout",
+                  "banner_lines", "banner-lines",
                   "browserfetch",
                   "tone", "mode", "bash_path", "bash-path",
                   "bash", "auto-update", "tab-title",
@@ -386,18 +392,22 @@ proc permittedKey(section, key: string): bool =
   else: false
 
 proc validateConfig*(path: string; entries: seq[RawEntry]): string =
-  ## Reject unknown sections, unknown keys, bad enum values, and empty
-  ## values. Returns the first violation as a `path:line:` message, or ""
-  ## when the config is schema-clean. The caller decides how to surface it
-  ## (`parseConfigFile` passes it to `die` with `ExitConfig`). Empty
-  ## `current`/`key`/`url`/`models` are tolerated here — those are
+  ## Reject unknown sections, bad enum values, and empty values. Returns
+  ## the first violation as a `path:line:` message, or "" when the config
+  ## is schema-clean. The caller decides how to surface it
+  ## (`parseConfigFile` passes it to `die` with `ExitConfig`). Unknown keys
+  ## are NOT violations: they are skipped here and reported as warnings by
+  ## `configWarnings`, so a config written by a newer 3code still boots.
+  ## Empty `current`/`key`/`url`/`models` are tolerated here — those are
   ## structural gaps `loadProfile` already diagnoses with its own messages;
   ## this pass is about the schema, not provider completeness.
   for ent in entries:
     if ent.section notin PermittedSections:
       return &"{path}:{ent.line}: unknown section [{ent.section}]"
     if not permittedKey(ent.section, ent.key):
-      return &"{path}:{ent.line}: unknown key '{ent.key}' in [{ent.section}]"
+      # Warned-and-ignored (see configWarnings); skipping also keeps the
+      # empty-value/value checks below off keys nothing reads anyway.
+      continue
     if ent.value.strip == "":
       # Empty key is fine for auth=oauth providers (and is also a structural
       # gap loadProfile diagnoses). Empty current/url/models likewise.
@@ -439,6 +449,13 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
         except ValueError:
           return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                  "in [settings] (expected a whole number of seconds)"
+      if ent.key in ["banner_lines", "banner-lines"]:
+        try:
+          if parseInt(ent.value.strip) < 1:
+            raise newException(ValueError, "")
+        except ValueError:
+          return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
+                 "in [settings] (expected a whole number of lines, 1 or more)"
       if ent.key in ["tone", "mode"] and
           ent.value.strip.toLowerAscii notin ColorModes:
         return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
@@ -475,6 +492,17 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           return &"{path}:{ent.line}: invalid shortcut value '{ent.value}' for '{ent.key}'"
     else: discard
   ""
+
+proc configWarnings*(path: string; entries: seq[RawEntry]): seq[string] =
+  ## Every unknown key in a known section, as `path:line:` lines. These are
+  ## warnings, not errors: each key is ignored and the rest of the config
+  ## loads. Unknown sections stay fatal (`validateConfig`). Collected per
+  ## `parseConfigFile` run into `activeConfigWarnings`; startup callers
+  ## print them once.
+  for ent in entries:
+    if ent.section in PermittedSections and
+        not permittedKey(ent.section, ent.key):
+      result.add &"{path}:{ent.line}: unknown key '{ent.key}' in [{ent.section}] (ignored)"
 
 proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) {.raises: [ValueError, IOError, OSError].} =
   ## Streaming parse so that repeated [provider] and [params] sections
@@ -667,6 +695,9 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "force_timeout", "force-timeout":
           try: forceTimeoutSetting = v.strip.parseInt
           except ValueError: discard
+        of "banner_lines", "banner-lines":
+          try: bannerLinesSetting = v.strip.parseInt
+          except ValueError: discard
         of "tone", "mode":
           # `auto` detects the background (default); `dark`/`light` force a
           # palette. `mode`/`bright` are the legacy spellings and stay
@@ -741,7 +772,11 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           else: discard
         else: discard
       of "shortcuts":
-        shortcuts[e.key] = v
+        # Unknown command names are dropped (configWarnings reports them):
+        # `applyShortcuts` merges whatever lands here into the dispatch
+        # tables, and a bogus command bound to a real key spec would
+        # shadow the genuine binding on that key.
+        if e.key in minline.ShortcutNames: shortcuts[e.key] = v
       else: discard
     of cfgError:
       raise newException(ValueError, &"{path}: {e.msg}")
@@ -750,6 +785,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   # otherwise explicitly (`verifier = off`), whatever the key order.
   if verifierModelSpec != "" and not verifierExplicit:
     verifierEnabled = true
+  activeConfigWarnings = configWarnings(path, entries)
   let verr = validateConfig(path, entries)
   if verr != "": raise newException(ValueError, verr)
   # Migration: older configs only kept one global `current`. Seed the
@@ -816,12 +852,13 @@ proc mergeForeignEdits(path: string; current: var string,
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
        savedWallWarn, savedMaxTimeout, savedForceTimeout, savedColorMode,
        savedBash, savedBashSrc, savedTabTitle, savedVerifierOn,
-       savedVerifierSpec, savedUserAgent) =
+       savedVerifierSpec, savedUserAgent, savedBannerLines) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
      sandboxWallWarn, maxTimeoutSetting, forceTimeoutSetting, colorModePref,
      bashPathOverride, bashSourcePref, tabTitleEnabled, verifierEnabled,
-     verifierModelSpec, userAgentTemplate)
+     verifierModelSpec, userAgentTemplate, bannerLinesSetting)
   let savedParams = activeParams
+  let savedWarnings = activeConfigWarnings
   let (diskCurrent, diskProviders, _, _, _, _) =
     try: parseConfigFile(path)
     except CatchableError as e:
@@ -836,6 +873,7 @@ proc mergeForeignEdits(path: string; current: var string,
   sandboxWallWarn = savedWallWarn
   maxTimeoutSetting = savedMaxTimeout
   forceTimeoutSetting = savedForceTimeout
+  bannerLinesSetting = savedBannerLines
   colorModePref = savedColorMode
   bashPathOverride = savedBash
   bashSourcePref = savedBashSrc
@@ -844,6 +882,7 @@ proc mergeForeignEdits(path: string; current: var string,
   verifierModelSpec = savedVerifierSpec
   userAgentTemplate = savedUserAgent
   activeParams = savedParams
+  activeConfigWarnings = savedWarnings
   # Same baseline-diff for the `current` line: an instance that never
   # switched in-session still holds the startup value, so a different
   # non-empty value on disk is another instance's switch and survives.
@@ -955,6 +994,9 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "verifier_model = " & quoteVal(verifierModelSpec) & "\n"
     if not verifierEnabled:
       buf.add "verifier = " & quoteVal("off") & "\n"
+  # Same bare-number shape; the default (1) keeps a clean config.
+  if bannerLinesSetting != 1:
+    buf.add "banner_lines = " & $bannerLinesSetting & "\n"
   # Persist the colour tone only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "light"
@@ -1112,6 +1154,13 @@ proc tryLoadStateOrEmpty*(path: string): tuple[current: string,
   minline.configuredShortcuts = activeShortcuts
   (current, providers, colors, "")
 
+proc printConfigWarnings*() =
+  ## Startup-only surface for `activeConfigWarnings`: one stderr line per
+  ## unknown key, prefixed to read as a warning rather than the `die`
+  ## format the real errors use.
+  for w in activeConfigWarnings:
+    stderr.writeLine("3code: warning: " & w)
+
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
   ## Returns `(current, providers, colors)` and updates `activeSearchKey` /
   ## `activeSearchEngine` / `activeSearchKeys` / `activeShortcuts` as a side
@@ -1122,6 +1171,7 @@ proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, s
   ## concurrent instances from clobbering each other's edits.
   let (current, providers, colors, err) = tryLoadStateOrEmpty(path)
   if err != "": die err, ExitConfig
+  printConfigWarnings()
   (current, providers, colors)
 
 proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
@@ -1361,6 +1411,7 @@ proc loadProfile*(wanted: string): Profile =
   let (current, providers, _, searchKeys, searchEngine, shortcuts) =
     try: parseConfigFile(path)
     except ValueError as e: die e.msg, ExitConfig
+  printConfigWarnings()
   # Single-shot runs (`3code -p ...`, subcommands) go through here instead
   # of loadStateOrEmpty; arm the same merge baseline so their writes don't
   # clobber concurrent edits either.

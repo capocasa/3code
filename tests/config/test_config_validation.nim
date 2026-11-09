@@ -3,7 +3,7 @@ discard """
   # in-process validateConfig checks run everywhere.
   disabled: "win"
 """
-import std/[os, osproc, strutils, unittest]
+import std/[os, osproc, strutils, tables, unittest]
 import threecode/config
 
 const binName = when defined(windows): "3code.exe" else: "3code"
@@ -32,25 +32,45 @@ suite "config validation: schema (in-process)":
     let m = validateConfig(P, entries)
     check m == P & ":3: unknown section [foo]"
 
-  test "unknown key in [settings] is reported":
+  test "unknown key in [settings] warns instead of erroring":
     let entries = @[("settings", "foo", "bar", 4)]
-    let m = validateConfig(P, entries)
-    check m == P & ":4: unknown key 'foo' in [settings]"
+    check validateConfig(P, entries) == ""
+    check configWarnings(P, entries) ==
+        @[P & ":4: unknown key 'foo' in [settings] (ignored)"]
 
-  test "unknown key in [search] is reported":
+  test "unknown key in [search] warns instead of erroring":
     let entries = @[("search", "foo", "bar", 4)]
-    let m = validateConfig(P, entries)
-    check m == P & ":4: unknown key 'foo' in [search]"
+    check validateConfig(P, entries) == ""
+    check configWarnings(P, entries) ==
+        @[P & ":4: unknown key 'foo' in [search] (ignored)"]
 
-  test "unknown key in [colors] is reported":
+  test "unknown key in [colors] warns instead of erroring":
     let entries = @[("colors", "hot-pink", "\\x1b[31m", 3)]
-    let m = validateConfig(P, entries)
-    check m == P & ":3: unknown key 'hot-pink' in [colors]"
+    check validateConfig(P, entries) == ""
+    check configWarnings(P, entries) ==
+        @[P & ":3: unknown key 'hot-pink' in [colors] (ignored)"]
 
-  test "unknown key in [provider] is reported":
+  test "unknown key in [provider] warns instead of erroring":
     let entries = @[("provider", "foo", "bar", 4)]
+    check validateConfig(P, entries) == ""
+    check configWarnings(P, entries) ==
+        @[P & ":4: unknown key 'foo' in [provider] (ignored)"]
+
+  test "every unknown key warns and real errors still surface":
+    let entries = @[
+      ("settings", "foo", "x", 2),
+      ("settings", "bar", "y", 3),
+      ("settings", "notify", "maybe", 4),
+    ]
+    check configWarnings(P, entries).len == 2
     let m = validateConfig(P, entries)
-    check m == P & ":4: unknown key 'foo' in [provider]"
+    check m == P & ":4: bad value 'maybe' for 'notify' " &
+          "(expected on/off/true/false/yes/no/1/0)"
+
+  test "unknown key with an empty value warns only":
+    let entries = @[("settings", "foo", "", 2)]
+    check validateConfig(P, entries) == ""
+    check configWarnings(P, entries).len == 1
 
   test "permitted [colors] -light suffix is accepted":
     let entries = @[("colors", "off-white-light", "\\x1b[38;5;238m", 3)]
@@ -143,10 +163,11 @@ suite "config validation: schema (in-process)":
     let entries = @[("settings", "auto-update", "true", 3)]
     check validateConfig(P, entries) == ""
 
-  test "auto_update is rejected as an unknown key":
+  test "auto_update warns as an unknown key":
     let entries = @[("settings", "auto_update", "true", 3)]
-    check validateConfig(P, entries) ==
-        P & ":3: unknown key 'auto_update' in [settings]"
+    check validateConfig(P, entries) == ""
+    check configWarnings(P, entries) ==
+        @[P & ":3: unknown key 'auto_update' in [settings] (ignored)"]
 
   test "sandbox_enabled is a permitted settings key":
     let entries = @[("settings", "sandbox_enabled", "off", 3)]
@@ -212,10 +233,11 @@ suite "config validation: schema (in-process)":
     let m = validateConfig(P, entries)
     check m == P & ":7: empty value for 'provider' in [params]"
 
-  test "unknown key in [params] is reported":
+  test "unknown key in [params] warns instead of erroring":
     let entries = @[("params", "top_p", "0.9", 7)]
-    let m = validateConfig(P, entries)
-    check m == P & ":7: unknown key 'top_p' in [params]"
+    check validateConfig(P, entries) == ""
+    check configWarnings(P, entries) ==
+        @[P & ":7: unknown key 'top_p' in [params] (ignored)"]
 
   test "non-numeric temperature is reported":
     let entries = @[("params", "temperature", "warm", 8)]
@@ -269,10 +291,14 @@ suite "config validation: end-to-end exit code":
     check r.exitCode == 3
     check "unknown section [foo]" in r.output
 
-  test "bad settings key exits with ExitConfig (3)":
+  test "unknown settings key warns instead of dying at load":
     let r = runWithConfig("[settings]\ncurrent = \"p.m\"\nfoo = \"bar\"\n")
+    check "warning" in r.output
+    check "unknown key 'foo' in [settings] (ignored)" in r.output
+    # Startup proceeded past the config schema: the exit-3 is the missing
+    # provider, not the unknown key.
     check r.exitCode == 3
-    check "unknown key 'foo' in [settings]" in r.output
+    check "no [provider] section" in r.output
 
   test "bad search engine exits with ExitConfig (3)":
     let r = runWithConfig("[search]\nengine = \"foo\"\n")
@@ -284,20 +310,22 @@ suite "config validation: end-to-end exit code":
     check r.exitCode == 3
     check "empty value for 'url'" in r.output
 
-  test "[shortcuts] unknown command rejected":
-    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\nfoo = \"CtrlC\"\n")
+  test "[shortcuts] unknown command warns and is dropped":
+    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\nfoo = \"CtrlC\"\ncancel = \"CtrlG\"\n")
+    check "unknown key 'foo' in [shortcuts] (ignored)" in r.output
     check r.exitCode == 3
-    check "unknown key 'foo' in [shortcuts]" in r.output
+    check "no [provider] section" in r.output
 
   test "[shortcuts] unknown key spec rejected":
     let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\ncancel = \"MetaX\"\n")
     check r.exitCode == 3
     check "invalid shortcut value" in r.output
 
-  test "[params] unknown key exits with ExitConfig (3)":
+  test "[params] unknown key warns instead of dying at load":
     let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[params]\nprovider = \"zai\"\ntop_p = \"0.9\"\n")
+    check "unknown key 'top_p' in [params] (ignored)" in r.output
     check r.exitCode == 3
-    check "unknown key 'top_p' in [params]" in r.output
+    check "no [provider] section" in r.output
 
 suite "config validation: [shortcuts] schema (in-process)":
   const P = "/tmp/cfg-shortcuts.ini"
@@ -311,11 +339,22 @@ suite "config validation: [shortcuts] schema (in-process)":
     ]
     check validateConfig(P, entries) == ""
 
-  test "shortcuts unknown command rejected":
+  test "shortcuts unknown command warns instead of erroring":
     let entries = @[("settings", "current", "p.m", 2),
                     ("shortcuts", "foo", "CtrlC", 5)]
-    let m = validateConfig(P, entries)
-    check m == P & ":5: unknown key 'foo' in [shortcuts]"
+    check validateConfig(P, entries) == ""
+    check configWarnings(P, entries) ==
+        @[P & ":5: unknown key 'foo' in [shortcuts] (ignored)"]
+
+  test "parseConfigFile drops unknown shortcut commands":
+    let tmp = getTempDir() / "3code-cfgval-drop.ini"
+    writeFile(tmp, "[shortcuts]\nfoo = \"CtrlC\"\ncancel = \"CtrlG\"\n")
+    defer: removeFile(tmp)
+    let (_, _, _, _, _, shortcuts) = parseConfigFile(tmp)
+    check not shortcuts.hasKey("foo")
+    check shortcuts["cancel"] == "CtrlG"
+    check activeConfigWarnings.len == 1
+    check "unknown key 'foo' in [shortcuts] (ignored)" in activeConfigWarnings[0]
 
   test "shortcuts invalid key spec rejected":
     let entries = @[("settings", "current", "p.m", 2),

@@ -686,7 +686,8 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
   ## streamed lines, bar-tick clock) is the same one a model-run bash
   ## call paints, and the caller's transcript commit folds it into one
   ## scrollback item afterwards.
-  var view = initStreamingView(StreamMaxLines, idx, bannerFor(act))
+  var view = initStreamingView(StreamMaxLines, idx,
+    if act.kind == akBash: cmdBannerBody(act.body, idx) else: bannerFor(act))
   let promptOwnsStdin = inputEditor != nil
 
   proc renderView() =
@@ -1585,6 +1586,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         flailDet.noteResult(name, argsStr, madeChange = code == 0, output = r)
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
+          command: if act.kind == akBash: act.body else: "",
           code: code, kind: act.kind, plan: act.plan)
         let isReceiptCap = deferredReceipt.len > 0 and i == lastCommitIdx
         if not silent:

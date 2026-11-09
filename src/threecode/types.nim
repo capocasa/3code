@@ -153,6 +153,12 @@ var forceTimeoutSetting* = 0
   ## `[settings] force_timeout` in seconds; 0 lets the model's `timeout`
   ## requests govern. When set, every bash run gets exactly this cap.
 
+var bannerLinesSetting* = 1
+  ## `[settings] banner_lines`: how many lines of a multiline bash command
+  ## the tool banner shows. 1 (the default) keeps the first line only, with
+  ## a linked `+N lines` tail when more remain; higher values show more of
+  ## the command inline.
+
 proc maxBashTimeoutSecs*(): int =
   ## The current ceiling a `timeout` request is clamped to. Precedence:
   ## `[settings] max_timeout` > `MaxBashTimeout`. Read at call time so
@@ -244,6 +250,8 @@ type
                             # High + empty content = budget starved.
   ToolRecord* = object
     banner*: string
+    command*: string  ## bash-only: the full command text (`:cmd` shows it;
+                      ## the banner carries only its preview)
     output*: string
     code*: int
     kind*: ActionKind

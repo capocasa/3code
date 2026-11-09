@@ -86,6 +86,8 @@ names, model names, and paths where supported.
 | `:private allow X [M]` | trust provider X, optionally one model, with private data |
 | `:prompt` | show the active system prompt (compiled-in, or the [file override](manual.html#system-prompt-override) if one matched) |
 | `:show [N]` | show the full output of tool call N (default: last) |
+| `:cmd [N]` | show the full command of bash tool call N (default: last), the multiline text the banner previews |
+| `:cmd N edit` | open that command in $VISUAL/$EDITOR (`vi`/`notepad` fallback) |
 | `:log` | list all tool calls this session |
 | `:sessions` | list recent sessions saved in this directory (max 20) |
 | `:session` | show this session's ID (for `--resume=ID`) |
@@ -157,8 +159,9 @@ providers or models change, same as the default. Annotated example:
 Values are Nim string literals, always wrapped in double quotes. parsecfg
 treats `:`, `=`, and `#` as syntax in unquoted values, so an unquoted URL or
 API key can silently truncate. `;` and `#` start comments. An unknown
-section or key is a startup error with a `file:line:` pointer, so a typo
-cannot quietly disable a setting.
+section is a startup error with a `file:line:` pointer, so a typo cannot
+quietly disable a setting. An unknown key prints a `file:line:` warning at
+startup and is ignored, so a config written by a newer 3code still boots.
 
 A minimal config:
 
@@ -190,6 +193,7 @@ Keys under `[settings]`:
 | `bash` | `auto` or full path (default auto) | any OS: a full path overrides all detection; `auto` keeps the normal order |
 | `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted |
 | `force_timeout` | seconds | every bash run gets exactly this cap, regardless of what the model requested (or omitted); `force-timeout` spelling accepted. When set it wins over both the model's `timeout` and `max_timeout`, and is the setting for slow boxes and models that never ask for enough |
+| `banner_lines` | lines (default 1) | how many lines of a multiline bash command the `$` banner shows; the rest collapses into a linked `… +N lines · T<idx>.cmd ↗` tail row. `:cmd N` prints the whole command, `:cmd N edit` opens it in $VISUAL/$EDITOR; `banner-lines` spelling accepted |
 | `browserfetch` | `on`/`off` (default off) | when a plain `web_fetch` returns a JS shell (almost no text survives tag stripping), redo the fetch in a shared headless Chrome (one browser per machine on 127.0.0.1:9223, one tab per fetch) and return the rendered text |
 | `auto-update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit |
 | `verifier_model` | `PROVIDER.MODEL` | the model goal mode's satisfaction check runs on (see [verifier models](manual.html#verifier-models)); a decision model answers typed questions in one request. Not set = the session model checks (the default) |
