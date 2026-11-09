@@ -1480,6 +1480,174 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     if runCode != 0:
       checkpoint runOut
 
+  test "provider stub keeps the turn going when a safe command ran inline during a tool":
+    # A safe command (`:tokens`, `:help`, ...) submitted mid-turn runs inline
+    # via activeCommandHook the moment Enter is pressed; the ieCommand event
+    # stays in the queue as an un-echoed tombstone the drain skips. The turn
+    # loop must not read that tombstone as queued work: hasQueuedAutosend()
+    # used to count any ieCommand, so the turn ended right after the tool
+    # exec — back at the prompt, silently, the model never seeing the tool
+    # result (regression against 0.8.0, which only counted ieLine).
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_autosend_cmd_tombstone_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": null,
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "arguments": "{\"command\":\"touch started; sleep 0.3; echo tooldone\"}"
+    }
+  }]
+},{
+  "role": "assistant",
+  "content": "SECOND_REPLY"
+}]""")
+    writeFile(probePath, """
+import std/[json, locks, os, strutils, times]
+import threecode
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "first"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "stub", family: "glm", model: "stub-model")
+
+proc pushRanInlineCommand() {.thread, gcsafe.} =
+  # Signal, not sleep (see the tool-window test above). Bounded so a
+  # missing marker fails the assertions instead of hanging the probe.
+  let deadline = epochTime() + 30.0
+  while not fileExists("started") and epochTime() < deadline:
+    sleep 1
+  sleep 50  # land inside the tool window, past the marker
+  {.cast(gcsafe).}:
+    # Exactly what onSubmit leaves behind once activeCommandHook has run
+    # a safe command inline: an ieCommand with echoed=false (no queue-time
+    # hourglass echo, nothing for the drain to do).
+    pushInputEvent(InputEvent(kind: ieCommand, text: ":tokens"))
+
+var t: Thread[void]
+createThread(t, pushRanInlineCommand)
+discard runTurns(profile, messages, session)
+joinThread(t)
+
+# The tombstone is still queued (the drain will skip it), and the turn ran
+# to completion: tool result paired, follow-up model call made, final
+# reply appended. Nothing was dropped early.
+doAssert hasQueuedAutosend() == false
+let ev = pollInputEvent()
+doAssert ev.kind == ieCommand and ev.text == ":tokens" and not ev.echoed
+doAssert messages.len == 5
+doAssert messages[2]{"role"}.getStr == "assistant"
+doAssert messages[3]{"role"}.getStr == "tool"
+doAssert "tooldone" in messages[3]{"content"}.getStr
+doAssert messages[4]{"role"}.getStr == "assistant"
+doAssert messages[4]{"content"}.getStr == "SECOND_REPLY"
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " & nimbleDepFlags() & " --nimcache:" &
+      cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
+      probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+
+  test "provider stub still yields before next call for a deferred mid-turn command":
+    # The counterpart: a MUTATING command typed mid-turn is deferred (echoed
+    # ieCommand, hourglass item pinned, drain runs it after the turn). The
+    # turn loop must still stop before the model-initiated follow-up call so
+    # the command runs at the boundary — the tombstone fix must not have
+    # swallowed the legitimate yield.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_autosend_cmd_deferred_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": null,
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "arguments": "{\"command\":\"touch started; sleep 0.3; echo tooldone\"}"
+    }
+  }]
+},{
+  "role": "assistant",
+  "content": "SHOULD_NOT_BE_CALLED"
+}]""")
+    writeFile(probePath, """
+import std/[json, locks, os, strutils, times]
+import threecode
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "first"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "stub", family: "glm", model: "stub-model")
+
+proc pushDeferredCommand() {.thread, gcsafe.} =
+  let deadline = epochTime() + 30.0
+  while not fileExists("started") and epochTime() < deadline:
+    sleep 1
+  sleep 50
+  {.cast(gcsafe).}:
+    # A deferred command as commitQueuedEcho leaves it: echoed=true, the
+    # drain's to-do.
+    pushInputEvent(InputEvent(kind: ieCommand, text: ":streaming off",
+                              echoed: true))
+
+var t: Thread[void]
+createThread(t, pushDeferredCommand)
+discard runTurns(profile, messages, session)
+joinThread(t)
+
+doAssert hasQueuedAutosend()
+doAssert messages.len == 4
+doAssert messages[2]{"role"}.getStr == "assistant"
+doAssert messages[3]{"role"}.getStr == "tool"
+doAssert "tooldone" in messages[3]{"content"}.getStr
+doAssert "SHOULD_NOT_BE_CALLED" notin $messages
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " & nimbleDepFlags() & " --nimcache:" &
+      cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
+      probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+
   test "provider stub covers common network failure aliases":
     let pid = $getCurrentProcessId()
     let probePath = getTempDir() / ("tc_stub_failures_" & pid & ".nim")
