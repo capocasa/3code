@@ -2,6 +2,15 @@ Changelog
 
 Unreleased
 
+- **`:show N` follows a running tool call live.** While a bash call
+  streams, `:show N` (or `:show` bare, or a click on the capped
+  viewport) flushes the held lines into scrollback and every new line
+  lands as it arrives; `:unshow` (or another click) returns to the
+  capped viewport, and the fold pins only the banner plus the dump
+  link instead of re-committing the body. A click during a call's
+  quiet stall toggles the same follow, so no command is needed. The
+  manual and `:help` document the live form of `:show` next to the
+  existing `:cmd` view.
 - **`max_timeout` raises the default too, and prompts quote the live
   numbers.** One config line now covers long builds from both ends:
   `max_timeout = 1800` raises the 600s ceiling (what a model-requested
