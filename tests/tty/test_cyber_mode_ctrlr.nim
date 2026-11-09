@@ -95,11 +95,11 @@ suite "cyber mode surfaces (interactive)":
     tty.expectInHistory "cybernetic armed (cybernetic.md, 1 task, 0 done), starting now"
     tty.expectInHistory "cybernetic.md detected implementing"
     tty.expectInHistory "PLAN_WORK_DONE"
-    # Turn end: the completed hint, then the verifier's green ✓ item,
-    # the retirement hint, and the plan retires on disk.
-    tty.expectInHistory "cybernetic.md completed verifying"
+    # Turn end: the verifier's green ✓ item is the whole display, and
+    # the plan retires on disk.
     tty.expectInHistory "\u2713"
-    tty.expectInHistory "cybernetic.md verification successful"
+    tty.expectNeverInHistory "verifying"
+    tty.expectNeverInHistory "verification"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
@@ -137,8 +137,8 @@ suite "cyber mode surfaces (interactive)":
     tty.expectInHistory "cybernetic.md detected implementing"
     tty.expectInHistory "PLAN_WORK_DONE"
     # The kickoff turn's end runs the check and retires the plan.
-    tty.expectInHistory "cybernetic.md completed verifying"
     tty.expectInHistory "\u2713"
+    tty.expectNeverInHistory "verifying"
     tty.drain(300)
     check fileExists(root / "run" / "cybernetic-confirmed.md")
     check not fileExists(root / "run" / "cybernetic.md")
@@ -307,8 +307,9 @@ suite "cyber mode direction machinery (interactive)":
     tty.expectInHistory "cybernetic.md detected implementing"
     tty.expectInHistory "real work"
     # Turn end: FEEDBACK from the verifier AND the discipline note, one
-    # continuation carrying both.
-    tty.expectInHistory "cybernetic.md verification failed"
+    # continuation carrying both; the verdict speaks as the ✗ icon row
+    # alone.
+    tty.expectInHistory "\u2717"
     tty.expectInHistory "check the box"
     tty.expectInHistory "cybernetic.md is unchanged"
     # The model updates the plan; the next check has no note to add and

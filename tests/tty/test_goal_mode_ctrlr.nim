@@ -13,9 +13,11 @@ discard """
 ##   moment it exists. `:goal TEXT` answers with the arm receipt, prints
 ##   the dim `goal.md detected implementing` hint, and runs the kickoff
 ##   turn at once; a goal.md already on disk at startup does the same
-##   before any prompt. Each turn end prints `goal.md completed
-##   verifying`, runs the verifier, and retires to achieved.md with
-##   `goal.md verification successful`.
+##   before any prompt. Each turn end runs the verifier whose reply is
+##   the whole display - a quote block led by the green `✓` or red `✗`
+##   icon, no notice before or after it. An unmet verdict sends the
+##   agent back in under the `⚑` marker and the next turn starts on
+##   its own; a satisfied one retires goal.md to achieved.md.
 import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
@@ -51,6 +53,19 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
     (key: "THREECODE_STUB_STREAM", val: "1"),
   ]
+
+proc reply(content: string; delayMs = 50): JsonNode =
+  %*{"role": "assistant", "preStreamDelayMs": delayMs,
+     "content": content, "contentChunks": [content],
+     "usage": {"promptTokens": 5, "completionTokens": 2,
+                "totalTokens": 7, "cachedTokens": 0}}
+
+proc toolReply(name, argsJson: string; content = ""): JsonNode =
+  %*{"role": "assistant", "preStreamDelayMs": 50, "content": content,
+     "tool_calls": [{"id": "c" & $epochTime(), "type": "function",
+       "function": {"name": name, "arguments": argsJson}}],
+     "usage": {"promptTokens": 5, "completionTokens": 2,
+                "totalTokens": 7, "cachedTokens": 0}}
 
 suite ":retry and goal mode (interactive)":
   test ":retry during a 429 backoff retries immediately":
@@ -141,15 +156,16 @@ suite ":retry and goal mode (interactive)":
     # streams anyway.
     tty.expectInHistory "goal armed (goal.md), starting now"
     tty.expectInHistory "goal.md detected implementing"
+    tty.expectInHistory "⚑ Goal armed: goal.md"
     tty.expectInHistory "GOAL_WORK_DONE"
-    # Turn end: the completed hint, then the verifier's reply renders as
-    # a dim quote block led by the green ✓ icon (verdict line stripped),
-    # the retirement hint, and the achieved record on disk.
-    tty.expectInHistory "goal.md completed verifying"
+    # Turn end: the verifier's reply renders as a dim quote block led by
+    # the green ✓ icon (verdict line stripped) - the whole display, with
+    # no notice around it - and the retirement lands on disk.
     tty.expectInHistory "all done"
     tty.expectNeverInHistory "VERDICT"
     tty.expectInHistory "\u2713"
-    tty.expectInHistory "goal.md verification successful"
+    tty.expectNeverInHistory "verifying"
+    tty.expectNeverInHistory "verification"
     tty.drain(300)
     check fileExists(root / "run" / "achieved.md")
     check not fileExists(root / "run" / "goal.md")
@@ -195,13 +211,15 @@ suite ":retry and goal mode (interactive)":
     # Nothing is typed: the detection hint fires and the kickoff turn
     # runs on its own, before any prompt.
     tty.expectInHistory "goal.md detected implementing"
+    tty.expectInHistory "⚑ Goal armed: goal.md"
     tty.expectInHistory "GOAL_WORK_DONE"
     check fileExists(root / "run" / "goal.md")
-    # The kickoff turn's end runs the check - completed hint, verifier,
-    # and the retirement to achieved.md all hang off that boundary.
-    tty.expectInHistory "goal.md completed verifying"
+    # The kickoff turn's end runs the check - the verifier's ✓ icon row
+    # is the whole display, and the retirement to achieved.md hangs off
+    # that boundary.
     tty.expectInHistory "\u2713"
-    tty.expectInHistory "goal.md verification successful"
+    tty.expectNeverInHistory "verifying"
+    tty.expectNeverInHistory "verification"
     tty.drain(300)
     check fileExists(root / "run" / "achieved.md")
     check not fileExists(root / "run" / "goal.md")
@@ -319,18 +337,50 @@ suite ":retry and goal mode (interactive)":
     check not fileExists(root / "run" / "achieved.md")
     tty.expectAlive()
 
-proc reply(content: string; delayMs = 50): JsonNode =
-  %*{"role": "assistant", "preStreamDelayMs": delayMs,
-     "content": content, "contentChunks": [content],
-     "usage": {"promptTokens": 5, "completionTokens": 2,
-                "totalTokens": 7, "cachedTokens": 0}}
+  test "unmet verdict shows the evaluation, then just continues":
+    let root = newFixture("goal_feedback_continue")
+    writeConfiguredProvider(root)
+    writeFile(root / "run" / "goal.md", "make the stub do two turns\n")
+    # Response 1: the kickoff turn's reply. Response 2: an unmet verdict.
+    # Response 3: the continuation turn's reply, which must start on its
+    # own - no prompt is sent at any point. Response 4: the satisfied
+    # verdict that retires the mode.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("WORK_TURN_ONE"),
+      reply("tests were not run\nVERDICT: FEEDBACK: run the tests"),
+      reply("WORK_TURN_TWO"),
+      reply("all good\nVERDICT: SATISFIED"),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
 
-proc toolReply(name, argsJson: string; content = ""): JsonNode =
-  %*{"role": "assistant", "preStreamDelayMs": 50, "content": content,
-     "tool_calls": [{"id": "c" & $epochTime(), "type": "function",
-       "function": {"name": name, "arguments": argsJson}}],
-     "usage": {"promptTokens": 5, "completionTokens": 2,
-                "totalTokens": 7, "cachedTokens": 0}}
+    tty.expect "\u276f"
+    tty.expectInHistory "⚑ Goal armed: goal.md"
+    tty.expectInHistory "WORK_TURN_ONE"
+    # The unmet evaluation: the red ✗ quote row is the whole display.
+    # The feedback rides the ⚑ continuation item and the next turn
+    # starts by itself - no verdict notice, no continuing receipt.
+    tty.expectInHistory "tests were not run"
+    tty.expectInHistory "\u2717"
+    tty.expectNeverInHistory "VERDICT"
+    tty.expectNeverInHistory "verifying"
+    tty.expectNeverInHistory "verification"
+    tty.expectNeverInHistory "auto: goal check"
+    tty.expectInHistory "⚑ run the tests"
+    tty.expectInHistory "WORK_TURN_TWO"
+    tty.expectNeverInHistory "\u276f run"   # nothing ever echoed a prompt
+    # The continuation turn's satisfied check retires the goal.
+    tty.expectInHistory "\u2713"
+    tty.drain(300)
+    check fileExists(root / "run" / "achieved.md")
+    check not fileExists(root / "run" / "goal.md")
+    tty.expectAlive()
 
 suite "goal mode mid-turn detection (interactive)":
   test "goal.md written during a turn kicks off at the turn's end":
@@ -366,16 +416,16 @@ suite "goal mode mid-turn detection (interactive)":
     tty.expect "go"
     tty.send "\n"
     # The turn writes the file and finishes; no verifier judges that
-    # turn - the detection hint and the kickoff's `»` continuation item
+    # turn - the detection hint and the kickoff's `⚑` continuation item
     # land instead, and the kickoff turn runs without any prompt.
     tty.expectInHistory "GOAL_WRITTEN"
     tty.expectInHistory "goal.md detected implementing"
-    tty.expectInHistory "Goal armed: goal.md"
+    tty.expectInHistory "⚑ Goal armed: goal.md"
     tty.expectInHistory "GOAL_WORK_DONE"
     # The kickoff turn's end is the first check.
-    tty.expectInHistory "goal.md completed verifying"
     tty.expectInHistory "\u2713"
-    tty.expectInHistory "goal.md verification successful"
+    tty.expectNeverInHistory "verifying"
+    tty.expectNeverInHistory "verification"
     tty.drain(300)
     check fileExists(root / "run" / "achieved.md")
     check not fileExists(root / "run" / "goal.md")

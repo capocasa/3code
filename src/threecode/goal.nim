@@ -141,9 +141,10 @@ proc stripVerdictLine*(text: string): string =
 
 proc goalFeedbackMessage*(feedback: string): JsonNode =
   ## The harness-autosent continuation. Marked `agentSent` exactly like
-  ## flail escalations, so replay renders it as a `»` item, no provider
-  ## ever sees the marker, and nothing mistakes it for user input.
-  %*{"role": "user", "agentSent": true,
+  ## flail escalations plus `goalSent`, so replay renders it as a `⚑`
+  ## item, no provider ever sees either marker, and nothing mistakes it
+  ## for user input.
+  %*{"role": "user", "agentSent": true, "goalSent": true,
      "content": "Goal check: the goal in " & GoalFileName & " is not yet " &
        "satisfied. Verifier feedback:\n\n" & feedback &
        "\n\nAddress it and keep working toward the goal; the " &
@@ -152,10 +153,10 @@ proc goalFeedbackMessage*(feedback: string): JsonNode =
 proc goalKickoffMessage*(goalText: string): JsonNode =
   ## The harness-autosent prompt that starts goal achievement the
   ## moment the mode is armed or detected, instead of waiting for the
-  ## user's next prompt. Same `agentSent` marking as the feedback
-  ## continuation, so replay renders it as a `»` item and no provider
-  ## ever sees the marker.
-  %*{"role": "user", "agentSent": true,
+  ## user's next prompt. Same `agentSent` + `goalSent` marking as the
+  ## feedback continuation, so replay renders it as a `⚑` item and no
+  ## provider ever sees the markers.
+  %*{"role": "user", "agentSent": true, "goalSent": true,
      "content": "Goal armed: " & GoalFileName & " in this repository now " &
        "states the session's goal:\n\n" & goalText.strip &
        "\n\nStart working toward it now. A satisfaction check runs when " &
@@ -608,9 +609,9 @@ proc modeConflictLabel*(m, other: ModeDesc): string =
 proc modeHintLine*(m: ModeDesc; state: string): string =
   ## The mode's lifecycle hint: one line in error-message shape but dim
   ## white - state changing, not attention owed - naming the trigger
-  ## file and the state, e.g. `goal.md detected implementing`. Every
-  ## detection, kickoff, and verdict moment speaks through here so the
-  ## hints cannot drift apart across the three hook sites.
+  ## file and the state, e.g. `goal.md detected implementing`. Detection
+  ## speaks through here; verdict moments speak as the verifier step's
+  ## icon row, so no hint may grow around the check.
   GreyFg & m.fileName & " " & state & Reset & "\r\n"
 
 # The goal-mode entry points: the registry walk for entry #1.

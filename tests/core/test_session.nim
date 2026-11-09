@@ -339,15 +339,19 @@ suite "session: renderSession → loadSessionFile round-trip":
       {"role": "tool", "tool_call_id": "call_9",
        "content": "Loop detected.", "agentSent": true},
       {"role": "user", "content": "Please provide your final answer now.",
-       "agentSent": true}
+       "agentSent": true},
+      {"role": "user", "content": "Goal check: keep going.",
+       "agentSent": true, "goalSent": true}
     ]
     let (_, lm) = roundTrip(sess, msgs)
-    check lm.len == 5
+    check lm.len == 6
     check not lm[1].hasKey("agentSent")          # plain user stays plain
     check lm[3]{"agentSent"}.getBool(false)       # flail note keeps the mark
     check lm[3]["content"].getStr == "Loop detected."
     check lm[4]{"agentSent"}.getBool(false)       # steer keeps the mark
     check lm[4]["role"].getStr == "user"          # wire role unchanged
+    check lm[5]{"agentSent"}.getBool(false)       # goal autosend keeps both
+    check lm[5]{"goalSent"}.getBool(false)        # marks (replays as `⚑`)
 
   test "round-trips flailNote and strips it from the rebuilt toolLog":
     # A flail-noted call executed: the wire content carries the note on

@@ -55,9 +55,22 @@ proc userPromptItem*(line: string): TranscriptItem =
   TranscriptItem(kind: tiUserPrompt, marker: "❯", body: line,
                  attachSeparator: false)
 
-proc agentPromptItem*(line: string): TranscriptItem =
-  TranscriptItem(kind: tiAgentPrompt, marker: "»", body: line,
+const
+  AgentPromptMarker* = "»"   ## the default harness-autosend marker
+  GoalPromptMarker* = "⚑"    ## goal-mode autosends: the flag leads
+
+proc agentPromptItem*(line: string; marker = AgentPromptMarker): TranscriptItem =
+  TranscriptItem(kind: tiAgentPrompt, marker: marker, body: line,
                  attachSeparator: false)
+
+proc agentPromptMarker*(m: JsonNode): string =
+  ## The marker a harness-autosent message replays under: `⚑` when the
+  ## message carries the goal-mode mark, `»` for every other autosend
+  ## (steers, flail notes, cybernetic continuations).
+  if m != nil and m.kind == JObject and m{"goalSent"}.getBool(false):
+    GoalPromptMarker
+  else:
+    AgentPromptMarker
 
 proc assistantItem*(content: string): TranscriptItem =
   TranscriptItem(kind: tiAssistant, marker: "●", body: content,
@@ -205,10 +218,12 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         continue
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
-      # A harness-autosent continuation renders as the `»` agent-prompt
-      # item the live path committed, never as a user `❯` echo.
+      # A harness-autosent continuation renders as the agent-prompt
+      # item the live path committed (`⚑` for goal autosends, `»`
+      # otherwise), never as a user `❯` echo.
       let item =
-        if m{"agentSent"}.getBool(false): agentPromptItem(c)
+        if m{"agentSent"}.getBool(false):
+          agentPromptItem(c, agentPromptMarker(m))
         else: userPromptItem(c)
       # No length truncation: the live path echoes the full submitted line
       # (wrapped at terminal width by `formatUserPromptItem`), so the replay
@@ -441,7 +456,8 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
       let item =
-        if m{"agentSent"}.getBool(false): agentPromptItem(c)
+        if m{"agentSent"}.getBool(false):
+          agentPromptItem(c, agentPromptMarker(m))
         else: userPromptItem(c)
       emit anchor, formatItem(item)
     of "assistant":

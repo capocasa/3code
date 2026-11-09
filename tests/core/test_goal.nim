@@ -93,36 +93,39 @@ suite "goal mode":
     let msg = goalFeedbackMessage("write the tests")
     check msg{"role"}.getStr == "user"
     check msg{"agentSent"}.getBool(false)
+    check msg{"goalSent"}.getBool(false)
     check "write the tests" in msg{"content"}.getStr
-    # The marker never reaches a provider (same strip as flail notes).
+    # The markers never reach a provider (same strip as flail notes).
     let wire = stripInternalFields(%*[msg])
     check "agentSent" notin $wire
-    # The persisted session renders it `user +agent`, so replay shows a `»`
-    # item instead of a user echo.
+    check "goalSent" notin $wire
+    # The persisted session renders it `user +agent +goal`, so replay
+    # shows a `⚑` item instead of a user echo.
     var session: Session
-    check "user +agent" in renderSession(session, %*[msg])
+    check "user +agent +goal" in renderSession(session, %*[msg])
 
   test "kickoff continuation is marked harness-autosent":
     let msg = goalKickoffMessage("ship the feature")
     check msg{"role"}.getStr == "user"
     check msg{"agentSent"}.getBool(false)
+    check msg{"goalSent"}.getBool(false)
     let content = msg{"content"}.getStr
     check "ship the feature" in content
     check "Start working toward it now" in content
-    # The marker never reaches a provider (same strip as flail notes).
+    # The markers never reach a provider (same strip as flail notes).
     let wire = stripInternalFields(%*[msg])
     check "agentSent" notin $wire
+    check "goalSent" notin $wire
     var session: Session
-    check "user +agent" in renderSession(session, %*[msg])
+    check "user +agent +goal" in renderSession(session, %*[msg])
 
   test "mode hints are dim-white single lines naming the file":
     # Error-message shape, but GreyFg instead of magenta: state
-    # changing, not attention owed. Every lifecycle moment speaks
-    # through modeHintLine so the wording cannot drift.
-    for state in ["detected implementing", "completed verifying",
-                  "verification failed", "verification successful"]:
-      let hint = modeHintLine(goalMode, state)
-      check hint == GreyFg & GoalFileName & " " & state & Reset & "\r\n"
+    # changing, not attention owed. Detection is the only lifecycle
+    # moment that still speaks through a hint; the check itself speaks
+    # as the verifier step's icon row.
+    let hint = modeHintLine(goalMode, "detected implementing")
+    check hint == GreyFg & GoalFileName & " detected implementing" & Reset & "\r\n"
 
   test "evidence builder: last turn's tool calls, no model prose":
     let msgs = %*[
