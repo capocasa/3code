@@ -245,3 +245,38 @@ suite "library: AgentSession":
         discard initAgentSession(AgentOptions(cwd: root / "run",
                                               model: "stub.nonexistent",
                                               experimental: true))
+
+    test "empty prompt continues the turn without adding a user message":
+      let root = newFixture("emptycontinue")
+      writeConfig(root)
+      isolateEnv(root)
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "first reply"},
+        {"content": "continued reply"}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      proc userRoles(): int =
+        for m in s.messages:
+          if m{"role"}.getStr == "user": inc result
+      check s.prompt("go") == "first reply"
+      let before = s.messages.len
+      check userRoles() == 1
+      # The empty prompt is a continue: a turn runs on the messages as
+      # they stand, only the model's reply is appended.
+      check s.prompt("") == "continued reply"
+      check s.messages.len == before + 1
+      check userRoles() == 1
+      s.close()
+
+      # Nothing to continue yet: an empty prompt on a fresh session is an
+      # error, not a turn on a system-only conversation. Same fixture (the
+      # lock dir nests per isolateEnv call; a second root would deepen it).
+      createDir(root / "fresh")
+      let s2 = initAgentSession(AgentOptions(cwd: root / "fresh",
+                                             experimental: true))
+      expect AgentError:
+        discard s2.prompt("")
+      s2.close()

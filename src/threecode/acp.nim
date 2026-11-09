@@ -11,7 +11,8 @@
 ## * `session/prompt` -> `AgentSession.prompt` on a worker thread, streaming
 ##   `session/update` notifications (message chunks, thought chunks, tool
 ##   activity as completed tool cards, usage when the context window is
-##   known); the response carries `end_turn` or `cancelled`
+##   known); the response carries `end_turn` or `cancelled`. An empty
+##   prompt is a continue: the turn runs on the messages as they stand
 ## * `session/cancel` -> `AgentSession.interrupt`
 ##
 ## Not supported and not advertised: MCP servers (accepted and ignored),
@@ -234,10 +235,10 @@ proc handlePrompt(fe: AcpFrontend; id: JsonNode; params: JsonNode) =
   var nonEmpty: seq[string]
   for part in parts:
     if part.len > 0: nonEmpty.add part
+  # An empty prompt (empty array, or nothing but blank text blocks)
+  # is a legal "continue the turn": no user message appended, the next
+  # turn runs on the messages as they stand. Mostly sent after a cancel.
   let text = nonEmpty.join("\n\n").strip
-  if text.len == 0:
-    fe.respondErr(id, JrInvalidParams, "empty prompt")
-    return
   if fe.busy.exchange(true):
     fe.respondErr(id, JrAppError, "a prompt turn is already in progress")
     return
