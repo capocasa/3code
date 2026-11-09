@@ -2,6 +2,21 @@ Changelog
 
 Unreleased
 
+- **A system command run during a turn no longer ends the turn: the
+  model is sent back in once the command has run.** A `:command`
+  typed while the model was mid-loop in a tool batch (an `:!` shell
+  escape, a mutating command) used to halt the turn at the next tool
+  boundary, the drain ran the command, and nothing ever resumed the
+  turn - the conversation sat on tool results the model never saw
+  until the next prompt. The mid-loop yield is now flagged, and after
+  the drain has run everything the queue held, the model gets its
+  follow-up call and finishes the turn (a queued prompt still runs its
+  own turn, an interrupt still stops for good, and a command that
+  rewrites the conversation, like `:clear`, opts out by leaving a
+  non-tool tail). Safe commands (`:tokens`, `:help`, ...) that run
+  inline on the input thread the moment they are submitted no longer
+  stop the turn at all: their queue entry waits for nothing, so
+  `hasQueuedAutosend` no longer counts it.
 - **Sandboxed ssh works as the user expects: aliases, keys, and
   known_hosts all found, every connection still allowlisted.** The
   fence runs the child as uid 65534, whose passwd home is `/`, so ssh's
