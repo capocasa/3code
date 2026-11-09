@@ -83,6 +83,7 @@
 <li><a href="#the-empty-response-handler">The empty response handler</a></li>
 </ul>
 </li>
+<li><a href="#bash-timeouts">Bash timeouts</a></li>
 <li><a href="#private-mode">Private mode</a><ul>
 <li><a href="#picking-a-private-provider">Picking a private provider</a></li>
 <li><a href="#walkthrough">Walkthrough</a></li>
@@ -416,6 +417,13 @@ edit-in-editor = AltE CtrlX&gt;CtrlE</pre></p>
 
 <h3 id="the-empty-response-handler">The empty response handler</h3><p>Some providers occasionally return a reply with no content and no tool calls: the model spent its budget thinking, or the gateway clipped the response. 3code refuses to accept that as an answer. Depending on what the response signaled, it either raises the output budget (the reply was cut off by <tt class="docutils literal"><span class="pre">length</span></tt>) or sends a short steering note demanding a real answer, then retries. Bare empties are retried up to twelve times with increasing backoff, and each attempt is visible as a grey or <tt class="docutils literal"><span class="pre">»</span></tt> scrollback row saying why and when the next attempt fires. If the provider stays empty, the turn ends with a notice instead of a silent nothing, and the scrollback shows exactly what was tried.</p>
 
+<h2 id="bash-timeouts">Bash timeouts</h2><p>Every bash tool call runs under a cap: 120 seconds unless the model passes <tt class="docutils literal"><span class="pre">timeout</span></tt>, clamped to a 600 second ceiling. A model that knows a compile runs long can ask for more; a model that does not gets killed at the cap, reads <tt class="docutils literal"><span class="pre">killed at the 120s default cap. Not a system limit: pass timeout=600 ... and rerun</span></tt>, and retries with a bigger timeout. Weak models used to miss the hint and just flail.</p>
+<p>One setting in the config file makes that whole dance unnecessary on a box where long builds are legitimate:</p>
+<p><pre class="listing">[settings]
+max_timeout = 1800</pre></p>
+<p>That raises the ceiling <em>and</em> the default: every bash run is eligible for the full 1800 seconds whether or not the model asks for more time, and the model is told the real numbers (the tool description and the kill message both quote the configured values). A big Rust compile on a small VPS survives with no model cooperation at all.</p>
+<p><tt class="docutils literal"><span class="pre">force_timeout = N</span></tt> still exists for the blunt case (every run gets exactly N seconds, model requests ignored), but with <tt class="docutils literal"><span class="pre">max_timeout</span></tt> raising the default too it is rarely the answer anymore. Both are documented in <a class="reference external" href="reference.html#settings">settings in the reference</a>.</p>
+
 <h2 id="private-mode">Private mode</h2><p>Private mode is incognito mode for the agent: off by default, on for one session only, never persisted. While it is on, turns only run on providers you have marked as trusted with your data, and the live token bar repaints in the private color (magenta by default) so the mode is always visible. Scrollback receipts keep the normal color, so old receipts also show which turns ran private.</p>
 <p>Turn it on either way:</p>
 <p><pre class="listing">3code -p            # from the start
@@ -523,6 +531,9 @@ brave-key = &quot;...&quot;</pre></p>
 <p><tt class="docutils literal"><span class="pre">:summarize</span></tt> replaces older turns with a generated recap. It is useful when the task must continue but the context has become expensive:</p>
 <p><pre class="listing">:summarize</pre></p>
 <p>If the old work is no longer relevant, clear it. A fresh context is safer than a summary of things the model no longer needs.</p>
+<p><tt class="docutils literal"><span class="pre">:btw</span></tt> asks the model a side question about the conversation — &quot;what did that error mean?&quot;, &quot;why did we pick the parser rewrite?&quot; — without touching the context:</p>
+<p><pre class="listing">:btw why did we skip the cache in that last change?</pre></p>
+<p>The question and its answer are printed to your terminal only. Neither becomes a message: the next turn the model sees is exactly the conversation you had before asking, so a <tt class="docutils literal"><span class="pre">:btw</span></tt> costs no context window (only the one meta-call it took to answer).</p>
 
 <h2 id="chunked-mode">Chunked mode</h2><p>For a large mechanical task, ask the model to split the work into files. Each chunk ends by calling the <tt class="docutils literal"><span class="pre">clear</span></tt> tool with instructions for the next one. The model carries the plan forward and leaves the spent context behind.</p>
 <p>Example:</p>
@@ -561,9 +572,10 @@ Task: add test coverage to the parser module.</pre></p>
 
 <h2 id="sandbox">Sandbox</h2><p>The model is useful, but it does not need the run of your entire computer. 3code applies a filesystem policy to every tool call. Bash commands also enter an OS sandbox, and host rules can fence their network access.</p>
 <p>The sandbox is questionless: it never interrupts the turn to ask whether a command may run. That is a deliberate trade. An agent that asks is an agent that costs a round trip and a context refresh every time it touches a new directory, which in practice means either an agent that nags or an agent whose guardrails get switched off. Instead the boundary is enforced by the kernel (Landlock, Seatbelt, Windows restricted tokens), decided by a policy you wrote before the turn started, and a denial is simply a failed command the model can read and route around. The tradeoff is that the policy needs setting up first: a couple of minutes once per project, and after that it does not stop on trivialities.</p>
-<p>The one exception is the <tt class="docutils literal"><span class="pre">ask</span></tt> verb. An <tt class="docutils literal"><span class="pre">ask</span></tt> rule denies exactly like <tt class="docutils literal"><span class="pre">deny</span></tt>, but when a sandboxed bash command is blocked on an ask-protected path, 3code puts one question in the tool output view:</p>
+<p>The one exception is the <tt class="docutils literal"><span class="pre">ask</span></tt> verb. An <tt class="docutils literal"><span class="pre">ask</span></tt> rule denies exactly like <tt class="docutils literal"><span class="pre">deny</span></tt>, but when a sandboxed bash command fails on an ask-protected path, or a <tt class="docutils literal"><span class="pre">read</span></tt>/<tt class="docutils literal"><span class="pre">write</span></tt>/<tt class="docutils literal"><span class="pre">patch</span></tt>/<tt class="docutils literal"><span class="pre">apply_patch</span></tt> call targets one, 3code puts one question on screen:</p>
 <pre>sandbox ask: ~/vault/notes/x.md is ask-protected.  [f] ~/vault  [d] ~  [n]o  (60s)</pre>
-<p>One key answers it: <tt class="docutils literal"><span class="pre">f</span></tt> allows the ask-protected path (the <tt class="docutils literal"><span class="pre">ask</span></tt> rule's own target), <tt class="docutils literal"><span class="pre">d</span></tt> the directory around it (the grant is written into the active policy file, so it sticks for the session and beyond), <tt class="docutils literal"><span class="pre">n</span></tt> keeps the denial. No answer within 60 seconds counts as <tt class="docutils literal"><span class="pre">n</span></tt>, and the failed command is never retried without an explicit grant. Use <tt class="docutils literal"><span class="pre">ask</span></tt> for the gray zone: paths you would probably allow if you were watching, like a browser profile or a notes vault, where <tt class="docutils literal"><span class="pre">deny</span></tt> would cost a manual policy edit and <tt class="docutils literal"><span class="pre">allow</span></tt> feels too broad unattended.</p>
+<p>One key answers it: <tt class="docutils literal"><span class="pre">f</span></tt> allows the ask-protected path (the <tt class="docutils literal"><span class="pre">ask</span></tt> rule's own target), <tt class="docutils literal"><span class="pre">d</span></tt> the directory around it (the grant is written into the active policy file, so it sticks for the session and beyond), <tt class="docutils literal"><span class="pre">n</span></tt> keeps the denial. No answer within 60 seconds counts as <tt class="docutils literal"><span class="pre">n</span></tt>, and the failed call is never retried without an explicit grant. The file tools ask before running (the target path is known exactly, so there is no failed call first); bash asks after the denial, because the blocked path only surfaces in the command's error output. Either way the model sees the decision recorded in the tool result. A <tt class="docutils literal"><span class="pre">read</span></tt> of a file that does not exist still asks (the denial hides existence, and skipping the ask would leak exactly that under a policy written to gate it); a skill read of an ask path asks mid-load and commits silently when answered. An <tt class="docutils literal"><span class="pre">apply_patch</span></tt> with ops under several ask roots asks once per root, before any op runs.</p>
+<p>Use <tt class="docutils literal"><span class="pre">ask</span></tt> for the gray zone: paths you would probably allow if you were watching, like a browser profile or a notes vault, where <tt class="docutils literal"><span class="pre">deny</span></tt> would cost a manual policy edit and <tt class="docutils literal"><span class="pre">allow</span></tt> feels too broad unattended.</p>
 <p>In practice:</p>
 <ul class="simple"><li>The project directory is writable out of the box (<tt class="docutils literal"><span class="pre">allow ./</span></tt> is in the built-in default), plus the temp directories. A fresh clone needs no setup at all.</li>
 <li>The default covers command-line builds of the common languages. Git, Go, Nim, Python, Rust, Zig, and C build out of the box. On Windows, git gets a seeded copy of your global config, so it works there too. Files that carry tokens stay fenced: <tt class="docutils literal"><span class="pre">~/.ssh</span></tt>, <tt class="docutils literal"><span class="pre">~/.git-credentials</span></tt>, <tt class="docutils literal"><span class="pre">~/.npmrc</span></tt>, <tt class="docutils literal"><span class="pre">~/.cargo/credentials</span></tt>. Every rule is listed in <a class="reference external" href="#builtminusin-default">the built-in default</a> below, and stacks beyond it get recipes in <a class="reference external" href="#sandbox-settings-collection">sandbox settings</a>.</li>
@@ -664,8 +676,10 @@ readonly ~/.nuget/NuGet
 
 NuGet dies on an unreadable config (`~/.nuget/NuGet/NuGet.Config`
 can hold feed tokens, so it is readable, not writable - the same
-treatment `~/.gitconfig` gets), and the package cache is the only
-writable dot it needs: `~/.dotnet` writes are optional. MSBuild's
+treatment `~/.gitconfig` gets), and the package cache and
+`~/.dotnet` are the writable dots it needs (SDK 10 writes a
+first-run `*.toolpath.sentinel` there; without it a build on a
+fresh machine dies). MSBuild's
 worker nodes and the dotnet diagnostic server bind unix sockets
 in the temp dir, which is writable by default; the socket rights
 ride the writable grant (sandwall 0.5.12). Inside a fenced
@@ -843,7 +857,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-30 10:05:05 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-09 13:23:20 UTC</small>
       </div>
     </div>
   </div>

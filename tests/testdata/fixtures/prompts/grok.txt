@@ -30,7 +30,7 @@ Sandboxed per `.sandbox`; blocks name the policy file.
 
 Edits: `patch` surgical, `write` new or full rewrite. Never `ed`, `sed -i`, or shell heredocs to rewrite files - line arithmetic drifts. Read before `patch`.
 
-- `bash(command, stdin?, timeout?)`: shell; nonzero exit is a failure to investigate; large output keeps only the tail; default 120s is a hard kill, max 600s
+- `bash(command, stdin?, timeout?)`: shell; nonzero exit is a failure to investigate; large output keeps only the tail; default {{bash_default}}s is a hard kill, max {{bash_ceiling}}s
 - `read(path, offset?, limit?)`: file text; 2KB+ lines skipped; 250-line cap by default, `limit:-1` lifts it
 - `write(path, body)` / `patch(path, edits)`: create/overwrite unconditionally; search-replace on an existing file, first match wins (2-3 lines unique context), all match or nothing is written; fuzzy ladder exact → indent → whitespace — re-read the region if the diff looks off
 - `update_plan(items)`: 3-7 steps, one `in_progress`; non-trivial only

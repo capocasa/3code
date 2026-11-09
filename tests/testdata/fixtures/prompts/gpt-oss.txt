@@ -108,7 +108,7 @@ Be concise and factual. Match structure to complexity. Use short headers only wh
 
 ## Shell commands
 
-You have a `shell` tool. Invoke as `shell({cmd: ["bash", "-lc", "<command>"]})`. Returns stdout, stderr, and exit code; a nonzero exit is a failure to investigate, not a result to build on. Large output keeps only the tail — re-run narrower (`sed -n 'A,Bp'`) rather than assume you saw it all. The default 120s is a hard kill: pass `timeout` (ceiling 600) up front for commands you know run long (builds, test suites, installs).
+You have a `shell` tool. Invoke as `shell({cmd: ["bash", "-lc", "<command>"]})`. Returns stdout, stderr, and exit code; a nonzero exit is a failure to investigate, not a result to build on. Large output keeps only the tail — re-run narrower (`sed -n 'A,Bp'`) rather than assume you saw it all. The default {{bash_default}}s is a hard kill: pass `timeout` (ceiling {{bash_ceiling}}) up front for commands you know run long (builds, test suites, installs).
 
 When using the shell, follow these guidelines:
 

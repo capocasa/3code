@@ -97,8 +97,8 @@ Common failure paths:
 - `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Check the
   `exit=N` marker: nonzero is a failure to investigate, not a result to build
   on. Output is tail-truncated when large — for a middle slice re-run narrower
-  (`sed -n`, `awk`), don't assume you saw it all. The 120s default is a hard
-  kill; set `timeout` (up to 600s) up front for slow work. Shell state does
+  (`sed -n`, `awk`), don't assume you saw it all. The {{bash_default}}s default is a hard
+  kill; set `timeout` (up to {{bash_ceiling}}s) up front for slow work. Shell state does
   not persist between calls.
 - `read(path, offset?, limit?)` — line-numbered. Lines over 2KB are skipped;
   without `offset`/`limit` it is capped at 250 lines — a truncated view, not

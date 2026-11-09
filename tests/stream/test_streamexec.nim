@@ -384,7 +384,8 @@ suite "streamexec: no external timeout dependency":
     let elapsed = epochTime() - started
     check code == 124
     check elapsed < 6.0
-    check "timed out" in o
+    check "killed at the 2s cap you requested" in o
+    check "pass timeout=600" in o
 
   test "native timeout via streaming path (exit 124)":
     let act = Action(kind: akBash, body: "sleep 30", timeoutSecs: 2)
@@ -393,7 +394,7 @@ suite "streamexec: no external timeout dependency":
     let elapsed = epochTime() - started
     check code == 124
     check elapsed < 6.0
-    check "timed out" in o
+    check "killed at the 2s cap you requested" in o
 
 suite "streamexec: force_timeout":
   # The config-level resolution rules are covered in
@@ -401,6 +402,7 @@ suite "streamexec: force_timeout":
   # reaches the process and the model-facing note changes tone.
   teardown:
     forceTimeoutSetting = 0
+    maxTimeoutSetting = 0
 
   test "force_timeout replaces the model's request entirely":
     forceTimeoutSetting = 2
@@ -418,6 +420,56 @@ suite "streamexec: force_timeout":
     let (_, code, cap) = runStreamingBash(act, nil, nil)
     check cap == 2
     check code == 124
+
+suite "streamexec: max_timeout raises the default":
+  # The one-setting promise: a configured max_timeout governs runs the
+  # model sent with no `timeout` at all. Resolution rules live in
+  # tests/config/test_config_extra.nim; these prove the raised default
+  # reaches the executor and the kill note says where the cap came from.
+  setup:
+    maxTimeoutSetting = 0
+    forceTimeoutSetting = 0
+
+  teardown:
+    maxTimeoutSetting = 0
+    forceTimeoutSetting = 0
+
+  test "a run that outlives the configured cap dies with the plain note":
+    maxTimeoutSetting = 2
+    let act = Action(kind: akBash, body: "sleep 30")
+    let started = epochTime()
+    let (o, code, _) = runActionStreaming(act, nil, nil)
+    let elapsed = epochTime() - started
+    check code == 124
+    check elapsed < 6.0
+    check "killed at the 2s default cap" in o
+    check "also the ceiling here" in o
+
+  test "the same run completes under a raised cap":
+    maxTimeoutSetting = 8
+    let act = Action(kind: akBash, body: "sleep 4")
+    let started = epochTime()
+    let (o, code, _) = runActionStreaming(act, nil, nil)
+    let elapsed = epochTime() - started
+    check code == 0
+    check elapsed < 7.0
+
+  test "a request below the raised ceiling gets the raise hint":
+    maxTimeoutSetting = 60
+    let act = Action(kind: akBash, body: "sleep 30", timeoutSecs: 2)
+    let started = epochTime()
+    let (o, code, _) = runActionStreaming(act, nil, nil)
+    let elapsed = epochTime() - started
+    check code == 124
+    check elapsed < 6.0
+    check "pass timeout=60" in o
+
+  test "a request at the raised ceiling is told nothing higher exists":
+    maxTimeoutSetting = 2
+    let act = Action(kind: akBash, body: "sleep 30", timeoutSecs: 2)
+    let (o, code, _) = runActionStreaming(act, nil, nil)
+    check code == 124
+    check "cap you requested, which is also the ceiling" in o
 
 when defined(windows):
   suite "streamexec: Windows bash resolution":

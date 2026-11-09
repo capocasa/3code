@@ -1326,7 +1326,7 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-- `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail — re-run narrower (`sed -n`). The 120s default is a hard kill; `timeout` (max 600s) for slow work.
+- `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail — re-run narrower (`sed -n`). The {{bash_default}}s default is a hard kill; `timeout` (max {{bash_ceiling}}s) for slow work.
 - `read(path, offset?, limit?)` — line-numbered; 2KB+ lines skipped. 250-line cap without offset/limit; `limit:-1` lifts the cap.
 - `write(path, body)` — create or overwrite, unconditionally. Read what is there first; prefer `patch` for targeted changes.
 - `patch(path, edits)` — `{search, replace}` pairs on an existing file. Each edit replaces the FIRST match (fuzzy ladder: exact → indent → whitespace): 2-3 lines of unique context, `search` verbatim from disk (no line numbers). A non-exact match says so — re-read the region if the diff looks off. All edits must match or nothing is written; fix and resend the entire call. Empty `search` is rejected.
@@ -1400,7 +1400,7 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-- `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail — re-run narrower (`sed -n`). The 120s default is a hard kill; `timeout` (max 600s) for slow work.
+- `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail — re-run narrower (`sed -n`). The {{bash_default}}s default is a hard kill; `timeout` (max {{bash_ceiling}}s) for slow work.
 - `read(path, offset?, limit?)` — line-numbered; 2KB+ lines skipped. 250-line cap without offset/limit; `limit:-1` lifts the cap.
 - `write(path, body)` — create or overwrite, unconditionally. Read what is there first; prefer `patch` for targeted changes.
 - `patch(path, edits)` — `{search, replace}` pairs on an existing file. Each edit replaces the FIRST match (fuzzy ladder: exact → indent → whitespace): 2-3 lines of unique context, `search` verbatim from disk (no line numbers). A non-exact match says so — re-read the region if the diff looks off. All edits must match or nothing is written; fix and resend the entire call. Empty `search` is rejected.
@@ -1741,7 +1741,7 @@ When unfamiliar, orient first: `ls` README, build manifest, skim relevant source
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-- `bash(command, stdin?, timeout?)` - stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail - re-run narrower (`sed -n`). The 120s default is a hard kill; `timeout` (max 600s) for slow work.
+- `bash(command, stdin?, timeout?)` - stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail - re-run narrower (`sed -n`). The {{bash_default}}s default is a hard kill; `timeout` (max {{bash_ceiling}}s) for slow work.
 - `read(path, offset?, limit?)` - line-numbered; 2KB+ lines skipped. 250-line cap without offset/limit; `limit:-1` lifts the cap.
 - `write(path, body)` - create or overwrite, unconditionally. Read what is there first; prefer `patch` for targeted changes.
 - `patch(path, edits)` - `{search, replace}` pairs on an existing file. Each edit replaces the FIRST match (fuzzy ladder: exact → indent → whitespace): 2-3 lines of unique context, `search` verbatim from disk (no line numbers). A non-exact match says so - re-read the region if the diff looks off. All edits must match or nothing is written - fix and resend the entire call. Empty `search` is rejected.
@@ -1934,7 +1934,7 @@ a real fork only the user can decide.
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-- `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail — re-run narrower (`sed -n`). The 120s default is a hard kill; `timeout` (max 600s) for slow work.
+- `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail — re-run narrower (`sed -n`). The {{bash_default}}s default is a hard kill; `timeout` (max {{bash_ceiling}}s) for slow work.
 - `read(path, offset?, limit?)` — line-numbered; 2KB+ lines skipped. 250-line cap without offset/limit; `limit:-1` lifts the cap.
 - `write(path, body)` — create or overwrite, unconditionally. Read what is there first; prefer `patch` for targeted changes.
 - `patch(path, edits)` — `{search, replace}` pairs on an existing file. Each edit replaces the FIRST match (fuzzy ladder: exact → indent → whitespace): 2-3 lines of unique context, `search` verbatim from disk (no line numbers). A non-exact match says so — re-read the region if the diff looks off. All edits must match or nothing is written; fix and resend the entire call. Empty `search` is rejected.
@@ -2233,8 +2233,8 @@ Common failure paths:
 - `bash(command, stdin?, timeout?)` — stdout, stderr, exit code. Check the
   `exit=N` marker: nonzero is a failure to investigate, not a result to build
   on. Output is tail-truncated when large — for a middle slice re-run narrower
-  (`sed -n`, `awk`), don't assume you saw it all. The 120s default is a hard
-  kill; set `timeout` (up to 600s) up front for slow work. Shell state does
+  (`sed -n`, `awk`), don't assume you saw it all. The {{bash_default}}s default is a hard
+  kill; set `timeout` (up to {{bash_ceiling}}s) up front for slow work. Shell state does
   not persist between calls.
 - `read(path, offset?, limit?)` — line-numbered. Lines over 2KB are skipped;
   without `offset`/`limit` it is capped at 250 lines — a truncated view, not
@@ -2490,7 +2490,7 @@ Be concise and factual. Match structure to complexity. Use short headers only wh
 
 ## Shell commands
 
-You have a `shell` tool. Invoke as `shell({cmd: ["bash", "-lc", "<command>"]})`. Returns stdout, stderr, and exit code; a nonzero exit is a failure to investigate, not a result to build on. Large output keeps only the tail — re-run narrower (`sed -n 'A,Bp'`) rather than assume you saw it all. The default 120s is a hard kill: pass `timeout` (ceiling 600) up front for commands you know run long (builds, test suites, installs).
+You have a `shell` tool. Invoke as `shell({cmd: ["bash", "-lc", "<command>"]})`. Returns stdout, stderr, and exit code; a nonzero exit is a failure to investigate, not a result to build on. Large output keeps only the tail — re-run narrower (`sed -n 'A,Bp'`) rather than assume you saw it all. The default {{bash_default}}s is a hard kill: pass `timeout` (ceiling {{bash_ceiling}}) up front for commands you know run long (builds, test suites, installs).
 
 When using the shell, follow these guidelines:
 
@@ -2599,7 +2599,7 @@ const OtherPreamble = """You are the 3code coding agent, served by a model this 
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-- `bash(command, stdin?, timeout?)` - stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail - re-run narrower (`sed -n`). The 120s default is a hard kill; `timeout` (max 600s) for slow work.
+- `bash(command, stdin?, timeout?)` - stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail - re-run narrower (`sed -n`). The {{bash_default}}s default is a hard kill; `timeout` (max {{bash_ceiling}}s) for slow work.
 - `read(path, offset?, limit?)` - line-numbered; 2KB+ lines skipped. 250-line cap without offset/limit; `limit:-1` lifts the cap.
 - `write(path, body)` - create or overwrite, unconditionally. Read what is there first; prefer `patch` for targeted changes.
 - `patch(path, edits)` - `{search, replace}` pairs on an existing file. Each edit replaces the FIRST match (fuzzy ladder: exact → indent → whitespace): 2-3 lines of unique context, `search` verbatim from disk (no line numbers). A non-exact match says so - re-read the region if the diff looks off. All edits must match or nothing is written - fix and resend the entire call. Empty `search` is rejected.
@@ -2649,7 +2649,7 @@ Act first, explain after. Don't narrate your plan before executing it - just exe
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-- `bash(command, stdin?, timeout?)` - stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail - re-run narrower (`sed -n`). The 120s default is a hard kill; `timeout` (max 600s) for slow work.
+- `bash(command, stdin?, timeout?)` - stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail - re-run narrower (`sed -n`). The {{bash_default}}s default is a hard kill; `timeout` (max {{bash_ceiling}}s) for slow work.
 - `read(path, offset?, limit?)` - line-numbered; 2KB+ lines skipped. 250-line cap without offset/limit; `limit:-1` lifts the cap.
 - `write(path, body)` - create or overwrite, unconditionally. Read what is there first; prefer `patch` for targeted changes.
 - `patch(path, edits)` - `{search, replace}` pairs on an existing file. Each edit replaces the FIRST match (fuzzy ladder: exact → indent → whitespace): 2-3 lines of unique context, `search` verbatim from disk (no line numbers). A non-exact match says so - re-read the region if the diff looks off. All edits must match or nothing is written - fix and resend the entire call. Empty `search` is rejected.
@@ -2717,7 +2717,7 @@ Your failure mode is declaring success on insufficient evidence. Fight it.
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-- `bash(cmd, stdin?, timeout?)` - shell; nonzero exit is a failure to investigate; large output keeps only the tail. timeout in seconds (default 120 is a hard kill, max 600).
+- `bash(cmd, stdin?, timeout?)` - shell; nonzero exit is a failure to investigate; large output keeps only the tail. timeout in seconds (default {{bash_default}} is a hard kill, max {{bash_ceiling}}).
 - `read(path, offset?, limit?)` - targeted ranges; 2KB+ lines skipped; 250-line cap without them, `limit:-1` lifts it.
 - `write(path, body)` - create / overwrite, unconditionally.
 - `patch(path, edits)` - search/replace, first match wins (unique context); all match or nothing is written; fuzzy ladder exact → indent → whitespace — re-read the region if the diff looks off.
@@ -2828,7 +2828,7 @@ Sandboxed per `.sandbox`; blocks name the policy file.
 
 Edits: `patch` surgical, `write` new or full rewrite. Never `ed`, `sed -i`, or shell heredocs to rewrite files - line arithmetic drifts. Read before `patch`.
 
-- `bash(command, stdin?, timeout?)`: shell; nonzero exit is a failure to investigate; large output keeps only the tail; default 120s is a hard kill, max 600s
+- `bash(command, stdin?, timeout?)`: shell; nonzero exit is a failure to investigate; large output keeps only the tail; default {{bash_default}}s is a hard kill, max {{bash_ceiling}}s
 - `read(path, offset?, limit?)`: file text; 2KB+ lines skipped; 250-line cap by default, `limit:-1` lifts it
 - `write(path, body)` / `patch(path, edits)`: create/overwrite unconditionally; search-replace on an existing file, first match wins (2-3 lines unique context), all match or nothing is written; fuzzy ladder exact → indent → whitespace — re-read the region if the diff looks off
 - `update_plan(items)`: 3-7 steps, one `in_progress`; non-trivial only
@@ -2906,7 +2906,7 @@ You carry a binary reasoning toggle (`on`/`off`), on by default. The harness sur
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked call errors with the policy name. Roster: `bash(command, stdin?, timeout?)`, `read(path, offset?, limit?)`, `write(path, body)`, `patch(path, edits)`, `update_plan(items)`, `web_search(query)`, `web_fetch(url)`, `clear(prompt)`. Beyond the schemas:
 
-- `bash`: `stdin` is piped in; nonzero `exit=N` is a failure to investigate; large output keeps only the tail. `timeout` raises the 120s default (a hard kill), ceiling 600s.
+- `bash`: `stdin` is piped in; nonzero `exit=N` is a failure to investigate; large output keeps only the tail. `timeout` raises the {{bash_default}}s default (a hard kill), ceiling {{bash_ceiling}}s.
 - `read`: `offset`/`limit` for targeted reads; 2KB+ lines skipped; 250-line cap without them, `limit:-1` lifts it.
 - `patch`: `edits` are `{search, replace}` pairs; each replaces the first match - give 2-3 lines of unique context; all edits match or nothing is written. Fuzzy ladder: exact → indent → whitespace; re-read the region if the diff looks off.
 - `update_plan`: items are `{text, status}` (`pending`/`in_progress`/`completed`). A work contract: revise it when reality changes. Skip for trivial tasks.
@@ -3226,7 +3226,7 @@ Act first, explain after. Don't narrate your plan before executing it - just exe
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-- `bash(command, stdin?, timeout?)` - stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail - re-run narrower (`sed -n`). The 120s default is a hard kill; `timeout` (max 600s) for slow work.
+- `bash(command, stdin?, timeout?)` - stdout, stderr, exit code. Nonzero `exit=N` is a failure to investigate. Large output keeps only the tail - re-run narrower (`sed -n`). The {{bash_default}}s default is a hard kill; `timeout` (max {{bash_ceiling}}s) for slow work.
 - `read(path, offset?, limit?)` - line-numbered; 2KB+ lines skipped. 250-line cap without offset/limit; `limit:-1` lifts the cap.
 - `write(path, body)` - create or overwrite, unconditionally. Read what is there first; prefer `patch` for targeted changes.
 - `patch(path, edits)` - `{search, replace}` pairs on an existing file. Each edit replaces the FIRST match (fuzzy ladder: exact → indent → whitespace): 2-3 lines of unique context, `search` verbatim from disk (no line numbers). A non-exact match says so - re-read the region if the diff looks off. All edits must match or nothing is written - fix and resend the entire call. Empty `search` is rejected.
@@ -3447,7 +3447,7 @@ let glmAndQwenTools = %*[
         "properties": {
           "command": {"type": "string", "description": "Shell command to run."},
           "stdin": {"type": "string", "description": "Optional text piped to the command's stdin."},
-          "timeout": {"type": "integer", "description": "Optional max run time in seconds. Default 120, hard ceiling 600. Set higher only for commands you know run long (builds, test suites, installs)."}
+          "timeout": {"type": "integer", "description": "Optional max run time in seconds. Default {{bash_default}}, hard ceiling {{bash_ceiling}}. Set higher only for commands you know run long (builds, test suites, installs)."}
         },
         "required": ["command"]
       }
@@ -3539,7 +3539,7 @@ let gptOssTools = %*[
             "items": {"type": "string"},
             "description": "Argv array — typically [\"bash\", \"-lc\", \"<command line>\"]."
           },
-          "timeout": {"type": "integer", "description": "Optional max run time in seconds. Default 120, hard ceiling 600. Set higher only for commands you know run long (builds, test suites, installs)."}
+          "timeout": {"type": "integer", "description": "Optional max run time in seconds. Default {{bash_default}}, hard ceiling {{bash_ceiling}}. Set higher only for commands you know run long (builds, test suites, installs)."}
         },
         "required": ["cmd"]
       }
@@ -4578,22 +4578,41 @@ proc screenshotOffered*(p: Profile): bool =
   ## accepted and logged like any mid-session tool change.
   computerUseEnabled and p.vision and screenBackendOk()
 
+proc applyTimeoutTokens*(s: string): string =
+  ## Fill the `{{bash_default}}`/`{{bash_ceiling}}` template tokens with
+  ## the live `[settings]` values, so a prompt or tool schema never
+  ## advertises a default or ceiling the harness would not honor
+  ## (`max_timeout`/`force_timeout` change them at runtime).
+  let (d, c) = advertisedBashTimeouts()
+  s.multiReplace([("{{bash_default}}", $d), ("{{bash_ceiling}}", $c)])
+
+proc applyTimeoutTokens(node: JsonNode) =
+  case node.kind
+  of JString: node.str = applyTimeoutTokens(node.str)
+  of JArray:
+    for e in node: applyTimeoutTokens(e)
+  of JObject:
+    for _, v in node.pairs: applyTimeoutTokens(v)
+  else: discard
+
 proc activeTools*(p: Profile): JsonNode =
   ## The request-facing tools for `p`: the family's static surface, plus
-  ## `screenshot` when computer use is live.
-  result = setup(p).tools
+  ## `screenshot` when computer use is live. Always a private copy: the
+  ## shared const rosters stay token-untouched, the request gets the
+  ## live timeout numbers substituted in.
+  result = copy(setup(p).tools)
+  applyTimeoutTokens(result)
   if screenshotOffered(p):
-    result = copy(result)
     result.add screenshotTool
 
 proc buildSystemPrompt(p: Profile, skills: string): string =
   let override = findSystemPromptOverride(p.family)
   if override != "":
     stderr.writeLine "3code: system prompt overridden by " & override
-    return readFile(override)
+    return applyTimeoutTokens(readFile(override))
       .replace("{{credit}}", buildCredit(p))
       .replace("{{skills}}", skills)
-  var prompt = setup(p).prompt
+  var prompt = applyTimeoutTokens(setup(p).prompt)
     .replace("{{credit}}", buildCredit(p))
     .replace("{{skills}}", skills)
   if p.vision:
@@ -4613,11 +4632,16 @@ proc buildSystemPrompt*(p: Profile): string =
 
 proc profileIdentity*(p: Profile): string =
   ## Cache identity of a profile: anything that changes the bytes of the
-  ## built system prompt (which `buildCredit` and skills substitution
-  ## derive from) has to appear here. Persisted in the session header and
-  ## re-compared on resume so a reloaded session can prove its persisted
-  ## prompt still matches the active profile.
-  $ %*[p.name, p.url, p.model, p.family, p.version, p.variant, p.vision]
+  ## built system prompt (which `buildCredit`, skills substitution, and
+  ## the live bash timeout numbers derive from) has to appear here.
+  ## Persisted in the session header and re-compared on resume so a
+  ## reloaded session can prove its persisted prompt still matches the
+  ## active profile. In a live session an identity change (e.g. the user
+  ## editing max_timeout mid-session) rebuilds the prompt for the next
+  ## request instead of re-sending stale numbers.
+  let (bashDefault, bashCeiling) = advertisedBashTimeouts()
+  $ %*[p.name, p.url, p.model, p.family, p.version, p.variant, p.vision,
+       bashDefault, bashCeiling]
 
 proc appendSkillsUpdate(messages: JsonNode, skills: string) =
   ## Catalog drift rides the tail: the newly submitted user message carries
