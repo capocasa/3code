@@ -2,6 +2,29 @@ Changelog
 
 Unreleased
 
+- **Community prompt findings folded into every shipped system
+  prompt.** kay-is's tools-section rewrite (community thread 9, born
+  from DS 4.1 Flash failing the patch tool) now rides every family
+  prompt that documents the bash/read/write/patch surface, not just
+  DeepSeek's: a nonzero `exit=N` is a failure to investigate, large
+  output keeps only the tail, the 120s cap is a hard kill, `read`
+  documents the 250-line cap, 2KB line skip and `limit:-1`, `write`
+  overwrites unconditionally, and `patch` teaches the real semantics
+  - first match through the fuzzy ladder (exact, indent,
+  whitespace), 2-3 lines of unique context, verbatim search text,
+  all-or-nothing application with the entire call resent, empty
+  search rejected. The patch tool schemas dropped the false "must
+  match exactly once" description that caused the flailing. warp's
+  findings (thread 14) went into the GPT prompts: a failure named in
+  test output comes before new work, the incidental-wording tests
+  rule hardened to "never", generated docs state what is and what
+  changed (never what you won't do or what stays unchanged), and the
+  gpt-oss prompt traded prose for lists throughout. Total prompt
+  bytes landed under the pre-change total, and a new golden-fixture
+  suite (`tests/testdata/fixtures/prompts/`, 21 families, prompt
+  plus tool descriptions, byte-compared in test_prompts_compact)
+  locks every prompt against drift; regenerate deliberately with
+  `THREECODE_REGEN_GOLDEN=1`.
 - **`:provider` teaches its verbs where you stand when a key dies.**
   After OpenCode revoked its API keys, the way back in,
   `:provider edit <name>`, was findable only by asking the forum:
