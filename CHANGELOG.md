@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **Sandboxed ssh works as the user expects: aliases, keys, and
+  known_hosts all found, every connection still allowlisted.** The
+  fence runs the child as uid 65534, whose passwd home is `/`, so ssh's
+  own defaults looked under `/.ssh` and each login died at host-key or
+  auth even with the tunnel up. The PATH shim now hands ssh a config
+  file that proxies through the wall (`wall connect %h %p`, same
+  tunnel as git), carries a copy of `~/.ssh/config` with `~` rewritten
+  to the absolute home, and falls back to the usual identity files and
+  known_hosts; local names (mDNS, search domains) resolve at the proxy.
+  `scp` and `sftp` are documented as the exception: OpenSSH 9.8+
+  execs `/usr/bin/ssh` by absolute path, beyond any PATH shim or env,
+  so they fail inside the fence - `rsync`, `ssh`, and git cover their
+  use cases and are proxied.
 - **Multiline bash commands banner their first lines, `+N lines` tail
   linked to the whole command, and `:cmd` shows it.** A multiline bash
   command used to render only its first line in the `$` banner with no
