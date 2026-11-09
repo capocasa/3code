@@ -299,6 +299,24 @@ proc hiddenHintBytes(hidden: int; idx: int; body: string; note: string;
   result = GreyFg & "  " &
     (if url.len > 0: osc8Link(url, text) else: text) & Reset & "\r\n"
 
+proc cmdBannerBody*(command: string; idx: int): string =
+  ## The `$` banner body for a bash command: the first `banner_lines`
+  ## lines of it, plus a `… +N lines` tail row when more remain. The tail
+  ## is an OSC 8 `file://` link over a dump of the full command
+  ## (`T<idx>.cmd`, same scheme as the output elision hints), so the rest
+  ## of a long command is one click away in the terminal's `file:` handler
+  ## ($VISUAL where configured); the plain tail keeps the row honest
+  ## where links are unsupported or there is no tool index (`:!` pass).
+  let lines = command.strip.splitLines
+  if lines.len <= max(1, bannerLinesSetting):
+    return command.strip
+  result = previewCmdLines(command, bannerLinesSetting)
+  let hidden = lines.len - max(1, bannerLinesSetting)
+  let note = &"+{hidden} line" & (if hidden == 1: "" else: "s")
+  let url = if idx > 0: dumpToolOutput(idx, command, "cmd") else: ""
+  let text = if url.len > 0: note & " · " & &"T{idx}.cmd ↗" else: note
+  result.add "\n… " & (if url.len > 0: osc8Link(url, text) else: text)
+
 proc compactHeadTailBytes(res: string; idx: int;
                           head = CompactHead; tail = CompactTail): string =
   var lines = res.splitLines
@@ -722,11 +740,17 @@ proc toolIcon*(kind: ActionKind): string =
   of akError: "✕"
 
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
-                      elapsedS = -1): string =
+                      elapsedS = -1; command = ""; idx = 0): string =
+  ## `command` (bash only) swaps the single-line preview for the
+  ## multiline `cmdBannerBody`: `banner_lines` lines plus the linked
+  ## `+N lines` tail when the command is longer.
   let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
   let suffix = if elapsedS >= 1: GreyFg & &"  ({elapsedS}s)" & Reset else: ""
   let termW = try: terminalWidth() except CatchableError: 80
-  let rows = bannerWrapRows(icon & " ", banner, termW)
+  let body =
+    if kind == akBash and command.len > 0: cmdBannerBody(command, idx)
+    else: banner
+  let rows = bannerWrapRows(icon & " ", body, termW, bannerMaxRows())
   for i, row in rows:
     result.add OffWhiteFg & row & Reset
     if i == rows.high:
@@ -788,8 +812,8 @@ proc fullToolResultBytes*(kind: ActionKind; res: string; code: int;
 
 proc toolTranscriptBytes*(banner: string; kind: ActionKind; res: string;
                           code: int; idx: int; diff = "";
-                          elapsedS = -1): string =
-  result.add toolBannerBytes(banner, kind, code, elapsedS)
+                          elapsedS = -1; command = ""): string =
+  result.add toolBannerBytes(banner, kind, code, elapsedS, command, idx)
   result.add toolResultBytes(kind, res, code, idx, diff)
 
 proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
@@ -819,7 +843,8 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
     result.add "✕ unknown tool: " & act.path & "\r\n"
   else:
     result.add toolTranscriptBytes(
-      bannerFor(act), act.kind, res, code, idx, diff, elapsedS)
+      bannerFor(act), act.kind, res, code, idx, diff, elapsedS,
+      command = act.body)
 
 proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure label string for the bar / receipt: "○N%  ↑input  ↻cached
@@ -1052,6 +1077,38 @@ proc showToolS*(arg: string, toolLog: seq[ToolRecord]): string =
     # untruncated renderer, never the compact head/tail one (the old bug:
     # `:show N` re-printed the same truncated body with the same hint).
     result.add fullToolResultBytes(rec.kind, rec.output, rec.code)
+
+proc resolveBashCmd*(arg: string; toolLog: seq[ToolRecord]):
+    tuple[idx: int, err: string] =
+  ## Shared `:cmd` resolution: the index of the bash tool call `arg`
+  ## selects ("" = the last bash call), or -1 plus a user-facing error.
+  var bashIdx: seq[int]
+  for i, rec in toolLog:
+    if rec.kind == akBash and rec.command.len > 0: bashIdx.add i
+  if bashIdx.len == 0:
+    return (-1, hintLnS("no bash commands yet"))
+  if arg == "":
+    return (bashIdx[^1], "")
+  var n = -1
+  try: n = parseInt(arg)
+  except ValueError:
+    return (-1, errLnS("cmd: not a number: " & arg))
+  if n < 1 or n > toolLog.len:
+    return (-1, errLnS(&"cmd: T{n} out of range (1..{toolLog.len})"))
+  if n - 1 notin bashIdx:
+    return (-1, errLnS(&"cmd: T{n} is not a bash command"))
+  (n - 1, "")
+
+proc showCmdS*(arg: string; toolLog: seq[ToolRecord]): string =
+  ## String form of the `:cmd` body: the FULL command text of a bash tool
+  ## call, the multiline command the banner only previews. Same shape as
+  ## `:show` (header row, dimmed body), so the two commands read as a pair.
+  let (sel, err) = resolveBashCmd(arg, toolLog)
+  if err.len > 0: return err
+  let rec = toolLog[sel]
+  result = &"── T{sel+1}  " & rec.banner & "\r\n"
+  for l in rec.command.splitLines:
+    result.add wrappedSubtleBytes(l)
 
 proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
   stdout.write showToolS(arg, toolLog)

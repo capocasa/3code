@@ -3764,6 +3764,8 @@ commands:
                       private data; persists as [params] allow-private
   :prompt             show the active system prompt
   :show [N]           show full output of tool call N (default: last)
+  :cmd [N]            show the full command of bash tool call N (default: last)
+  :cmd N edit         open that command in $VISUAL/$EDITOR (view it externally)
   :log                list all tool calls this session
   :sessions           list recent sessions saved in this directory (max 20)
   :session            show this session's id (for --resume=ID / :resume ID)

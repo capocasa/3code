@@ -16,7 +16,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
-                      ":show", ":log", ":sessions", ":session", ":resume", ":summarize",
+                      ":show", ":cmd", ":log", ":sessions", ":session", ":resume", ":summarize",
                       ":version", ":sandbox", ":sb", ":retry", ":private",
                       ":q", ":quit", ":exit"]
 
@@ -73,6 +73,11 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
+  of ":cmd":
+    # Plain `:cmd [N]` only prints; the `edit` verb spawns the external
+    # editor, which must not fire while a turn holds the screen.
+    if parts.len > 0 and parts[^1] == "edit": ckMutating
+    else: ckSafeImmediate
   of ":streaming", ":notify", ":retry", ":private", ":tab-title":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
@@ -1289,6 +1294,32 @@ proc cmdStreaming(arg: string): string =
   else:
     return errLnS("usage: :streaming [on|off]")
 
+proc cmdEditExternal*(n: int; command: string): string =
+  ## `:cmd N edit`: open the full command text of tool call N in
+  ## $VISUAL/$EDITOR (vi / notepad fallback), the same contract as
+  ## `:sandbox edit`. The file is the T<N>.cmd dump the banner's linked
+  ## tail already points at; edits to it go nowhere (the command already
+  ## ran); the point is comfortable viewing in whatever the user wired
+  ## up as editor or viewer. Returns a user-facing status line; a leading
+  ## "error:" marks failure.
+  try:
+    createDir(toolOutDir())
+    let path = toolOutDir() / (&"T{n}.cmd")
+    writeFile(path, command)
+  except CatchableError as e:
+    return "error: could not write command dump: " & e.msg
+  let editor = getEnv("VISUAL", getEnv("EDITOR",
+    when defined(windows): "notepad" else: "vi"))
+  let code = execShellCmd(editor & " " & quoteShell(
+    toolOutDir() / (&"T{n}.cmd")))
+  if code != 0:
+    return "error: editor exited with status " & $code
+  # The editor's first token, basename only: the status line stays stable
+  # (and replayable against frame fixtures) whatever absolute path $VISUAL
+  # carries.
+  let editorName = editor.splitWhitespace[0].extractFilename
+  &"T{n}.cmd opened in " & editorName
+
 proc cmdNotifyList(): string =
   let mark = if notifyEnabled: "on" else: "off"
   hintLnS("notify: " & mark &
@@ -1801,9 +1832,10 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           except CatchableError as e:
             output = "ERROR: " & e.msg
             code = -1
-        session.toolLog.add ToolRecord(banner: bannerFor(act), output: output,
-          code: code, kind: act.kind, plan: act.plan)
-        body.add toolBannerBytes(previewCmd(cmdText), akBash, code)
+        session.toolLog.add ToolRecord(banner: bannerFor(act), command: cmdText,
+          output: output, code: code, kind: act.kind, plan: act.plan)
+        body.add toolBannerBytes(bannerFor(act), akBash, code,
+          command = cmdText, idx = session.toolLog.len)
         body.add toolResultBytes(akBash, output, code, session.toolLog.len)
         if code != 0:
           ok = false
@@ -1910,6 +1942,30 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           "  (show, on, off, allow, readonly, deny, ask, edit)"
     of ":show":
       body.add showToolS(arg, session.toolLog)
+    of ":cmd":
+      # `:cmd [N]` prints the full command text of bash tool call N
+      # (default: the last); `:cmd [N] edit` opens that text in
+      # $VISUAL/$EDITOR. The read-the-whole-multiline-command route the
+      # banner's linked `+N lines` tail also offers as a click.
+      let wantsEdit = parts.len > 0 and parts[^1] == "edit"
+      let nArg =
+        if wantsEdit: parts[0 ..< parts.len - 1].join(" ")
+        else: arg
+      if wantsEdit:
+        let (sel, err) = resolveBashCmd(nArg, session.toolLog)
+        if err.len > 0:
+          # Pre-styled by the resolver (`hintLnS`/`errLnS`), like the
+          # `:show`/`:cmd` view bodies.
+          body.add err
+        else:
+          let msg = cmdEditExternal(sel + 1, session.toolLog[sel].command)
+          if msg.startsWith("error:"):
+            ok = false
+            respErr msg
+          else:
+            resp msg
+      else:
+        body.add showCmdS(nArg, session.toolLog)
     of ":log":
       body.add listToolsS(session.toolLog)
     of ":session":

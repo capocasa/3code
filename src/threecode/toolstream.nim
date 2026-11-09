@@ -69,7 +69,8 @@ proc viewportRowsAt*(v: StreamingView; termW: int): seq[string] =
   ## each tick so the rows always match the live terminal geometry — a
   ## resize between output lines re-wraps the banner/output instead of
   ## replaying stale pre-wrap rows (which stacked fragments into scrollback).
-  for row in bannerWrapRows(v.commandIcon & " ", v.banner, termW):
+  for row in bannerWrapRows(v.commandIcon & " ", v.banner, termW,
+                           bannerMaxRows()):
     result.add row
   for line in v.visibleOutputLines():
     for row in wrappedRowsAt(line, termW):
@@ -79,7 +80,7 @@ proc viewportRows*(v: StreamingView): seq[string] =
   viewportRowsAt(v, try: terminalWidth() except CatchableError: 80)
 
 proc bannerRowCountAt*(v: StreamingView; termW: int): int =
-  bannerWrapRows(v.commandIcon & " ", v.banner, termW).len
+  bannerWrapRows(v.commandIcon & " ", v.banner, termW, bannerMaxRows()).len
 
 proc bannerRowCount*(v: StreamingView): int =
   bannerRowCountAt(v, try: terminalWidth() except CatchableError: 80)

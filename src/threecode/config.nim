@@ -342,6 +342,7 @@ const
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
                   "force_timeout", "force-timeout",
+                  "banner_lines", "banner-lines",
                   "browserfetch",
                   "tone", "mode", "bash_path", "bash-path",
                   "bash", "auto-update", "tab-title",
@@ -422,6 +423,13 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
         except ValueError:
           return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                  "in [settings] (expected a whole number of seconds)"
+      if ent.key in ["banner_lines", "banner-lines"]:
+        try:
+          if parseInt(ent.value.strip) < 1:
+            raise newException(ValueError, "")
+        except ValueError:
+          return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
+                 "in [settings] (expected a whole number of lines, 1 or more)"
       if ent.key in ["tone", "mode"] and
           ent.value.strip.toLowerAscii notin ColorModes:
         return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
@@ -612,6 +620,9 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "force_timeout", "force-timeout":
           try: forceTimeoutSetting = v.strip.parseInt
           except ValueError: discard
+        of "banner_lines", "banner-lines":
+          try: bannerLinesSetting = v.strip.parseInt
+          except ValueError: discard
         of "tone", "mode":
           # `auto` detects the background (default); `dark`/`light` force a
           # palette. `mode`/`bright` are the legacy spellings and stay
@@ -756,10 +767,12 @@ proc mergeForeignEdits(path: string; current: var string,
   # right before the buffer serializes it.
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
        savedWallWarn, savedMaxTimeout, savedForceTimeout, savedColorMode,
-       savedBash, savedBashSrc, savedTabTitle, savedUserAgent) =
+       savedBash, savedBashSrc, savedTabTitle, savedUserAgent,
+       savedBannerLines) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
      sandboxWallWarn, maxTimeoutSetting, forceTimeoutSetting, colorModePref,
-     bashPathOverride, bashSourcePref, tabTitleEnabled, userAgentTemplate)
+     bashPathOverride, bashSourcePref, tabTitleEnabled, userAgentTemplate,
+     bannerLinesSetting)
   let savedParams = activeParams
   let savedWarnings = activeConfigWarnings
   let (diskCurrent, diskProviders, _, _, _, _) =
@@ -776,6 +789,7 @@ proc mergeForeignEdits(path: string; current: var string,
   sandboxWallWarn = savedWallWarn
   maxTimeoutSetting = savedMaxTimeout
   forceTimeoutSetting = savedForceTimeout
+  bannerLinesSetting = savedBannerLines
   colorModePref = savedColorMode
   bashPathOverride = savedBash
   bashSourcePref = savedBashSrc
@@ -885,6 +899,9 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "max_timeout = " & $maxTimeoutSetting & "\n"
   if forceTimeoutSetting > 0:
     buf.add "force_timeout = " & $forceTimeoutSetting & "\n"
+  # Same bare-number shape; the default (1) keeps a clean config.
+  if bannerLinesSetting != 1:
+    buf.add "banner_lines = " & $bannerLinesSetting & "\n"
   # Persist the colour tone only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "light"

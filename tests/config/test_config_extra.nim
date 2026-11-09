@@ -1,5 +1,5 @@
 import std/[os, sequtils, strformat, strutils, tables, times, unittest]
-import threecode/[config, modelname, prompts, types]
+import threecode/[config, modelname, prompts, types, util]
 
 suite "config: [settings] max_timeout":
   var tmp = ""
@@ -772,3 +772,48 @@ suite "config: concurrent instances don't clobber each other":
     let (current, merged, _, _, _, _) = parseConfigFile(tmp)
     check current == "alpha.model-a"
     check merged.len == 1
+
+suite "config: [settings] banner_lines":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-bannerlines.ini"
+    bannerLinesSetting = 1
+
+  teardown:
+    removeFile(tmp)
+    bannerLinesSetting = 1
+
+  test "parse sets it and bannerMaxRows follows":
+    writeFile(tmp, "[settings]\nbanner_lines = 4\n")
+    discard parseConfigFile(tmp)
+    check bannerLinesSetting == 4
+    # the cap carries the setting's lines plus the `+N lines` tail row
+    check bannerMaxRows() == 5
+
+  test "hyphen spelling accepted":
+    writeFile(tmp, "[settings]\nbanner-lines = 6\n")
+    discard parseConfigFile(tmp)
+    check bannerLinesSetting == 6
+
+  test "non-numeric value rejected by the schema":
+    let m = validateConfig(tmp, @[("settings", "banner_lines", "many", 3)])
+    check m == tmp & ":3: bad value 'many' for 'banner_lines' in [settings] " &
+           "(expected a whole number of lines, 1 or more)"
+
+  test "zero and negative values rejected by the schema":
+    for bad in ["0", "-2"]:
+      let m = validateConfig(tmp, @[("settings", "banner_lines", bad, 3)])
+      check m.len > 0
+
+  test "writer persists a non-default value as a bare number":
+    bannerLinesSetting = 4
+    writeConfigFile(tmp, "", @[])
+    check readFile(tmp).contains("\nbanner_lines = 4\n")
+    bannerLinesSetting = 1
+    discard parseConfigFile(tmp)
+    check bannerLinesSetting == 4
+
+  test "writer omits the default":
+    writeConfigFile(tmp, "", @[])
+    check not readFile(tmp).contains("banner_lines")

@@ -656,7 +656,11 @@ Each conversation event gets a one-character marker or banner icon:
 Tool output below the banner is dimmed to keep the model's prose the
 loudest thing on screen. Long output is elided in the middle (`... N lines
 omitted · T7.log ↗`); `:show N` prints the whole capture, `:log` lists
-every tool call of the session. The whole elision row is a terminal
+every tool call of the session. A multiline bash command shows its first
+line(s) in the banner (`banner_lines` in the config widens that, default
+1) and collapses the rest into a linked `… +N lines · T7.cmd ↗` tail row;
+`:cmd N` prints the whole command, `:cmd N edit` opens it in
+$VISUAL/$EDITOR. The whole elision row is a terminal
 hyperlink (OSC 8) over a dump of the full output in
 `$TMPDIR/3code_out_<pid>/T<N>.log(.diff)`, so terminals that support links
 open it in the `file:` handler (e.g. `$VISUAL`) on a click; the visible

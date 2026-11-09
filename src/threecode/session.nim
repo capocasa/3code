@@ -1266,6 +1266,7 @@ proc buildToolLogFromMessages(messages: JsonNode,
           Action(kind: akError, path: name)
       result.add ToolRecord(
         banner: bannerFor(act),
+        command: if act.kind == akBash: act.body else: "",
         output: idToContent.getOrDefault(id, ""),
         code: exitByCallId.getOrDefault(id, 0),
         kind: act.kind,

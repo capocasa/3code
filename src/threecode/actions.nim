@@ -183,6 +183,17 @@ proc toolCallToAction*(family, name: string, args: JsonNode): Action =
 proc previewCmd*(body: string): string =
   body.strip.splitLines[0]
 
+proc previewCmdLines*(body: string; maxLines: int): string =
+  ## The banner body for a bash command: up to `maxLines` lines of it.
+  ## `maxLines` 1 is the historical `previewCmd` (first line only); a
+  ## multiline command shows its leading lines instead of silently
+  ## losing the rest (the caller appends the `+N lines` tail separately,
+  ## with the dump link only it can build).
+  let lines = body.strip.splitLines
+  if lines.len <= max(1, maxLines):
+    return body.strip
+  lines[0 ..< max(1, maxLines)].join("\n")
+
 proc bannerPath(act: Action): string =
   ## The path portion of a path-bearing tool banner, never empty: a
   ## missing/blank path surfaces as `(no path)` so the banner row is
