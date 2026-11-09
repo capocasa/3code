@@ -821,6 +821,26 @@ proc main() =
       discard posix.raise(sig)
     signal(SIGTERM, signalCleanup)
     signal(SIGHUP, signalCleanup)
+    # Fatal signals (SEGV, abort, ...) die with the default disposition
+    # and so skip every exit proc: without this the shell the user lands
+    # in inherits raw mode - invisible typing until `reset` (the macOS
+    # crash reports). Termios restore plus one write(2) of the mode-reset
+    # escapes only: the stdio lock may be held by whichever thread
+    # crashed, so buffered output would hang instead of dying.
+    proc fatalSignalRestore(sig: cint) {.noconv.} =
+      signal(sig, SIG_DFL)  # first: no recursive re-entry, incl. SIGPIPE
+      fatprompt.restoreCancelTermios()
+      fatprompt.restoreInputTermios()
+      # One literal, one write: no allocation on a possibly-corrupt heap.
+      # Mirrors minline.restoreTerminal (cursor, attrs, bracketed paste,
+      # kitty pop) plus DECSET 2026l, which restoreTerminal balances only
+      # on balanced paints - a crash mid-paint would otherwise leave the
+      # terminal swallowing output until the next reset.
+      let resetModes = "\x1b[?2026l\x1b[?25h\x1b[0m\x1b[?2004l\x1b[<1u"
+      discard posix.write(1.cint, unsafeAddr resetModes[0], resetModes.len)
+      discard posix.raise(sig)
+    for fatal in [SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGPIPE]:
+      signal(fatal, fatalSignalRestore)
   editor.completionCallback = proc(ed: minline.LineEditor): seq[string] =
     completionFor(ed.lineText)
   # The bootstrap provider wizard (and every later prompt) reads via the
