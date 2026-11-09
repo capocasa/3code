@@ -63,21 +63,30 @@ else
   die "need curl or wget to download"
 fi
 
-# resolve tag from redirect - avoids the rate-limited GitHub API
-if have curl; then
-  tag=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-    "https://github.com/$REPO/releases/latest" | sed 's|.*/tag/||')
-elif have wget; then
-  tag=$(wget -q --server-response --spider \
-    "https://github.com/$REPO/releases/latest" 2>&1 \
-    | grep -i 'Location:' | tail -1 | sed 's|.*/tag/||' | tr -d '\r ')
+# THREECODE_RELEASE_BASE overrides the release download base (mirrors,
+# offline installs, the test suite); it must hold the archive and
+# SHASUMS256.txt side by side and skips the GitHub tag resolution.
+if [ -n "${THREECODE_RELEASE_BASE:-}" ]; then
+  tag="release"
+  url="$THREECODE_RELEASE_BASE/$asset"
+  sums_url="$THREECODE_RELEASE_BASE/SHASUMS256.txt"
+else
+  # resolve tag from redirect - avoids the rate-limited GitHub API
+  if have curl; then
+    tag=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+      "https://github.com/$REPO/releases/latest" | sed 's|.*/tag/||')
+  elif have wget; then
+    tag=$(wget -q --server-response --spider \
+      "https://github.com/$REPO/releases/latest" 2>&1 \
+      | grep -i 'Location:' | tail -1 | sed 's|.*/tag/||' | tr -d '\r ')
+  fi
+  [ -n "${tag:-}" ] || die "could not determine latest release tag"
+  url="https://github.com/$REPO/releases/download/$tag/$asset"
+  sums_url="https://github.com/$REPO/releases/download/$tag/SHASUMS256.txt"
 fi
-[ -n "${tag:-}" ] || die "could not determine latest release tag"
 
 variant=$(echo "$asset" | sed -e 's/^3code-//' -e 's/\.tar\.gz$//')
 info "installing 3code $tag ($variant)"
-
-url="https://github.com/$REPO/releases/download/$tag/$asset"
 tmp=$(mktemp -d 2>/dev/null || mktemp -d -t 3code)
 trap 'rm -rf "$tmp"' EXIT INT HUP TERM
 
@@ -91,8 +100,7 @@ file_sha256() {
   elif have shasum;    then shasum -a 256 "$1" | awk '{print $1}'
   else echo ""; fi
 }
-if fetch "https://github.com/$REPO/releases/download/$tag/SHASUMS256.txt" \
-     "$tmp/SHASUMS256.txt"; then
+if fetch "$sums_url" "$tmp/SHASUMS256.txt"; then
   want=$(grep " $asset\$" "$tmp/SHASUMS256.txt" | awk '{print $1}')
   [ -n "$want" ] || die "no checksum line for $asset in SHASUMS256.txt"
   got=$(file_sha256 "$tmp/$asset")

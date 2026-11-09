@@ -272,60 +272,6 @@ proc trimBoundaryBlank(lines: var seq[string]) =
   if start > 0:
     lines = lines[start ..< lines.len]
 
-proc wrappedSubtleBytes(body: string; widthPad = 3): string =
-  let termW = try: terminalWidth() except CatchableError: 80
-  let bodyW = max(20, termW - widthPad)
-  for line in body.splitLines:
-    for chunk in wrapAnsi(line, bodyW):
-      result.add GreyFg & "  " & chunk & Reset & "\r\n"
-
-proc hiddenHintBytes(hidden: int; idx: int; body: string; note: string;
-                     lead = "… "; ext = "log"): string =
-  ## The "… N lines <note> · T7.log ↗" row — as short as the hint gets
-  ## while still naming where the full text went. The untruncated output
-  ## is dumped to a temp file and the whole visible text becomes an OSC 8
-  ## `file://` hyperlink over it, so a click expands what the scrollback
-  ## elided (a click opens it in the terminal's `file:` handler,
-  ## $VISUAL where configured). The visible file name keeps the row
-  ## honest where OSC 8 is unsupported. Without a usable dump the plain
-  ## `:show` hint stands.
-  let vis = lead & $hidden & " line" & (if hidden == 1: "" else: "s") & note
-  let url = dumpToolOutput(idx, body, ext)
-  let text =
-    if url.len > 0:
-      vis & " · " & &"T{idx}.{ext}" & " ↗"
-    elif idx > 0:
-      vis & " · :show " & $idx & " for full"
-    else:
-      vis
-  result = GreyFg & "  " &
-    (if url.len > 0: osc8Link(url, text) else: text) & Reset & "\r\n"
-
-proc compactHeadTailBytes(res: string; idx: int;
-                          head = CompactHead; tail = CompactTail): string =
-  var lines = res.splitLines
-  trimBoundaryBlank(lines)
-  var header = 0
-  if header < lines.len and lines[header].startsWith("$ "):
-    result.add wrappedSubtleBytes(lines[header])
-    inc header
-  var footer = lines.len
-  if footer > 0 and lines[footer-1].startsWith("[exit "):
-    dec footer
-  let bodyLen = footer - header
-  let hidden = bodyLen - head - tail
-  if hidden <= head + tail + 1:
-    for i in header ..< footer:
-      result.add wrappedSubtleBytes(lines[i])
-  else:
-    for i in header ..< header + head:
-      result.add wrappedSubtleBytes(lines[i])
-    result.add hiddenHintBytes(hidden, idx, res, " hidden")
-    for i in footer - tail ..< footer:
-      result.add wrappedSubtleBytes(lines[i])
-  if footer < lines.len:
-    result.add wrappedSubtleBytes(lines[footer])
-
 type
   DiffLinkState = object
     ## Walked while a diff is painted so every row can link into the file
@@ -402,6 +348,77 @@ proc diffLinkFor(l: string; st: var DiffLinkState): string =
     inc st.bLine
   else:
     result = st.url
+
+proc wrappedSubtleBytes(body: string; widthPad = 3): string =
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - widthPad)
+  for line in body.splitLines:
+    for chunk in wrapAnsi(line, bodyW):
+      result.add GreyFg & "  " & chunk & Reset & "\r\n"
+
+proc hiddenHintBytes(hidden: int; idx: int; body: string; note: string;
+                     lead = "… "; ext = "log"): string =
+  ## The "… N lines <note> · T7.log ↗" row — as short as the hint gets
+  ## while still naming where the full text went. The untruncated output
+  ## is dumped to a temp file and the whole visible text becomes an OSC 8
+  ## `file://` hyperlink over it, so a click expands what the scrollback
+  ## elided (a click opens it in the terminal's `file:` handler,
+  ## $VISUAL where configured). The visible file name keeps the row
+  ## honest where OSC 8 is unsupported. Without a usable dump the plain
+  ## `:show` hint stands.
+  let vis = lead & $hidden & " line" & (if hidden == 1: "" else: "s") & note
+  let url = dumpToolOutput(idx, body, ext)
+  let text =
+    if url.len > 0:
+      vis & " · " & &"T{idx}.{ext}" & " ↗"
+    elif idx > 0:
+      vis & " · :show " & $idx & " for full"
+    else:
+      vis
+  result = GreyFg & "  " &
+    (if url.len > 0: osc8Link(url, text) else: text) & Reset & "\r\n"
+
+proc subtleRowBytes(l: string; links: var DiffLinkState;
+                    linked: bool): string =
+  ## One subtle body row: `wrappedSubtleBytes` for the plain case; when
+  ## `linked`, the row rides the diff line-walk's OSC 8 file:line link.
+  let url = if linked: diffLinkFor(l, links) else: ""
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - 3)
+  for chunk in wrapAnsi(l, bodyW):
+    let row = if url.len > 0: osc8Link(url, chunk) else: chunk
+    result.add GreyFg & "  " & row & Reset & "\r\n"
+
+proc compactHeadTailBytes(res: string; idx: int;
+                          head = CompactHead; tail = CompactTail;
+                          linked = false): string =
+  var lines = res.splitLines
+  trimBoundaryBlank(lines)
+  var links: DiffLinkState
+  var header = 0
+  if header < lines.len and lines[header].startsWith("$ "):
+    result.add wrappedSubtleBytes(lines[header])
+    inc header
+  var footer = lines.len
+  if footer > 0 and lines[footer-1].startsWith("[exit "):
+    dec footer
+  let bodyLen = footer - header
+  let hidden = bodyLen - head - tail
+  if hidden <= head + tail + 1:
+    for i in header ..< footer:
+      result.add subtleRowBytes(lines[i], links, linked)
+  else:
+    # Walk EVERY body row through the line state (linked or not) so a
+    # linked tail row still names its own line after the hidden middle.
+    var tailRows = ""
+    for i in header ..< footer:
+      let rowBytes = subtleRowBytes(lines[i], links, linked)
+      if i < header + head: result.add rowBytes
+      elif i >= footer - tail: tailRows.add rowBytes
+    result.add hiddenHintBytes(hidden, idx, res, " hidden")
+    result.add tailRows
+  if footer < lines.len:
+    result.add wrappedSubtleBytes(lines[footer])
 
 proc addDiffPainted(outBytes: var string; l: string;
                     links: var DiffLinkState) =
@@ -847,7 +864,8 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
       lines.setLen(lines.len - 1)
     result.add compactHeadTailBytes(lines.join("\n"), idx, ReadHead, ReadTail)
   elif kind == akWrite:
-    result.add compactHeadTailBytes(diff, idx, ReadHead, ReadTail)
+    result.add compactHeadTailBytes(diff, idx, ReadHead, ReadTail,
+                                    linked = true)
   elif kind in {akWebSearch, akWebFetch}:
     result.add compactHeadTailBytes(res, idx)
   else:
@@ -892,7 +910,8 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
   of akWrite:
     result.add toolBannerBytes(bannerFor(act), act.kind, code, elapsedS)
     if code == 0 and diff.len > 0:
-      result.add compactHeadTailBytes(diff, idx, ReadHead, ReadTail)
+      result.add compactHeadTailBytes(diff, idx, ReadHead, ReadTail,
+                                      linked = true)
     else:
       result.add toolResultBytes(act.kind, res, code, idx, diff = "")
   of akPatch, akApplyPatch:

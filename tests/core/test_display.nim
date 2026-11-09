@@ -566,6 +566,20 @@ suite "display: truncated tool output expansion":
     check osc8Link(url & ":6", "+extra") in bytes
     check osc8Link(url & ":7", "rest") in bytes
 
+  test "write diff block rows link the file at their line (warp #12)":
+    # The `w` output block renders its diff as subtle rows (no green/red),
+    # but each row rides the same file:line link as the painted patch
+    # diff; hidden middle rows still advance the line walk.
+    let diff = "--- a/fix.nim\n+++ b/fix.nim\n@@ -2,2 +2,2 @@\n keep\n-old\n+new"
+    let act = Action(kind: akWrite, path: "fix.nim")
+    let bytes = toolTranscriptBytes(act, "wrote fix.nim (4 bytes)", 0, 3,
+                                    diff)
+    let url = fileUrl(getCurrentDir() / "fix.nim")
+    check osc8Link(url, "+++ b/fix.nim") in bytes
+    check osc8Link(url & ":2", "keep") in bytes   # context row, b-side
+    check osc8Link(url & ":3", "-old") in bytes   # old-side line
+    check osc8Link(url & ":3", "+new") in bytes   # new-side line
+
   test "diff rows without a file header stay unlinked":
     # A diff that never names a path must not link rows against a
     # guessed URL; the paint stays plain. The T<n>.diff hint keeps its

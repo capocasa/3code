@@ -24,19 +24,28 @@ if ([Environment]::Is64BitOperatingSystem -ne $true) {
   Die "only 64-bit Windows is supported"
 }
 
-Info "resolving latest release"
-try {
-  $req = [Net.HttpWebRequest]::Create("https://github.com/$Repo/releases/latest")
-  $req.Method = "HEAD"
-  $req.AllowAutoRedirect = $true
-  $resp = $req.GetResponse(); $resp.Close()
-  $tag = $resp.ResponseUri.Segments[-1].TrimEnd('/')
-} catch {
-  Die "could not resolve latest release: $_"
+# THREECODE_RELEASE_BASE overrides the release download base (mirrors,
+# offline installs, the test suite); it must hold the archive and
+# SHASUMS256.txt side by side and skips the GitHub tag resolution.
+if ($env:THREECODE_RELEASE_BASE) {
+  $tag = "release"
+  $url = "$env:THREECODE_RELEASE_BASE/$Asset"
+  $sumsUrl = "$env:THREECODE_RELEASE_BASE/SHASUMS256.txt"
+} else {
+  Info "resolving latest release"
+  try {
+    $req = [Net.HttpWebRequest]::Create("https://github.com/$Repo/releases/latest")
+    $req.Method = "HEAD"
+    $req.AllowAutoRedirect = $true
+    $resp = $req.GetResponse(); $resp.Close()
+    $tag = $resp.ResponseUri.Segments[-1].TrimEnd('/')
+  } catch {
+    Die "could not resolve latest release: $_"
+  }
+  if (-not $tag) { Die "could not determine latest release tag" }
+  $url = "https://github.com/$Repo/releases/download/$tag/$Asset"
+  $sumsUrl = "https://github.com/$Repo/releases/download/$tag/SHASUMS256.txt"
 }
-if (-not $tag) { Die "could not determine latest release tag" }
-
-$url  = "https://github.com/$Repo/releases/download/$tag/$Asset"
 $tmp  = Join-Path ([System.IO.Path]::GetTempPath()) ("3code-install-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 
@@ -49,7 +58,7 @@ try {
   # release, so what lands in PATH is what was built
   $sums = $null
   try {
-    $sums = (Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$Repo/releases/download/$tag/SHASUMS256.txt").Content
+    $sums = (Invoke-WebRequest -UseBasicParsing -Uri $sumsUrl).Content
   } catch { }
   if ($sums) {
     $want = $null
