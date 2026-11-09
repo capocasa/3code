@@ -1,5 +1,16 @@
-import std/[json, strutils, unittest]
+import std/[json, os, strutils, unittest]
 import threecode/[prompts, compact, types]
+
+const GoldenFamilies = [
+  "laguna", "glm", "kolibri", "minimax", "longcat", "qwen", "hy",
+  "mistral", "deepseek", "gpt", "gpt-oss", "other", "0xalpha",
+  "inkling", "grok", "mimo", "kimi", "claude", "ling", "nemotron",
+  "gemini"]
+
+func toolsDigest(tools: JsonNode): string =
+  for t in tools:
+    let f = t{"function"}
+    result.add f{"name"}.getStr & ": " & f{"description"}.getStr & "\n"
 
 suite "prompts: knownGoodFamily":
   test "returns family for known-good combo":
@@ -402,6 +413,68 @@ suite "prompts: setup — deepseek":
     check "Empty `search` is rejected" in s.prompt
     check "unconditionally" in s.prompt
 
+  test "same semantics, compact form, in every glm-tools family":
+    # kay-is's rewrite (community.3code.capocasa.dev/t/9) was folded
+    # into DeepSeek first; the same behavioral rules — corrected patch
+    # matching above all — ride the other per-tool prompts in compact
+    # form, replacing the old "must match exactly once" prose.
+    for fam in ["laguna", "glm", "longcat", "hy", "other", "0xalpha",
+                "nemotron"]:
+      let s = setup(Profile(name: fam & ".m", model: "m", family: fam))
+      check "Nonzero `exit=N` is a failure to investigate" in s.prompt
+      check "keeps only the tail" in s.prompt
+      check "hard kill" in s.prompt
+      check "2KB+ lines skipped" in s.prompt
+      check "250-line cap without offset/limit" in s.prompt
+      check "`limit:-1` lifts the cap" in s.prompt
+      check "FIRST match" in s.prompt
+      check "2-3 lines of unique context" in s.prompt
+      check "fuzzy ladder: exact → indent → whitespace" in s.prompt
+      check "re-read the region if the diff looks off" in s.prompt
+      check ("All edits must match or nothing is written" in s.prompt and
+             "resend the entire call" in s.prompt)
+      check "Empty `search` is rejected" in s.prompt
+      check "unconditionally" in s.prompt
+
+    for fam in ["inkling", "grok", "mimo"]:
+      let s = setup(Profile(name: fam & ".m", model: "m", family: fam))
+      check "failure to investigate" in s.prompt
+      check "keeps only the tail" in s.prompt
+      check "first match" in s.prompt
+      check "nothing is written" in s.prompt
+      check "2KB+ lines skipped" in s.prompt
+      check "250-line cap" in s.prompt
+      check "exact → indent → whitespace" in s.prompt
+      check "re-read the region if the diff looks off" in s.prompt
+
+  test "mistral read bullet documents the cap lift":
+    let s = setup(Profile(name: "mistral.m", model: "m", family: "mistral"))
+    check "`limit:-1` lifts the cap" in s.prompt
+
+  test "gpt-oss shell docs carry the bash behavior rules":
+    let s = setup(Profile(name: "x.gpt-oss", model: "gpt-oss-120b",
+                          family: "gpt-oss"))
+    check "failure to investigate, not a result to build on" in s.prompt
+    check "keeps only the tail" in s.prompt
+    check "hard kill" in s.prompt
+
+  test "gpt-oss prompt counters obvious/excluded docs and unread failures":
+    # warp's findings (community.3code.capocasa.dev/t/14): docs stating
+    # the obvious and the explicitly excluded; failing tests overlooked.
+    let s = setup(Profile(name: "openai.gpt-oss-120b",
+                          model: "gpt-oss-120b", family: "gpt-oss"))
+    check "Avoid adding what you won't do or what something is not" in s.prompt
+    check "a failure named in the output is unfinished work" in s.prompt
+
+  test "gpt prompt: failures-first, hardened tests rule, docs counter":
+    let s = setup(Profile(name: "openai.gpt-5.6", model: "gpt-5.6",
+                          family: "gpt"))
+    check "a failure named in the output is the next task" in s.prompt
+    check "Never add tests that copy the implementation or freeze " &
+          "incidental wording" in s.prompt
+    check "In generated docs and reports: state what is and what changed" in
+      s.prompt
+
   test "prompt stays terse (under 9.9KB with splices)":
     let p = Profile(name: "deepseek.deepseek-flash", url: "x", key: "k",
                     model: "deepseek-flash", family: "deepseek",
@@ -663,3 +736,41 @@ suite "prompts: setup — bashToolDisabled":
     for t in s.tools:
       if t{"function"}{"name"}.getStr == "bash": foundBash = true
     check foundBash
+
+suite "prompts: golden fixtures":
+  # Byte-for-byte snapshots of every shipped family prompt plus its
+  # tool descriptions. Prompt text rides every request, so this locks
+  # it against accidental drift. After a deliberate prompt change,
+  # regenerate and review the diff like any source change:
+  #   THREECODE_REGEN_GOLDEN=1 <this test binary>
+  const GoldenDir = "tests/testdata/fixtures/prompts"
+
+  test "every family prompt matches its golden fixture":
+    createDir(GoldenDir)
+    let regen = getEnv("THREECODE_REGEN_GOLDEN") == "1"
+    for fam in GoldenFamilies:
+      let s = setup(Profile(name: fam & ".m", model: "m", family: fam))
+      let snap = s.prompt
+        .replace("{{credit}}", "CREDIT")
+        .replace("{{skills}}", "SKILLS") &
+        "\n\n--- tools ---\n" & toolsDigest(s.tools)
+      let path = GoldenDir / (fam & ".txt")
+      if regen:
+        writeFile(path, snap)
+        continue
+      check fileExists(path)
+      if not fileExists(path): continue
+      let golden = readFile(path)
+      if golden == snap:
+        check true
+      else:
+        var i = 0
+        while i < min(golden.len, snap.len) and golden[i] == snap[i]:
+          inc i
+        proc around(x: string): string =
+          let a = min(i, x.len)
+          x[a ..< min(a + 60, x.len)]
+        checkpoint fam & ": first diff at byte " & $i
+        checkpoint "golden> " & around(golden)
+        checkpoint "actual> " & around(snap)
+        check false
