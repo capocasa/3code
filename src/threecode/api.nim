@@ -49,6 +49,15 @@ var
     ## thread, which receives no Profile. Written and read under the
     ## `callModel` entry contract (one active turn at a time).
 
+proc providerLabel*(p: Profile): string =
+  ## The profile's provider prefix verbatim ("OpenCode.flash" ->
+  ## "OpenCode"): the exact `[provider]` section name the user typed, so
+  ## user-facing fix hints (`:provider edit <name>`) round-trip.
+  ## `providerOf` is the lower-cased dispatch key; this is the display
+  ## form. A dot-less name falls back to itself.
+  let dot = p.name.find('.')
+  if dot > 0: p.name[0 ..< dot] else: p.name
+
 proc bearerFor*(p: Profile): string =
   if bearerHook != nil:
     let t =
@@ -60,8 +69,7 @@ proc bearerFor*(p: Profile): string =
         # and the REPL loop would catch it, so it used to kill the whole
         # process mid-turn. ApiError is the turn-error channel: the turn
         # loop renders it and the prompt survives.
-        let dot = p.name.find('.')
-        let provider = if dot > 0: p.name[0 ..< dot] else: p.name
+        let provider = providerLabel(p)
         raise newException(ApiError, provider & " login expired (" &
           e.msg & "). re-login: :provider edit " & provider)
     if t != "": return t
@@ -432,6 +440,46 @@ proc newHttpError*(code: int, errMsg, errBody: string;
   ## and read `.code` instead of string-matching.
   var e = newException(HttpError, formatApiDetail(errMsg, errBody, code,
     provider))
+  e.code = code
+  e
+
+proc providerErrorDetail*(provider, errMsg, errBody: string;
+                          code: int): string =
+  ## Provider-attributed error detail in the `(code N)` suffix form: the
+  ## message is prefixed with the provider's own name so a raw provider
+  ## body ("This API key has expired...") cannot read as a 3code failure,
+  ## and auth-class statuses (401/403) append the re-key fix. An
+  ## unattributable case (no provider name, or no status and no body)
+  ## degrades to the bare detail instead of mislabeling a harness-side
+  ## error as the provider's. This does not delegate to `formatApiDetail`,
+  ## which uses the `<code> from <provider>:` prefix form for retry
+  ## notices; the terminal raise wants the suffix form so the provider
+  ## name leads and the code reads as a parenthetical.
+  let rawBody = extractErrorMsg(errBody)
+  let usedBody = rawBody.len > 0 and not isCodeEcho(rawBody, code)
+  let msg = condenseErrorLine(
+    if usedBody: rawBody
+    elif errMsg.len > 0: errMsg
+    else: "error")
+  if provider.len == 0 or (code == 0 and errBody.len == 0):
+    if code != 0: result = msg & " (code " & $code & ")"
+    else: result = msg
+    return
+  result = provider & " error: " & msg
+  if code != 0: result &= " (code " & $code & ")"
+  if code == 401 or code == 403:
+    result &= ". re-enter the key: :provider edit " & provider
+
+proc newProviderHttpError*(p: Profile; code: int, errMsg,
+    errBody: string): ref HttpError =
+  ## `newHttpError` for terminal raises where the profile is in scope: the
+  ## message names the provider (and for 401/403 the `:provider edit` fix)
+  ## while `code` keeps the status for programmatic branching. Every
+  ## downstream consumer (turn loop, goal verifier, library) renders the
+  ## message verbatim, so attribution at the raise is attribution at the
+  ## screen.
+  var e = newException(HttpError,
+    providerErrorDetail(providerLabel(p), errMsg, errBody, code))
   e.code = code
   e
 
@@ -3564,7 +3612,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     if not retryable:
       hookStopSpinner()
       if outcome.assistantMsg == nil:
-        raise newHttpError(code, errMsg, outcome.errBody, providerOf(p))
+        raise newProviderHttpError(p, code, errMsg, outcome.errBody)
       # Promote any leaked GLM/Qwen native `<tool_call>...</tool_call>`
       # blocks in the assistant content to synthetic OpenAI tool_calls.
       # Some endpoints (notably nvidia z-ai/glm-5.2) don't reliably
@@ -3594,11 +3642,18 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       if category == "server" and code == 0:
         # Format with the body so a 200 anomaly that carried a provider
         # error object (e.g. z.ai's overloaded message) surfaces its text,
-        # not just the generic transport errMsg. `code` is 0 here, so no
-        # status prefix is prepended, matching the network-quiet case.
+        # not just the generic transport errMsg. A body means the provider
+        # spoke, so the message carries provider attribution; a body-less
+        # transport failure (network quiet, connect/read error) is
+        # 3code's own report and says so, keeping the two sides legible
+        # apart. `code` is 0 here, so no `(code N)` suffix is appended.
         raise newException(NetworkHealthError,
-          formatApiDetail(errMsg, outcome.errBody, code, providerOf(p)))
-      raise newHttpError(code, errMsg, outcome.errBody, providerOf(p))
+          if extractErrorMsg(outcome.errBody).len > 0:
+            providerErrorDetail(providerLabel(p), errMsg,
+              outcome.errBody, code)
+          else:
+            "3code: " & formatApiDetail(errMsg, outcome.errBody, code))
+      raise newProviderHttpError(p, code, errMsg, outcome.errBody)
     if category == "retry-now":
       # `:retry` asked for this resend: no backoff, no notice row, and
       # the curve resets. Attempt counting still applies, so a `:retry`
@@ -3960,8 +4015,9 @@ proc callSystemOne*(p: Profile, state: string, questions: JsonNode,
     let resp = client.request(url, httpMethod = HttpPost,
                               body = sanitizeUtf8($body))
     if resp.code.int != 200:
-      raise newException(ApiError, "HTTP " & $resp.code.int & " — " &
-        resp.body[0 ..< min(200, resp.body.len)])
+      raise newException(ApiError, providerErrorDetail(providerLabel(p),
+        "HTTP " & $resp.code.int,
+        resp.body[0 ..< min(200, resp.body.len)], resp.code.int))
     let j = parseJson(resp.body)
     if j.kind != JObject or j{"answers"} == nil or
         j{"answers"}.kind != JObject:

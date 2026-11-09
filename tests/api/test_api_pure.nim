@@ -608,6 +608,56 @@ suite "api: HttpError":
     check not (http of NetworkHealthError)
     check not (net of HttpError)
 
+suite "api: provider error attribution":
+  # The jasonfi report (community thread 16): an expired OpenCode key
+  # surfaced as the raw provider body with no indication which side
+  # produced it. Terminal provider failures must name the provider, and
+  # auth-class ones must carry the re-key fix.
+  test "auth failure names the provider, the body, and the fix":
+    let body = "{\"error\":{\"message\":\"This API key has expired. " &
+        "Create a new API key\"}}"
+    check providerErrorDetail("opencode", "", body, 401) ==
+      "opencode error: This API key has expired. Create a new API key " &
+      "(code 401). re-enter the key: :provider edit opencode"
+
+  test "403 carries the re-key fix too":
+    let body = "{\"error\":\"forbidden\"}"
+    check providerErrorDetail("stub", "", body, 403) ==
+      "stub error: forbidden (code 403). re-enter the key: " &
+      ":provider edit stub"
+
+  test "non-auth statuses name the provider without the re-key fix":
+    let body = "{\"error\":\"rate limit\"}"
+    check providerErrorDetail("stub", "", body, 429) ==
+      "stub error: rate limit (code 429)"
+
+  test "empty provider name degrades to the bare detail":
+    let body = "{\"error\":\"server error\"}"
+    check providerErrorDetail("", "", body, 500) == "server error (code 500)"
+
+  test "statusless bodyless failure is not mislabeled as the provider's":
+    # The retry-now exhaustion corner raises with code 0 and no body;
+    # that message must not grow a provider attribution.
+    check providerErrorDetail("stub", "retry requested by user", "", 0) ==
+      "retry requested by user"
+
+  test "newProviderHttpError keeps the class, code, and attribution":
+    let body = "{\"error\":{\"message\":\"key expired\"}}"
+    let e = newProviderHttpError(
+      Profile(name: "opencode.flash", family: "glm", model: "flash"),
+      401, "", body)
+    check e of HttpError
+    check e of ApiError
+    check e.code == 401
+    check e.msg == "opencode error: key expired (code 401). " &
+      "re-enter the key: :provider edit opencode"
+
+  test "providerLabel keeps the section name verbatim":
+    # The fix hint must round-trip through :provider edit, so no
+    # lowercasing (providerOf is the dispatch key, not the display name).
+    check providerLabel(Profile(name: "OpenCode.flash")) == "OpenCode"
+    check providerLabel(Profile(name: "dotless")) == "dotless"
+
 suite "api: bearerFor":
   template withBearerHook(hook: untyped, body: untyped) =
     ## Install `hook` as api.bearerHook for the duration of `body`,
