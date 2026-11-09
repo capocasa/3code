@@ -2,6 +2,20 @@ Changelog
 
 Unreleased
 
+- **Multiline bash commands banner their first lines, `+N lines` tail
+  linked to the whole command, and `:cmd` shows it.** A multiline bash
+  command used to render only its first line in the `$` banner with no
+  signal anything followed. The banner now shows the first
+  `banner_lines` lines (config `[settings]`, default 1) plus a linked
+  `… +N lines · T<idx>.cmd ↗` tail row: the click opens the `T<idx>.cmd`
+  dump the run wrote with the complete command. `:cmd [N]` prints the
+  full command of bash tool call N (default last) in the transcript,
+  `:cmd N edit` opens it in `$VISUAL`/`$EDITOR`.
+- **Unknown config keys warn instead of erroring.** An unknown key in a
+  known section prints a `file:line:` warning at startup and is
+  ignored, so a config written by a newer 3code still boots; unknown
+  sections stay fatal. Unknown `[shortcuts]` command names are dropped
+  with the same warning so a bogus binding cannot shadow a real key.
 - **Computer use is compiled out of release builds and undocumented.**
   Internal use only for now: `:computer`, `--computer`, and the
   `computer` config line are inert in a build without the internal
