@@ -320,7 +320,6 @@ when defined(posix):
        fpGroupRead, fpGroupExec, fpOthersRead, fpOthersExec})
     shimDir
 
-when defined(posix):
   proc sweepStaleWallDirs*() =
     ## Best-effort removal of proxy dirs from dead 3code processes,
     ## mirroring cleanupStaleBinaries. Runs at startup.
