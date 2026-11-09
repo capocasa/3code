@@ -100,7 +100,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">:quit</span></tt> / <tt class="docutils literal"><span class="pre">:q</span></tt> / <tt class="docutils literal"><span class="pre">:exit</span></tt></td><td>leave</td></tr>
 </table>
 <h2 id="config-file">Config file</h2><p>Location: <tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt> on Linux, <tt class="docutils literal"><span class="pre">~/Library/Application Support/3code/config</span></tt> on macOS, <tt class="docutils literal"><span class="pre">%APPDATA%\3code\config</span></tt> on Windows; <tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt> overrides the base directory on every platform. <tt class="docutils literal"><span class="pre">-c FILE</span></tt> / <tt class="docutils literal"><span class="pre">--config FILE</span></tt> reads a different file for a single run; it is rewritten by 3code itself whenever providers or models change, same as the default. Annotated example: <tt class="docutils literal"><span class="pre">docs/config.example</span></tt> in the repository.</p>
-<p>Values are Nim string literals, always wrapped in double quotes. parsecfg treats <tt class="docutils literal"><span class="pre">:</span></tt>, <tt class="docutils literal"><span class="pre">=</span></tt>, and <tt class="docutils literal"><span class="pre">#</span></tt> as syntax in unquoted values, so an unquoted URL or API key can silently truncate. <tt class="docutils literal"><span class="pre">;</span></tt> and <tt class="docutils literal"><span class="pre">#</span></tt> start comments. An unknown section or key is a startup error with a <tt class="docutils literal"><span class="pre">file:line:</span></tt> pointer, so a typo cannot quietly disable a setting.</p>
+<p>Values are Nim string literals, always wrapped in double quotes. parsecfg treats <tt class="docutils literal"><span class="pre">:</span></tt>, <tt class="docutils literal"><span class="pre">=</span></tt>, and <tt class="docutils literal"><span class="pre">#</span></tt> as syntax in unquoted values, so an unquoted URL or API key can silently truncate. <tt class="docutils literal"><span class="pre">;</span></tt> and <tt class="docutils literal"><span class="pre">#</span></tt> start comments. An unknown section is a startup error with a <tt class="docutils literal"><span class="pre">file:line:</span></tt> pointer, so a typo cannot quietly disable a setting. An unknown key prints a <tt class="docutils literal"><span class="pre">file:line:</span></tt> warning at startup and is ignored, so a config written by a newer 3code still boots.</p>
 <p>A minimal config:</p>
 <p><pre class="listing">[settings]
 current = &quot;baseten.glm5&quot;
@@ -183,7 +183,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-05 20:38:01 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-09 09:17:35 UTC</small>
       </div>
     </div>
   </div>

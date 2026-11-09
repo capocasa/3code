@@ -753,7 +753,9 @@ suite "config: concurrent instances don't clobber each other":
     ]
     writeConfigFile(tmp, "alpha.model-a", providers)
     let (bCurrent, bProviders) = loadLikeStartup(tmp)
-    writeFile(tmp, "[settings]\nnope = \"x\"\n")
+    # A structurally broken file (bad enum value), not merely an unknown
+    # key: unknown keys are warnings now and must not block a write.
+    writeFile(tmp, "[settings]\nnotify = \"maybe\"\n")
     let before = readFile(tmp)
     writeConfigFile(tmp, bCurrent, bProviders)
     check readFile(tmp) == before

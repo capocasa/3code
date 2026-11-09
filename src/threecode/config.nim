@@ -104,6 +104,11 @@ var activeParams*: seq[ParamsRec]
   ## Every `[params]` section from the active config, in file order. Kept
   ## so `writeConfigFile` can persist them and `buildProfile` can resolve
   ## the entry matching the current (provider, model).
+var activeConfigWarnings*: seq[string]
+  ## Unknown-key notices from the last `parseConfigFile` run. Startup
+  ## callers print them once; the mid-session re-parse in `writeConfigFile`
+  ## refreshes them silently — repeating the same file's warning under the
+  ## live TUI would be noise, not news.
 var activeSearchKey*: string = ""
   ## The key for the *active* search engine, resolved at config load from
   ## the engine-specific `[search] exa-key` / `brave-key` (or the matching
@@ -373,18 +378,22 @@ proc permittedKey(section, key: string): bool =
   else: false
 
 proc validateConfig*(path: string; entries: seq[RawEntry]): string =
-  ## Reject unknown sections, unknown keys, bad enum values, and empty
-  ## values. Returns the first violation as a `path:line:` message, or ""
-  ## when the config is schema-clean. The caller decides how to surface it
-  ## (`parseConfigFile` passes it to `die` with `ExitConfig`). Empty
-  ## `current`/`key`/`url`/`models` are tolerated here — those are
+  ## Reject unknown sections, bad enum values, and empty values. Returns
+  ## the first violation as a `path:line:` message, or "" when the config
+  ## is schema-clean. The caller decides how to surface it
+  ## (`parseConfigFile` passes it to `die` with `ExitConfig`). Unknown keys
+  ## are NOT violations: they are skipped here and reported as warnings by
+  ## `configWarnings`, so a config written by a newer 3code still boots.
+  ## Empty `current`/`key`/`url`/`models` are tolerated here — those are
   ## structural gaps `loadProfile` already diagnoses with its own messages;
   ## this pass is about the schema, not provider completeness.
   for ent in entries:
     if ent.section notin PermittedSections:
       return &"{path}:{ent.line}: unknown section [{ent.section}]"
     if not permittedKey(ent.section, ent.key):
-      return &"{path}:{ent.line}: unknown key '{ent.key}' in [{ent.section}]"
+      # Warned-and-ignored (see configWarnings); skipping also keeps the
+      # empty-value/value checks below off keys nothing reads anyway.
+      continue
     if ent.value.strip == "":
       # Empty key is fine for auth=oauth providers (and is also a structural
       # gap loadProfile diagnoses). Empty current/url/models likewise.
@@ -449,6 +458,17 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           return &"{path}:{ent.line}: invalid shortcut value '{ent.value}' for '{ent.key}'"
     else: discard
   ""
+
+proc configWarnings*(path: string; entries: seq[RawEntry]): seq[string] =
+  ## Every unknown key in a known section, as `path:line:` lines. These are
+  ## warnings, not errors: each key is ignored and the rest of the config
+  ## loads. Unknown sections stay fatal (`validateConfig`). Collected per
+  ## `parseConfigFile` run into `activeConfigWarnings`; startup callers
+  ## print them once.
+  for ent in entries:
+    if ent.section in PermittedSections and
+        not permittedKey(ent.section, ent.key):
+      result.add &"{path}:{ent.line}: unknown key '{ent.key}' in [{ent.section}] (ignored)"
 
 proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) {.raises: [ValueError, IOError, OSError].} =
   ## Streaming parse so that repeated [provider] and [params] sections
@@ -661,11 +681,16 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           else: discard
         else: discard
       of "shortcuts":
-        shortcuts[e.key] = v
+        # Unknown command names are dropped (configWarnings reports them):
+        # `applyShortcuts` merges whatever lands here into the dispatch
+        # tables, and a bogus command bound to a real key spec would
+        # shadow the genuine binding on that key.
+        if e.key in minline.ShortcutNames: shortcuts[e.key] = v
       else: discard
     of cfgError:
       raise newException(ValueError, &"{path}: {e.msg}")
   p.close
+  activeConfigWarnings = configWarnings(path, entries)
   let verr = validateConfig(path, entries)
   if verr != "": raise newException(ValueError, verr)
   # Migration: older configs only kept one global `current`. Seed the
@@ -736,6 +761,7 @@ proc mergeForeignEdits(path: string; current: var string,
      sandboxWallWarn, maxTimeoutSetting, forceTimeoutSetting, colorModePref,
      bashPathOverride, bashSourcePref, tabTitleEnabled, userAgentTemplate)
   let savedParams = activeParams
+  let savedWarnings = activeConfigWarnings
   let (diskCurrent, diskProviders, _, _, _, _) =
     try: parseConfigFile(path)
     except CatchableError as e:
@@ -756,6 +782,7 @@ proc mergeForeignEdits(path: string; current: var string,
   tabTitleEnabled = savedTabTitle
   userAgentTemplate = savedUserAgent
   activeParams = savedParams
+  activeConfigWarnings = savedWarnings
   # Same baseline-diff for the `current` line: an instance that never
   # switched in-session still holds the startup value, so a different
   # non-empty value on disk is another instance's switch and survives.
@@ -980,6 +1007,13 @@ proc applyEarlySandboxSettings*(path: string) =
   # OSError. The finalizer never ran in a short session.
   p.close()
 
+proc printConfigWarnings*() =
+  ## Startup-only surface for `activeConfigWarnings`: one stderr line per
+  ## unknown key, prefixed to read as a warning rather than the `die`
+  ## format the real errors use.
+  for w in activeConfigWarnings:
+    stderr.writeLine("3code: warning: " & w)
+
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
   ## Returns `(current, providers, colors)` and updates `activeSearchKey` /
   ## `activeSearchEngine` / `activeSearchKeys` / `activeShortcuts` as a side
@@ -995,6 +1029,7 @@ proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, s
   let (current, providers, colors, searchKeys, searchEngine, shortcuts) =
     try: parseConfigFile(path)
     except ValueError as e: die e.msg, ExitConfig
+  printConfigWarnings()
   baselineCurrent = current
   baselineProviders = providers
   if searchEngine != "": activeSearchEngine = searchEngine
@@ -1148,6 +1183,7 @@ proc loadProfile*(wanted: string): Profile =
   let (current, providers, _, searchKeys, searchEngine, shortcuts) =
     try: parseConfigFile(path)
     except ValueError as e: die e.msg, ExitConfig
+  printConfigWarnings()
   # Single-shot runs (`3code -p ...`, subcommands) go through here instead
   # of loadStateOrEmpty; arm the same merge baseline so their writes don't
   # clobber concurrent edits either.

@@ -108,8 +108,9 @@ providers or models change, same as the default. Annotated example:
 Values are Nim string literals, always wrapped in double quotes. parsecfg
 treats `:`, `=`, and `#` as syntax in unquoted values, so an unquoted URL or
 API key can silently truncate. `;` and `#` start comments. An unknown
-section or key is a startup error with a `file:line:` pointer, so a typo
-cannot quietly disable a setting.
+section is a startup error with a `file:line:` pointer, so a typo cannot
+quietly disable a setting. An unknown key prints a `file:line:` warning at
+startup and is ignored, so a config written by a newer 3code still boots.
 
 A minimal config:
 
