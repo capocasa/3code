@@ -75,7 +75,7 @@ suite "computer use via shot (real binary)":
                      "arguments": $(%*{"command": shotCmd})}}]},
       {"content": "stale confirmed", "contentChunks": ["stale confirmed"]}
     ]))
-    let stub = ensureStubBinary()
+    let stub = ensureStubBinary("-d:computerUse")
     let tty = newTtySession(stub,
                             args = ["-x", "-i"],
                             cwd = root / "run",

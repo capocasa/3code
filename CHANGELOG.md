@@ -2,6 +2,13 @@ Changelog
 
 Unreleased
 
+- **Computer use is compiled out unless the build asks for it.** Every
+  arm path (`:computer on`, `--computer`, `[settings] computer = on`)
+  is inert in a build without `-d:computerUse`; `:computer` answers
+  "not compiled in" instead. The feature stays fully testable: the
+  shot e2e builds its own `-d:computerUse` binary and the in-process
+  e2e arms the gate directly. Temporary measure while the feature
+  bakes; revert by making the define the default again.
 - **The sandbox ask covers `apply_patch` too.** The last file-tool gap:
   `apply_patch` carries its paths per-op inside the patch body, so the
   pre-emptive hook never saw them and gpt-oss profiles (its canonical

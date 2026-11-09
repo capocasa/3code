@@ -1588,6 +1588,9 @@ proc cmdPrivate(arg: string, prof: var Profile): string =
     return errLnS("usage: :private [on|off|allow <provider> [model]|deny <provider> [model]]")
 
 proc cmdComputerStatus(prof: Profile, session: Session): string =
+  if not computerUseBuild:
+    return hintLnS("computer use: not compiled in (build with -d:computerUse " &
+      "to enable; session only, never persisted)")
   let mark = if computerUseEnabled: "on" else: "off"
   result.add hintLnS("computer use: " & mark &
     "  (on = the model can screenshot this screen and drive it with the " &
@@ -1613,6 +1616,9 @@ proc cmdComputer(arg: string, prof: Profile, session: Session): string =
   if parts[0] == "off":
     computerUseEnabled = false
     return hintLnS("computer use: off")
+  if not computerUseBuild:
+    return errLnS("computer use is not compiled into this build; rebuild " &
+      "with -d:computerUse to enable it")
   if not prof.vision:
     return errLnS("computer use needs a vision model — " & prof.model &
       " cannot see images. Switch to a vision model (glm-5.3-flash on " &

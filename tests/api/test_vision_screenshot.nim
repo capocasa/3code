@@ -123,6 +123,11 @@ else:
       putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
       resetStubResponses()
 
+      # Config `computer = on` only arms a -d:computerUse build now; arm
+      # directly so the e2e covers the capture path in every build. The
+      # config arming itself is covered by tests/tty/test_computer_shot.
+      computerUseEnabled = true
+
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
       check s.prompt("look at the screen") == "screen seen"
@@ -193,6 +198,7 @@ else:
       putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
       resetStubResponses()
 
+      computerUseEnabled = true
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
       check s.prompt("keep looking") == "capped"

@@ -489,7 +489,8 @@ proc main() =
       of "g", "good": printKnownGood(); return
       of "x", "experimental": experimentalEnabled = true
       of "p", "private": privateMode = true
-      of "computer": computerUseEnabled = true
+      of "computer":
+        if computerUseBuild: computerUseEnabled = true
       of "no-sandbox": sandboxEnabled = false
       of "D", "debug": debugEnabled = true
       of "i", "interactive": interactive = true

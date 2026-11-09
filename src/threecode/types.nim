@@ -27,10 +27,14 @@ var streamingEnabled*: bool = true
   ## the reliable fallback when a provider's SSE transport is flaky (empty
   ## 200 replies, ticker dying mid-response — the streamhttp TLS-read race).
   ## Toggled at runtime via `:streaming on/off`, persisted in `[settings]`.
+const computerUseBuild* = defined(computerUse)
+  ## Temporary release kill-switch: computer use only compiles in with
+  ## `-d:computerUse`. Without it the config line and `:computer on` are
+  ## inert (the var stays false), so packaged builds ship without it.
 var computerUseEnabled*: bool = false
-  ## Session-scoped: `:computer on`, `--computer`, or `[settings]
-  ## computer = on` (tests/CLI). Never written back to the config by the
-  ## toggle — activation must not become a standing default.
+  ## Session-scoped: `:computer on` or `[settings] computer = on`
+  ## (tests/CLI). Never written back to the config by the toggle —
+  ## activation must not become a standing default.
 var notifyEnabled*: bool = true
   ## When true, a native desktop notification fires when a turn ends.
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in

@@ -1052,6 +1052,10 @@ resizer support is pending the Windows sandbox work.)
 
 ## Computer use
 
+Build note: computer use ships disabled and needs a build with
+`-d:computerUse` (`nim c -d:computerUse ...`); in a build without it
+`:computer` reports "not compiled in" and the config line is inert.
+
 Vision models can also drive your desktop: `:computer on` (or `--computer`)
 arms the `screenshot` tool for the session. Off by default, never persisted
 — a resumed session starts with it off until you arm it again.

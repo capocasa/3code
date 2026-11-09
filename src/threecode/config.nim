@@ -623,9 +623,11 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "computer":
           # Same boolean dialect. Session-scoped in spirit: this line exists
           # so tests and scripted runs can arm computer use; the :computer
-          # toggle never writes it back.
+          # toggle never writes it back. Inert unless compiled with
+          # -d:computerUse (computerUseBuild, the release kill-switch).
           case v.toLowerAscii
-          of "on", "true", "yes", "1": computerUseEnabled = true
+          of "on", "true", "yes", "1":
+            if computerUseBuild: computerUseEnabled = true
           of "off", "false", "no", "0": computerUseEnabled = false
           else: discard
         of "allow-empty-prompt", "allow_empty_prompt":
