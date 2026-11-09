@@ -56,7 +56,7 @@ jobs:
           # lookup keys even with no restore-keys, so the key must not be a
           # prefix of a legacy "...-nim-toolchain-2.2.12-<hash>" entry or a
           # stale tree restores on every miss and collides with the mv.
-          key: nim-toolchain-2.2.12-${{ runner.os }}-${{ runner.arch }}
+          key: nim-toolchain-2.4.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build Nim toolchain from source (pinned)
         # Inline instead of setup-nim-action: the action is composite, and
@@ -72,19 +72,19 @@ jobs:
         # regenerating nimble.lock (its `nim` entry records the version).
         if: steps.cache-nim.outputs.cache-hit != 'true'
         run: |
-          NIM_SRC_SHA256=2639a06a5ea7a7fcf57df1e7e1ef4d1b2bee58c7ac9bd00dbd2aa5bea1e5a56a
+          NIM_SRC_SHA256=4fa00853bc6ac92ebdd924d8e2ce42509d3f708d76a3ffcc034e16288e0e0325
           curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/nim.tar.xz \
-            https://nim-lang.org/download/nim-2.2.12.tar.xz
+            https://nim-lang.org/download/nim-2.4.0.tar.xz
           echo "${NIM_SRC_SHA256}  /tmp/nim.tar.xz" | sha256sum -c -
           tar -xJf /tmp/nim.tar.xz -C /opt
-          cd /opt/nim-2.2.12
+          cd /opt/nim-2.4.0
           ./build.sh
           bin/nim c --noNimblePath --skipUserCfg --skipParentCfg --hints:off koch
           ./koch boot -d:release --skipUserCfg --skipParentCfg --hints:off
           ./koch tools --skipUserCfg --skipParentCfg --hints:off
           # Belt for the prefix-match hazard above: never mv onto a leftover.
           rm -rf /opt/nim-toolchain
-          mv /opt/nim-2.2.12 /opt/nim-toolchain
+          mv /opt/nim-2.4.0 /opt/nim-toolchain
           echo "/opt/nim-toolchain/bin" >> "$GITHUB_PATH"
           /opt/nim-toolchain/bin/nim --version | head -1
 
@@ -180,12 +180,12 @@ jobs:
           path: /home/runner/nim-toolchain
           # Version-first and hash-free (see the build job's cache step);
           # never a prefix of a legacy hashed key, no restore-keys.
-          key: nim-toolchain-2.2.12-${{ runner.os }}-${{ runner.arch }}
+          key: nim-toolchain-2.4.0-${{ runner.os }}-${{ runner.arch }}
 
       - uses: jiro4989/setup-nim-action@v2
         if: steps.cache-nim.outputs.cache-hit != 'true'
         with:
-          nim-version: 2.2.12
+          nim-version: 2.4.0
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain

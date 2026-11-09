@@ -40,7 +40,7 @@ jobs:
           path: /Users/runner/nim-toolchain
           # Version-first and hash-free (see linux-arm64.yml): never a
           # prefix of a legacy hashed key, no restore-keys.
-          key: nim-toolchain-2.2.12-${{ runner.os }}-${{ runner.arch }}
+          key: nim-toolchain-2.4.0-${{ runner.os }}-${{ runner.arch }}
 
       - uses: jiro4989/setup-nim-action@v2
         if: steps.cache-nim.outputs.cache-hit != 'true'
@@ -48,7 +48,7 @@ jobs:
           # Exact version, not `stable`: the same commit must compile with
           # the same compiler forever. Bump deliberately, together with
           # regenerating nimble.lock (its `nim` entry records the version).
-          nim-version: 2.2.12
+          nim-version: 2.4.0
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
