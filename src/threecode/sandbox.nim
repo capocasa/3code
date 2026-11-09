@@ -47,6 +47,7 @@ import sandwall/wall as sandwallWall
 import defaults
 import types
 import util
+import dirsettings
 from shell import bashMutationPath
 
 export sandwall.AccessKind, sandwall.Rule,
@@ -79,8 +80,23 @@ proc defaultPolicyText*(): string =
   ## every repo.
   defaults.defaultPolicyText
 
+proc storePolicyPath*(dir: string): string =
+  ## The directory's policy slot in its settings store
+  ## (`<dir>/.3code/sandbox`, or the per-directory directory under the
+  ## user config root when `dirconfig = "user"`). This is where a new
+  ## policy materializes; a legacy root-level `.sandbox` that already
+  ## exists keeps being read and edited in place.
+  dirsettings.storeFileFor(dir, UserPolicyFile)
+
 proc repoPolicyPath*(projectDir: string): string =
-  projectDir / PolicyFile
+  ## The repo-level policy file for `projectDir`: the store slot when
+  ## one already exists, else a legacy `.sandbox`, else the store slot
+  ## (the write target for a first materialization).
+  let store = storePolicyPath(projectDir)
+  if fileExists(store): return store
+  let legacy = projectDir / PolicyFile
+  if fileExists(legacy): return legacy
+  store
 
 proc systemPolicyPath*(): string =
   getConfigDir() / "3code" / UserPolicyFile
@@ -109,10 +125,32 @@ var
     ## read-only.
 
 proc activePolicyPath*(projectDir: string): string =
-  ## The one policy file in effect: the repo `.sandbox` when it
-  ## exists, else the user file. Never both.
-  let repo = repoPolicyPath(projectDir)
-  if fileExists(repo): repo else: systemPolicyPath()
+  ## The one policy file in effect, cascading up the parents: each
+  ## directory from `projectDir` to the root contributes its store's
+  ## `sandbox` (or its legacy `.sandbox`), nearest one wins. The user
+  ## file under the config root is the fallback, as before. Never more
+  ## than one file active at a time.
+  for d in dirsettings.ancestorsNearestFirst(projectDir):
+    let store = storePolicyPath(d)
+    if fileExists(store): return store
+    let legacy = d / PolicyFile
+    if fileExists(legacy): return legacy
+  systemPolicyPath()
+
+proc activePolicyRoot*(projectDir: string): string =
+  ## The directory the active policy file belongs to: policy `./`
+  ## targets resolve against it. A store file at `<dir>/.3code/sandbox`
+  ## belongs to `<dir>` (the store's parent), a legacy `.sandbox` to its
+  ## parent, and the user config file stays anchored to the session cwd
+  ## like it always was.
+  let f = activePolicyPath(projectDir)
+  if f == systemPolicyPath(): return projectDir
+  let dir = f.parentDir
+  if dir.splitFile.name == StoreDirName:
+    return dir.parentDir
+  if f.extractFilename == PolicyFile:
+    return dir
+  projectDir
 
 proc readPolicyText*(projectDir: string): string =
   ## The active file's contents, or the built-in default when no
@@ -222,13 +260,16 @@ proc ensureWallProxy*(projectDir: string): bool =
   createDir(dir)
   let polFile = dir / "policy"
   writeFile(polFile, wallPolicyText(projectDir))
+  # `./` targets in an ancestor's policy resolve against the ancestor,
+  # the directory that owns the active policy file.
+  let root = activePolicyRoot(projectDir)
   try:
     when defined(posix):
-      wallProxy = sandwallWall.startWallProxy(polFile, projectDir,
+      wallProxy = sandwallWall.startWallProxy(polFile, root,
         port = 0, unixSockPath = proxySockPath())
     else:
       # port = 0 picks a free port in the WFP fence range on Windows
-      wallProxy = sandwallWall.startWallProxy(polFile, projectDir)
+      wallProxy = sandwallWall.startWallProxy(polFile, root)
     wallProxyBoundDir = dir
   except CatchableError as e:
     raise newException(IOError, "wall proxy: " & e.msg)
@@ -507,12 +548,14 @@ proc mtimeOf(path: string): Time =
   except OSError: fromUnix(0)
 
 proc guardRules*(projectDir: string): seq[Rule] =
-  ## Hidden read-only rules covering the two policy file paths 3code
-  ## can make active (the repo `.sandbox` and the user file), so
+  ## Hidden read-only rules covering the policy file paths 3code can
+  ## make active (the repo slot `<dir>/.3code/sandbox` — the write
+  ## target even before it exists — the legacy `<dir>/.sandbox`, the
+  ## cascade-selected active file when it lives elsewhere (an
+  ## ancestor's), and the user file), so
   ## neither the in-process tools nor the sandboxed command can change
   ## the policy out from under 3code, no matter what the file says.
-  ## Appended last after every load; a repo file that is also the user
-  ## file collapses to one rule.
+  ## Appended last after every load; paths that collapse guard once.
   ##
   ## The private-mode transcript directory rides as a hidden deny for
   ## the same reason it is separate from `sessions/`: any ordinary
@@ -524,7 +567,17 @@ proc guardRules*(projectDir: string): seq[Rule] =
   let user = systemPolicyPath()
   result = @[Rule(access: akReadOnly, kind: rkPath, hidden: true,
                   path: repoPolicyPath(projectDir))]
-  if user != result[0].path:
+  let legacy = projectDir / PolicyFile
+  if legacy != result[0].path:
+    result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
+                    path: legacy)
+  let active = activePolicyPath(projectDir)
+  if active != result[0].path and
+      (result.len < 2 or active != result[1].path):
+    result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
+                    path: active)
+  if user != result[^1].path and user != result[0].path and
+      (result.len < 3 or user != result[1].path):
     result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
                     path: user)
   result.add Rule(access: akDeny, kind: rkPath, hidden: true,
@@ -535,7 +588,8 @@ proc loadPolicy*(projectDir: string): Policy =
   ## reloadIfChanged. Guard rules (`hiddenRules`) are appended last so
   ## no rule in the file can weaken them.
   lastMtime = mtimeOf(activePolicyPath(projectDir))
-  result = sandwall.parsePolicy(readPolicyText(projectDir), projectDir)
+  result = sandwall.parsePolicy(readPolicyText(projectDir),
+                               activePolicyRoot(projectDir))
   result.add hiddenRules
 
 proc reloadIfChanged*(projectDir: string): bool =
@@ -650,6 +704,7 @@ proc ensureRepoPolicy*(dir: string): bool =
   let path = repoPolicyPath(dir)
   if fileExists(path): return true
   try:
+    createDir(path.parentDir)
     writeFile(path, readPolicyText(dir))
   except CatchableError:
     return false
@@ -711,7 +766,10 @@ proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## a new target appends at the end. Either way, reload so the change
   ## is live for the next check.
   if not fileExists(sandboxFile):
-    if not ensureRepoPolicy(sandboxFile.parentDir): return false
+    # Materialize against the cwd's slot, not `sandboxFile.parentDir`:
+    # the file may be `<dir>/.3code/sandbox`, whose parent is the store
+    # directory, not the project.
+    if not ensureRepoPolicy(getCurrentDir()): return false
   let word =
     case access
     of akDeny: "deny"
@@ -839,7 +897,7 @@ proc editPolicy*(sandboxFile: string): string =
   ## user (`VISUAL="/opt/Visual Studio Code"` would try to exec
   ## `/opt/Visual`), same contract as $EDITOR everywhere else.
   if not fileExists(sandboxFile):
-    if not ensureRepoPolicy(sandboxFile.parentDir):
+    if not ensureRepoPolicy(getCurrentDir()):
       return "error: could not create sandbox file at " & sandboxFile
   let editor = getEnv("VISUAL", getEnv("EDITOR",
     when defined(windows): "notepad" else: "vi"))

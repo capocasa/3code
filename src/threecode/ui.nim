@@ -13,7 +13,7 @@ import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
   auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins,
-  images, goal, screen
+  images, goal, screen, dirsettings
 
 # `:computer` stays out of the list in undocumented builds so tab
 # completion, prefix resolution and typo suggestions do not advertise
@@ -1806,9 +1806,14 @@ proc cmdSandboxSettingSelect(target: string): string =
     sandboxEnabled = false
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
+  # An explicit `:sandbox on|off` is the user editing the GLOBAL
+  # setting: clear any directory override so the write below records
+  # the user's choice instead of the pre-overlay snapshot.
+  dirsettings.dirSandboxOverridden = false
+  dirsettings.globalSandboxEnabled = sandboxEnabled
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   result = hintLnS("sandbox: " & (if sandboxEnabled: "on" else: "off") &
-    "  (on = enforce the .sandbox policy, off = run unconfined)")
+    "  (on = enforce the .3code/sandbox policy, off = run unconfined)")
   # `sandbox.active` is only set at session init, so a mid-session `on`
   # cannot arm enforcement for the running session; say so instead of
   # letting the user believe bash is already fenced (asks included).
@@ -2102,8 +2107,15 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
   ## it. `armed` marks every arm/re-arm path so the controller starts
   ## the mode's kickoff turn immediately after the receipt.
   result.ok = true
+  # Captured before any mutation: the retire/clear messages print after
+  # the file is renamed away, when the live-file label lookup would
+  # fall back to the legacy name.
+  let label = modeFileLabel(m)
+  let retiredName =
+    if label != m.fileName: storeBaseName(m.cancelledName)
+    else: m.cancelledName
   if parts.len == 0 and not forced:
-    if fileExists(m.fileName):
+    if fileExists(modeFilePath(m, ".")):
       result.line = readModeText(m).strip
     else:
       result.ok = false
@@ -2113,15 +2125,15 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
     if parts.len > 1:
       result.ok = false
       result.line = m.verb & " cancel takes no argument (cancel retires " &
-        "the whole " & m.fileName & ")"
+        "the whole " & label & ")"
     else:
       let (cok, cerr) = cancelMode(m)
       if not cok:
         result.ok = false
         result.line = cerr
       else:
-        result.line = m.name & " cancelled (" & m.fileName & " renamed to " &
-          m.cancelledName & ")"
+        result.line = m.name & " cancelled (" & label &
+          " renamed to " & retiredName & ")"
   elif parts[0] == "new":
     if parts.len == 1:
       result.ok = false
@@ -2145,16 +2157,18 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
     # mode to retire, and a stray empty file would arm one anyway
     # (bare existence is the whole protocol).
     var created = false
-    if not fileExists(m.fileName):
+    let modePath = modeFilePath(m, ".")
+    if not fileExists(modePath):
       let other = conflictingMode(m)
       if other.name != "":
         result.ok = false
-        result.line = other.fileName & " (" & other.name & " mode) is " &
+        result.line = modeFileLabel(other) & " (" & other.name & " mode) is " &
           "already active; harness modes are mutually exclusive - cancel " &
           "it first with " & other.verb & "!"
       else:
         try:
-          writeFile(m.fileName, "")
+          createDir(modePath.parentDir)
+          writeFile(modePath, "")
           created = true
         except OSError, IOError:
           result.ok = false
@@ -2163,20 +2177,20 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
       let before = readModeText(m)
       let editor = getEnv("VISUAL", getEnv("EDITOR",
         when defined(windows): "notepad" else: "vi"))
-      let code = execShellCmd(editor & " " & quoteShell(m.fileName))
+      let code = execShellCmd(editor & " " & quoteShell(modePath))
       proc createdLeftEmpty(): bool =
-        created and (not fileExists(m.fileName) or
+        created and (not fileExists(modePath) or
           readModeText(m).strip.len == 0)
       if code != 0:
         result.ok = false
         result.line = "editor exited with status " & $code
-        if createdLeftEmpty(): discard tryRemoveFile(m.fileName)
+        if createdLeftEmpty(): discard tryRemoveFile(modePath)
       elif createdLeftEmpty():
-        if fileExists(m.fileName): discard tryRemoveFile(m.fileName)
+        if fileExists(modePath): discard tryRemoveFile(modePath)
         result.line = m.name & " not armed (nothing written to " &
-          m.fileName & ")"
-      elif not fileExists(m.fileName):
-        result.line = m.name & " cancelled (" & m.fileName &
+          label & ")"
+      elif not fileExists(modePath):
+        result.line = m.name & " cancelled (" & label &
           " removed in the editor)"
       elif readModeText(m).strip.len == 0:
         let (cok, cerr) = cancelMode(m)
@@ -2184,8 +2198,8 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
           result.ok = false
           result.line = cerr
         else:
-          result.line = m.name & " cleared (" & m.fileName & " renamed to " &
-            m.cancelledName & ")"
+          result.line = m.name & " cleared (" & label &
+            " renamed to " & retiredName & ")"
       else:
         let after = readModeText(m)
         let verr = m.validate(after)
@@ -2195,7 +2209,7 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
         elif after != before:
           result.armed = true
         else:
-          result.line = m.fileName & " unchanged"
+          result.line = label & " unchanged"
   else:
     let (gok, gerr) = startMode(m, arg, force = forced)
     if not gok:
@@ -2337,7 +2351,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       elif r.armed:
         armGoal = true
         let counts = m.taskCounts(readModeText(m))
-        resp m.name & " armed (" & m.fileName &
+        resp m.name & " armed (" & modeFileLabel(m) &
           (if counts.len > 0: ", " & counts else: "") & "), starting now"
       elif r.line.len > 0:
         resp r.line

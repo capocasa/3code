@@ -24,7 +24,7 @@ Over-thinking simple work wastes latency; under-thinking hard work wastes the ru
 
 # Tools
 
-Sandboxed per `.sandbox`; blocks name the policy file.
+Sandboxed per `.3code/sandbox` (or legacy `.sandbox`); blocks name the policy file.
 
 `bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Exact names only. Batch independent calls; sequence only when one result gates the next. Same call fails twice → stop and explain.
 

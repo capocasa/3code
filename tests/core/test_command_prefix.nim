@@ -8,6 +8,11 @@ import threecode/[minline, types, ui]
 import threecode/api except callModel
 import threecode/goal
 
+# `:goal` arms land in the directory settings store; legacy goal.md
+# names only apply to sessions armed before the store existed.
+const StoreGoal = ".3code" / "goal"
+const StoreCancelled = ".3code" / "goal-cancelled"
+
 proc withCommandDir(body: proc ()) =
   let dir = createTempDir("cmd-prefix-", "")
   defer: removeDir(dir)
@@ -40,7 +45,7 @@ suite "command prefix resolution":
                                   editor)
       check r.recognized and r.ok
       check r.name == "goal"
-      check readFile(GoalFileName).strip == "ship it"
+      check readFile(StoreGoal).strip == "ship it"
 
   test "ambiguous prefix is an error naming the candidates":
     check classifyCommand(":se") == ckUnknown
@@ -65,7 +70,7 @@ suite "command prefix resolution":
       let replace = handleCommandResult(":goal! second", messages, session,
                                         prof, editor)
       check replace.recognized and replace.ok
-      check readFile(GoalFileName).strip == "second"
+      check readFile(StoreGoal).strip == "second"
 
   test "bare :goal! cancels the live goal":
     withCommandDir:
@@ -74,9 +79,9 @@ suite "command prefix resolution":
       check classifyCommand(":g!") == ckMutating
       let r = handleCommandResult(":g!", messages, session, prof, editor)
       check r.recognized and r.ok
-      check GoalCancelledName in r.body
-      check not fileExists(GoalFileName)
-      check readFile(GoalCancelledName).strip == "doomed"
+      check "goal-cancelled" in r.body
+      check not fileExists(StoreGoal)
+      check readFile(StoreCancelled).strip == "doomed"
       let none = handleCommandResult(":g!", messages, session, prof, editor)
       check none.recognized and not none.ok
       check "no goal active" in none.body
@@ -92,7 +97,7 @@ suite "command prefix resolution":
       check r.recognized and r.ok
       check r.name == "goal"
       check "goal armed" in r.body
-      check readFile(GoalFileName) == "goal description\non several alines\n"
+      check readFile(StoreGoal) == "goal description\non several alines\n"
 
   test "bare :goal shows the live goal text":
     withCommandDir:
@@ -124,9 +129,9 @@ suite "goal command verbs":
       check r.recognized and r.ok
       # The receipt says the file is armed; the controller starts the
       # kickoff turn right after it (startGoalTurn is the signal).
-      check r.body == "goal armed (goal.md), starting now\n"
+      check r.body == "goal armed (.3code/goal), starting now\n"
       check r.startGoalTurn
-      check readFile(GoalFileName).strip == "make it so"
+      check readFile(StoreGoal).strip == "make it so"
 
   test ":goal new is the balking synonym":
     withCommandDir:
@@ -134,12 +139,12 @@ suite "goal command verbs":
                                   prof, editor)
       check r.recognized and r.ok
       check "goal armed" in r.body
-      check readFile(GoalFileName).strip == "first goal"
+      check readFile(StoreGoal).strip == "first goal"
       let balk = handleCommandResult(":goal new second goal", messages,
                                      session, prof, editor)
       check balk.recognized and not balk.ok
       check ":goal!" in balk.body
-      check readFile(GoalFileName).strip == "first goal"
+      check readFile(StoreGoal).strip == "first goal"
       let usage = handleCommandResult(":goal new", messages, session, prof,
                                       editor)
       check usage.recognized and not usage.ok
@@ -153,8 +158,8 @@ suite "goal command verbs":
       let r = handleCommandResult(":goal cancel", messages, session, prof,
                                   editor)
       check r.recognized and r.ok
-      check GoalCancelledName in r.body
-      check readFile(GoalCancelledName).strip == "doomed"
+      check "goal-cancelled" in r.body
+      check readFile(StoreCancelled).strip == "doomed"
       let none = handleCommandResult(":goal cancel", messages, session, prof,
                                       editor)
       check none.recognized and not none.ok
@@ -171,7 +176,7 @@ suite "goal command verbs":
                                     editor)
         check r.recognized and r.ok
         check "goal armed" in r.body
-        check readFile(GoalFileName).strip == "fresh goal"
+        check readFile(StoreGoal).strip == "fresh goal"
 
     test ":goal edit creating nothing arms nothing":
       withCommandDir:
@@ -183,6 +188,7 @@ suite "goal command verbs":
         check "not armed" in r.body
         check not fileExists(GoalFileName)
         check not fileExists(GoalCancelledName)
+        check not fileExists(StoreGoal)
 
   when defined(posix):
     test ":goal edit rewrites the live goal in $EDITOR":
@@ -198,7 +204,7 @@ suite "goal command verbs":
                                     editor)
         check r.recognized and r.ok
         check "goal armed" in r.body
-        check readFile(GoalFileName).strip == "edited text"
+        check readFile(StoreGoal).strip == "edited text"
 
     test ":goal edit with an emptied file cancels the goal":
       withCommandDir:
@@ -211,8 +217,9 @@ suite "goal command verbs":
         let r = handleCommandResult(":goal edit", messages, session, prof,
                                     editor)
         check r.recognized and r.ok
-        check GoalCancelledName in r.body
+        check "goal-cancelled" in r.body
         check not fileExists(GoalFileName)
+        check not fileExists(StoreGoal)
 
     test ":goal edit with unchanged text does not re-kick":
       withCommandDir:
@@ -226,7 +233,7 @@ suite "goal command verbs":
                                     editor)
         check r.recognized and r.ok
         check "unchanged" in r.body
-        check readFile(GoalFileName).strip == "stable text"
+        check readFile(StoreGoal).strip == "stable text"
 
 suite ":retry command":
   var messages = %* []

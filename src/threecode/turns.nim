@@ -1044,7 +1044,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       let counts = m.taskCounts(body)
       let rolloverReceipt = receiptBytes(
         "auto: " & m.name & " rollover - plan at " &
-          m.fileName &
+          modeFileLabel(m) &
           (if counts.len > 0: " (" & counts & ")" else: ""))
       termengine.noteNonMessageTail(rolloverReceipt, messages.len)
       commitTranscriptBytes(rolloverReceipt, true)

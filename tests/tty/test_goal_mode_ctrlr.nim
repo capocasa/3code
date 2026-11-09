@@ -109,7 +109,7 @@ suite ":retry and goal mode (interactive)":
   test ":goal TEXT arms; the kickoff turn runs at once":
     let root = newFixture("goal_kickoff")
     writeConfiguredProvider(root)
-    check not fileExists(root / "run" / "goal.md")
+    check not fileExists(root / "run" / ".3code" / "goal")
     # Response 1 goes to the kickoff turn the arm starts; response 2 is
     # its turn-end verifier side call (satisfied verdict retires
     # goal.md).
@@ -154,9 +154,9 @@ suite ":retry and goal mode (interactive)":
     # The arm receipt lands, the dim detection hint follows, and the
     # kickoff turn starts on its own - no prompt is sent, and the reply
     # streams anyway.
-    tty.expectInHistory "goal armed (goal.md), starting now"
-    tty.expectInHistory "goal.md detected implementing"
-    tty.expectInHistory "⚑ Goal armed: goal.md"
+    tty.expectInHistory "goal armed (.3code/goal), starting now"
+    tty.expectInHistory ".3code/goal detected implementing"
+    tty.expectInHistory "⚑ Goal armed: .3code/goal"
     tty.expectInHistory "GOAL_WORK_DONE"
     # Turn end: the verifier's reply renders as a dim quote block led by
     # the green ✓ icon (verdict line stripped) - the whole display, with
@@ -167,8 +167,8 @@ suite ":retry and goal mode (interactive)":
     tty.expectNeverInHistory "verifying"
     tty.expectNeverInHistory "verification"
     tty.drain(300)
-    check fileExists(root / "run" / "achieved.md")
-    check not fileExists(root / "run" / "goal.md")
+    check fileExists(root / "run" / ".3code" / "achieved")
+    check not fileExists(root / "run" / ".3code" / "goal")
     tty.expectAlive()
 
   test "goal.md present at startup starts the kickoff turn at once":
@@ -270,7 +270,7 @@ suite ":retry and goal mode (interactive)":
     tty.send ":goal make the stub say the word"
     tty.send "\n"
     tty.drain(100)
-    tty.expectInHistory "goal armed (goal.md), starting now"
+    tty.expectInHistory "goal armed (.3code/goal), starting now"
     # The kickoff turn runs on its own; its reply lands without any
     # prompt being sent.
     tty.expectInHistory "GOAL_WORK_DONE"
@@ -285,8 +285,8 @@ suite ":retry and goal mode (interactive)":
     tty.expectInHistory "checked the tree."
     tty.expectNeverInHistory "VERDICT: SATISFIED"
     tty.expectInHistory "\u2713"
-    check fileExists(root / "run" / "achieved.md")
-    check not fileExists(root / "run" / "goal.md")
+    check fileExists(root / "run" / ".3code" / "achieved")
+    check not fileExists(root / "run" / ".3code" / "goal")
     # Submit the buffer that lived through the check: the echoed prompt
     # only appears if every keystroke survived the side call.
     tty.send "\n"
@@ -321,11 +321,11 @@ suite ":retry and goal mode (interactive)":
     tty.send ":goal work toward it"
     tty.send "\n"
     tty.drain(100)
-    tty.expectInHistory "goal armed (goal.md), starting now"
+    tty.expectInHistory "goal armed (.3code/goal), starting now"
     # The kickoff turn runs on its own and its reply lands; the
     # turn-end verifier's slow model call (8000ms delay) then runs.
     tty.expectInHistory "GOAL_WORK_DONE"
-    tty.expectInHistory "goal.md detected implementing"
+    tty.expectInHistory ".3code/goal detected implementing"
     # Ctrl-C while the verifier's slow model call runs: the interrupt is
     # honored after the side call returns, skips the satisfaction check,
     # and ends the turn. goal.md survives.
@@ -333,8 +333,8 @@ suite ":retry and goal mode (interactive)":
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
     tty.drain(300)
-    check fileExists(root / "run" / "goal.md")
-    check not fileExists(root / "run" / "achieved.md")
+    check fileExists(root / "run" / ".3code" / "goal")
+    check not fileExists(root / "run" / ".3code" / "achieved")
     tty.expectAlive()
 
   test "unmet verdict shows the evaluation, then just continues":

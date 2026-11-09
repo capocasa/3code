@@ -33,6 +33,7 @@
 import std/[algorithm, json, options, os, osproc, sequtils, strformat,
            strutils, tables]
 import types, util, prompts, api, config, actions
+import dirsettings
 
 const
   GoalFileName* = "goal.md"            ## existence activates goal mode
@@ -105,11 +106,36 @@ and unexplained). Treat newly checked boxes as claims to verify."""
 
 const CyberVerifierPreamble* = StepTruthClause & "\n\n" & VerifierPreamble
 
+proc storeBaseName*(name: string): string =
+  ## The store spelling of a mode file name: `goal.md` -> `goal`,
+  ## `achieved.md` -> `achieved`. Names without the markdown suffix map
+  ## to themselves, so store and legacy families stay one rule.
+  if name.endsWith(".md"): name[0 ..< name.len - 3] else: name
+
+proc modePathForName*(fileName, dir: string): string =
+  ## Where a mode's trigger file lives in `dir`: the settings store's
+  ## copy (`.3code/goal`, or the per-dir directory under the config
+  ## root) when one exists, else a legacy root-level `goal.md`, else
+  ## the store path — the write target when the mode is first armed.
+  let store = dirsettings.storeFileFor(dir, storeBaseName(fileName))
+  if fileExists(store): return store
+  let legacy = dir / fileName
+  if fileExists(legacy): return legacy
+  store
+
+proc modeLabelForName*(fileName: string; dir = "."): string =
+  ## The name detection and receipts speak: the store-relative form
+  ## when the store copy is live, else the legacy root-level name.
+  if fileExists(dirsettings.storeFileFor(dir, storeBaseName(fileName))):
+    StoreDirName / storeBaseName(fileName)
+  else:
+    fileName
+
 proc goalModeActive*(dir = "."): bool =
-  fileExists(dir / GoalFileName)
+  fileExists(modePathForName(GoalFileName, dir))
 
 proc readGoalText*(dir = "."): string =
-  try: readFile(dir / GoalFileName)
+  try: readFile(modePathForName(GoalFileName, dir))
   except CatchableError: ""
 
 proc parseVerdict*(text: string): GoalVerdict =
@@ -145,7 +171,8 @@ proc goalFeedbackMessage*(feedback: string): JsonNode =
   ## item, no provider ever sees either marker, and nothing mistakes it
   ## for user input.
   %*{"role": "user", "agentSent": true, "goalSent": true,
-     "content": "Goal check: the goal in " & GoalFileName & " is not yet " &
+     "content": "Goal check: the goal in " &
+       modeLabelForName(GoalFileName, getCurrentDir()) & " is not yet " &
        "satisfied. Verifier feedback:\n\n" & feedback &
        "\n\nAddress it and keep working toward the goal; the " &
        "satisfaction check runs again when this turn ends."}
@@ -157,7 +184,8 @@ proc goalKickoffMessage*(goalText: string): JsonNode =
   ## feedback continuation, so replay renders it as a `⚑` item and no
   ## provider ever sees the markers.
   %*{"role": "user", "agentSent": true, "goalSent": true,
-     "content": "Goal armed: " & GoalFileName & " in this repository now " &
+     "content": "Goal armed: " &
+       modeLabelForName(GoalFileName, getCurrentDir()) & " in this repository now " &
        "states the session's goal:\n\n" & goalText.strip &
        "\n\nStart working toward it now. A satisfaction check runs when " &
        "each turn ends and sends you back in with feedback until the " &
@@ -474,14 +502,21 @@ var modeRegistry* = newSeq[ModeDesc]()
 template noMode*(m: ModeDesc): bool =
   m.name.len == 0
 
+proc modeFilePath*(m: ModeDesc; dir: string): string =
+  modePathForName(m.fileName, dir)
+
+proc modeFileLabel*(m: ModeDesc; dir = "."): string =
+  modeLabelForName(m.fileName, dir)
+
 proc activeMode*(dir = "."): ModeDesc =
-  ## The mode whose trigger file sits in `dir`, first registry hit; a
-  ## zero `ModeDesc` (`noMode`) when none is armed.
+  ## The mode whose trigger file sits in `dir` — the settings store's
+  ## copy or the legacy root-level file — first registry hit; a zero
+  ## `ModeDesc` (`noMode`) when none is armed.
   for m in modeRegistry:
-    if fileExists(dir / m.fileName): return m
+    if fileExists(modeFilePath(m, dir)): return m
 
 proc readModeText*(m: ModeDesc; dir = "."): string =
-  try: readFile(dir / m.fileName)
+  try: readFile(modeFilePath(m, dir))
   except CatchableError: ""
 
 proc startMode*(m: ModeDesc; text: string; force = false;
@@ -496,29 +531,44 @@ proc startMode*(m: ModeDesc; text: string; force = false;
   if text.strip.len == 0:
     return (false, "usage: " & m.verb & " <text>")
   for other in modeRegistry:
-    if other.name != m.name and fileExists(dir / other.fileName):
-      return (false, other.fileName & " (" & other.name & " mode) is " &
+    if other.name != m.name and fileExists(modeFilePath(other, dir)):
+      return (false, modeFileLabel(other, dir) & " (" & other.name & " mode) is " &
         "already active; harness modes are mutually exclusive - cancel " &
         "it first with " & other.verb & "!")
-  if fileExists(dir / m.fileName) and not force:
-    return (false, m.fileName & " is already active; use " & m.verb &
+  if fileExists(modeFilePath(m, dir)) and not force:
+    return (false, modeFileLabel(m, dir) & " is already active; use " & m.verb &
       "! to replace it")
   let body = m.composeBody(text)
   let verr = m.validate(body)
   if verr.len > 0:
     return (false, verr)
   try:
-    writeFile(dir / m.fileName, body)
+    let path = modeFilePath(m, dir)
+    createDir(path.parentDir)
+    writeFile(path, body)
     (true, "")
   except OSError, IOError:
     (false, getCurrentExceptionMsg())
+
+proc retireTarget*(m: ModeDesc; dir, legacyName: string): string =
+  ## Where a trigger file retires to: the same family it lives in. A
+  ## store file renames within the store (`goal` -> `achieved`), a
+  ## legacy root-level file keeps the legacy names (`goal.md` ->
+  ## `achieved.md`), so a session armed before the store existed
+  ## retires the way it always did.
+  let active = modePathForName(m.fileName, dir)
+  if fileExists(active) and active ==
+      dirsettings.storeFileFor(dir, storeBaseName(m.fileName)):
+    dirsettings.storeFileFor(dir, storeBaseName(legacyName))
+  else:
+    dir / legacyName
 
 proc completeMode*(m: ModeDesc; dir = "."): bool =
   ## The retirement path on SATISFIED: `mv <file> <confirmedName>`. The
   ## confirmed file stays as the record; the mode is off until a new
   ## trigger file appears.
   try:
-    moveFile(dir / m.fileName, dir / m.confirmedName)
+    moveFile(modeFilePath(m, dir), retireTarget(m, dir, m.confirmedName))
     true
   except OSError, IOError:
     false
@@ -527,10 +577,11 @@ proc cancelMode*(m: ModeDesc; dir = "."): tuple[ok: bool, err: string] =
   ## The user exit behind bare `:<verb>!`: `mv <file> <cancelledName>`.
   ## Interrupt only skips one satisfaction check; this ends the mode,
   ## keeping the text as the record.
-  if not fileExists(dir / m.fileName):
+  if not fileExists(modeFilePath(m, dir)):
     return (false, "no " & m.name & " active")
   try:
-    moveFile(dir / m.fileName, dir / m.cancelledName)
+    moveFile(modeFilePath(m, dir),
+             retireTarget(m, dir, m.cancelledName))
     (true, "")
   except OSError, IOError:
     (false, getCurrentExceptionMsg())
@@ -597,22 +648,26 @@ proc conflictingMode*(m: ModeDesc; dir = "."): ModeDesc =
   ## while `m` is the active one: a second file on disk is a refused
   ## arming, and the refusal must reach the prompt, never pass silently.
   for other in modeRegistry:
-    if other.name != m.name and fileExists(dir / other.fileName): return other
+    if other.name != m.name and fileExists(modeFilePath(other, dir)): return other
 
 proc modeConflictLabel*(m, other: ModeDesc): string =
   ## The one-line receipt for that refusal, shared by the startup scan
   ## and the turn-boundary detection so the two cannot drift apart.
-  other.fileName & " is also on disk but " & m.name & " mode is active; " &
+  modeFileLabel(other) & " is also on disk but " & m.name & " mode is active; " &
     "harness modes are mutually exclusive (" & m.verb & "! cancels " &
     m.name & " mode, then " & other.verb & " arms the plan)"
 
-proc modeHintLine*(m: ModeDesc; state: string): string =
+proc modeHintLine*(m: ModeDesc; state: string; label = ""): string =
   ## The mode's lifecycle hint: one line in error-message shape but dim
   ## white - state changing, not attention owed - naming the trigger
   ## file and the state, e.g. `goal.md detected implementing`. Detection
   ## speaks through here; verdict moments speak as the verifier step's
-  ## icon row, so no hint may grow around the check.
-  GreyFg & m.fileName & " " & state & Reset & "\r\n"
+  ## icon row, so no hint may grow around the check. `label` overrides
+  ## the computed file name: a hint printing after the file was renamed
+  ## away would fall back to the legacy name, so the caller captures
+  ## the label first.
+  GreyFg & (if label.len > 0: label else: modeFileLabel(m)) & " " & state &
+    Reset & "\r\n"
 
 # The goal-mode entry points: the registry walk for entry #1.
 

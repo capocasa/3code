@@ -130,11 +130,11 @@ suite "cybernetic mode entry":
   test "startMode arms through the skeleton and validates":
     withModeDir proc (dir: string) =
       check startMode(cyberneticMode, "wire the parser").ok
-      check fileExists(CyberFileName)
-      check validatePlanBody(readFile(CyberFileName)) == ""
+      check fileExists(".3code" / "cybernetic")
+      check validatePlanBody(readFile(".3code" / "cybernetic")) == ""
       let balk = startMode(cyberneticMode, "another")
       check not balk.ok
-      check balk.err == CyberFileName &
+      check balk.err == ".3code/cybernetic" &
         " is already active; use :cyber! to replace it"
       check startMode(cyberneticMode, "replaced", force = true).ok
 
@@ -143,14 +143,15 @@ suite "cybernetic mode entry":
       check startGoal("live goal").ok
       let r = startMode(cyberneticMode, "my plan")
       check not r.ok
-      check "goal.md (goal mode) is already active" in r.err
+      check ".3code/goal (goal mode) is already active" in r.err
       check ":goal!" in r.err
       check not fileExists(CyberFileName)
+      check not fileExists(".3code" / "cybernetic")
       check cancelGoal().ok
       check startMode(cyberneticMode, "my plan").ok
       let r2 = startGoal("back again")
       check not r2.ok
-      check "cybernetic.md (cybernetic mode) is already active" in r2.err
+      check ".3code/cybernetic (cybernetic mode) is already active" in r2.err
 
   test "retirement names are per-mode":
     withModeDir proc (dir: string) =
@@ -215,7 +216,7 @@ suite "mode registry":
     withModeDir proc (dir: string) =
       withSynthMode proc () =
         check startMode(synthMode(), "  padded  ").ok
-        check readFile("synth.md") == "padded\n"
+        check readFile(".3code" / "synth") == "padded\n"
 
   test "mutual exclusivity: arming a second mode is refused":
     withModeDir proc (dir: string) =
@@ -224,7 +225,7 @@ suite "mode registry":
         let r = startMode(synthMode(), "mine now")
         check not r.ok
         # The teaching error names the live mode's file and its exit.
-        check GoalFileName in r.err
+        check ".3code/goal" in r.err
         check ":goal!" in r.err
         check not fileExists("synth.md")
 
@@ -240,7 +241,7 @@ suite "mode registry":
         let r2 = startGoal("steal it back", force = true)
         check not r2.ok
         check "synth.md" in r2.err
-        check readFile(GoalFileName).strip == "live"
+        check readFile(".3code" / "goal").strip == "live"
 
   test "cancelMode and completeMode retire through the descriptor":
     withModeDir proc (dir: string) =
@@ -265,9 +266,9 @@ suite "mode registry":
         discard startMode(synthMode(), "live")
         let balk = startMode(synthMode(), "again")
         check not balk.ok
-        check balk.err == "synth.md is already active; use :synth! to replace it"
+        check balk.err == ".3code/synth is already active; use :synth! to replace it"
         check startMode(synthMode(), "again", force = true).ok
-        check readFile("synth.md").strip == "again"
+        check readFile(".3code" / "synth").strip == "again"
 
 suite "plan delta and verifier feed":
   test "delta: newly checked, unchecked, added, removed":
