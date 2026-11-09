@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **`:provider` teaches its verbs where you stand when a key dies.**
+  After OpenCode revoked its API keys, the way back in,
+  `:provider edit <name>`, was findable only by asking the forum:
+  `:help` lists it, but nothing at the point of need did. Tab in the
+  `:provider ` argument slot now offers the verbs (`add edit update
+  new pull rm`) ahead of the provider names, so `:provider e<tab>`
+  completes `edit`, and the bare `:provider` listing ends with
+  `verbs: add edit update new pull rm (edit <name> re-enters its key
+  or renews a login)`. The manual's API-keys section gained the
+  matching paragraph: what a dead key looks like (the provider's own
+  401 on the next turn) and the one-paste-plus-Enters re-entry, with
+  the same wording the auth-error hints use.
 - **Provider errors say whose they are, and auth failures point at the
   fix.** An expired key used to surface as the raw provider body with no
   indication which side produced it. Retry notices now read `500 from
