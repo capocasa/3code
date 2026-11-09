@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **Provider errors say whose they are, and auth failures point at the
+  fix.** An expired key used to surface as the raw provider body with no
+  indication which side produced it. Retry notices now read `500 from
+  zaicode: quota exceeded`, and a terminal failure reads `opencode
+  error: This API key has expired. Create a new API key (code 401).
+  re-enter the key: :provider edit opencode` - the provider's name
+  leads, the status rides as a parenthetical, and 401/403 name the exact
+  `[provider]` section to re-key. A dead stored OAuth grant points the
+  same way (`opencode login expired (...). re-login: :provider edit
+  opencode`). Verbose pretty-printed error bodies condense to one line
+  (whitespace runs collapse, a cut ends in an ellipsis), while failures
+  that are 3code's own - a body-less transport error, network quiet -
+  still say so (`3code: ...`), so the two sides stay legible apart.
 - **`:model` takes `provider.model`: what `--good` prints is what you
   type.** `3code --good` lists curated combos as
   `opencodego.deepseek-v4.1-flash`, but `:model` resolved its argument
