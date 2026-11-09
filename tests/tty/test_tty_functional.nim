@@ -451,7 +451,7 @@ suite "terminal visual contract":
     tty.expect "models"
     tty.send "\x1b"
     tty.drain(300)
-    tty.expect "\u276f"
+    tty.expect "❯"
     tty.expectNo "cancelled"  # silent return per the bug report
     tty.expectAlive()  # cancelling :provider add must not exit the process
 
@@ -487,7 +487,7 @@ suite "terminal visual contract":
     check prefix notin tty.screenText()
     tty.send "\x1b"
     tty.drain(300)
-    tty.expect "\u276f"
+    tty.expect "❯"
     tty.expectAlive()
 
   test "idle provider add that completes returns to a fresh main prompt":
@@ -542,14 +542,14 @@ suite "terminal visual contract":
     # separate rows.
     let post = tty.frames[^1].rows.join("\n")
     let verifyIdx = post.find("verifying")
-    let promptIdx = post.rfind("\u276f")
+    let promptIdx = post.rfind("❯")
     check verifyIdx > 0
     check promptIdx > verifyIdx
     # Typing must land on the fresh prompt; if the bug regresses, the
     # keystrokes go into the abyss and :q never reaches the parser.
     tty.send "hello"
     tty.drain(200)
-    tty.expect "\u276f hello"
+    tty.expect "❯ hello"
     tty.send "\x15"  # Ctrl-U deletes to line start, emptying "hello"
     # Readline search reaches the real pty: C-r repaints the prompt row
     # as the search minibuffer while the query is typed, C-g restores.
@@ -565,84 +565,92 @@ suite "terminal visual contract":
     tty.expectExit(0, timeoutMs = 5000)
 
   test "harness commands are transcript items":
-    let root = newFixture("harness_commands")
-    writeHarnessProviders(root)
-    writeStubResponses(root, %*[])
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "harness_commands":
+      check true
+    else:
+      let root = newFixture("harness_commands")
+      writeHarnessProviders(root)
+      writeStubResponses(root, %*[])
 
-    # Keep path-heavy :prompt output readable; assertions use committed
-    # history and never join physical rows to hide checkout-dependent wraps.
-    let tty = startStub(root, cols = 128)
-    defer:
-      tty.writeFrameArtifact(root / "frames.txt")
-      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
-      tty.close()
+      # Keep path-heavy :prompt output readable; assertions use committed
+      # history and never join physical rows to hide checkout-dependent wraps.
+      let tty = startStub(root, cols = 128)
+      defer:
+        tty.writeFrameArtifact(root / "frames.txt")
+        tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+        tty.close()
 
-    tty.expect "❯"
-    tty.frames.setLen(0)
-    var firstCommand = true
-    for commandCase in [
-      (":help", "3code the economical coding agent"),
-      (":provider", "stub  [stub-model]"),
-      (":model", "stub-model"),
-      (":reasoning", "reasoning:"),
-      (":model stub-large", "provider  stub"),
-      (":reasoning high", "reasoning high"),
-      # one-word `provider.model` switch, same spelling `-m` takes: from
-      # stub straight to alt's second model; `alt-large` has no earlier
-      # echo in this run, so the profile row proves the pair switched
-      (":model alt.alt-large", "model     alt-large"),
-      (":provider alt", "provider  alt"),
-      (":tokens", "no tokens used yet"),
-      (":clear", "═══"),
-      (":sessions", "no saved sessions for this directory"),
-      (":resume", "no saved sessions for this directory"),
-      (":sessions all", "no saved sessions for this directory"),
-      (":log", "no tool calls yet"),
-      (":show", "no tool calls yet"),
-      (":compact", "unknown command: :compact"),
-      (":summarize", "failed or not worth it"),
-      (":prompt", "# Risk"),
-      (":toknes", "unknown command: :toknes")
-    ]:
-      let (command, marker) = commandCase
-      tty.send command
-      if firstCommand:
-        tty.expect "❯ " & command
-        tty.frames.setLen(0)
-        firstCommand = false
-      else:
-        tty.drain(80)
+      tty.expect "❯"
+      tty.frames.setLen(0)
+      var firstCommand = true
+      for commandCase in [
+        (":help", "3code the economical coding agent"),
+        (":provider", "stub  [stub-model]"),
+        (":model", "stub-model"),
+        (":reasoning", "reasoning:"),
+        (":model stub-large", "provider  stub"),
+        (":reasoning high", "reasoning high"),
+        # one-word `provider.model` switch, same spelling `-m` takes: from
+        # stub straight to alt's second model; `alt-large` has no earlier
+        # echo in this run, so the profile row proves the pair switched
+        (":model alt.alt-large", "model     alt-large"),
+        (":provider alt", "provider  alt"),
+        (":tokens", "no tokens used yet"),
+        (":clear", "═══"),
+        (":sessions", "no saved sessions for this directory"),
+        (":resume", "no saved sessions for this directory"),
+        (":sessions all", "no saved sessions for this directory"),
+        (":log", "no tool calls yet"),
+        (":show", "no tool calls yet"),
+        (":compact", "unknown command: :compact"),
+        (":summarize", "failed or not worth it"),
+        (":prompt", "# Risk"),
+        (":toknes", "unknown command: :toknes")
+      ]:
+        let (command, marker) = commandCase
+        tty.send command
+        if firstCommand:
+          tty.expect "❯ " & command
+          tty.frames.setLen(0)
+          firstCommand = false
+        else:
+          tty.drain(80)
+        tty.send "\n"
+        tty.expectInHistory "❯ " & command
+        tty.expectInHistory marker
+        tty.drain(120)
+      tty.expectAlive()  # no command in the suite exited the process
+      tty.expectInHistory "unknown command: :toknes  did you mean :tokens?"
+      # The bare :provider listing teaches its verbs; the reentry hint is
+      # the discoverability fix for dead keys (edit re-enters one).
+      tty.expectInHistory "verbs: add edit update new pull rm"
+      tty.expectInHistory "edit <name> re-enters its key or renews a login"
+      # :session prints this session's id; cross-check it against the id the
+      # dir lock recorded for this process (second line of the lock file).
+      tty.send ":session"
+      tty.drain(80)
       tty.send "\n"
-      tty.expectInHistory "❯ " & command
-      tty.expectInHistory marker
-      tty.drain(120)
-    tty.expectAlive()  # no command in the suite exited the process
-    tty.expectInHistory "unknown command: :toknes  did you mean :tokens?"
-    # :session prints this session's id; cross-check it against the id the
-    # dir lock recorded for this process (second line of the lock file).
-    tty.send ":session"
-    tty.drain(80)
-    tty.send "\n"
-    var lockId = ""
-    for p in walkFiles(root / "tmp" / "3code" / "dirlock" / "*.lock"):
-      let lines = readFile(p).strip.splitLines
-      if lines.len > 1: lockId = lines[1]
-    # Timestamp-only ids since the rename; a "-N" suffix only appears on a
-    # same-second collision, so accept both shapes.
-    doAssert lockId.len >= 15 and lockId[0..7].allCharsInSet(Digits) and
-      lockId[8] == 'T' and lockId[9..14].allCharsInSet(Digits) and
-      (lockId.len == 15 or lockId[15] == '-'),
-      "dir lock should carry a session id line, got: " & lockId
-    tty.expectInHistory lockId
-    tty.send "\x1b[A"
-    tty.expect "❯ :session"
-    tty.drain(200)
-    # :prompt embeds machine-specific skill paths and their physical wraps.
-    # Assert command results above and the live recalled-input cursor here,
-    # without collapsing paths/rows to fit the historical text recording.
-    tty.requireVisibleEditorCaret(":session")
-    discard tty.checkpoint("commands/recalled-session")
-    tty.writeCheckpoints(root / "checkpoints.jsonl")
+      var lockId = ""
+      for p in walkFiles(root / "tmp" / "3code" / "dirlock" / "*.lock"):
+        let lines = readFile(p).strip.splitLines
+        if lines.len > 1: lockId = lines[1]
+      # Timestamp-only ids since the rename; a "-N" suffix only appears on a
+      # same-second collision, so accept both shapes.
+      doAssert lockId.len >= 15 and lockId[0..7].allCharsInSet(Digits) and
+        lockId[8] == 'T' and lockId[9..14].allCharsInSet(Digits) and
+        (lockId.len == 15 or lockId[15] == '-'),
+        "dir lock should carry a session id line, got: " & lockId
+      tty.expectInHistory lockId
+      tty.send "\x1b[A"
+      tty.expect "❯ :session"
+      tty.drain(200)
+      # :prompt embeds machine-specific skill paths and their physical wraps.
+      # Assert command results above and the live recalled-input cursor here,
+      # without collapsing paths/rows to fit the historical text recording.
+      tty.requireVisibleEditorCaret(":session")
+      discard tty.checkpoint("commands/recalled-session")
+      tty.writeCheckpoints(root / "checkpoints.jsonl")
 
   test "resume command swaps onto a saved session":
     # #62: `:resume <id>` replaces the running session in place: state,
@@ -680,7 +688,7 @@ suite "terminal visual contract":
       tty.writeFrameArtifact(root / "frames.txt")
       tty.close()
 
-    tty.expect "\u276f"
+    tty.expect "❯"
     tty.send ":resume\n"
     tty.expectInHistory targetId          # bare form lists the candidate
     tty.expectInHistory "resume with :resume <id>"
@@ -688,8 +696,8 @@ suite "terminal visual contract":
     tty.expectInHistory "resumed " & targetId
     # The token bar carries the seeded turn's usage in the typing-ready
     # shape a startup resume paints (fresh 80 + cached 20 = prompt 100).
-    tty.expect "\u2191100"
-    tty.expect "\u219320"
+    tty.expect "↑100"
+    tty.expect "↓20"
     # :session reports the swapped-in session.
     tty.send ":session\n"
     tty.expectInHistory targetId
@@ -732,12 +740,12 @@ suite "terminal visual contract":
       tty.writeFrameArtifact(root / "frames.txt")
       tty.close()
 
-    tty.expect "\u276f"
+    tty.expect "❯"
     # Change provider
     tty.send ":provider alt"
     tty.send "\n"
     tty.drain(200)
-    tty.expect "\u276f"  # prompt must return
+    tty.expect "❯"  # prompt must return
     tty.expectAlive()  # must not exit after :provider
     # Send a message — if the program exited this times out
     let hellosBefore = tty.countInHistory("● hello")
@@ -749,19 +757,19 @@ suite "terminal visual contract":
     # turn's completion unambiguously — identical replies would let an
     # earlier turn's repaint satisfy the wait.
     tty.expectTokenBar(["↑5"])
-    tty.expect "\u276f"
+    tty.expect "❯"
     tty.expectAlive()
     # Change model
     tty.send ":model stub-large"
     tty.send "\n"
     tty.drain(200)
-    tty.expect "\u276f"  # prompt must return
+    tty.expect "❯"  # prompt must return
     tty.expectAlive()  # must not exit after :model
     tty.send "hey"
     tty.expect "hey"
     tty.send "\n"
     tty.expectTokenBar(["↑15"])
-    tty.expect "\u276f"
+    tty.expect "❯"
     tty.expectAlive()
     # Change model via Tab completion cycling: two Tabs rotate through the
     # provider's models (alt-model -> alt-large), and the single Enter that
@@ -775,7 +783,7 @@ suite "terminal visual contract":
     # the cycled match (alt-large, not the first match alt-model) proves
     # the rotation, and the single-Enter submit proves the fix.
     tty.expectInHistory "model     alt-large"
-    tty.expect "\u276f"  # prompt must return
+    tty.expect "❯"  # prompt must return
     tty.expectAlive()
     tty.send "again"
     tty.expect "again"
@@ -1800,13 +1808,13 @@ max-tokens = "8192"
     let f = tty.frames[^1]
     block promptRow:
       for i in countdown(f.rows.high, 0):
-        if not f.rows[i].startsWith("\u276f"): continue
+        if not f.rows[i].startsWith("❯"): continue
         doAssert f.drawnCaretCount(i) == 1,
           "REGRESSION (interrupted-by-user): drawn caret missing after ESC; expected exactly one on prompt row " & $i
         doAssert f.drawnCaretCol(i) == 2,
           "REGRESSION (interrupted-by-user): expected drawn caret at col 2 after ❯, got " &
             $f.drawnCaretCol(i) & " (rows: " & $f.rows.len & ")"
-        doAssert "\u276f" in f.rows[i],
+        doAssert "❯" in f.rows[i],
           "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from prompt row " &
             $i & ", got: '" & f.rows[i] & "'"
         break promptRow
@@ -1862,13 +1870,13 @@ max-tokens = "8192"
     let f = tty.frames[^1]
     block promptRow:
       for i in countdown(f.rows.high, 0):
-        if not f.rows[i].startsWith("\u276f"): continue
+        if not f.rows[i].startsWith("❯"): continue
         doAssert f.drawnCaretCount(i) == 1,
           "REGRESSION (interrupted-by-user): drawn caret missing after Ctrl-C; expected exactly one on prompt row " & $i
         doAssert f.drawnCaretCol(i) == 2,
           "REGRESSION (interrupted-by-user): expected drawn caret at col 2 after ❯, got " &
             $f.drawnCaretCol(i)
-        doAssert "\u276f" in f.rows[i],
+        doAssert "❯" in f.rows[i],
           "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from prompt row " &
             $i & ", got: '" & f.rows[i] & "'"
         break promptRow
@@ -2180,13 +2188,13 @@ max-tokens = "8192"
     let f = tty.frames[^1]
     block promptRow:
       for i in countdown(f.rows.high, 0):
-        if not f.rows[i].startsWith("\u276f"): continue
+        if not f.rows[i].startsWith("❯"): continue
         doAssert f.drawnCaretCount(i) == 1,
           "REGRESSION (interrupt-during-bash): drawn caret missing after Ctrl-C; expected exactly one on prompt row " & $i
         doAssert f.drawnCaretCol(i) == 2,
           "REGRESSION (interrupt-during-bash): expected drawn caret at col 2 after ❯, got " &
             $f.drawnCaretCol(i)
-        doAssert "\u276f" in f.rows[i],
+        doAssert "❯" in f.rows[i],
           "REGRESSION (interrupt-during-bash): prompt glyph ❯ missing from prompt row " &
             $i & ", got: '" & f.rows[i] & "'"
         break promptRow
@@ -4415,14 +4423,14 @@ when false:
     writeConfiguredProvider(root)
     let tty = startStub(root, cols = 12)
     defer: tty.close()
-    tty.expect "\u276f"
+    tty.expect "❯"
     tty.expectIdleCaret()
-    # `\u276f ` is 2 cells; 10 data cells fill the row exactly.
+    # `❯ ` is 2 cells; 10 data cells fill the row exactly.
     tty.send "0123456789"
     tty.expectIdleCaret()
     var promptRow = -1
     for i, row in tty.rows():
-      if row.startsWith("\u276f 0123456789"):
+      if row.startsWith("❯ 0123456789"):
         promptRow = i
     check promptRow >= 0
     # The char printed plainly; the caret is the only reverse cell, on
@@ -4435,12 +4443,12 @@ when false:
     # inclusive, so a full row followed by `\x1b[K` blanks the char that
     # filled the margin. ttty models EL as preserving that cell, which
     # is exactly why the grid checks above can't catch the loss.
-    check "\u276f 0123456789\x1b[K" notin tty.raw
+    check "❯ 0123456789\x1b[K" notin tty.raw
     # Keep typing: the wrap settles on that same row, in place; no
     # content moved and the prompt row did not shift down.
     tty.send "xy"
     tty.expectIdleCaret()
-    check tty.rows()[promptRow].startsWith("\u276f 0123456789")
+    check tty.rows()[promptRow].startsWith("❯ 0123456789")
     check tty.rows()[promptRow + 1] == "  xy"
     check tty.drawnCaretCol(promptRow + 1) == 4
     # Clear, then reach the margin through trailing spaces: 7 chars
@@ -4452,12 +4460,12 @@ when false:
     tty.send "abcdefg   "
     tty.drain(200)
     tty.expectIdleCaret()
-    check tty.rows()[promptRow].startsWith("\u276f abcdefg")
+    check tty.rows()[promptRow].startsWith("❯ abcdefg")
     check tty.drawnCaretCount(promptRow) == 0
     check tty.drawnCaretCol(promptRow + 1) == 2
     tty.send "xy"
     tty.expectIdleCaret()
-    check tty.rows()[promptRow].startsWith("\u276f abcdefg")
+    check tty.rows()[promptRow].startsWith("❯ abcdefg")
     check tty.rows()[promptRow + 1] == "  xy"
     # Only ONE trailing space may collapse into the wrap. Typing spaces
     # one keystroke at a time past the margin: each one after the
@@ -4489,7 +4497,7 @@ when false:
     tty.send " "
     tty.expectIdleCaret()
     check tty.drawnCaretCol(promptRow + 1) == 3
-    check tty.rows()[promptRow].startsWith("\u276f abcdefg")
+    check tty.rows()[promptRow].startsWith("❯ abcdefg")
     # Submit from the caret-only row: the transient row must vanish into
     # the committed block, with no blank row or leftover caret cell
     # between the committed prompt and the reply chrome.
@@ -4501,9 +4509,9 @@ when false:
     tty.send "\r"
     tty.expect "ok"
     tty.expectIdleCaret()
-    let committed = tty.rowContaining("\u276f 0123456789")
+    let committed = tty.rowContaining("❯ 0123456789")
     check committed >= 0
-    let nextPrompt = tty.rowContaining("\u276f")
+    let nextPrompt = tty.rowContaining("❯")
     check nextPrompt > committed
     for i in committed + 1 ..< tty.rows().len:
       if i != nextPrompt:
