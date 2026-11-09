@@ -4480,32 +4480,38 @@ proc buildCredit*(p: Profile): string =
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
 
-const RetiredBuiltinSkills* = ["cybernetic-plan.md"]
-  ## Skills 3code no longer ships. The materializer deletes these from the
-  ## data dir so a retired built-in cannot linger in the skills catalog;
-  ## an explicit list (not "anything unknown") so user-placed files in that
-  ## dir are never touched.
-
-const BuiltinSkills*: array[6, (string, string)] = [
-  ("role-conversational.md",   staticRead("skills/role-conversational.md")),
-  ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
-  ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
-  ("role-writing.md",          staticRead("skills/role-writing.md")),
-  ("task-debug-systematic.md",   staticRead("skills/task-debug-systematic.md")),
-  ("computer-use.md",          staticRead("skills/computer-use.md")),
-]
-  ## Universal skills compiled into the binary. Materialized to
-  ## `~/.local/share/3code/skills/` on startup; re-extracted whenever
-  ## the contents change (the dir's `VERSION` file holds a content
-  ## fingerprint, not just a version string, so adding or editing a
-  ## built-in skill triggers re-extraction without a manual bump).
-  ## User overrides live in `~/.config/3code/skills/` and are never
-  ## touched by the materializer.
-  ##
-  ## Per-model variants (`skills/<model>/<name>.md`) are not
-  ## implemented yet — see CLAUDE.md "Skills convention" for the
-  ## planned layout and the trigger condition (when a smaller model
-  ## needs hand-holding the others don't).
+# Universal skills compiled into the binary. Materialized to
+# `~/.local/share/3code/skills/` on startup; re-extracted whenever
+# the contents change (the dir's `VERSION` file holds a content
+# fingerprint, not just a version string, so adding or editing a
+# built-in skill triggers re-extraction without a manual bump).
+# User overrides live in `~/.config/3code/skills/` and are never
+# touched by the materializer.
+when computerUseBuild:
+  const BuiltinSkills*: array[6, (string, string)] = [
+    ("role-conversational.md",   staticRead("skills/role-conversational.md")),
+    ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
+    ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
+    ("role-writing.md",          staticRead("skills/role-writing.md")),
+    ("task-debug-systematic.md",   staticRead("skills/task-debug-systematic.md")),
+    ("computer-use.md",          staticRead("skills/computer-use.md")),
+  ]
+  const RetiredBuiltinSkills* = ["cybernetic-plan.md"]
+else:
+  # computer-use.md stays out of undocumented builds: the materializer
+  # also deletes a previously-extracted copy so it leaves the catalog.
+  const BuiltinSkills*: array[5, (string, string)] = [
+    ("role-conversational.md",   staticRead("skills/role-conversational.md")),
+    ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
+    ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
+    ("role-writing.md",          staticRead("skills/role-writing.md")),
+    ("task-debug-systematic.md",   staticRead("skills/task-debug-systematic.md")),
+  ]
+  const RetiredBuiltinSkills* = ["cybernetic-plan.md", "computer-use.md"]
+    ## Skills 3code no longer ships. The materializer deletes these from the
+    ## data dir so a retired built-in cannot linger in the skills catalog;
+    ## an explicit list (not "anything unknown") so user-placed files in that
+    ## dir are never touched.
 
 proc builtinSkillsDir*(): string = userDataRoot() / "skills"
 

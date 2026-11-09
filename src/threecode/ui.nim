@@ -15,12 +15,19 @@ import types, util, prompts, session, config, api, compact, display, minline,
   auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins,
   images, goal, screen
 
-const CommandNames* = [":help", ":tokens", ":clear", ":goal", ":cyber", ":model",
+# `:computer` stays out of the list in undocumented builds so tab
+# completion, prefix resolution and typo suggestions do not advertise
+# it; typed in full it still dispatches.
+when computerUseBuild:
+  const ComputerCommandNames = @[":computer"]
+else:
+  const ComputerCommandNames: seq[string] = @[]
+const CommandNames* = @[":help", ":tokens", ":clear", ":goal", ":cyber", ":model",
                       ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":verifier",
                       ":show", ":log", ":sessions", ":session", ":resume", ":summarize", ":btw",
-                      ":version", ":sandbox", ":sb", ":retry", ":private", ":computer",
-                      ":quit", ":exit"]
+                      ":version", ":sandbox", ":sb", ":retry", ":private",
+                      ":quit", ":exit"] & ComputerCommandNames
 
 proc canonicalCommandName*(name: string): tuple[canon, ambig: string] =
   ## Vim-style name resolution: an exact match wins, otherwise the input
@@ -1589,8 +1596,8 @@ proc cmdPrivate(arg: string, prof: var Profile): string =
 
 proc cmdComputerStatus(prof: Profile, session: Session): string =
   if not computerUseBuild:
-    return hintLnS("computer use: not compiled in (build with -d:computerUse " &
-      "to enable; session only, never persisted)")
+    return hintLnS("computer use: not compiled in (session only, never " &
+      "persisted)")
   let mark = if computerUseEnabled: "on" else: "off"
   result.add hintLnS("computer use: " & mark &
     "  (on = the model can screenshot this screen and drive it with the " &
@@ -1617,8 +1624,7 @@ proc cmdComputer(arg: string, prof: Profile, session: Session): string =
     computerUseEnabled = false
     return hintLnS("computer use: off")
   if not computerUseBuild:
-    return errLnS("computer use is not compiled into this build; rebuild " &
-      "with -d:computerUse to enable it")
+    return errLnS("computer use is not compiled into this build")
   if not prof.vision:
     return errLnS("computer use needs a vision model — " & prof.model &
       " cannot see images. Switch to a vision model (glm-5.3-flash on " &
