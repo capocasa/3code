@@ -640,7 +640,11 @@ Each conversation event gets a one-character marker or banner icon:
 Tool output below the banner is dimmed to keep the model's prose the
 loudest thing on screen. Long output is elided in the middle (`... N lines
 omitted · T7.log ↗`); `:show N` prints the whole capture, `:log` lists
-every tool call of the session. The whole elision row is a terminal
+every tool call of the session. While tool call N is still running, the
+same `:show N` (or a click on the viewport) follows its output live:
+the held lines flush into scrollback and every new line lands as it
+arrives; `:unshow` returns to the capped viewport, and the fold pins
+only the banner plus the dump link. The whole elision row is a terminal
 hyperlink (OSC 8) over a dump of the full output in
 `$TMPDIR/3code_out_<pid>/T<N>.log(.diff)`, so terminals that support links
 open it in the `file:` handler (e.g. `$VISUAL`) on a click; the visible

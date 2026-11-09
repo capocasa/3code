@@ -689,7 +689,7 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
   var view = initStreamingView(StreamMaxLines, idx, bannerFor(act))
   let promptOwnsStdin = inputEditor != nil
 
-  proc renderView() =
+  proc renderView(flowedDelta = 0) =
     # Push a snapshot of the viewport's raw inputs into the shared model;
     # the GUI thread owns the viewport+footer composite during amBarTick
     # and re-wraps it at the live terminal width each tick (so a resize
@@ -698,12 +698,27 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
     # here. In test mode, request one paint and wait for the ack so the
     # harness captures each streamed line as a discrete frame (the frame
     # event fires after this returns). In normal mode the 80ms cadence
-    # paints the rows.
-    setAnimViewport(view.banner, view.buf, view.exitCode, view.idx,
-                    view.maxLines)
+    # paints the rows. `flowedDelta` advances the live-follow `committed`
+    # count when the caller just committed lines to scrollback itself.
+    pushAnimViewport(view.banner, view.buf, view.exitCode, view.idx,
+                     view.maxLines, flowedDelta)
     requestViewportPaint()
 
+  proc takeLine(line: string) =
+    # One streamed output line: committed straight to scrollback while
+    # this call is followed live (`:show N`), buffered into the capped
+    # viewport otherwise. The buffer keeps mirroring either way, so
+    # `:unshow` restores the capped tail and the fold stays honest.
+    if followActiveFor(idx):
+      commitFollowLine(idx, line)
+      view.addLine(line)
+      renderView(flowedDelta = 1)
+    else:
+      view.addLine(line)
+      renderView()
+
   setToolStdinWatcherEnabled(not promptOwnsStdin)
+  setMouseClickReporting(true)
   try:
     setCommandStatusActive(true)
     renderView()
@@ -711,17 +726,21 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
     if stub != nil and stub.kind == JObject:
       let stream = stub{"stream"}
       let finalCode = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
+      # Optional inter-line stall for the tty harness: a mid-stream typing
+      # window (live follow, ask gate) needs the stream to outlast the
+      # keystrokes.
+      let streamDelayMs = stub{"streamDelayMs"}.getInt(0)
       var streamedLines: seq[string]
       if stream != nil and stream.kind == JArray:
         var lineIdx = 0
         for item in stream:
           let line = item.getStr("")
+          if streamDelayMs > 0: sleep streamDelayMs
           streamedLines.add line
           if lineIdx == stream.len - 1 and finalCode > 0:
             view.setExitCode(finalCode)
           streamedOutputShown[] = true
-          view.addLine(line)
-          renderView()
+          takeLine(line)
           emitTestFrameEvent()
           inc lineIdx
       result.output = stub{"output"}.getStr("")
@@ -735,8 +754,7 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
     else:
       let onLine = proc(line: string) =
         streamedOutputShown[] = true
-        view.addLine(line)
-        renderView()
+        takeLine(line)
       result = runActionStreaming(act, cache, onLine)
       # Sandbox ask gate: a failed command that smells like an EACCES
       # from the sandbox, whose denied target is covered by an `ask`
@@ -774,6 +792,7 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
   finally:
     setCommandStatusActive(false)
     setToolStdinWatcherEnabled(true)
+    setMouseClickReporting(false)
     # The normal path leaves the viewport in place so the controller's
     # `appendItem` can fold it into one synchronized scrollback commit (no
     # blank intermediate frame). Only on exception, where the append will not
@@ -781,6 +800,7 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
     # The GUI thread still owns the composite, so clear via the model + a
     # paint request rather than rendering directly.
     if getCurrentException() != nil:
+      followFinish(idx)
       clearAnimViewport()
       requestViewportPaint()
 
@@ -1589,9 +1609,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let isReceiptCap = deferredReceipt.len > 0 and i == lastCommitIdx
         if not silent:
           appendItem(
-            toolItem(act, r, code, idx, diff, toolElapsed.int),
+            if followTouchedFor(idx):
+              followedToolItem(act, code, idx, r, toolElapsed.int)
+            else:
+              toolItem(act, r, code, idx, diff, toolElapsed.int),
             receipt = if isReceiptCap: deferredReceipt else: "")
+          followFinish(idx)
         else:
+          followFinish(idx)
           commitTranscriptItem(proc(): string =
             skillLoadedBytes(act)
           , receipt = if isReceiptCap: deferredReceipt else: "")

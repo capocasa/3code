@@ -3876,7 +3876,9 @@ commands:
   (goal and cybernetic modes are mutually exclusive: one mode, one
   file, one verb)
   :prompt             show the active system prompt
-  :show [N]           show full output of tool call N (default: last)
+  :show [N]           follow tool call N live while it runs (default: the
+                      running call, else the last); dump full output when done
+  :unshow             stop the live follow started by :show
   :log                list all tool calls this session
   :sessions           list recent sessions saved in this directory (max 20)
   :session            show this session's id (for --resume=ID / :resume ID)

@@ -339,6 +339,28 @@ proc addDiffPainted(outBytes: var string; l: string) =
     else:
       outBytes.add GreyFg & "  " & chunk & Reset & "\r\n"
 
+proc dumpLinkRowBytes*(idx: int; body: string; ext = "log"): string =
+  ## The bare `T<n>.<ext> ↗` row: dump + link, no elision note. Shared by
+  ## the diff hint, the live-follow fold (its body already flowed to
+  ## scrollback, so the fold pins only the banner plus this link), and
+  ## nothing else. 0 idx (the `:!` pass before a tool index exists) gets
+  ## nothing.
+  if idx <= 0: return ""
+  let url = dumpToolOutput(idx, body, ext)
+  if url.len == 0: return ""
+  GreyFg & "  " & osc8Link(url, &"T{idx}.{ext} ↗") & Reset & "\r\n"
+
+proc toolFollowLineBytes*(line: string): string =
+  ## One flowed live-follow line: same grey wrap the transcript body uses,
+  ## so lines that streamed into scrollback match the folded item's rows.
+  wrappedSubtleBytes(line)
+
+proc toolFollowFlushBytes*(lines: openArray[string]): string =
+  ## The `:show N` flush: everything the capped viewport was holding,
+  ## committed to scrollback in order when the follow starts.
+  for l in lines:
+    result.add wrappedSubtleBytes(l)
+
 proc diffDumpHintBytes(idx: int; diff: string): string =
   ## The `T5.diff ↗` row (#60): a patch's full diff always lands in the
   ## log dir as its own file, linked, so even a diff that fit in the
@@ -346,10 +368,7 @@ proc diffDumpHintBytes(idx: int; diff: string): string =
   ## to `git apply` / `patch -R`. The long-diff path gets the same link
   ## from its `… N lines hidden` hint instead. Nothing without a usable
   ## tool index (the `:!` shell pass, `idx = 0`).
-  if idx <= 0: return ""
-  let url = dumpToolOutput(idx, diff, "diff")
-  if url.len == 0: return ""
-  GreyFg & "  " & osc8Link(url, &"T{idx}.diff ↗") & Reset & "\r\n"
+  dumpLinkRowBytes(idx, diff, "diff")
 
 proc diffBytes(diff: string; idx = 0; skipFirst = false): string =
   ## `skipFirst` drops the diff's first non-blank line from the painted

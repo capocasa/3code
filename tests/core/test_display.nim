@@ -674,3 +674,34 @@ when not defined(windows):
       check "delivered 16x12" in s
       check "attached below" in s
       check "base64" notin s
+suite "display: live follow bytes":
+  setup:
+    if dirExists(toolOutDir()): removeDir(toolOutDir())
+
+  teardown:
+    if dirExists(toolOutDir()): removeDir(toolOutDir())
+
+  test "follow line bytes match transcript body styling":
+    let b = toolFollowLineBytes("hello")
+    check "  hello" in b
+    check b.contains("\r\n")
+
+  test "follow flush bytes keep order":
+    let b = toolFollowFlushBytes(@["one", "two", "three"])
+    check b.find("one") < b.find("two")
+    check b.find("two") < b.find("three")
+
+  test "followed fold pins banner plus dump link, not the body":
+    let act = Action(kind: akBash, body: "seq 30")
+    var lines: seq[string]
+    for i in 1..30: lines.add "line " & $i
+    let output = lines.join("\n") & "\n"
+    let item = followedToolItem(act, 0, 5, output)
+    let bytes = formatItem(item)
+    check "$ seq 30" in bytes      # banner survives (toolTranscriptBytes form)
+    check "T5.log ↗" in bytes      # the dump link rides along
+    check "\x1b]8;;file://" in bytes
+    check "line 20" notin bytes    # the body never re-commits at the fold
+    let dump = toolOutDir() / "T5.log"
+    check fileExists(dump)
+    check readFile(dump) == output

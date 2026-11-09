@@ -5,7 +5,9 @@
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
+  :show [N]           follow tool call N live while it runs (default: the
+                      running call, else the last); dump full output when done
+  :unshow             stop the live follow started by :show
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :session          show this session's id (for --resume <id>)
@@ -65,7 +67,9 @@ input:
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
+  :show [N]           follow tool call N live while it runs (default: the
+                      running call, else the last); dump full output when done
+  :unshow             stop the live follow started by :show
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :session          show this session's id (for --resume <id>)

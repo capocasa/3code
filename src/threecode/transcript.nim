@@ -69,6 +69,17 @@ proc toolItem*(act: Action; res: string; code, idx: int; diff = "";
                  body: toolTranscriptBytes(act, res, code, idx, diff, elapsedS),
                  attachSeparator: true)
 
+proc followedToolItem*(act: Action; code, idx: int; output: string;
+                       elapsedS = -1): TranscriptItem =
+  ## Fold for a call whose output streamed live into scrollback (`:show N`
+  ## follow): the body already lives there in order, so this item pins only
+  ## the banner (exit/elapsed verdict) and the full-output dump link.
+  TranscriptItem(kind: tiTool,
+                 body: toolBannerBytes(bannerFor(act), act.kind, code,
+                                       elapsedS) &
+                       dumpLinkRowBytes(idx, output),
+                 attachSeparator: true)
+
 proc emptyAssistantBytes*(attachReceipt: bool; receipt = ""): string =
   ## The shared empty-reply rendering. Live (`commitAssistantItem`) and
   ## replay (`formatItem`) both render through this, and the saved-session
