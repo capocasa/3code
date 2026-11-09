@@ -1794,18 +1794,20 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       stopTurnInputForFinalRender()
       turnEnded = true
       return false
-    # Harness-mode end-call boundary — the only hook. The turn's final
-    # model call completed, the reply is committed, nothing is queued,
-    # and the harness is about to hand the prompt back. The armed mode's
-    # trigger file in the project root keeps the session on its goal: a
-    # fresh-context side-call verifier (same model, own message list, no
-    # tools) judges the mode's text against harness-built evidence from
-    # this turn plus the check-time working-tree diff. FEEDBACK sends the
-    # agent back in with the verifier's words; SATISFIED retires the file
-    # and idles normally. No session-start check, no per-tool-call
-    # checks. Interrupt is the pause lever: it skips the check and ends
-    # the turn; on resume the file is still there, so the mode is still
-    # on.
+    # Harness-mode end-call boundary — the one in-turn hook. The turn's
+    # final model call completed, the reply is committed, nothing is
+    # queued, and the harness is about to hand the prompt back. A mode
+    # file that first appears here (written mid-turn by the agent or
+    # another process) is a detection: the hint fires and the kickoff
+    # turn starts at once, because this turn was not goal work. A mode
+    # already announced goes to the check: a fresh-context side-call
+    # verifier (same model, own message list, no tools) judges the mode's
+    # text against harness-built evidence from this turn plus the
+    # check-time working-tree diff. FEEDBACK sends the agent back in
+    # with the verifier's words; SATISFIED retires the file and idles
+    # normally. Interrupt is the pause lever: it skips the check and
+    # ends the turn; on resume the file is still there, so the mode is
+    # still on.
     # The mode file is a project-root artifact: activation keys off the
     # session's project dir, not the process cwd. Embedders (library,
     # ACP) run sessions against their own cwd while the process may sit
@@ -1819,19 +1821,31 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         turnEnded = true
         return true
       if not session.goalNotified:
+        # Detection: the file appeared during the turn, so the work the
+        # verifier would judge was never aimed at the goal. Announce,
+        # bind the discipline baselines, and send the kickoff - the
+        # same immediate start a startup detection and a `:verb` arm
+        # take. The check first runs at the end of the kickoff turn.
         session.goalNotified = true
-        let detectedReceipt = receiptBytes(
-          mode.name & " mode: " & mode.fileName &
-            " detected (interrupt to pause, " & mode.verb & "! to cancel)")
-        termengine.noteNonMessageTail(detectedReceipt, messages.len)
-        commitTranscriptBytes(detectedReceipt, true)
+        commitHarnessNotice(modeHintLine(mode, "detected implementing"),
+                            messages)
         # A second mode's file on disk while one mode runs is a refused
-        # arming: say so once, right under the detection receipt.
+        # arming: say so once, right under the detection hint.
         let other = conflictingMode(mode, session.cwd)
         if not noMode(other):
-          let conflictReceipt = receiptBytes(modeConflictLabel(mode, other))
-          termengine.noteNonMessageTail(conflictReceipt, messages.len)
-          commitTranscriptBytes(conflictReceipt, true)
+          commitHarnessNotice(receiptBytes(modeConflictLabel(mode, other)),
+                              messages)
+        let detectedText = readModeText(mode, session.cwd)
+        session.modeSnapshot = detectedText
+        if session.readCache != nil:
+          session.changeCountStart = session.readCache.changes.len
+        let kickoff = mode.kickoffMessage(detectedText)
+        messages.add kickoff
+        saveSession(session, messages)
+        commitTranscriptBytes(
+          formatItem(agentPromptItem(kickoff{"content"}.getStr)), true)
+        debugOut "runTurns: " & mode.fileName & " detected, kickoff"
+        continue
       # Verifier steps land in scrollback as they happen: same commit
       # path as the receipts around them, an item rendered like a reply
       # that speaks its verdict in color, icon first, through and
@@ -1860,6 +1874,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         commitTranscriptBytes(formatItem(agentPromptItem(guard)), true)
         debugOut "runTurns: " & mode.name & " structure lost, continuing"
         continue
+      # The turn's work is done; the dim hint says what happens to it
+      # next, then the verifier side call runs.
+      commitHarnessNotice(modeHintLine(mode, "completed verifying"),
+                          messages)
       let check = runGoalCheck(p, mode, modeText, buildGoalEvidence(messages),
                                session.modeSnapshot, session.readCache)
       # The side call ran the bar/spinner hooks again; its usage is not
@@ -1909,15 +1927,18 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           session.goalNotified = false
           session.modeSnapshot = ""
           session.changeCountStart = 0
-          # No confirmation receipt: the green ✓ verdict row under the
-          # verifier's reply IS the confirmation; the rename is on disk.
+          # The green ✓ verdict row under the verifier's reply says what
+          # passed; the dim hint says what the harness did about it (the
+          # rename is on disk).
+          commitHarnessNotice(
+            modeHintLine(mode, "verification successful"), messages)
         else:
           commitHarnessNotice(
             errLnS(mode.name & " satisfied but " & mode.fileName &
               " could not be renamed to " & mode.confirmedName), messages)
       elif check.verdict.kind == gvkFeedback:
-        commitHarnessNotice(
-          receiptBytes(mode.name & " check: feedback"), messages)
+        commitHarnessNotice(modeHintLine(mode, "verification failed"),
+                            messages)
         var fb = check.verdict.feedback
         if note.len > 0: fb.add "\n\nAlso: " & note
         sendBack(fb, mode.name & " check feedback, continuing")

@@ -122,10 +122,10 @@ suite "goal command verbs":
       let r = handleCommandResult(":goal make it so", messages, session,
                                   prof, editor)
       check r.recognized and r.ok
-      # The receipt is the whole announcement: no kickoff turn follows,
-      # the file is armed and the next turn end runs the check.
-      check r.body == "goal armed (goal.md); the check runs when each " &
-        "turn ends\n"
+      # The receipt says the file is armed; the controller starts the
+      # kickoff turn right after it (startGoalTurn is the signal).
+      check r.body == "goal armed (goal.md), starting now\n"
+      check r.startGoalTurn
       check readFile(GoalFileName).strip == "make it so"
 
   test ":goal new is the balking synonym":

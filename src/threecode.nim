@@ -35,7 +35,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
                   auth_xai, auth_openai, auth_google, auth_anthropic,
-                  streamexec, cli, search, tabtitle, plugins]
+                  streamexec, cli, search, tabtitle, plugins, goal]
 import threecode/acp
 import threecode/rpc
 when not defined(android):
@@ -883,6 +883,11 @@ proc main() =
                               clearEditor = true)
   )
 
+  proc runModeKickoff(m: ModeDesc): bool
+    ## Forward: defined after runTurnWithSafetyNet, used by the command
+    ## paths below (runDeferredCommand, the idle loop) and the startup
+    ## detection after them.
+
   proc runDeferredCommand(cmd: string) =
     ## Execute one command deferred from mid-turn. Identical to the idle
     ## loop's command path except there is no prompt echo to commit: the
@@ -925,6 +930,11 @@ proc main() =
                             restoreEditor = true,
                             beforeRepaint = clearSubmittedCommandFooter,
                             reserveFooter = true)
+    if res.startGoalTurn:
+      # A mid-turn mode arm (e.g. a queued `:goal`): work starts as soon
+      # as the command has yielded (now).
+      discard runModeKickoff(activeMode(session.cwd))
+
   proc handleBufferedAfterTurn(interrupted: bool): bool =
     ## Drain the queue in order once the turn yields: each queued prompt
     ## runs a full turn (anything queued during that turn drains after
@@ -1031,6 +1041,40 @@ proc main() =
         ". Please open an issue with the lines above."
       result = true
 
+  # A mode was just armed (`:goal TEXT`, `:cyber ...`) or detected at
+  # startup: print the dim detection hint, append the harness-autosent
+  # kickoff prompt, and run the turn now - the mode's work begins the
+  # moment the file is written (or found), never at the next turn
+  # boundary. The discipline baselines bind here: the first turn is
+  # compared against the file as armed, and work-happened starts from
+  # the change log as armed. No refreshSystemPrompt: the kickoff rides
+  # the existing system prompt exactly like the in-turn feedback
+  # continuation in turns.nim. Returns true if a buffered
+  # quit/interrupt should end the session.
+  proc runModeKickoff(m: ModeDesc): bool =
+    let modeText = readModeText(m, session.cwd)
+    session.goalNotified = true
+    session.modeSnapshot = modeText
+    if session.readCache != nil:
+      session.changeCountStart = session.readCache.changes.len
+    let hintBytes = modeHintLine(m, "detected implementing")
+    termengine.noteNonMessageTail(hintBytes, messages.len)
+    commitTranscriptBytes(hintBytes, true)
+    # A second mode's file on disk while one mode starts is a refused
+    # arming: say so once, right under the detection hint (same order as
+    # the turn-boundary detection in turns.nim).
+    let other = conflictingMode(m, session.cwd)
+    if not noMode(other):
+      let conflictBytes = receiptBytes(modeConflictLabel(m, other))
+      termengine.noteNonMessageTail(conflictBytes, messages.len)
+      commitTranscriptBytes(conflictBytes, true)
+    let kickoff = m.kickoffMessage(modeText)
+    messages.add kickoff
+    saveSession(session, messages)
+    commitTranscriptBytes(
+      formatItem(agentPromptItem(kickoff{"content"}.getStr)), true)
+    result = runTurnWithSafetyNet()
+
   # Run a prompt that arrived on the command line (or was queued during
   # startup) through the exact same sequence as a typed submit in the
   # REPL loop below: append the message, refresh the system prompt, do
@@ -1108,10 +1152,17 @@ proc main() =
     emitTestFrameEvent()
     startupTrace("first-prompt-painted")
     # A mode trigger file that is already on disk when the session opens
-    # does nothing by itself: the file is the whole protocol and its one
-    # consumer is the turn-end boundary in turns.nim, which announces the
-    # mode (and any conflict) at the first control hand-back and runs the
-    # satisfaction check there. Startup stays inert.
+    # is just as armed as one written by its verb: the file is the whole
+    # protocol, and whoever wrote it (the user, another tool, a previous
+    # session) meant work to happen. Announce it (and any conflict) and
+    # kick the mode's work off now - the same kickoff path `:goal TEXT`
+    # takes - instead of waiting for the first prompt to hit a turn-end
+    # boundary. Session cwd, not process cwd: same authority as the
+    # turn-end check in turns.nim.
+    let mode = activeMode(session.cwd)
+    if not noMode(mode):
+      if runModeKickoff(mode):
+        quit(0)
     if prompt != "" and runInitialPrompt(prompt):
       # quit, not return: unwinding `editor` while the input thread still
       # holds it is the Windows oneshot SIGSEGV (illegal storage access).
@@ -1227,6 +1278,9 @@ proc main() =
           reserveFooter = true,
           clearEditor = true)
         releaseIdleSubmittedInput()
+        if commandResult.startGoalTurn:
+          if runModeKickoff(activeMode(session.cwd)):
+            break
         continue
       if prof.name == "":
         let noProvider = errLnS("no provider configured. use :provider add")

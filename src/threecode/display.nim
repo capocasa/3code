@@ -947,13 +947,6 @@ proc profileLinesS*(p: Profile; bold = false): string =
                  else: verifierModelSpec[vdot + 1 .. ^1]
     result.add labelOn & pad & "verifier  " & ansiResetCode &
       BrightWhiteFg & shortModel(vmodel) & ansiResetCode & "\r\n"
-  # Same conditional style as the reasoning row: present exactly while
-  # a harness mode is on (its trigger file exists in the project root),
-  # absent otherwise.
-  let mode = activeMode()
-  if not noMode(mode):
-    result.add labelOn & pad & mode.name.alignLeft(10) & ansiResetCode &
-      BrightWhiteFg & "on" & ansiResetCode & "\r\n"
   if privateMode:
     result.add labelOn & pad & "private   " & ansiResetCode &
       BrightWhiteFg & (if privateAllowed(p): "allowed" else: "NOT allowed") &
