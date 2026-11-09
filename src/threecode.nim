@@ -916,7 +916,7 @@ proc main() =
                             restoreEditor = true,
                             beforeRepaint = clearSubmittedCommandFooter,
                             reserveFooter = true)
-  proc handleBufferedAfterTurn(): bool =
+  proc handleBufferedAfterTurn(interrupted: bool): bool =
     ## Drain the queue in order once the turn yields: each queued prompt
     ## runs a full turn (anything queued during that turn drains after
     ## it), each deferred command runs exactly as it would at the idle
@@ -933,6 +933,19 @@ proc main() =
       of ieInterrupt:
         discard  # already handled
       of ieNone:
+        if not interrupted and turnYieldedToQueue and
+            messages.len > 0 and
+            messages[^1]{"role"}.getStr == "tool":
+          # The turn yielded at a tool boundary for the command(s) that
+          # just ran (a queued prompt ran its own turn above and cleared
+          # the flag); the model never saw those tool results. Send it
+          # back in instead of parking the conversation until the next
+          # prompt. An interrupted turn stays stopped: the user
+          # cancelled. A command that rewrote the conversation (`:clear`)
+          # leaves a non-tool tail, which opts out right here.
+          turnYieldedToQueue = false
+          discard runTurnsInteractive(prof, messages, session)
+          continue  # anything queued during the resumed turn drains next
         return false
       of ieCommand:
         releaseIdleSubmittedInput()
@@ -992,7 +1005,7 @@ proc main() =
       if not interrupted and notifyEnabled and
           epochTime() - turnStart >= NotifyMinSeconds:
         notifyTurnFinished(messages)
-      result = handleBufferedAfterTurn()
+      result = handleBufferedAfterTurn(interrupted)
     except IOError as e:
       stderr.writeLine "3code: output stream broken (" & e.msg &
         "); session saved. If you ran 3code from a pipe or a now-closed " &

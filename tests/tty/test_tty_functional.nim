@@ -2676,6 +2676,64 @@ max-tokens = "8192"
     doAssert fileExists(ruleFile), "rule file missing: " & ruleFile
     check readFile(ruleFile).contains("./foo")
 
+  test "system command queued mid-tool continues the turn after running":
+    # The drain-side twin of the test above: a system command (`:! cmd`)
+    # queued while a TOOL runs yields the turn at the tool boundary with
+    # the batch's tool results unanswered. After the command runs, the
+    # model must be sent back in - the turn continues and its follow-up
+    # reply lands - instead of the conversation parking on the dangling
+    # tool result until the next prompt.
+    let root = newFixture("queued_syscmd")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "",
+        "contentChunks": [],
+        "tool_calls": [
+          toolCall("c_sleep", "bash", %*{"command": "sleep 3"})
+        ],
+        "usage": {
+          "promptTokens": 40,
+          "completionTokens": 8,
+          "totalTokens": 48,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "RESUMED-AFTER-COMMAND",
+        "contentChunks": ["RESUMED-AFTER-COMMAND"],
+        "usage": {
+          "promptTokens": 60,
+          "completionTokens": 6,
+          "totalTokens": 66,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "go\n"
+    # The real executor runs `sleep 3`: its banner is up, the turn is
+    # mid-loop inside the tool.
+    tty.expectInHistory "sleep 3"
+    # Queue the system command inside that window; it defers with the
+    # hourglass echo exactly like a queued prompt.
+    tty.send ":! echo syscmd-out\n"
+    tty.expectInHistory "❯ :! echo syscmd-out ⧖"
+    # The command ran at the boundary (output in scrollback), and the
+    # turn resumed: the model's follow-up reply must land.
+    tty.expectInHistory "syscmd-out"
+    tty.expectInHistory "RESUMED-AFTER-COMMAND"
+    tty.expect "❯"
+    tty.expectAlive()
+
   test "backspace on an empty prompt joins the last queued prompt":
     # Editing a queue feels like editing lines of a file: backspace on the
     # empty editor (which would delete a newline in a true multiline

@@ -877,6 +877,14 @@ proc revertHistory*(messages: var JsonNode, checkpoint: int): bool =
 
 var pluginTurnCount = 0
 
+var turnYieldedToQueue* = false
+  ## Set when a turn returns mid-loop because the user queued input (a
+  ## prompt or a deferred system command) at a tool boundary: that batch's
+  ## tool results sit unanswered at the conversation tail. The
+  ## interactive drain reads this to send the model back in once the
+  ## queue has emptied, so a system command executed during a turn runs
+  ## without stranding the conversation until the next prompt.
+
 func pluginToolBanner*(name, argsJson: string): string =
   ## Banner text for a plugin-registered tool: the tool name plus a
   ## squeezed one-line preview of its JSON arguments.
@@ -905,6 +913,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   if termengine.engineOutputEnabled:
     installApiStreamHooks()
   clearInterrupted()
+  turnYieldedToQueue = false
   # `beginTurn` hides the terminal cursor for the duration of the
   # turn (streaming + tool exec); the `❯ ` glyph remains on screen as
   # the visible-but-not-blinking caret. `endTurn` shows the cursor again so
@@ -1695,6 +1704,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         turnEnded = true
         return true
       if queuedUser:
+        # The queue takes over from here; record that this was a mid-loop
+        # yield (tool results unanswered) so the drain that runs the queued
+        # items can send the model back in afterwards.
+        turnYieldedToQueue = true
         endTurn(repaintPrompt = false)
         turnEnded = true
         return
