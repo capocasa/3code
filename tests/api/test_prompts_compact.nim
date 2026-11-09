@@ -1,5 +1,16 @@
-import std/[json, strutils, unittest]
+import std/[json, os, strutils, unittest]
 import threecode/[prompts, compact, types]
+
+const GoldenFamilies = [
+  "laguna", "glm", "kolibri", "minimax", "longcat", "qwen", "hy",
+  "mistral", "deepseek", "gpt", "gpt-oss", "other", "0xalpha",
+  "inkling", "grok", "mimo", "kimi", "claude", "ling", "nemotron",
+  "gemini"]
+
+func toolsDigest(tools: JsonNode): string =
+  for t in tools:
+    let f = t{"function"}
+    result.add f{"name"}.getStr & ": " & f{"description"}.getStr & "\n"
 
 suite "prompts: knownGoodFamily":
   test "returns family for known-good combo":
@@ -725,3 +736,41 @@ suite "prompts: setup — bashToolDisabled":
     for t in s.tools:
       if t{"function"}{"name"}.getStr == "bash": foundBash = true
     check foundBash
+
+suite "prompts: golden fixtures":
+  # Byte-for-byte snapshots of every shipped family prompt plus its
+  # tool descriptions. Prompt text rides every request, so this locks
+  # it against accidental drift. After a deliberate prompt change,
+  # regenerate and review the diff like any source change:
+  #   THREECODE_REGEN_GOLDEN=1 <this test binary>
+  const GoldenDir = "tests/testdata/fixtures/prompts"
+
+  test "every family prompt matches its golden fixture":
+    createDir(GoldenDir)
+    let regen = getEnv("THREECODE_REGEN_GOLDEN") == "1"
+    for fam in GoldenFamilies:
+      let s = setup(Profile(name: fam & ".m", model: "m", family: fam))
+      let snap = s.prompt
+        .replace("{{credit}}", "CREDIT")
+        .replace("{{skills}}", "SKILLS") &
+        "\n\n--- tools ---\n" & toolsDigest(s.tools)
+      let path = GoldenDir / (fam & ".txt")
+      if regen:
+        writeFile(path, snap)
+        continue
+      check fileExists(path)
+      if not fileExists(path): continue
+      let golden = readFile(path)
+      if golden == snap:
+        check true
+      else:
+        var i = 0
+        while i < min(golden.len, snap.len) and golden[i] == snap[i]:
+          inc i
+        proc around(x: string): string =
+          let a = min(i, x.len)
+          x[a ..< min(a + 60, x.len)]
+        checkpoint fam & ": first diff at byte " & $i
+        checkpoint "golden> " & around(golden)
+        checkpoint "actual> " & around(snap)
+        check false
