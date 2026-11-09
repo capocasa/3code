@@ -3816,7 +3816,8 @@ commands:
   :tokens             show token usage for this session
   :clear              reset conversation (keeps system prompt)
   :model              list models for current provider (current marked with *)
-  :model X            switch to model X (within current provider)
+  :model X            switch to model X (bare: current provider;
+                      provider.model or provider/model: switch both)
   :provider           list configured providers (current shows its model)
   :provider X         switch to provider X (model defaults to first in its list)
   :provider add       add a new provider (interactive, verified)

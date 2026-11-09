@@ -1051,8 +1051,8 @@ proc printKnownGood*() =
     let vis = if c.vision: "  (vision)" else: ""
     echo "  ", id.alignLeft(maxId), "  ", tag, vis
   echo ""
-  echo "pass any of these to --model, e.g. 3code --model ", KnownGoodCombos[0].provider,
-       ".", KnownGoodCombos[0].model
+  echo "pass any of these to --model or :model, e.g. 3code --model ",
+       KnownGoodCombos[0].provider, ".", KnownGoodCombos[0].model
   echo "other combos require --experimental. (vision) = can see images " &
        "(@img.png, read on image files)."
 
