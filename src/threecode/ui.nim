@@ -1250,24 +1250,117 @@ proc cmdModelList(prof: Profile): string =
     else:
       result.add hintLnS(short)
 
+proc pickModel*(target: string): tuple[prov: ProviderRec, idx: int, rest: string] =
+  ## Resolution for `:model <target>`. A bare name goes to the current
+  ## provider, exactly first (full id or short name), normalized only as
+  ## the last resort: the normalized pass strips author prefixes, so run
+  ## before the split readings it would resolve a `provider.model` spec
+  ## to a same-named model on the *current* provider. Between the
+  ## two, `provider.model` and `provider/model` switch provider in the
+  ## same step; the split point is the first separator because provider
+  ## names carry neither dots nor slashes while model ids carry both
+  ## (`glm-5.3`, `deepseek-ai/DeepSeek-V4.1-Flash`). Every id `--good`
+  ## prints is such a spec and must resolve to the provider it names.
+  ## On a miss `idx` is -1: `prov.name` then names the provider the
+  ## prefix selected (its list lacks `rest`), or is empty when no
+  ## reading matched.
+  let cur = currentProvider()
+  for i, m in cur.models:
+    if m == target or shortModel(m) == target:
+      return (cur, i, target)
+  var near: ProviderRec
+  var rest = target
+  for sep in ['.', '/']:
+    let cut = target.find(sep)
+    if cut <= 0 or cut == target.len - 1: continue
+    let head = target[0 ..< cut]
+    for pr in activeProviders:
+      if pr.name != head: continue
+      let j = pr.findModel(target[cut + 1 .. ^1])
+      if j >= 0: return (pr, j, target[cut + 1 .. ^1])
+      if near.name == "":
+        near = pr
+        rest = target[cut + 1 .. ^1]
+      break
+  if near.name != "": return (near, -1, rest)
+  let k = cur.findModel(target)
+  if k >= 0: return (cur, k, target)
+  (near, -1, rest)
+
+proc modelSuggests(target: string): seq[string] =
+  ## Copy-pasteable `provider.model` specs for what the user may have
+  ## meant: the same name on any provider first (typed bare, or behind a
+  ## mistyped provider prefix), then near misses by edit distance.
+  ## Suggestions always carry the prefix so they work verbatim as
+  ## `:model` arguments, the same contract `--good` ids follow.
+  var cands = @[target]
+  for sep in ['.', '/']:
+    let cut = target.find(sep)
+    if cut > 0 and cut < target.len - 1 and
+        activeProviders.allIt(it.name != target[0 ..< cut]):
+      cands.add target[cut + 1 .. ^1]
+      break
+  var ranked: seq[tuple[d: int, spec: string]]
+  for pr in activeProviders:
+    for cand in cands:
+      let i = pr.findModel(cand)
+      if i >= 0:
+        ranked.add (0, pr.name & "." & shortModel(pr.models[i]))
+        break
+  if ranked.len == 0:
+    for pr in activeProviders:
+      for m in pr.models:
+        let s = shortModel(m)
+        var best = high(int)
+        for cand in cands:
+          best = min(best, levenshtein(cand.toLowerAscii, s))
+          best = min(best,
+            levenshtein(cand.toLowerAscii, pr.name.toLowerAscii & "." & s))
+        if best in 1..3:
+          ranked.add (best, pr.name & "." & s)
+  ranked.sort()
+  var specs: seq[string]
+  for r in ranked:
+    if specs.len == 3: break
+    if r.spec notin specs: specs.add r.spec
+  specs
+
+proc unknownModelS(target: string; sel: ProviderRec; rest: string): string =
+  let cur = currentProvider()
+  var msg: string
+  if sel.name != "":
+    if sel.models.len == 0:
+      return errLnS(&"provider {sel.name} has no models")
+    msg = &"{sel.name} has no model {rest}"
+  else:
+    msg = &"unknown model: {target} on {cur.name}"
+  let sugs = modelSuggests(rest)
+  if sugs.len == 1:
+    msg.add "  did you mean " & sugs[0] & "?"
+  elif sugs.len > 1:
+    msg.add "  close: " & sugs.join(" ")
+  elif sel.name == "":
+    msg.add &"  (try provider.model to switch, or :model for {cur.name}'s list)"
+  errLnS(msg)
+
 proc cmdModelSelect(target: string, prof: var Profile): string =
   let prov = currentProvider()
   if prov.name == "":
     return errLnS("no provider selected")
-  let idx = prov.findModel(target)
+  let (sel, idx, rest) = pickModel(target)
   if idx < 0:
-    return errLnS(&"unknown model: {target}")
-  let fullModel = prov.models[idx]
+    return unknownModelS(target, sel, rest)
+  let fullModel = sel.models[idx]
   if isDecisionModel(fullModel):
     return errLnS(&"{shortModel(fullModel)} is a verification-class " &
       "model: it cannot run turns. select it with :verifier instead")
-  let newCurrent = prov.name & "." & fullModel
+  let newCurrent = sel.name & "." & fullModel
   let candidate = buildProfile(newCurrent, activeProviders, "")
   if not gateExperimental(candidate):
     return errLnS(experimentalGateText(candidate))
   if privateMode and not privateAllowed(candidate):
     return errLnS(privateGateText(candidate))
-  setCurrentModel(prov.name, fullModel)
+  setCurrentModel(sel.name, fullModel)
   activeCurrent = newCurrent
   prof = candidate
   persistCurrent()

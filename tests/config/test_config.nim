@@ -642,6 +642,160 @@ suite "config: sticky model across provider switches":
     check providers[1].currentModel == "glm-5.2"
     check rememberedModel(providers[1]) == "glm-5.2"
 
+suite "config: provider-prefixed :model selection":
+  # `3code --good` prints `provider.model` ids; `:model` used to know
+  # only bare names on the current provider. Selection now takes the
+  # dotted and slashed forms, and every printed id must resolve to the
+  # provider it names.
+  var
+    savedXdg = ""
+    hadXdg = false
+    tempRoot = ""
+    savedCurrent = ""
+    savedProviders: seq[ProviderRec]
+
+  setup:
+    savedCurrent = activeCurrent
+    savedProviders = activeProviders
+    hadXdg = existsEnv("XDG_CONFIG_HOME")
+    savedXdg = getEnv("XDG_CONFIG_HOME")
+    tempRoot = getTempDir() / ("3code-test-modelsel-" & $getCurrentProcessId())
+    putEnv("XDG_CONFIG_HOME", tempRoot)
+    activeParams = @[]
+    activeProviders = @[
+      ProviderRec(name: "zai", url: "https://api.z.ai/v1", key: "k",
+                  models: @["glm-5.2", "glm-5.3"]),
+      ProviderRec(name: "baseten", url: "https://inference.baseten.co/v1",
+                  key: "k", models: @["zai-org/GLM-5.2"]),
+      ProviderRec(name: "opencodego", url: "https://go.opencode.ai/v1",
+                  key: "k", models: @["qwen3.7-plus", "glm-5.3",
+                                      "kimi-k3.1-pro"])]
+    activeCurrent = "zai.glm-5.2"
+
+  teardown:
+    activeCurrent = savedCurrent
+    activeProviders = savedProviders
+    activeParams = @[]
+    if hadXdg:
+      putEnv("XDG_CONFIG_HOME", savedXdg)
+    else:
+      delEnv("XDG_CONFIG_HOME")
+    try: removeDir(tempRoot)
+    except OSError: discard
+
+  var messages = %*[]
+  var session = Session()
+  var prof = Profile()
+  var editor: LineEditor
+
+  proc run(cmd: string): CommandResult =
+    handleCommandResult(cmd, messages, session, prof, editor)
+
+  test "dotted form switches provider and model in one step":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    let r = run(":model opencodego.kimi-k3.1-pro")
+    check r.recognized and r.ok
+    check prof.name == "opencodego.kimi-k3.1-pro"
+    check activeCurrent == "opencodego.kimi-k3.1-pro"
+    # the switch records the model per provider, sticky like any other
+    discard run(":provider zai")
+    check prof.model == "glm-5.2"
+    discard run(":provider opencodego")
+    check prof.model == "kimi-k3.1-pro"
+
+  test "slashed form switches the same way":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    let r = run(":model opencodego/qwen3.7-plus")
+    check r.recognized and r.ok
+    check prof.name == "opencodego.qwen3.7-plus"
+
+  test "bare name with a dot stays on the current provider":
+    # glm-5.3 is a dotted id; `glm-5` is not a provider, so the bare
+    # reading must win, not the split
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    discard run(":model glm-5.3")
+    check prof.name == "zai.glm-5.3"
+
+  test "a full --good id with an author slash resolves verbatim":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    let r = run(":model baseten.zai-org/GLM-5.2")
+    check r.recognized and r.ok
+    check prof.name == "baseten.zai-org/GLM-5.2"
+
+  test "explicit prefix wins over a same-named model on the current provider":
+    # the current provider hosts glm-5.3 under a slashed spelling whose
+    # normalized form equals the bare target; only the split reading may
+    # answer, or the prefix would silently reselect the current provider
+    let savedCur = activeCurrent
+    let savedPrv = activeProviders
+    activeProviders = @[
+      ProviderRec(name: "novita", url: "https://api.novita.ai/v3",
+                  key: "k", models: @["deepseek/deepseek-v4.1-flash"]),
+      ProviderRec(name: "deepinfra", url: "https://api.deepinfra.com/v1",
+                  key: "k", models: @["deepseek-ai/DeepSeek-V4.1-Flash"])]
+    activeCurrent = "novita.deepseek/deepseek-v4.1-flash"
+    let (p, i, rest) = pickModel("deepinfra.deepseek-ai/DeepSeek-V4.1-Flash")
+    check i >= 0
+    check p.name == "deepinfra"
+    check p.models[i] == "deepseek-ai/DeepSeek-V4.1-Flash"
+    activeCurrent = savedCur
+    activeProviders = savedPrv
+
+  test "unknown bare model names the current provider and the prefix form":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    let r = run(":model zzz-nope")
+    check r.recognized
+    check "unknown model: zzz-nope on zai" in r.body
+    check "provider.model" in r.body
+
+  test "nonexistent provider suggests the model's real home":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    let r = run(":model nosuchprov.glm-5.3")
+    check r.recognized
+    check "unknown model: nosuchprov.glm-5.3 on zai" in r.body
+    check "zai.glm-5.3" in r.body
+    check "opencodego.glm-5.3" in r.body
+    check prof.name == "zai.glm-5.2"
+
+  test "provider that lacks the model says so and points elsewhere":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    # glm-5.2 lives on zai and baseten alike, so both homes are offered
+    let elsewhere = run(":model opencodego.glm-5.2")
+    check elsewhere.recognized
+    check "opencodego has no model glm-5.2" in elsewhere.body
+    check "zai.glm-5.2" in elsewhere.body
+    check "baseten.glm-5.2" in elsewhere.body
+    let nowhere = run(":model opencodego.glm-9.9")
+    check nowhere.recognized
+    check "opencodego has no model glm-9.9" in nowhere.body
+    check "close:" in nowhere.body
+
+  test "every id 3code --good prints resolves as a :model argument":
+    var names: seq[string]
+    for c in KnownGoodCombos:
+      if c.provider notin names: names.add c.provider
+      # the first separator must always be the provider split point
+      check "." notin c.provider
+      check "/" notin c.provider
+    var recs: seq[ProviderRec]
+    for n in names:
+      recs.add ProviderRec(name: n, url: "https://api.example.test/v1",
+                           key: "k", models: @[])
+    for c in KnownGoodCombos:
+      for pr in recs.mitems:
+        if pr.name == c.provider: pr.models.add c.model
+    let savedCur = activeCurrent
+    let savedPrv = activeProviders
+    activeProviders = recs
+    activeCurrent = recs[0].name & "." & recs[0].models[0]
+    for c in KnownGoodCombos:
+      let (p, i, rest) = pickModel(c.provider & "." & c.model)
+      check i >= 0
+      check p.name == c.provider
+      check p.models[i] == c.model
+    activeCurrent = savedCur
+    activeProviders = savedPrv
+
 suite "config: :resume":
   # #62: `:resume` swaps a running REPL onto another saved session. The
   # handler is driven directly (same harness as the sticky-model suite):
