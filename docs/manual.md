@@ -653,8 +653,12 @@ hyperlink (OSC 8) over a dump of the full output in
 `$TMPDIR/3code_out_<pid>/T<N>.log(.diff)`, so terminals that support links
 open it in the `file:` handler (e.g. `$VISUAL`) on a click; the visible
 file name keeps the row honest where links are unsupported, and the dumps
-live as long as the session does. Diffs are painted green/red, and a long
-diff is clipped the same linked way rather than flooding the screen.
+live as long as the session does. Diffs are painted green/red, and every
+painted row is itself a hyperlink into the edited file at that row's line
+(`file://path:line`: the line is the number after the last colon, so a
+`file:` handler that understands `path:line` (a `$VISUAL` wrapper, an IDE)
+lands on the exact spot; the `r`/`w`/`p` banner paths link the same way).
+A long diff is clipped the same linked way rather than flooding the screen.
 Failed tools mark their banner so a red `Ø`/`✕` scan tells you where a
 turn went wrong without reading anything.
 
