@@ -323,15 +323,18 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         # HttpError carrying the code, so turn-level recovery can branch on
         # it exactly like it would against a live provider.
         if code > 0:
-          raise newHttpError(code, errMsg, stubErrBody(lastFailure, node))
+          raise newHttpError(code, errMsg, stubErrBody(lastFailure, node),
+            providerOf(p))
         raise newException(ApiError,
-          formatApiDetail(errMsg, stubErrBody(lastFailure, node), code))
+          formatApiDetail(errMsg, stubErrBody(lastFailure, node), code,
+            providerOf(p)))
       let retryAfter = try: parseInt(stubRetryAfter(node)) except CatchableError: 0
       let backoff =
         if retryAfter > 0: retryAfter
         elif category == "rate": min(1 shl rateRetryLevel, 90)
         else: min(1 shl serverRetryLevel, 16)
-      let detail = formatApiDetail(errMsg, stubErrBody(lastFailure, node), code)
+      let detail = formatApiDetail(errMsg, stubErrBody(lastFailure, node), code,
+        providerOf(p))
       let retryLabel = detail & ", retry " & $(attempt + 1) &
         "/" & $StubMaxAttempts & " in"
       hookRetryNotice retryLabel & " " & humanDuration(backoff)

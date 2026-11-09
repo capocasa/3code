@@ -108,7 +108,7 @@ type
     ## painted on the ticker row above the bar and replaced in place each
     ## tick, while the bar keeps its token label and turn timer.
     active*: bool
-    label*: string     # e.g. "usage limit (code 429), retry 13/64 in"
+    label*: string     # e.g. "429 from zaicode: usage limit, retry 13/64 in"
     remainingS*: int   # seconds until the next attempt (controller-driven)
 
   FooterFrame* = object

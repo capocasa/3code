@@ -308,7 +308,8 @@ type
     ## The server returned a response carrying an HTTP status code (any
     ## non-success code: 4xx client errors, 5xx server errors, etc.). The
     ## `code` field exposes it for programmatic handling; `msg` already
-    ## carries the formatted detail including the `(code N)` suffix.
+    ## carries the formatted detail including the status and provider
+    ## prefix (`N from <provider>: ...`).
     code*: int
   NetworkHealthError* = object of ApiError
     ## Transport-level failure with no HTTP response: the network-quiet

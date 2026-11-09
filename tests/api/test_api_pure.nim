@@ -117,29 +117,37 @@ suite "api: retryCategory":
     check retryCategory("", nil, 0) == ""
 
 suite "api: formatApiDetail":
-  test "body message with code is suffixed":
+  test "body message carries code and provider up front":
+    let body = "{\"error\":{\"message\":\"invalid request error trace_id: abc\"}}"
+    check formatApiDetail("", body, 400, "zaicode") ==
+      "400 from zaicode: invalid request error trace_id: abc"
+
+  test "body message with code, no provider known":
     let body = "{\"error\":{\"message\":\"invalid request error trace_id: abc\"}}"
     check formatApiDetail("", body, 400) ==
-      "invalid request error trace_id: abc (code 400)"
+      "400: invalid request error trace_id: abc"
 
   test "code-only body collapses to bare error (no duplication)":
     # Gateways emit `{"error":{"message":"error code: 502"}}` which adds
-    # nothing beyond the status; collapse to `error (code 502)`.
+    # nothing beyond the status; collapse to a bare `error`.
     let body = "{\"error\":{\"message\":\"error code: 502\"}}"
-    check formatApiDetail("", body, 502) == "error (code 502)"
+    check formatApiDetail("", body, 502) == "502: error"
+    check formatApiDetail("", body, 502, "zaicode") == "502 from zaicode: error"
 
   test "bare-error body collapses too":
     let body = "{\"error\":{\"message\":\"error\"}}"
-    check formatApiDetail("", body, 400) == "error (code 400)"
+    check formatApiDetail("", body, 400) == "400: error"
 
   test "falls back to errMsg when body empty":
     check formatApiDetail("stream read: connection reset by peer", "", 502) ==
-      "stream read: connection reset by peer (code 502)"
+      "502: stream read: connection reset by peer"
+    check formatApiDetail("stream read: connection reset by peer", "", 502,
+        "venice") == "502 from venice: stream read: connection reset by peer"
 
   test "falls back to bare error when both empty":
-    check formatApiDetail("", "", 400) == "error (code 400)"
+    check formatApiDetail("", "", 400) == "400: error"
 
-  test "omits code suffix when status is 0":
+  test "omits status prefix when code is 0":
     check formatApiDetail("stream read: connection reset", "", 0) ==
       "stream read: connection reset"
 
@@ -150,11 +158,14 @@ suite "api: formatApiDetail":
     # A 200 OK that carried an inline error object (e.g. z.ai's overloaded
     # message) must surface the body's error text on exhaustion, not the
     # generic transport errMsg. The promoted NetworkHealthError raise uses
-    # formatApiDetail with code 0, so the body wins and no (code N) suffix
-    # is appended.
+    # formatApiDetail with code 0, so the body wins; a body-sourced message
+    # still names the provider, but no status prefix is prepended (a 200
+    # would read as success).
     let body = "{\"error\":{\"message\":\"Service overloaded, please retry\"}}"
     check formatApiDetail(EmptyReplyMsg, body, 0) ==
       "Service overloaded, please retry"
+    check formatApiDetail(EmptyReplyMsg, body, 0, "zaicode") ==
+      "zaicode: Service overloaded, please retry"
     check formatApiDetail("api error in 200 body", body, 0) ==
       "Service overloaded, please retry"
     check formatApiDetail("response parse: unexpected token", body, 0) ==
@@ -171,6 +182,35 @@ suite "api: formatApiDetail":
     # A non-JSON body surfaces as its raw text, matching HttpError behavior.
     check formatApiDetail(EmptyReplyMsg, "this is not json at all", 0) ==
       "this is not json at all"
+
+  test "multi-line body message is condensed to one line":
+    # Pretty-printed provider errors (and longestStringLeaf fallbacks) can
+    # span lines; a receipt or footer row is one line. Newlines and
+    # indentation collapse to single spaces.
+    let body = "{\"error\":{\"message\":" &
+      "\"line one\\n   line two\\n\\nline three\"}}"
+    check formatApiDetail("", body, 500, "zaicode") ==
+      "500 from zaicode: line one line two line three"
+
+  test "verbose body message is capped and marked":
+    # An over-long message is cut at ErrorLineMaxChars and the trailing
+    # ellipsis identifies it as shortened.
+    let body = "{\"error\":{\"message\":\"" & "x".repeat(300) & "\"}}"
+    let want = "500 from zaicode: " & "x".repeat(197) & "…"
+    check formatApiDetail("", body, 500, "zaicode") == want
+    check want.len == "500 from zaicode: ".len + 200
+
+suite "api: condenseErrorLine":
+  test "single-line message passes through":
+    check condenseErrorLine("quota exceeded") == "quota exceeded"
+
+  test "whitespace runs collapse, ends are stripped":
+    check condenseErrorLine("  a \t b\n\n  c \n") == "a b c"
+
+  test "cut carries an identifying ellipsis and valid utf8":
+    let cut = condenseErrorLine("€".repeat(200))
+    check cut.len == 198 # 195 bytes of euros + 3-byte ellipsis
+    check cut[^6 .. ^1] == "€…"
 
 suite "api: applyReasoning — gpt-oss":
   test "sets reasoning_effort for gpt-oss":
@@ -546,14 +586,16 @@ suite "api: HttpError":
     let e = newHttpError(401, "", "")
     check e.code == 401
 
-  test "HttpError message carries the (code N) suffix":
-    let e = newHttpError(503, "overloaded", "")
-    check e.msg == "overloaded (code 503)"
+  test "HttpError message carries the status and provider prefix":
+    let e = newHttpError(503, "overloaded", "", "zaicode")
+    check e.msg == "503 from zaicode: overloaded"
+    let bare = newHttpError(503, "overloaded", "")
+    check bare.msg == "503: overloaded"
 
   test "HttpError surfaces the body error text":
     let body = "{\"error\":{\"message\":\"invalid api key\"}}"
     let e = newHttpError(401, "", body)
-    check e.msg == "invalid api key (code 401)"
+    check e.msg == "401: invalid api key"
     check e.code == 401
 
   test "HttpError and NetworkHealthError are distinct classes":

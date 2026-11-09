@@ -295,7 +295,7 @@ edit-in-editor = AltE CtrlX&gt;CtrlE</pre></p>
 
 <h2 id="patient-retry">Patient retry</h2><p>Patient retry is enabled by default. On <tt class="docutils literal"><span class="pre">429</span></tt> limits, <tt class="docutils literal"><span class="pre">5xx</span></tt> responses, and network failures, 3code backs off exponentially rather than failing immediately. Delays are capped at 2048 seconds and retries can continue for about 36 hours, long enough to outwait a rolling limit or a bad connection.</p>
 <p>After the short initial retry period, attempts become part of the transcript:</p>
-<p><pre class="listing">Usage limit reached for the past 5 hours. (code 429). retry 42/64 in 2048s</pre></p>
+<p><pre class="listing">429 from zaicode: Usage limit reached for the past 5 hours. retry 42/64 in 2048s</pre></p>
 <p>Use these commands to inspect or change the setting:</p>
 <p><pre class="listing">:retry list
 :retry off

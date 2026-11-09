@@ -1560,7 +1560,7 @@ max-tokens = "8192"
         tty.drain(100, recordFrame = true)
         for fi in 0 ..< tty.frames.len:
           for r in 0 ..< tty.frames[fi].rows.len:
-            if "rate limit (code 429), retry 2/12 in" in
+            if "429 from stub: rate limit, retry 2/12 in" in
                 tty.frames[fi].rows[r]:
               noticeFrame = fi
               noticeRow = r
@@ -1599,7 +1599,7 @@ max-tokens = "8192"
       # and was replaced in place, so the settled screen holds no trace of
       # it. The reply and the user echo are the committed lines.
       tty.drain(300)
-      check "rate limit (code 429)" notin tty.screenText()
+      check "429 from stub: rate limit" notin tty.screenText()
       # The notice's padding rows vanished with it: exactly one blank row
       # (the standard item separator) sits between the committed echo and
       # the reply. Stray extra blanks would mean the volatile repaint
