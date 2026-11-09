@@ -195,6 +195,18 @@ when defined(posix):
   proc consumeResizePending*(): bool =
     takeResizePending()
 
+  proc installFatalHandlers*(handler: proc(sig: cint) {.noconv, gcsafe.}) =
+    ## Register `handler` for the fatal signals (SEGV, abort, and the
+    ## rest). They die with the default disposition, so every exit proc
+    ## is skipped: without a handler the shell the user lands in inherits
+    ## whatever termios and terminal modes the dying process held (the
+    ## macOS crash report: invisible typing until `reset`). The handler
+    ## must itself re-raise with SIG_DFL and use async-signal-safe calls
+    ## only (the stdio lock may be held by whichever thread crashed); see
+    ## threecode.nim's fatalSignalRestore.
+    for fatal in [SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGPIPE]:
+      signal(fatal, handler)
+
 else:
   var resizePendingFlag: bool
 
@@ -215,3 +227,4 @@ else:
   proc requestBackground*() = discard
   proc drainPendingResume*(): bool = false
   proc backgroundResumeCount*(): int = 0
+  proc installFatalHandlers*(handler: proc(sig: cint) {.noconv, gcsafe.}) = discard
