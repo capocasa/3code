@@ -204,7 +204,12 @@ when defined(posix):
     ## must itself re-raise with SIG_DFL and use async-signal-safe calls
     ## only (the stdio lock may be held by whichever thread crashed); see
     ## threecode.nim's fatalSignalRestore.
-    for fatal in [SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGPIPE]:
+    # SIGPIPE is deliberately absent: the runtime ignores it so a broken
+    # stdout surfaces as IOError(EPIPE) instead of death, and 3code turns
+    # that into a clean exit whose exit procs restore the terminal
+    # (test_broken_stdout_exit). Overriding it here would trade that for
+    # death-by-signal with a hand-rolled restore.
+    for fatal in [SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT]:
       signal(fatal, handler)
 
 else:

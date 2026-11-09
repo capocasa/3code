@@ -827,7 +827,7 @@ proc main() =
     # whichever thread crashed, so buffered output would hang instead of
     # dying. Registration policy (which signals) lives in signals.nim.
     proc fatalSignalRestore(sig: cint) {.noconv, gcsafe.} =
-      signal(sig, SIG_DFL)  # first: no recursive re-entry, incl. SIGPIPE
+      signal(sig, SIG_DFL)  # first: no recursive re-entry
       fatprompt.restoreCancelTermios()
       fatprompt.restoreInputTermios()
       # One literal, one write: no allocation on a possibly-corrupt heap.
