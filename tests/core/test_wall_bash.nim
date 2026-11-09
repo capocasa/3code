@@ -22,13 +22,42 @@ suite "wall env helper":
     check t["HTTPS_PROXY"] == "http://127.0.0.1:12345"
     check t["ALL_PROXY"] == "socks5h://127.0.0.1:12345"
     check t["all_proxy"] == "socks5h://127.0.0.1:12345"
-    check "127.0.0.1" in t["NO_PROXY"]
+    when defined(linux):
+      # the netns fence has no direct loopback: local targets must go
+      # through the proxy too (the allowlist decides)
+      check t["NO_PROXY"] == ""
+    else:
+      check "127.0.0.1" in t["NO_PROXY"]
     check t["GIT_SSH_COMMAND"].contains("wall connect %h %p")
     check t["GIT_SSH_COMMAND"].contains("/x/3code")
     # user-set GIT_SSH_COMMAND wins
     let e2 = sb.wallEnv("/x/3code", "12345", "", "ssh -i /key")
     for (k, v) in e2: check k != "GIT_SSH_COMMAND"
     for (k, v) in e2: check k != "WALL_PROXY_SOCK"  # no sock on macOS shape
+
+when defined(posix):
+  suite "wall ssh shim":
+    test "installSshShim wraps the real ssh with a wall ProxyCommand":
+      if findExe("ssh") == "":
+        skip()
+      else:
+        let dir = getTempDir() / ("3code-sshshim-" & $getCurrentProcessId())
+        createDir(dir)
+        defer: removeDir(dir)
+        let shimDir = sb.installSshShim(dir, "/x/3code")
+        check shimDir == dir / "wallbin"
+        let shim = readFile(shimDir / "ssh")
+        check shim.startsWith("#!/bin/sh")
+        check ("exec " & findExe("ssh").quoteShell) in shim
+        check "/x/3code wall connect %h %p" in shim
+        var st: Stat
+        check posix.stat((shimDir / "ssh").cstring, st) == 0
+        check (st.st_mode and 0o111) != 0  # executable
+        # the wrapper must actually run: `-V` exits before any
+        # connection, so this only exercises exec + option quoting
+        let v = execCmdEx((shimDir / "ssh").quoteShell & " -V")
+        check v.exitCode == 0
+        check "OpenSSH" in v.output
 
 suite "wall proxy lifecycle":
   test "proxy starts on host rules, reloads on policy rewrite":
@@ -209,6 +238,90 @@ when defined(linux):
           " restrict -- bash -c " & script3 & " </dev/null", env = probeEnv,
           options = {poDaemon})
         check "403" in r3.output
+
+    test "netns: ssh tunnels through the wall shim, allowlisted":
+      # The fence is protocol-agnostic at the proxy (SOCKS5 carries
+      # any TCP); what makes ssh work is the PATH shim's ProxyCommand
+      # (`wall connect`, DNS at the proxy) plus the bridge surviving
+      # ssh's close_range(3, ...) fd hygiene (sandwall PDEATHSIG fix).
+      # ssh itself must be present; the binary dir must be executable
+      # inside the fence because the ProxyCommand re-execs 3code.
+      if findExe("ssh") == "":
+        skip()
+      else:
+        let dir = getTempDir() / ("3code-walle2e-ssh-" & $getCurrentProcessId())
+        createDir(dir)
+        defer: removeDir(dir)
+        let pol = dir / "policy"
+        writeFile(pol, "deny /\nallow " & dir & "\nallow " & getTempDir() &
+          "\nallow " & getCurrentDir() & "\nallow 127.0.0.1\n")
+        # banner reader: accept, read the client's SSH banner, close
+        let srv = newSocket(buffered = false)
+        srv.setSockOpt(OptReuseAddr, true)
+        srv.bindAddr(Port(0), "127.0.0.1")
+        srv.listen()
+        defer: srv.close()
+        let srvPort = int(srv.getLocalAddr()[1])
+        var proxy = sw.startWallProxy(pol, dir, port = 0,
+          unixSockPath = dir / "proxy.sock")
+        defer: sw.stopWallProxy(proxy)
+        let port = $int(proxy.port)
+        let shimDir = sb.installSshShim(dir, binPath())
+        var fenceEnv = {"WALL_PROXY_PORT": port,
+          "WALL_PROXY_SOCK": dir / "proxy.sock",
+          "PATH": shimDir & ":" & getEnv("PATH")}.newStringTable
+        # netns probe first: skip (don't fail) without userns+netns
+        let probe = startProcess(binPath(), args = ["sandbox", "--policy",
+          pol, "restrict", "--", "true"], env = fenceEnv,
+          options = {poStdErrToStdOut})
+        let probeOk = probe.waitForExit(15_000) == 0
+        probe.close()
+        if not probeOk:
+          skip()
+        else:
+          # 1. allowed: the shim's tunnel must carry ssh's banner to
+          # the reader on host loopback (proxy resolves/dials for us)
+          let p1 = startProcess(binPath(), args = ["sandbox", "--policy",
+            pol, "restrict", "--", "ssh", "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=6",
+            "-p", $srvPort, "127.0.0.1"], env = fenceEnv,
+            options = {poStdErrToStdOut})
+          var afd: SocketHandle = SocketHandle(-1)
+          var waited = 0
+          while afd.int < 0 and waited < 10_000:
+            var fds = [TPollfd(fd: srv.getFd().cint, events: POLLIN,
+                               revents: 0)]
+            doAssert posix.poll(addr fds[0], 1, 100) >= 0
+            if fds[0].revents != 0:
+              afd = posix.accept(srv.getFd(), nil, nil)
+            waited += 100
+          check afd.int >= 0
+          var banner = ""
+          if afd.int >= 0:
+            var buf = newString(256)
+            var bwait = 0
+            while banner.len < 8 and bwait < 5_000:
+              var rfds = [TPollfd(fd: afd.cint, events: POLLIN, revents: 0)]
+              if posix.poll(addr rfds[0], 1, 100) <= 0 or
+                  (rfds[0].revents and POLLIN) == 0:
+                inc bwait, 100
+                continue
+              let n = posix.recv(afd, addr buf[0], 255, 0'i32)
+              if n > 0: banner.add(buf[0 ..< n])
+              if n <= 0: break
+            discard posix.close(afd)  # EOF: ssh gives up fast
+          check banner.startsWith("SSH-2.0-")
+          discard p1.waitForExit(15_000)
+          p1.close()
+          # 2. denied: the proxy refuses the SOCKS5 request and ssh
+          # dies without reaching anything
+          let r2 = execCmdEx(binPath() & " sandbox --policy " &
+            pol.quoteShell & " restrict -- ssh -o StrictHostKeyChecking=no" &
+            " -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 " &
+            "denied.example </dev/null", env = fenceEnv,
+            options = {poStdErrToStdOut, poDaemon})
+          check r2.exitCode != 0
+          check "denied.example" in r2.output
 
 when defined(posix):
   suite "default policy keeps git working":

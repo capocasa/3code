@@ -278,11 +278,47 @@ proc wallEnv*(selfExe, port, sockPath: string;
     result.add ("HTTPS_PROXY", hp)
     result.add ("ALL_PROXY", sp)
     result.add ("all_proxy", sp)
-    result.add ("NO_PROXY", "127.0.0.1,localhost")
-    result.add ("no_proxy", "127.0.0.1,localhost")
+    when defined(linux):
+      # The netns fence leaves the child a loopback whose only
+      # occupant is the bridge: loopback targets must go through the
+      # proxy like everything else (the allowlist decides), matching
+      # sandwall's setProxyEnv. A loopback NO_PROXY here would just
+      # make every local target die on the empty netns loopback.
+      result.add ("NO_PROXY", "")
+      result.add ("no_proxy", "")
+    else:
+      # macOS seatbelt and the Windows WFP fence permit loopback
+      # directly; local servers stay reachable without a proxy hop.
+      result.add ("NO_PROXY", "127.0.0.1,localhost")
+      result.add ("no_proxy", "127.0.0.1,localhost")
     if existingGitSsh.len == 0:
       result.add ("GIT_SSH_COMMAND",
         "ssh -o ProxyCommand=\"" & selfExe & " wall connect %h %p\"")
+
+when defined(posix):
+  proc installSshShim*(dir, selfExe: string): string =
+    ## Write an `ssh` wrapper into `dir/wallbin` that routes every ssh
+    ## invocation through the wall proxy. OpenSSH ignores the proxy env
+    ## vars, so without the wrapper ssh dies inside the fence (no
+    ## resolver, no route off the netns). The wrapper execs the real
+    ## ssh with a ProxyCommand of `wall connect %h %p` - the same
+    ## tunnel GIT_SSH_COMMAND gives git - so the proxy resolves the
+    ## name and the allowlist decides, loopback and remote targets
+    ## alike. scp, sftp and rsync ride along: they all spawn `ssh`
+    ## from PATH. Returns the shim dir, or "" when there is no ssh on
+    ## PATH to wrap.
+    let ssh = findExe("ssh")
+    if ssh.len == 0: return ""
+    let shimDir = dir / "wallbin"
+    createDir(shimDir)
+    let shim = shimDir / "ssh"
+    writeFile(shim, "#!/bin/sh\nexec " & ssh.quoteShell &
+      " -o " & ("ProxyCommand=" & selfExe & " wall connect %h %p").quoteShell &
+      " \"$@\"\n")
+    setFilePermissions(shim,
+      {fpUserRead, fpUserWrite, fpUserExec,
+       fpGroupRead, fpGroupExec, fpOthersRead, fpOthersExec})
+    shimDir
 
 when defined(posix):
   proc sweepStaleWallDirs*() =
