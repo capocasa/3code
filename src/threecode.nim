@@ -867,6 +867,10 @@ proc main() =
         let bytes = plainCommandBodyBytes(res.body)
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
                               clearEditor = true)
+        # Ran inline: the ieCommand copy onSubmit queued would otherwise
+        # double-run at the drain and end the turn before the model's
+        # follow-up call (hasQueuedAutosend counts it).
+        dropQueuedCommand(cmd)
       of ckQuit:
         pushInputEvent(InputEvent(kind: ieQuit))
         requestTurnInterrupt("quit-command-during-turn")
@@ -881,6 +885,7 @@ proc main() =
           "unknown command: " & cmd.strip & "  (try :help)\n")
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
                               clearEditor = true)
+        dropQueuedCommand(cmd)
   )
 
   proc runModeKickoff(m: ModeDesc): bool

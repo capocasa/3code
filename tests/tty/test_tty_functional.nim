@@ -3318,14 +3318,16 @@ max-tokens = "8192"
                 "scroll-9",
                 "scroll-10"
               ],
+              "streamDelayMs": 200,
               "output": "scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n",
               "code": 0
             }),
             toolCall("call_slow", "bash", %*{
-              "command": "sleep 3; printf 'slow-done\\n'"
+              "command": "printf 'slow-pre\\n'; sleep 3; printf 'slow-done\\n'"
             }, %*{
-              "stream": ["slow-done"],
-              "output": "slow-done\n",
+              "stream": ["slow-pre", "slow-done"],
+              "streamDelayMs": 2000,
+              "output": "slow-pre\nslow-done\n",
               "code": 0
             }),
             toolCall("call_long", "bash", %*{
@@ -3395,9 +3397,38 @@ max-tokens = "8192"
       tty.expectInHistory "Ø printf 'bad-one"
       tty.expectInHistory "bad-three"
       tty.expectInHistory "$ printf 'scroll-1"
+      # --- live follow, T3 (scroll): typed `:show 3` mid-stream flushes the
+      # capped viewport's held lines into scrollback and flows the rest; the
+      # final fold pins only the banner plus the T3.log link. `:unshow` after
+      # a few flowed lines returns the capped viewport for the tail.
+      # Gate on the banner, not a streamed line: every stub line costs a
+      # frame-event round trip, so exact line gates are scheduling luck.
+      require tty.waitForText("scroll-2")
+      tty.send ":show 3"
+      tty.drain(60)
+      tty.send "\n"
+      tty.expectInHistory "❯ :show 3"
+      tty.expectInHistory "following T3 live"
+      tty.drain(700)  # a few lines flush and flow meanwhile
+      tty.send ":unshow"
+      tty.drain(60)
+      tty.send "\n"
+      tty.expectInHistory "❯ :unshow"
+      tty.expectInHistory "stopped following T3"
       tty.expectInHistory "scroll-10"
-      tty.expectInHistory "$ sleep 3; printf 'slow-done"
+      tty.expectInHistory "T3.log ↗"
+      # --- click shortcut, T4 (slow): an SGR press during the stall between
+      # its two lines toggles follow without any command; the held line
+      # flushes, the last line flows, and the fold links T4.log instead of
+      # a body row. The stall is the deterministic window (the PTY coalesces
+      # a burst, so a click sent after a one-line call can never beat the
+      # fold).
+      require tty.waitForText("slow-pre")
+      tty.send("\x1b[<0;5;10M")  # any row: with 1000h on, a press is app input
       tty.expectInHistory "slow-done"
+      tty.expectInHistory "T4.log ↗"
+      tty.expectInHistory "$ printf 'slow-pre"
+      tty.expectInHistory "slow-pre"
       # A long bash command wraps to fill the terminal width instead of being
       # clipped at a fixed column. The full command is present in scrollback,
       # split across rows; its tail (well past the old 64-char clip) is visible.

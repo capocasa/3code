@@ -657,7 +657,11 @@ every tool call of the session. A multiline bash command shows its first
 line(s) in the banner (`banner_lines` in the config widens that, default
 1) and collapses the rest into a linked `… +N lines · T7.cmd ↗` tail row;
 `:cmd N` prints the whole command, `:cmd N edit` opens it in
-$VISUAL/$EDITOR. The whole elision row is a terminal
+$VISUAL/$EDITOR. While tool call N is still running, the same `:show N`
+(or a click on the viewport) follows its output live: the held lines
+flush into scrollback and every new line lands as it arrives; `:unshow`
+returns to the capped viewport, and the fold pins only the banner plus
+the dump link. The whole elision row is a terminal
 hyperlink (OSC 8) over a dump of the full output in
 `$TMPDIR/3code_out_<pid>/T<N>.log(.diff)`, so terminals that support links
 open it in the `file:` handler (e.g. `$VISUAL`) on a click; the visible

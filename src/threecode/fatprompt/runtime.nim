@@ -490,6 +490,7 @@ proc getFrameModel*(): FrameModel {.gcsafe.} =
       for i in 0 ..< frameModelShared.viewport.lines.len:
         result.viewport.lines[i] =
           freshString(frameModelShared.viewport.lines[i])
+      result.viewport.committed = frameModelShared.viewport.committed
     finally:
       release frameModelLock
 
@@ -573,6 +574,28 @@ proc clearAnimViewport*() {.gcsafe.} =
   {.cast(gcsafe).}:
     acquire frameModelLock
     frameModelShared.viewport = ViewportSnapshot(active: false)
+    release frameModelLock
+
+proc pushAnimViewport*(banner: string; lines: openArray[string];
+                       exitCode: int; idx, maxLines: int;
+                       flowedDelta = 0) {.gcsafe.} =
+  ## `setAnimViewport` with live-follow bookkeeping: `committed` counts
+  ## buffer lines already flowed to scrollback, so a later flush (or
+  ## re-follow) never re-commits them. The turn thread passes
+  ## `flowedDelta` for each line it committed; a new call (idx change)
+  ## resets the count. All committed-mutations happen under this lock,
+  ## serialized with `startFollowRunning`'s flush grab.
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    var committed = frameModelShared.viewport.committed + flowedDelta
+    if frameModelShared.viewport.idx != idx:
+      committed = min(flowedDelta, lines.len)
+    else:
+      committed = min(committed, lines.len)
+    frameModelShared.viewport = ViewportSnapshot(
+      active: true, banner: freshString(banner), lines: @lines,
+      exitCode: exitCode, idx: idx, maxLines: maxLines,
+      committed: committed)
     release frameModelLock
 
 proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
@@ -821,6 +844,24 @@ proc consumeQueuedInput*(line: var string; echoRows: var int;
   of ieNone:
     discard
 
+proc dropQueuedCommand*(text: string) =
+  ## Remove the newest un-echoed queue entry for `text`. `onSubmit` pushes
+  ## every mid-turn command as ieCommand before the command hook runs it;
+  ## for commands the hook executes inline (safe-immediate), the queued
+  ## copy is a duplicate: the post-turn drain would run it a second time,
+  ## and its mere presence makes `hasQueuedAutosend` end the turn early
+  ## (before the model's follow-up call). Called on the input thread,
+  ## right after the hook handled the command.
+  acquire inputStateLock
+  try:
+    for i in countdown(inputState.eventQueue.high, 0):
+      let ev = addr inputState.eventQueue[i]
+      if ev[].kind == ieCommand and not ev[].echoed and ev[].text == text:
+        inputState.eventQueue.delete(i)
+        return
+  finally:
+    release inputStateLock
+
 proc setActiveCommandHook*(hook: proc(cmd: string) {.gcsafe.}) =
   activeCommandHook = hook
 
@@ -1047,6 +1088,142 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
 
+# --- Live follow (`:show N` on the running call) --------------------------
+#
+# While a bash tool streams, `:show N` (or a viewport click) can flush the
+# capped viewport's held lines into scrollback and follow the rest live:
+# every new line commits as it arrives, the viewport paints banner-only.
+# The snapshot keeps mirroring the full line buffer (the paint side drops
+# the rows), so `:unshow` instantly restores the capped tail and a re-follow
+# never re-commits what already flowed (`committed` counts them).
+var
+  followIdx: Atomic[int]
+  followFlushPending: Atomic[bool]
+  followTouchedIdx: Atomic[int]
+  mouseClickActive: Atomic[bool]
+
+proc runningToolViewportIdx*(): int {.gcsafe.} =
+  ## Tool idx of the streaming viewport, 0 when none is running.
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    result = if frameModelShared.viewport.active:
+               frameModelShared.viewport.idx else: 0
+    release frameModelLock
+
+proc followActiveFor*(idx: int): bool {.gcsafe.} =
+  followIdx.load(moAcquire) == idx
+
+proc followTouchedFor*(idx: int): bool {.gcsafe.} =
+  ## True when follow was ever active for this idx: the final fold must
+  ## not re-commit the body (it is already in scrollback, flowed).
+  followTouchedIdx.load(moAcquire) == idx
+
+proc commitFollowLine*(idx: int; line: string) {.gcsafe.} =
+  ## One flowed line. Waits out an in-flight flush first so scrollback
+  ## order holds: the flush holds lines N+1.. while it commits 1..N.
+  if followIdx.load(moAcquire) != idx: return
+  while followFlushPending.load(moAcquire): sleep 1
+  {.cast(gcsafe).}:
+    commitTranscriptBytes(toolFollowLineBytes(line))
+
+proc startFollowRunning*(): tuple[idx: int, ok: bool, note: string] {.gcsafe.} =
+  ## Flush the running viewport's held (uncommitted) lines into scrollback
+  ## and follow the rest live. Input-thread context (`:show` command hook,
+  # or the mouse dispatcher).
+  {.cast(gcsafe).}:
+    followFlushPending.store(true, moRelease)
+    var held: seq[string] = @[]
+    var idx = 0
+    acquire frameModelLock
+    var snap = frameModelShared.viewport
+    if snap.active and snap.idx > 0 and
+        followIdx.load(moAcquire) == snap.idx:
+      # Already following this call: nothing held, nothing to do.
+      idx = snap.idx
+    elif snap.active and snap.idx > 0:
+      idx = snap.idx
+      let fromIdx = min(snap.committed, snap.lines.len)
+      for l in snap.lines[fromIdx ..< snap.lines.len]:
+        held.add freshString(l)
+      var kept: seq[string] = newSeq[string](snap.lines.len)
+      for i in 0 ..< snap.lines.len:
+        kept[i] = freshString(snap.lines[i])
+      let banner = freshString(snap.banner)
+      let commitMark = snap.lines.len
+      # Drop this thread's refs inside the lock: the local copy dies at
+      # scope end, and a dec outside the lock races the controller's push
+      # (the freshString discipline).
+      snap.lines = @[]
+      snap.banner = ""
+      frameModelShared.viewport = ViewportSnapshot(
+        active: true, banner: banner,
+        lines: kept, exitCode: snap.exitCode, idx: snap.idx,
+        maxLines: snap.maxLines, committed: commitMark)
+      followIdx.store(idx, moRelease)
+      followTouchedIdx.store(idx, moRelease)
+    release frameModelLock
+    if idx > 0 and held.len > 0:
+      {.cast(gcsafe).}:
+        commitTranscriptBytes(toolFollowFlushBytes(held))
+    followFlushPending.store(false, moRelease)
+    if idx == 0:
+      return (0, false, "no tool call is streaming")
+    (idx, true, "")
+
+proc stopFollowRunning*(): int {.gcsafe.} =
+  ## Stop following; the capped viewport repaints from its mirrored buffer
+  ## on the next GUI tick. Returns the idx that was followed, 0 if none.
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    result = followIdx.load(moAcquire)
+    if result > 0:
+      followIdx.store(0, moRelease)
+    release frameModelLock
+
+proc followFinish*(idx: int) {.gcsafe.} =
+  ## End-of-call bookkeeping at the transcript fold: the call is done, so a
+  ## lingering follow state must not accept a late `:show` (the snapshot
+  ## stays active between fold and turn end otherwise).
+  {.cast(gcsafe).}:
+    if followIdx.load(moAcquire) == idx:
+      discard stopFollowRunning()
+      clearAnimViewport()
+      requestViewportPaint()
+
+proc toggleFollowFromClick*() {.gcsafe.} =
+  ## Mouse shortcut: a click inside the painted viewport toggles follow
+  ## for the running call. Same path `:show`/`:unshow` take.
+  {.cast(gcsafe).}:
+    if followIdx.load(moAcquire) > 0:
+      discard stopFollowRunning()
+    else:
+      discard startFollowRunning()
+
+proc dispatchMouseClick*(row: int) {.gcsafe.} =
+  ## An SGR press report's 1-based screen row. While reporting is on (a
+  ## bash tool is streaming), a left press anywhere toggles live follow:
+  ## with 1000h active the terminal no longer selects on plain clicks
+  ## (shift-click still does), so any press that reaches the app is an
+  ## intentional app interaction. Row hit-testing is wrong by construction:
+  ## the volatile block is not bottom-anchored (a scrollback app parks the
+  ## prompt right below the last content row), so absolute screen rows
+  ## cannot be derived from the terminal height.
+  {.cast(gcsafe).}:
+    if runningToolViewportIdx() > 0:
+      toggleFollowFromClick()
+
+proc setMouseClickReporting*(on: bool) {.gcsafe.} =
+  ## Enable/disable SGR click reporting (1000+1006), scoped to bash tool
+  ## runs: while on, the input thread parses press reports and a click
+  ## inside the painted viewport toggles live follow. Posix only (the
+  ## parser lives in the posix getCh); Windows keeps the command paths.
+  when defined(posix):
+    if mouseClickActive.load(moAcquire) == on: return
+    mouseClickActive.store(on, moRelease)
+    termengine.syncWrite(
+      if on: "\x1b[?1000h\x1b[?1006h" else: "\x1b[?1000l\x1b[?1006l")
+
+
 proc commitQueuedEcho*(text: string) =
   ## Echo a mid-turn queued prompt or command as an hourglass item pinned
   ## at the bottom of the volatile block, and clear the editor for the next
@@ -1227,14 +1404,27 @@ proc guiLoop(unused: string) {.thread.} =
             view.symbol = nextCommandSymbol()
           for line in snap.lines:
             addLine(view, line)
+          if followIdx.load(moAcquire) == snap.idx:
+            # Live follow paints banner-only: the output lines are flowing
+            # into scrollback as they arrive, so rows here would duplicate
+            # them. The snapshot still mirrors the full buffer for a later
+            # `:unshow` (instant capped-tail restore) and re-follow.
+            let symbol = view.symbol
+            view = initStreamingView(snap.maxLines, snap.idx, snap.banner)
+            view.exitCode = snap.exitCode
+            view.symbol = symbol
           let bannerRows = bannerRowCountAt(view, termW)
           let rows = viewportRowsAt(view, termW)
           termengine.renderToolViewport(rows, frame,
                                         inputThreadRunning, inputEditor,
                                         termW, bannerRows)
         else:
+          # Snapshot inactive (follow cleared it, fold consumed it): the
+          # request still gets its ack, or `requestViewportPaint` waits
+          # forever (the T4-fold hang: followFinish clears then requests).
           termengine.renderFooter(frame, inputThreadRunning, inputEditor,
                                   currentTermW())
+          paintedViewport = true
         # A running tool is still work: keep the tab spinning (the currency
         # ticker lives only on the viewport row; braille reads better in a
         # tab).
@@ -2356,6 +2546,43 @@ proc inputThreadProc() {.thread.} =
           stdinEof = true
         result = pendingInput.len > 0
 
+      var mousePushback: seq[int]
+      proc dispatchSgrPress(seqBuf: seq[int]) =
+        var s = ""
+        for b in seqBuf: s.add chr(b)
+        # s == "\x1b[<btn;col;rowM": body spans the first digit through the
+        # byte before the final M (s[3] is the button; s[4] would drop it).
+        if s.len < 7: return
+        let body = s[3 ..< s.len - 1]
+        let parts = body.split(';')
+        if parts.len != 3: return
+        let btn = try: parseInt(parts[0]) except ValueError: return
+        if btn != 0: return  # left press only
+        let row = try: parseInt(parts[2]) except ValueError: return
+        dispatchMouseClick(row)
+
+      proc tryMouseReport(): bool =
+        # Consumes one candidate sequence from pendingInput. True when it
+        # was an SGR mouse report (handled); false when it was not mouse
+        # (arrows, bracketed paste: every consumed byte is pushed back for
+        # the editor) or incomplete after a short wait (a lone Esc,
+        # pushed back the same way).
+        var seqBuf = @[pendingInput[0]]
+        pendingInput.delete(0)
+        while seqBuf.len < 24:
+          if pendingInput.len == 0 and not fillPending(30.cint):
+            break
+          seqBuf.add pendingInput[0]
+          pendingInput.delete(0)
+          if seqBuf.len == 2 and seqBuf[1] != ord('['): break
+          if seqBuf.len == 3 and seqBuf[2] != ord('<'): break
+          if seqBuf[^1] in {ord('M'), ord('m')}:
+            if seqBuf[^1] == ord('M'):
+              dispatchSgrPress(seqBuf)
+            return true
+        for b in seqBuf: mousePushback.add b
+        false
+
       let getCh: minline.GetChProc = proc(): int =
         while inputRunning():
           # Yield to a modal wizard if one is pending AND the wizard
@@ -2401,6 +2628,14 @@ proc inputThreadProc() {.thread.} =
                 continue
               break
             startupDrainDone = true
+          # SGR mouse reports arrive only while a bash tool runs (the
+          # enable bytes are scoped to it). Parse the report here, before
+          # any byte of it can reach the editor as junk keystrokes.
+          when defined(posix):
+            if mousePushback.len > 0:
+              result = mousePushback[0]
+              mousePushback.delete(0)
+              return
           # The ask gate outranks the idle-submit park: a sandbox ask is
           # modal, and its 60s window must not be eaten by a parked
           # prompt waiting for the controller to drain a queued submit.
@@ -2426,6 +2661,14 @@ proc inputThreadProc() {.thread.} =
               discard askGateConsume(pendingInput[0])
               pendingInput.delete(0)
               continue
+            when defined(posix):
+              # A byte that landed in this same poll window: mouse reports
+              # are intercepted at the read point (a report never reaches
+              # the editor as keystrokes; anything ESC-led that is NOT an
+              # SGR report is pushed back byte-for-byte).
+              if mouseClickActive.load(moAcquire) and pendingInput[0] == 27:
+                if tryMouseReport():
+                  continue
             draftLastKeyAt = epochTime()
             result = pendingInput[0]
             pendingInput.delete(0)

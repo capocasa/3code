@@ -25,7 +25,7 @@ else:
 const CommandNames* = @[":help", ":tokens", ":clear", ":goal", ":cyber", ":model",
                       ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":verifier",
-                      ":show", ":cmd", ":log", ":sessions", ":session", ":resume", ":summarize", ":btw",
+                      ":show", ":unshow", ":cmd", ":log", ":sessions", ":session", ":resume", ":summarize", ":btw",
                       ":version", ":sandbox", ":sb", ":retry", ":private",
                       ":quit", ":exit"] & ComputerCommandNames
 
@@ -109,7 +109,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   if ambig.len > 0:
     return ckUnknown
   case canon
-  of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
+  of ":help", ":?", ":tokens", ":show", ":unshow", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
   of ":goal", ":cyber":
     # Bare `:goal` shows the goal; bare `:goal!` cancels (a rename), and
@@ -2311,9 +2311,17 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             code = -1
         session.toolLog.add ToolRecord(banner: bannerFor(act), command: cmdText,
           output: output, code: code, kind: act.kind, plan: act.plan)
-        body.add toolBannerBytes(bannerFor(act), akBash, code,
-          command = cmdText, idx = session.toolLog.len)
-        body.add toolResultBytes(akBash, output, code, session.toolLog.len)
+        if followTouchedFor(session.toolLog.len):
+          # Live follow folded already: the output flowed to scrollback as
+          # it streamed, so pin only the banner and the dump link.
+          body.add toolBannerBytes(bannerFor(act), akBash, code,
+            command = cmdText, idx = session.toolLog.len)
+          body.add dumpLinkRowBytes(session.toolLog.len, output)
+        else:
+          body.add toolBannerBytes(bannerFor(act), akBash, code,
+            command = cmdText, idx = session.toolLog.len)
+          body.add toolResultBytes(akBash, output, code, session.toolLog.len)
+        followFinish(session.toolLog.len)
         if code != 0:
           ok = false
     of ":goal", ":cyber":
@@ -2461,7 +2469,27 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         respErr "unknown :sandbox verb: " & verb &
           "  (show, on, off, allow, readonly, deny, ask, edit)"
     of ":show":
-      body.add showToolS(arg, session.toolLog)
+      block followOrDump:
+        let running = runningToolViewportIdx()
+        var n = 0
+        if arg.strip.len > 0:
+          try:
+            n = parseInt(arg.strip)
+          except ValueError:
+            body.add showToolS(arg, session.toolLog)  # its not-a-number err
+            break followOrDump
+        if running > 0 and (n == 0 or n == running):
+          # `:show N` on the running call (or bare `:show` mid-run): flush
+          # what the capped viewport holds and follow the rest live.
+          let (fidx, fok, fnote) = startFollowRunning()
+          if fok:
+            resp &"following T{fidx} live · :unshow or click the viewport to stop"
+          elif n > 0 and n <= session.toolLog.len:
+            body.add showToolS($n, session.toolLog)  # finished meanwhile
+          else:
+            respErr "show: " & fnote
+        else:
+          body.add showToolS(arg, session.toolLog)
     of ":cmd":
       # `:cmd [N]` prints the full command text of bash tool call N
       # (default: the last); `:cmd [N] edit` opens that text in
@@ -2486,6 +2514,12 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             resp msg
       else:
         body.add showCmdS(nArg, session.toolLog)
+    of ":unshow":
+      let fidx = stopFollowRunning()
+      if fidx > 0:
+        resp &"stopped following T{fidx}"
+      else:
+        respErr "unshow: not following a live tool call"
     of ":log":
       body.add listToolsS(session.toolLog)
     of ":session":

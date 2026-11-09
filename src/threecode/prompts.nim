@@ -3860,7 +3860,9 @@ commands:
   (goal and cybernetic modes are mutually exclusive: one mode, one
   file, one verb)
   :prompt             show the active system prompt
-  :show [N]           show full output of tool call N (default: last)
+  :show [N]           follow tool call N live while it runs (default: the
+                      running call, else the last); dump full output when done
+  :unshow             stop the live follow started by :show
   :cmd [N]            show the full command of bash tool call N (default: last)
   :cmd N edit         open that command in $VISUAL/$EDITOR (view it externally)
   :log                list all tool calls this session
