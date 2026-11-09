@@ -9,6 +9,12 @@ type Srv999 = ref object
   listener: Socket
   done: bool
 
+# The server thread's handle must outlive `start999`: the test joins it in
+# its defer so the thread can never race the suite's runtime teardown
+# (unjoined, its epilogue segfaulted under Nim 2.4.0's ORC after the last
+# test had already passed).
+var thr999: Thread[Srv999]
+
 proc serve999(s: Srv999) {.thread.} =
   {.cast(gcsafe).}:
     try:
@@ -32,8 +38,7 @@ proc start999(): tuple[url: string, srv: Srv999] =
   s.listener.bindAddr(Port(0), "127.0.0.1")
   s.listener.listen()
   let (_, port) = s.listener.getLocalAddr()
-  var thr: Thread[Srv999]
-  createThread(thr, serve999, s)
+  createThread(thr999, serve999, s)
   result = ("http://127.0.0.1:" & $port.uint16 & "/", s)
 
 const ExaFixture = "Title: Nim Programming Language\nURL: https://nim-lang.org/\nPublished: 2024-01-15\nAuthor: Nim Team\nHighlights:\nNim is a statically typed compiled systems programming language.\nIt combines successful concepts from mature languages like Python, Ada and Modula.\n---\nTitle: Learn Nim in Y Minutes\nURL: https://learnxinyminutes.com/docs/nim/\nPublished: 2023-11-02\nHighlights:\nSingle-page tour of Nim syntax for the impatient.\nCovers procs, types, generics and macros."
@@ -170,6 +175,7 @@ suite "web helpers":
         if srv.done: break
         sleep(20)
       try: srv.listener.close() except CatchableError: discard
+      joinThread(thr999)
     try:
       discard fetchUrl(url)
       fail()
