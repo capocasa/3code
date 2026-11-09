@@ -368,7 +368,7 @@ proc extractErrorMsg*(errBody: string): string =
 proc isCodeEcho(s: string; code: int): bool =
   ## True when `s` carries no information beyond restating the HTTP status,
   ## e.g. "", "error code: 502", "502". Such a message is redundant once the
-  ## code is shown in the trailing `(code N)` suffix.
+  ## code is shown in the leading status prefix.
   let stripped = s.strip
   if stripped.len == 0: return true
   if code > 0 and stripped == $code: return true
@@ -376,29 +376,62 @@ proc isCodeEcho(s: string; code: int): bool =
   if stripped == "error": return true
   false
 
-proc formatApiDetail*(errMsg, errBody: string; code: int): string =
-  ## Build the human-readable detail for an API error or retry notice in the
-  ## form `<message> (code N)` or just `<message>`. The message is the body's
-  ## error text if present, then the transport `errMsg`, then a bare "error".
-  ## The code is shown as a trailing `(code N)` so it never duplicates the
-  ## message the way a leading `502: error code: 502` did. Some gateways emit
-  ## a body whose message is just an "error code: N" echo of the status;
-  ## that carries no information beyond the code we already show, so it is
-  ## collapsed to a bare "error".
-  let rawBody = extractErrorMsg(errBody)
-  let msg =
-    if rawBody.len > 0 and not isCodeEcho(rawBody, code): rawBody
-    elif errMsg.len > 0: errMsg
-    else: "error"
-  if code != 0: msg & " (code " & $code & ")"
-  else: msg
+const ErrorLineMaxChars = 200
 
-proc newHttpError*(code: int, errMsg, errBody: string): ref HttpError =
+func condenseErrorLine*(s: string; maxChars = ErrorLineMaxChars): string =
+  ## Collapse a provider error message to one concise line: runs of
+  ## whitespace (including the newlines and indentation a pretty-printed
+  ## error body carries) become single spaces, and anything past `maxChars`
+  ## is cut with a trailing ellipsis so a shortened message always carries
+  ## the mark of having been shortened.
+  result = newStringOfCap(s.len)
+  var prevSpace = true # swallows leading whitespace too
+  for ch in s:
+    if ch in {' ', '\t', '\n', '\r'}:
+      if not prevSpace: result.add ' '
+      prevSpace = true
+    else:
+      result.add ch
+      prevSpace = false
+  if result.len > 0 and result[^1] == ' ': result.setLen(result.len - 1)
+  if result.len > maxChars:
+    # Ellipsis included in the budget so the line never exceeds maxChars.
+    result = utf8ByteCut(result, maxChars - 3) & "…"
+
+proc formatApiDetail*(errMsg, errBody: string; code: int;
+    provider = ""): string =
+  ## Build the human-readable detail for an API error or retry notice in
+  ## the form `<code> from <provider>: <message>` (e.g. `500 from zaicode:
+  ## quota exceeded`), so a message from a provider always names the
+  ## provider. Without a provider: `<code>: <message>`; with no HTTP status
+  ## (a local transport error): just `<message>`. The message is the body's
+  ## error text if present, then the transport `errMsg`, then a bare
+  ## "error", condensed to one line by `condenseErrorLine`. Some gateways
+  ## emit a body whose message is just an "error code: N" echo of the
+  ## status; that carries no information beyond the code we already show,
+  ## so it is collapsed to a bare "error".
+  let rawBody = extractErrorMsg(errBody)
+  let usedBody = rawBody.len > 0 and not isCodeEcho(rawBody, code)
+  let msg = condenseErrorLine(
+    if usedBody: rawBody
+    elif errMsg.len > 0: errMsg
+    else: "error")
+  if code != 0:
+    if provider.len > 0: $code & " from " & provider & ": " & msg
+    else: $code & ": " & msg
+  elif usedBody and provider.len > 0:
+    provider & ": " & msg
+  else:
+    msg
+
+proc newHttpError*(code: int, errMsg, errBody: string;
+    provider = ""): ref HttpError =
   ## Build an `HttpError` carrying the status `code` as a field plus the
   ## formatted detail as its message. Use this for every raise that has an
   ## HTTP status, so callers can branch on the class (`except HttpError`)
   ## and read `.code` instead of string-matching.
-  var e = newException(HttpError, formatApiDetail(errMsg, errBody, code))
+  var e = newException(HttpError, formatApiDetail(errMsg, errBody, code,
+    provider))
   e.code = code
   e
 
@@ -3494,7 +3527,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     # `NetworkHealthError` so the retry loop backs off and resends, exactly
     # like a 5xx, instead of relying on the string heuristic in
     # `retryCategory` (which returns "" for status 200 and would dead-end
-    # on the first attempt with an `HttpError (code 200)`):
+    # on the first attempt with a dead-end `HttpError` carrying code 200):
     #   - `networkQuietMsg`: the quiet watchdog fired (no data for
     #     `QuietTooLongMs`).
     #   - A 200 OK that produced no assistant message: a transport/protocol
@@ -3531,7 +3564,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     if not retryable:
       hookStopSpinner()
       if outcome.assistantMsg == nil:
-        raise newHttpError(code, errMsg, outcome.errBody)
+        raise newHttpError(code, errMsg, outcome.errBody, providerOf(p))
       # Promote any leaked GLM/Qwen native `<tool_call>...</tool_call>`
       # blocks in the assistant content to synthetic OpenAI tool_calls.
       # Some endpoints (notably nvidia z-ai/glm-5.2) don't reliably
@@ -3562,10 +3595,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         # Format with the body so a 200 anomaly that carried a provider
         # error object (e.g. z.ai's overloaded message) surfaces its text,
         # not just the generic transport errMsg. `code` is 0 here, so no
-        # `(code N)` suffix is appended, matching the network-quiet case.
+        # status prefix is prepended, matching the network-quiet case.
         raise newException(NetworkHealthError,
-          formatApiDetail(errMsg, outcome.errBody, code))
-      raise newHttpError(code, errMsg, outcome.errBody)
+          formatApiDetail(errMsg, outcome.errBody, code, providerOf(p)))
+      raise newHttpError(code, errMsg, outcome.errBody, providerOf(p))
     if category == "retry-now":
       # `:retry` asked for this resend: no backoff, no notice row, and
       # the curve resets. Attempt counting still applies, so a `:retry`
@@ -3600,7 +3633,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     # hourglass glyph (braille means an in-flight request), the notice row
     # above it counts down, and the turn timer keeps ticking; the next
     # attempt clears the notice and brings the braille back.
-    let detail = formatApiDetail(errMsg, outcome.errBody, code)
+    let detail = formatApiDetail(errMsg, outcome.errBody, code, providerOf(p))
     let retryLabel = detail & ", retry " & $(attempt + 1) &
       "/" & $MaxAttempts & " in"
     hookRetryNotice retryLabel & " " & humanDuration(backoff)

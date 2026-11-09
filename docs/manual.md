@@ -733,7 +733,7 @@ about 36 hours, long enough to outwait a rolling limit or a bad connection.
 After the short initial retry period, attempts become part of the transcript:
 
 ```
-Usage limit reached for the past 5 hours. (code 429). retry 42/64 in 2048s
+429 from zaicode: Usage limit reached for the past 5 hours. retry 42/64 in 2048s
 ```
 
 Use these commands to inspect or change the setting:
