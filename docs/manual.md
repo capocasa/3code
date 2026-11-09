@@ -1274,16 +1274,19 @@ glance. A verifier that stops resolving (provider removed, key gone) is
 skipped with a visible note — the check falls back to the session model
 rather than going silent.
 
-The file is the whole interface — existence is the mode, and the turn-end
-check is the mode's only machinery. Edit `goal.md` mid-run to steer (`:goal
-edit` opens it in `$VISUAL/$EDITOR`, creating it when missing; the next check
-reads it fresh), delete
-it to end goal mode silently, interrupt to pause. Arming runs nothing:
-`:goal <text>` writes the file and answers with one receipt line, and a
-`goal.md` that is already on disk when 3code starts does nothing at all —
-the session idles at the prompt until you send one (an empty Enter is
-enough: it runs a turn on the conversation as it stands, and that turn's
-end runs the first check). `:goal cancel` (or
+The file is the whole interface — existence is the mode, and work starts
+the moment the file exists. Edit `goal.md` mid-run to steer (`:goal edit`
+opens it in `$VISUAL/$EDITOR`, creating it when missing; a changed file
+restarts the goal work at once), delete
+it to end goal mode silently, interrupt to pause. Arming starts work
+immediately: `:goal <text>` writes the file, answers with one receipt
+line, prints the dim `goal.md detected implementing` hint, and runs the
+kickoff turn; a `goal.md` that is already on disk when 3code starts does
+the same before any prompt. Each turn end prints `goal.md completed
+verifying` and runs the check; the outcome speaks as `goal.md
+verification successful` (retired to `achieved.md`) or `goal.md
+verification failed` (the verifier's feedback sends the agent back in).
+`:goal cancel` (or
 `:goal!`) cancels
 the active goal, retiring the file to `goal-cancelled.md` (`:goal new
 <text>` is the balking synonym that refuses a live goal, `:goal! <text>`

@@ -68,6 +68,9 @@ type
     plainBody*: bool
     clearFooter*: bool
     disposition*: CommandDisposition
+    startGoalTurn*: bool
+      ## A harness mode was armed: the controller kicks the mode's work
+      ## off immediately instead of waiting for the next turn boundary.
 
 var wizardReadLineHook*: WizardReadLineHook
 var wizardVerifyCancelHook*: WizardVerifyCancelHook
@@ -1918,9 +1921,8 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
   ## `edit` = revise the live file in $VISUAL/$EDITOR. A successful arm
   ## answers with an empty line here - the controller adds the one
   ## receipt line (the arm receipt with the mode's counts) on top of
-  ## it. `armed` marks every arm/re-arm path so that receipt is the
-  ## whole announcement: the file is armed, nothing runs until the
-  ## next turn ends.
+  ## it. `armed` marks every arm/re-arm path so the controller starts
+  ## the mode's kickoff turn immediately after the receipt.
   result.ok = true
   if parts.len == 0 and not forced:
     if fileExists(m.fileName):
@@ -2098,6 +2100,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                          disposition: cdModal)
   var ok = true
   var body = ""
+  var armGoal = false
   template resp(b: string) = body.add cmdResponseS(b)
   template respErr(b: string) = body.add cmdErrorS(b)
   block dispatch:
@@ -2136,19 +2139,19 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           ok = false
     of ":goal", ":cyber":
       # The mode-verb grammar lives in `modeVerbResult`; the command name
-      # picks the registry entry (`:goal` #1, `:cyber` #2). An arm answers
-      # with the one receipt line there is: no kickoff follows it, the
-      # file itself is armed and the next turn end runs the check.
+      # picks the registry entry (`:goal` #1, `:cyber` #2). An arm sets
+      # `startGoalTurn` so the controller kicks the mode's work off
+      # immediately; the receipt says the file is armed and work starts.
       let m = if name == ":cyber": cyberneticMode else: goalMode
       let r = modeVerbResult(m, parts, arg, forced)
       if not r.ok:
         ok = false
         respErr r.line
       elif r.armed:
+        armGoal = true
         let counts = m.taskCounts(readModeText(m))
         resp m.name & " armed (" & m.fileName &
-          (if counts.len > 0: ", " & counts else: "") &
-          "); the check runs when each turn ends"
+          (if counts.len > 0: ", " & counts else: "") & "), starting now"
       elif r.line.len > 0:
         resp r.line
     of ":help", ":?":
@@ -2403,4 +2406,5 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                 body: body,
                 plainBody: ok,
                 clearFooter: ok and title == "profile",
-                disposition: disposition)
+                disposition: disposition,
+                startGoalTurn: armGoal)

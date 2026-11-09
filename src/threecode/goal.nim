@@ -9,13 +9,14 @@
 ## entry #1; `cybernetic.md` is entry #2. One mode, one file, one verb.
 ##
 ## `goal.md` in the project root keeps a session on one goal. The file
-## IS the mode: no flag, no kickoff, nothing at startup — a `goal.md`
-## already on disk when the session opens does nothing until work runs.
-## The one hook is the end-call boundary in `turns.nim`: when the turn's
-## final model call completes and the harness is about to hand the
-## prompt back to the user, it stats `goal.md`; bare existence activates
-## (v1 waives marker sniff and name-collision handling). A side-call
-## verifier (the
+## IS the mode, and work starts the moment it exists: startup detection,
+## every `:goal` write path, and a turn-end detection of a file that
+## appeared mid-session all print the dim `goal.md detected
+## implementing` hint and run the kickoff turn at once. The other hook
+## is the end-call boundary in `turns.nim`: when the turn's final model
+## call completes and the harness is about to hand the prompt back to
+## the user, it stats `goal.md`; bare existence activates (v1 waives
+## marker sniff and name-collision handling). A side-call verifier (the
 ## session's own model by default; a dedicated verification-class model
 ## when one is configured via `:verifier`, e.g. a System One decision
 ## model like Jev) judges the
@@ -147,6 +148,19 @@ proc goalFeedbackMessage*(feedback: string): JsonNode =
        "satisfied. Verifier feedback:\n\n" & feedback &
        "\n\nAddress it and keep working toward the goal; the " &
        "satisfaction check runs again when this turn ends."}
+
+proc goalKickoffMessage*(goalText: string): JsonNode =
+  ## The harness-autosent prompt that starts goal achievement the
+  ## moment the mode is armed or detected, instead of waiting for the
+  ## user's next prompt. Same `agentSent` marking as the feedback
+  ## continuation, so replay renders it as a `»` item and no provider
+  ## ever sees the marker.
+  %*{"role": "user", "agentSent": true,
+     "content": "Goal armed: " & GoalFileName & " in this repository now " &
+       "states the session's goal:\n\n" & goalText.strip &
+       "\n\nStart working toward it now. A satisfaction check runs when " &
+       "each turn ends and sends you back in with feedback until the " &
+       "goal is met."}
 
 # ---------- cybernetic plan format ----------
 
@@ -342,6 +356,30 @@ proc cyberSkeleton*(text: string): string =
   else:
     result.add "Not begun.\n"
 
+proc cyberKickoffMessage*(body: string): JsonNode =
+  ## The cybernetic kickoff: same shape and `agentSent` marking as the
+  ## goal kickoff, but plan-aware - the counts ride the header and the
+  ## orientation paragraph names the next unchecked task, so direction
+  ## comes from the harness, not model vibes.
+  let plan = parsePlan(body)
+  let counts = planCountsLine(plan)
+  let next = nextUncheckedText(plan)
+  var content = "Goal armed: " & CyberFileName &
+    " in this repository now states the session's plan"
+  if counts.len > 0: content.add " (" & counts & ")"
+  content.add ":\n\n" & body.strip
+  if next.len > 0:
+    content.add "\n\nStart with the next unchecked task: \"" & next &
+      "\" (first unchecked task in file order). Check off each task " &
+      "as it completes, record what the step taught under ## Current " &
+      "state, and keep working through the plan in order."
+  elif plan.tasks.len > 0:
+    content.add "\n\nEvery task in the plan is already checked; the " &
+      "verifier confirms the work or names what still lies."
+  content.add "\n\nA satisfaction check runs when each turn ends and " &
+    "sends you back in with feedback until the plan is complete."
+  %*{"role": "user", "agentSent": true, "content": content}
+
 proc cyberRolloverMessage*(body: string): JsonNode =
   ## The rollover handoff: after a context collapse the fresh context
   ## re-anchors at the plan file - the counts, the next unchecked task
@@ -402,6 +440,9 @@ type
       ## a teaching error that refuses the arm.
     composeBody*: proc (text: string): string
       ## `:<verb> <text>` -> the file body to write.
+    kickoffMessage*: proc (body: string): JsonNode
+      ## The harness-autosent prompt that starts the mode's work the
+      ## moment the file is armed or detected.
     feedbackMessage*: proc (body, fb: string): JsonNode
       ## The FEEDBACK continuation; takes the current file body so a
       ## mode can orient (name the next step) on its own structure.
@@ -502,6 +543,7 @@ let goalMode* = ModeDesc(
   givenUpName: GoalGivenUpName,
   validate: proc (body: string): string = "",
   composeBody: proc (text: string): string = text.strip & "\n",
+  kickoffMessage: goalKickoffMessage,
   feedbackMessage: proc (body, fb: string): JsonNode = goalFeedbackMessage(fb),
   taskCounts: proc (body: string): string = "",
   structureGuard: proc (post: string): string = "",
@@ -520,6 +562,7 @@ let cyberneticMode* = ModeDesc(
   givenUpName: CyberGivenUpName,
   validate: validatePlanBody,
   composeBody: cyberSkeleton,
+  kickoffMessage: cyberKickoffMessage,
   feedbackMessage: cyberFeedbackMessage,
   taskCounts: proc (body: string): string = planCountsLine(parsePlan(body)),
   structureGuard: (proc (post: string): string =
@@ -561,6 +604,14 @@ proc modeConflictLabel*(m, other: ModeDesc): string =
   other.fileName & " is also on disk but " & m.name & " mode is active; " &
     "harness modes are mutually exclusive (" & m.verb & "! cancels " &
     m.name & " mode, then " & other.verb & " arms the plan)"
+
+proc modeHintLine*(m: ModeDesc; state: string): string =
+  ## The mode's lifecycle hint: one line in error-message shape but dim
+  ## white - state changing, not attention owed - naming the trigger
+  ## file and the state, e.g. `goal.md detected implementing`. Every
+  ## detection, kickoff, and verdict moment speaks through here so the
+  ## hints cannot drift apart across the three hook sites.
+  GreyFg & m.fileName & " " & state & Reset & "\r\n"
 
 # The goal-mode entry points: the registry walk for entry #1.
 
