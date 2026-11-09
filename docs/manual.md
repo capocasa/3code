@@ -225,6 +225,11 @@ keep the global config default. All of this lives in the config file; see
 :model gpt-oss-20b
 ```
 
+A model can also name its provider explicitly, `:model nvidia.gpt-oss-20b`,
+the same `provider.model` spelling `-m` takes on the command line; a bare
+name still resolves within the current provider. Tab completion follows
+suit: type the provider and the dot, get that provider's models.
+
 When a provider ships new models, `:provider update <name>` re-runs just
 the models step of the wizard: the offered list refreshes (curated in
 regular mode, the provider's `/models` endpoint under `--experimental`)

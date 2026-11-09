@@ -226,6 +226,18 @@ proc completionFor*(line: string): seq[string] =
           if pr.findModel(m) < 0: result.add shortModel(m)
       return
   if words[0] == ":model" and words.len == 2:
+    # `provider.model` spec: once the dot prefix names a provider,
+    # complete that provider's models under the same spelling. A bare
+    # prefix still lists the current provider's models only, so the
+    # no-prefix experience is unchanged.
+    let dot = last.find('.')
+    let idx = if dot > 0: providerIndex(last[0 ..< dot]) else: -1
+    if idx >= 0:
+      let pr = activeProviders[idx]
+      for m in orderedModels(pr):
+        if experimentalEnabled or knownGoodFamily(pr.name, m) != "":
+          result.add pr.name & "." & shortModel(m)
+      return
     let prov = currentProvider()
     for m in orderedModels(prov):
       if experimentalEnabled or knownGoodFamily(prov.name, m) != "":
@@ -1244,10 +1256,23 @@ proc cmdModelList(prof: Profile): string =
       result.add hintLnS(short)
 
 proc cmdModelSelect(target: string, prof: var Profile): string =
-  let prov = currentProvider()
+  var prov = currentProvider()
+  var model = target
+  # `provider.model` spec, same syntax `-m` takes: when the text before
+  # the first dot names a configured provider, the rest is the model on
+  # that provider. Only an exact provider-name prefix counts, so dotted
+  # model spellings (`glm-5.3`) still resolve against the current one.
+  let dot = target.find('.')
+  if dot > 0:
+    let pfx = target[0 ..< dot]
+    for pr in activeProviders:
+      if pr.name == pfx:
+        prov = pr
+        model = target[dot + 1 .. ^1]
+        break
   if prov.name == "":
     return errLnS("no provider selected")
-  let idx = prov.findModel(target)
+  let idx = prov.findModel(model)
   if idx < 0:
     return errLnS(&"unknown model: {target}")
   let fullModel = prov.models[idx]

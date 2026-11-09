@@ -4,12 +4,8 @@
 ## fragment completed against the cwd (like a shell). Subdirectories get
 ## a trailing `/`, results are alphabetical, and the existing `:`-command
 ## and model/provider completions are unaffected.
-discard """
-  action: compile
-"""
-
 import std/[os, strutils, unittest]
-import threecode/ui
+import threecode/[config, ui]
 
 ## A temp cwd populated with a known tree, restored on scope exit. Each test
 ## builds its own so the cwd change is live while the test body runs (the
@@ -32,6 +28,40 @@ template withTempCwd(body: untyped) =
     writeFile(root / "beta" / "one.nim", "")
     writeFile(root / "apple.nim", "")
     body
+
+suite "completionFor: :model provider.model completion":
+  var savedProviders: seq[ProviderRec]
+  var savedCurrent: string
+
+  setup:
+    savedProviders = activeProviders
+    savedCurrent = activeCurrent
+    activeProviders = @[
+      ProviderRec(name: "zai", models: @["glm-5.2", "glm-5.3"]),
+      ProviderRec(name: "baseten", models: @["zai-org/GLM-5.2"])]
+    activeCurrent = "zai.glm-5.2"
+
+  teardown:
+    activeProviders = savedProviders
+    activeCurrent = savedCurrent
+
+  test "provider prefix completes to provider.model entries":
+    let c = completionFor(":model baseten.")
+    check c == @["baseten.glm-5.2"]
+
+  test "current provider's bare models are unaffected":
+    let c = completionFor(":model ")
+    check "glm-5.2" in c
+    check "glm-5.3" in c
+    check "baseten.glm-5.2" notin c
+
+  test "dotted model fragment stays a current-provider completion":
+    # `glm-5.` is not a provider prefix, so it completes the short
+    # names that start with it (the callback list is prefix-filtered
+    # by minline, so this returns the provider's models as-is)
+    let c = completionFor(":model glm-5.")
+    check "glm-5.2" in c
+    check "glm-5.3" in c
 
 suite "completionFor: @ path completion":
   test "bare @ lists cwd entries, dirs suffixed with slash":
