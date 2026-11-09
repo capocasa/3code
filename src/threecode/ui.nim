@@ -214,7 +214,13 @@ proc completionFor*(line: string): seq[string] =
     return
   if words[0] == ":provider":
     if words.len == 2:
-      for pr in activeProviders: result.add pr.name
+      # Verbs before names: the grammar slots a user is typing into
+      # ("edit nvidia") surface alongside the switch-by-name form, so
+      # `:provider <tab>` teaches the subcommands instead of only the
+      # names. minline's prefix filter picks between them.
+      for v in ["add", "edit", "update", "new", "pull", "rm"]: result.add v
+      for pr in activeProviders:
+        if pr.name notin result: result.add pr.name
       return
     if words.len == 3:
       if words[1] in ["edit", "update", "new", "pull", "rm", "remove"]:
@@ -1000,6 +1006,12 @@ proc cmdProviderList(prof: Profile): string =
       result.add GreyFg & pr.name & Reset & "\r\n"
     else:
       result.add hintLnS(pr.name)
+  # The verb vocabulary rides the listing: a user staring at a dead
+  # key lands here first, and the names alone teach no way back to
+  # `:provider edit <name>`.
+  result.add hintLnS(GreyFg &
+    "  verbs: add edit update new pull rm  " &
+    "(edit <name> re-enters its key or renews a login)" & Reset)
 
 proc cmdProviderSelect(target: string, prof: var Profile): string =
   var prov: ProviderRec

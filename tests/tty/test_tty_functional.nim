@@ -567,80 +567,88 @@ suite "terminal visual contract":
     tty.expectExit(0, timeoutMs = 5000)
 
   test "harness commands are transcript items":
-    let root = newFixture("harness_commands")
-    writeHarnessProviders(root)
-    writeStubResponses(root, %*[])
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "harness_commands":
+      check true
+    else:
+      let root = newFixture("harness_commands")
+      writeHarnessProviders(root)
+      writeStubResponses(root, %*[])
 
-    # Keep path-heavy :prompt output readable; assertions use committed
-    # history and never join physical rows to hide checkout-dependent wraps.
-    let tty = startStub(root, cols = 128)
-    defer:
-      tty.writeFrameArtifact(root / "frames.txt")
-      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
-      tty.close()
+      # Keep path-heavy :prompt output readable; assertions use committed
+      # history and never join physical rows to hide checkout-dependent wraps.
+      let tty = startStub(root, cols = 128)
+      defer:
+        tty.writeFrameArtifact(root / "frames.txt")
+        tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+        tty.close()
 
-    tty.expect "❯"
-    tty.frames.setLen(0)
-    var firstCommand = true
-    for commandCase in [
-      (":help", "3code the economical coding agent"),
-      (":provider", "stub  [stub-model]"),
-      (":model", "stub-model"),
-      (":reasoning", "reasoning:"),
-      (":model stub-large", "provider  stub"),
-      (":reasoning high", "reasoning high"),
-      (":provider alt", "provider  alt"),
-      (":tokens", "no tokens used yet"),
-      (":clear", "═══"),
-      (":sessions", "no saved sessions for this directory"),
-      (":resume", "no saved sessions for this directory"),
-      (":sessions all", "no saved sessions for this directory"),
-      (":log", "no tool calls yet"),
-      (":show", "no tool calls yet"),
-      (":compact", "unknown command: :compact"),
-      (":summarize", "failed or not worth it"),
-      (":prompt", "# Risk"),
-      (":toknes", "unknown command: :toknes")
-    ]:
-      let (command, marker) = commandCase
-      tty.send command
-      if firstCommand:
-        tty.expect "❯ " & command
-        tty.frames.setLen(0)
-        firstCommand = false
-      else:
-        tty.drain(80)
+      tty.expect "❯"
+      tty.frames.setLen(0)
+      var firstCommand = true
+      for commandCase in [
+        (":help", "3code the economical coding agent"),
+        (":provider", "stub  [stub-model]"),
+        (":model", "stub-model"),
+        (":reasoning", "reasoning:"),
+        (":model stub-large", "provider  stub"),
+        (":reasoning high", "reasoning high"),
+        (":provider alt", "provider  alt"),
+        (":tokens", "no tokens used yet"),
+        (":clear", "═══"),
+        (":sessions", "no saved sessions for this directory"),
+        (":resume", "no saved sessions for this directory"),
+        (":sessions all", "no saved sessions for this directory"),
+        (":log", "no tool calls yet"),
+        (":show", "no tool calls yet"),
+        (":compact", "unknown command: :compact"),
+        (":summarize", "failed or not worth it"),
+        (":prompt", "# Risk"),
+        (":toknes", "unknown command: :toknes")
+      ]:
+        let (command, marker) = commandCase
+        tty.send command
+        if firstCommand:
+          tty.expect "❯ " & command
+          tty.frames.setLen(0)
+          firstCommand = false
+        else:
+          tty.drain(80)
+        tty.send "\n"
+        tty.expectInHistory "❯ " & command
+        tty.expectInHistory marker
+        tty.drain(120)
+      tty.expectAlive()  # no command in the suite exited the process
+      tty.expectInHistory "unknown command: :toknes  did you mean :tokens?"
+      # The bare :provider listing teaches its verbs; the reentry hint is
+      # the discoverability fix for dead keys (edit re-enters one).
+      tty.expectInHistory "verbs: add edit update new pull rm"
+      tty.expectInHistory "edit <name> re-enters its key or renews a login"
+      # :session prints this session's id; cross-check it against the id the
+      # dir lock recorded for this process (second line of the lock file).
+      tty.send ":session"
+      tty.drain(80)
       tty.send "\n"
-      tty.expectInHistory "❯ " & command
-      tty.expectInHistory marker
-      tty.drain(120)
-    tty.expectAlive()  # no command in the suite exited the process
-    tty.expectInHistory "unknown command: :toknes  did you mean :tokens?"
-    # :session prints this session's id; cross-check it against the id the
-    # dir lock recorded for this process (second line of the lock file).
-    tty.send ":session"
-    tty.drain(80)
-    tty.send "\n"
-    var lockId = ""
-    for p in walkFiles(root / "tmp" / "3code" / "dirlock" / "*.lock"):
-      let lines = readFile(p).strip.splitLines
-      if lines.len > 1: lockId = lines[1]
-    # Timestamp-only ids since the rename; a "-N" suffix only appears on a
-    # same-second collision, so accept both shapes.
-    doAssert lockId.len >= 15 and lockId[0..7].allCharsInSet(Digits) and
-      lockId[8] == 'T' and lockId[9..14].allCharsInSet(Digits) and
-      (lockId.len == 15 or lockId[15] == '-'),
-      "dir lock should carry a session id line, got: " & lockId
-    tty.expectInHistory lockId
-    tty.send "\x1b[A"
-    tty.expect "❯ :session"
-    tty.drain(200)
-    # :prompt embeds machine-specific skill paths and their physical wraps.
-    # Assert command results above and the live recalled-input cursor here,
-    # without collapsing paths/rows to fit the historical text recording.
-    tty.requireVisibleEditorCaret(":session")
-    discard tty.checkpoint("commands/recalled-session")
-    tty.writeCheckpoints(root / "checkpoints.jsonl")
+      var lockId = ""
+      for p in walkFiles(root / "tmp" / "3code" / "dirlock" / "*.lock"):
+        let lines = readFile(p).strip.splitLines
+        if lines.len > 1: lockId = lines[1]
+      # Timestamp-only ids since the rename; a "-N" suffix only appears on a
+      # same-second collision, so accept both shapes.
+      doAssert lockId.len >= 15 and lockId[0..7].allCharsInSet(Digits) and
+        lockId[8] == 'T' and lockId[9..14].allCharsInSet(Digits) and
+        (lockId.len == 15 or lockId[15] == '-'),
+        "dir lock should carry a session id line, got: " & lockId
+      tty.expectInHistory lockId
+      tty.send "\x1b[A"
+      tty.expect "❯ :session"
+      tty.drain(200)
+      # :prompt embeds machine-specific skill paths and their physical wraps.
+      # Assert command results above and the live recalled-input cursor here,
+      # without collapsing paths/rows to fit the historical text recording.
+      tty.requireVisibleEditorCaret(":session")
+      discard tty.checkpoint("commands/recalled-session")
+      tty.writeCheckpoints(root / "checkpoints.jsonl")
 
   test "resume command swaps onto a saved session":
     # #62: `:resume <id>` replaces the running session in place: state,

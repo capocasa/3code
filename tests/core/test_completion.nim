@@ -1,15 +1,17 @@
-## Tab completion: the `@` path-completion path in `completionFor`.
+## Tab completion and the `:provider` discoverability surfaces.
 ##
 ## `@` at the start of a word turns the rest of the word into a path
 ## fragment completed against the cwd (like a shell). Subdirectories get
 ## a trailing `/`, results are alphabetical, and the existing `:`-command
-## and model/provider completions are unaffected.
+## and model/provider completions are unaffected. The `:provider` tests
+## cover the key-reentry discoverability work: the verb vocabulary in
+## the second completion slot and the hint line on the bare listing.
 discard """
   action: compile
 """
 
-import std/[os, strutils, unittest]
-import threecode/ui
+import std/[json, os, strutils, unittest]
+import threecode/[config, minline, types, ui]
 
 ## A temp cwd populated with a known tree, restored on scope exit. Each test
 ## builds its own so the cwd change is live while the test body runs (the
@@ -86,3 +88,56 @@ suite "completionFor: @ path completion":
 
 test "pathCompletions against a nonexistent dir returns empty":
   check pathCompletions("definitely-not-here/").len == 0
+
+suite "provider verb discoverability":
+  # A user whose key was revoked meets `:provider` before anything
+  # else. Both surfaces must teach the verbs: the second completion
+  # slot (typing) and the bare listing (exploring).
+  var savedProviders: seq[ProviderRec]
+  var savedCurrent: string
+
+  setup:
+    savedProviders = activeProviders
+    savedCurrent = activeCurrent
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-x", models: @["openai/gpt-oss-20b"]),
+      ProviderRec(name: "zai", url: "https://api.z.ai/v1", key: "k",
+                  models: @["glm-5.2"])]
+    activeCurrent = "nvidia.openai/gpt-oss-20b"
+
+  teardown:
+    activeProviders = savedProviders
+    activeCurrent = savedCurrent
+
+  test "second slot offers the verbs before provider names":
+    let c = completionFor(":provider ")
+    for v in ["add", "edit", "update", "new", "pull", "rm"]:
+      check v in c
+    check "nvidia" in c
+    check "zai" in c
+    check c.find("edit") < c.find("nvidia")
+
+  test "a provider named like a verb is not duplicated":
+    activeProviders = @[ProviderRec(name: "new", models: @["m"])
+                        ] & activeProviders
+    var news = 0
+    for m in completionFor(":provider "):
+      if m == "new": inc news
+    check news == 1
+
+  test "verb slot leaves the name slots intact":
+    check completionFor(":provider edit ") == @["nvidia", "zai"]
+    check completionFor(":provider rm ") == @["nvidia", "zai"]
+
+  test "bare :provider listing names the verbs and the key fix":
+    var messages = %* []
+    var session = Session()
+    var prof = Profile()
+    var editor: minline.LineEditor
+    let res = handleCommandResult(":provider", messages, session, prof,
+                                  editor)
+    check res.recognized and res.ok
+    check "nvidia" in res.body
+    check "verbs: add edit update new pull rm" in res.body
+    check "edit <name> re-enters its key or renews a login" in res.body

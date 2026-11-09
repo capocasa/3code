@@ -247,6 +247,14 @@ Most providers use an API key, and the wizard recognizes the common prefixes.
 For an unknown provider or a custom URL, start 3code with `--experimental`.
 The flag is deliberate: compatibility is likely, not promised.
 
+Keys die: they expire, get revoked, get rotated on you. Nothing breaks
+at startup, the provider's own 401 just shows up on the next turn. To
+re-enter a key, run `:provider edit <name>`; every field offers
+enter-to-keep, so the re-entry is one paste and a few Enters. The same
+wizard renews a subscription login (ChatGPT, SuperGrok, Claude Code,
+Gemini CLI) with its optional browser re-login. `:provider` lists your
+providers and the verbs; tab completes both.
+
 ### xAI and SuperGrok
 
 An `xai-` key creates a normal `xai` provider. Enter `supergrok` instead to
