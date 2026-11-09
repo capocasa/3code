@@ -549,6 +549,32 @@ suite "display: truncated tool output expansion":
     check fileExists(dump)
     check readFile(dump) == diff      # ...but the dump stays whole
 
+  test "patch diff rows link the file at their own line (warp #12)":
+    # Every painted diff row is an OSC 8 hyperlink into the changed
+    # file: headers at the file head, hunk rows and +/- rows at their
+    # own line (`:N` after the path, the old side for deletions).
+    let diff = "--- a/fix.nim\n+++ b/fix.nim\n@@ -4,3 +4,4 @@\n ctx\n" &
+      "-old\n+new\n+extra\n rest"
+    let act = Action(kind: akPatch, path: "fix.nim")
+    let bytes = toolTranscriptBytes(act, "ok", 0, 4, diff)
+    let url = fileUrl(getCurrentDir() / "fix.nim")
+    check osc8Link(url, "+++ b/fix.nim") in bytes   # file head
+    check osc8Link(url & ":4", "@@ -4,3 +4,4 @@") in bytes
+    check osc8Link(url & ":4", "ctx") in bytes  # wrapAnsi drops the ctx space
+    check osc8Link(url & ":5", "-old") in bytes    # old-side line
+    check osc8Link(url & ":5", "+new") in bytes
+    check osc8Link(url & ":6", "+extra") in bytes
+    check osc8Link(url & ":7", "rest") in bytes
+
+  test "diff rows without a file header stay unlinked":
+    # A diff that never names a path must not link rows against a
+    # guessed URL; the paint stays plain. The T<n>.diff hint keeps its
+    # own dump link (exactly one: two ]8;; markers).
+    let diff = "+added line 1\n+added line 2"
+    let bytes = toolResultBytes(akBash, "done", 0, 5, diff = diff)
+    check bytes.count("\x1b]8;;") == 2
+    check "+added line 1" in bytes
+
   test "short outputs render without any hint or dump":
     let bytes = toolResultBytes(akRead, "one\ntwo\nthree", 0, 9)
     check "hidden" notin bytes

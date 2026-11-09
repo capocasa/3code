@@ -326,18 +326,99 @@ proc compactHeadTailBytes(res: string; idx: int;
   if footer < lines.len:
     result.add wrappedSubtleBytes(lines[footer])
 
-proc addDiffPainted(outBytes: var string; l: string) =
+type
+  DiffLinkState = object
+    ## Walked while a diff is painted so every row can link into the file
+    ## it changed: the target's `file://` URL plus the current a-side and
+    ## b-side line numbers. Header rows set the URL, `@@` hunks re-anchor
+    ## both counters, content rows advance them (warp, thread 12: patch
+    ## output blocks should click into the editor at the right line, like
+    ## the r/w/p banners already click into the file).
+    url: string
+    aLine: int
+    bLine: int
+
+proc diffLinkFor(l: string; st: var DiffLinkState): string =
+  ## URL one painted diff row links to: the file head for header rows,
+  ## `file://...:N` at the row's own line for hunk rows and content rows,
+  ## "" when the row stays plain (no path known yet, the no-newline
+  ## marker, unparsable shapes). The `:N` suffix (line after the last
+  ## colon) is what an editor-wrapping `file:` handler splits on.
+  proc stripSideMarker(label: string): string =
+    if label.startsWith("a/") or label.startsWith("b/"):
+      label[2 ..< label.len]
+    else:
+      label
+  if l.startsWith("--- ") or l.startsWith("+++ "):
+    st.url = fileLinkUrl(stripSideMarker(l[4 ..< l.len].strip), "")
+    st.aLine = 0
+    st.bLine = 0
+    return st.url
+  if l.startsWith("*** "):
+    st.url = fileLinkUrl(l[4 ..< l.len].strip, "")
+    st.aLine = 0
+    st.bLine = 0
+    return st.url
+  if l.startsWith("@@"):
+    var i = 2
+    while i < l.len and l[i] == ' ': inc i
+    if i < l.len and l[i] == '-':
+      inc i
+      var n = 0
+      var haveA = false
+      while i < l.len and l[i].isDigit:
+        n = n * 10 + (ord(l[i]) - ord('0'))
+        inc i
+        haveA = true
+      if haveA: st.aLine = n
+      if i < l.len and l[i] == ',':
+        inc i
+        while i < l.len and l[i].isDigit: inc i
+      while i < l.len and l[i] == ' ': inc i
+      if i < l.len and l[i] == '+':
+        inc i
+        var m = 0
+        var haveB = false
+        while i < l.len and l[i].isDigit:
+          m = m * 10 + (ord(l[i]) - ord('0'))
+          inc i
+          haveB = true
+        if haveB: st.bLine = m
+    if st.url.len == 0: return ""
+    if st.bLine > 0: return st.url & ":" & $st.bLine
+    return st.url
+  if st.url.len == 0 or l.startsWith("\\"): return ""
+  if l.len > 0 and l[0] == '+':
+    if st.bLine == 0: st.bLine = 1
+    result = st.url & ":" & $st.bLine
+    inc st.bLine
+  elif l.len > 0 and l[0] == '-':
+    if st.aLine == 0: st.aLine = 1
+    result = st.url & ":" & $st.aLine
+    inc st.aLine
+  elif l.len > 0 and l[0] == ' ':
+    if st.bLine > 0: result = st.url & ":" & $st.bLine else: result = st.url
+    inc st.aLine
+    inc st.bLine
+  else:
+    result = st.url
+
+proc addDiffPainted(outBytes: var string; l: string;
+                    links: var DiffLinkState) =
   let termW = try: terminalWidth() except CatchableError: 80
   let bodyW = max(20, termW - 2)
+  let url = diffLinkFor(l, links)
   for chunk in wrapAnsi(l, bodyW):
+    let row =
+      if url.len > 0: osc8Link(url, chunk) else: chunk
     if l.len > 0 and l[0] == '+':
-      outBytes.add ansiForegroundColorCode(fgGreen) & "  " & chunk &
+      outBytes.add ansiForegroundColorCode(fgGreen) & "  " & row &
         ansiResetCode & "\r\n"
     elif l.len > 0 and l[0] == '-':
-      outBytes.add ansiForegroundColorCode(fgRed) & "  " & chunk &
+      outBytes.add ansiForegroundColorCode(fgRed) & "  " & row &
         ansiResetCode & "\r\n"
     else:
-      outBytes.add GreyFg & "  " & chunk & Reset & "\r\n"
+      outBytes.add GreyFg & "  " & row & Reset & "\r\n"
 
 proc diffDumpHintBytes(idx: int; diff: string): string =
   ## The `T5.diff ↗` row (#60): a patch's full diff always lands in the
@@ -368,17 +449,18 @@ proc diffBytes(diff: string; idx = 0; skipFirst = false): string =
     while k < painted.len and painted[k].strip == "": inc k
     if k < painted.len: painted.delete(k)
   let whole = lines.join("\n")
+  var links: DiffLinkState
   if painted.len <= DiffHead + DiffTail + 2:
     for l in painted:
-      result.addDiffPainted(l)
+      result.addDiffPainted(l, links)
     result.add diffDumpHintBytes(idx, whole)
     return
   for i in 0 ..< DiffHead:
-    result.addDiffPainted(painted[i])
+    result.addDiffPainted(painted[i], links)
   result.add hiddenHintBytes(painted.len - DiffHead - DiffTail, idx, whole,
     " hidden", ext = "diff")
   for i in painted.len - DiffTail ..< painted.len:
-    result.addDiffPainted(painted[i])
+    result.addDiffPainted(painted[i], links)
 
 proc firstDiffLine(diff: string): string =
   for line in diff.splitLines:
@@ -782,11 +864,12 @@ proc fullToolResultBytes*(kind: ActionKind; res: string; code: int;
                            diff = ""): string =
   ## The untruncated rendering `:show` prints: same styling as the live
   ## transcript but no head/tail compaction, so the middle the scrollback
-  ## elided is finally visible. Nothing is dumped or hyperlinked here -
-  ## this IS the full output.
+  ## elided is finally visible. Nothing is dumped here - this IS the full
+  ## output - but the painted diff rows keep their per-line hyperlinks.
   if kind == akWrite and diff.len > 0:
+    var links: DiffLinkState
     for l in diff.splitLines:
-      result.addDiffPainted(l)
+      result.addDiffPainted(l, links)
     return
   var lines = res.splitLines
   if kind == akRead:
