@@ -1,4 +1,5 @@
-import std/[os, sequtils, strformat, strutils, tables, times, unittest]
+import std/[json, os, sequtils, strformat, strutils, tables, times,
+           unittest]
 import threecode/[config, modelname, prompts, types]
 
 suite "config: [settings] max_timeout":
@@ -19,6 +20,22 @@ suite "config: [settings] max_timeout":
     discard parseConfigFile(tmp)
     check maxTimeoutSetting == 900
     check maxBashTimeoutSecs() == 900
+
+  test "parse raises the default along with the ceiling":
+    # The one-setting contract: a run the model sent with no `timeout`
+    # gets the full configured budget, and an explicit request is still
+    # honored below the ceiling and clamped above it.
+    writeFile(tmp, "[settings]\nmax_timeout = 900\n")
+    discard parseConfigFile(tmp)
+    check bashTimeoutSecs(0) == 900
+    check bashTimeoutSecs(120) == 120
+    check bashTimeoutSecs(300) == 300
+    check bashTimeoutSecs(9999) == 900
+
+  test "unset keeps the 120s default for request-less runs":
+    writeFile(tmp, "[settings]\n")
+    discard parseConfigFile(tmp)
+    check bashTimeoutSecs(0) == DefaultBashTimeout
 
   test "hyphen spelling accepted":
     writeFile(tmp, "[settings]\nmax-timeout = 1800\n")
@@ -48,6 +65,80 @@ suite "config: [settings] max_timeout":
     maxTimeoutSetting = MaxBashTimeout
     writeConfigFile(tmp, "", @[])
     check not readFile(tmp).contains("max_timeout")
+
+suite "config: advertised bash timeout pair":
+  ## The numbers the model-facing prompt quotes (prompts.nim fills its
+  ## {{bash_default}}/{{bash_ceiling}} tokens from this), so a prompt can
+  ## never advertise a default or ceiling the harness would not honor.
+
+  setup:
+    maxTimeoutSetting = 0
+    forceTimeoutSetting = 0
+
+  teardown:
+    maxTimeoutSetting = 0
+    forceTimeoutSetting = 0
+
+  test "defaults out of the box":
+    check advertisedBashTimeouts() == (DefaultBashTimeout, MaxBashTimeout)
+
+  test "max_timeout raises both numbers":
+    maxTimeoutSetting = 1800
+    check advertisedBashTimeouts() == (1800, 1800)
+
+  test "force_timeout flattens both to its value":
+    maxTimeoutSetting = 1800
+    forceTimeoutSetting = 300
+    check advertisedBashTimeouts() == (300, 300)
+
+suite "prompts: live bash timeout numbers":
+  setup:
+    maxTimeoutSetting = 0
+    forceTimeoutSetting = 0
+
+  teardown:
+    maxTimeoutSetting = 0
+    forceTimeoutSetting = 0
+
+  test "every family prompt resolves the tokens, none leak":
+    for fam in ["laguna", "kolibri", "glm", "qwen", "gpt-oss", "gpt",
+                "deepseek", "minimax", "longcat", "hy", "mistral",
+                "inkling", "grok", "gemini", "claude", "mimo", "kimi",
+                "ling", "0xalpha", "other", "nemotron"]:
+      let p = Profile(name: fam & ".m", model: "m", family: fam)
+      let s = buildSystemPrompt(p)
+      check "{{bash_default}}" notin s
+      check "{{bash_ceiling}}" notin s
+      check s.len > 0
+    # the tiny-qwen variant prompt too
+    let tiny = Profile(name: "qwen.m", model: "m", family: "qwen",
+                       variant: "27b")
+    let ts = buildSystemPrompt(tiny)
+    check "{{bash_default}}" notin ts
+    check "{{bash_ceiling}}" notin ts
+
+  test "max_timeout rewrites the advertised default and ceiling":
+    maxTimeoutSetting = 1800
+    let p = Profile(name: "zai.glm-5.3", model: "glm-5.3", family: "glm",
+                    version: "5", variant: "3")
+    let s = buildSystemPrompt(p)
+    check "1800s default" in s
+    check "1800s ceiling" in s
+    check "120s default" notin s
+    check "600s ceiling" notin s
+
+  test "bash tool schema carries the live numbers":
+    maxTimeoutSetting = 1800
+    let p = Profile(name: "zai.glm-5.3", model: "glm-5.3", family: "glm")
+    proc bashTimeoutDesc(): string =
+      for t in activeTools(p):
+        if t{"function"}{"name"}.getStr == "bash":
+          return t{"function"}{"parameters"}{"properties"}{"timeout"}{"description"}.getStr
+      ""
+    check "Default 1800, hard ceiling 1800" in bashTimeoutDesc()
+    # the shared const roster was not mutated by the substitution above
+    maxTimeoutSetting = 0
+    check "Default 120, hard ceiling 600" in bashTimeoutDesc()
 
 suite "config: [settings] force_timeout":
   var tmp = ""

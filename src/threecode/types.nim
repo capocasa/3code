@@ -148,6 +148,10 @@ const
 
 var maxTimeoutSetting* = 0
   ## `[settings] max_timeout` in seconds; 0 keeps the compiled default.
+  ## When set it raises both the ceiling (what a `timeout` request is
+  ## clamped to) and the default (what a run gets when the model passes
+  ## no `timeout`), so known-long work survives without the model
+  ## cooperating.
 
 var forceTimeoutSetting* = 0
   ## `[settings] force_timeout` in seconds; 0 lets the model's `timeout`
@@ -159,15 +163,30 @@ proc maxBashTimeoutSecs*(): int =
   ## the ceiling can change without a rebuild.
   if maxTimeoutSetting > 0: maxTimeoutSetting else: MaxBashTimeout
 
+proc defaultBashTimeoutSecs*(): int =
+  ## The cap a bash run gets when the model passes no `timeout`:
+  ## `max_timeout` when set, else the compiled `DefaultBashTimeout`.
+  if maxTimeoutSetting > 0: maxTimeoutSetting else: DefaultBashTimeout
+
 proc bashTimeoutSecs*(req: int): int =
   ## Resolve the run cap (seconds) from a model-requested value.
   ## `force_timeout`, when set, replaces the model's request entirely;
   ## otherwise missing/zero/negative → default, and any value above the
   ## ceiling is clamped to it.
   if forceTimeoutSetting > 0: return forceTimeoutSetting
-  let v = if req > 0: req else: DefaultBashTimeout
+  let v = if req > 0: req else: defaultBashTimeoutSecs()
   let cap = maxBashTimeoutSecs()
   if v > cap: cap else: v
+
+proc advertisedBashTimeouts*(): tuple[defaultSecs, ceilingSecs: int] =
+  ## The (default, ceiling) pair the model-facing prompt should advertise.
+  ## `force_timeout` flattens both to its value: every run gets exactly
+  ## that cap regardless of what the model passes, so advertising a wider
+  ## range would be a lie.
+  if forceTimeoutSetting > 0:
+    (forceTimeoutSetting, forceTimeoutSetting)
+  else:
+    (defaultBashTimeoutSecs(), maxBashTimeoutSecs())
 
 type
   PlanItem* = object

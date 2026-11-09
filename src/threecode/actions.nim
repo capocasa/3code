@@ -891,12 +891,27 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     body.add outClip
     if not outClip.endsWith("\n"): body.add "\n"
   if code == 124:
+    # Name the cap and where it came from, and say exactly what unblocks
+    # a rerun. A bare "timed out" invites blind retries at the same cap.
+    let advCeiling = advertisedBashTimeouts().ceilingSecs
     if forceTimeoutSetting > 0:
-      body.add &"[timed out after {cap}s. The user's force_timeout setting " &
-                "overrides any timeout you pass, so a bigger one will not " &
+      body.add &"[killed at the {cap}s cap (the user's force_timeout setting). " &
+                "It overrides any timeout you pass, so a bigger one will not " &
                 "help; background the work and poll its log instead.]"
+    elif cap < advCeiling:
+      let origin = if act.timeoutSecs > 0: "cap you requested"
+                   else: "default cap (you passed no timeout)"
+      body.add &"[killed at the {cap}s {origin}. Not a system limit: " &
+                &"pass timeout={advCeiling} (or any value up to it) and " &
+                "rerun. Or background the work.]"
+    elif act.timeoutSecs > 0:
+      body.add &"[killed at the {cap}s cap you requested, which is also the " &
+                "ceiling here. A bigger timeout will not help; background " &
+                "the work and poll its log.]"
     else:
-      body.add &"[timed out after {cap}s. This is your own setting, not a system limit: pass timeout={maxBashTimeoutSecs()} (or any value up to that) and rerun. Or background the work.]"
+      body.add &"[killed at the {cap}s default cap (the user's max_timeout, " &
+                "also the ceiling here). A bigger timeout will not help; " &
+                "background the work and poll its log.]"
   elif code > 0:
     let verdict = semanticExitNote(cmd, code, body)
     if verdict.len > 0: body.add verdict

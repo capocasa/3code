@@ -829,6 +829,34 @@ saying why and when the next attempt fires. If the provider stays empty,
 the turn ends with a notice instead of a silent nothing, and the scrollback
 shows exactly what was tried.
 
+## Bash timeouts
+
+Every bash tool call runs under a cap: 120 seconds unless the model passes
+`timeout`, clamped to a 600 second ceiling. A model that knows a compile
+runs long can ask for more; a model that does not gets killed at the cap,
+reads `killed at the 120s default cap. Not a system limit: pass
+timeout=600 ... and rerun`, and retries with a bigger timeout. Weak models
+used to miss the hint and just flail.
+
+One setting in the config file makes that whole dance unnecessary on a box
+where long builds are legitimate:
+
+```ini
+[settings]
+max_timeout = 1800
+```
+
+That raises the ceiling *and* the default: every bash run is eligible for
+the full 1800 seconds whether or not the model asks for more time, and the
+model is told the real numbers (the tool description and the kill message
+both quote the configured values). A big Rust compile on a small VPS
+survives with no model cooperation at all.
+
+`force_timeout = N` still exists for the blunt case (every run gets
+exactly N seconds, model requests ignored), but with `max_timeout` raising
+the default too it is rarely the answer anymore. Both are documented in
+[settings in the reference](reference.html#settings).
+
 ## Private mode
 
 Private mode is incognito mode for the agent: off by default, on for one

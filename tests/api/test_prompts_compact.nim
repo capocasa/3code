@@ -385,7 +385,8 @@ suite "prompts: setup — deepseek":
     # teach the semantics the harness actually enforces, one fact once.
     check "exit=N" in s.prompt
     check "tail-truncated" in s.prompt
-    check "hard" in s.prompt and "120s" in s.prompt
+    # the built prompt resolves the timeout tokens to the live values
+    check "hard" in s.prompt and "120s" in buildSystemPrompt(p)
     check "Lines over 2KB are skipped" in s.prompt
     check "capped at 250 lines" in s.prompt
     check "limit:-1` lifts the cap" in s.prompt
