@@ -1079,6 +1079,248 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     if runCode != 0:
       checkpoint runOut
 
+  test "runTurns flags a mid-loop yield so a queued system command can resume the turn":
+    # A deferred system command (`:!`, mutating `:cmd`) queued while a tool
+    # runs must yield the turn at the tool boundary - but the yield has to
+    # be distinguishable from a finished turn, or the drain that runs the
+    # command strands the conversation on unanswered tool results until
+    # the next prompt. `turnYieldedToQueue` is that signal.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_syscmd_yield_probe_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": null,
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "arguments": "{\"command\":\"touch started; sleep 0.3; echo tooldone\"}"
+    }
+  }]
+},{
+  "role": "assistant",
+  "content": "SECOND_REPLY"
+}]""")
+    writeFile(probePath, """
+import std/[json, locks, os, strutils, times]
+import threecode
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "first"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "stub", family: "glm", model: "stub-model")
+
+proc queueCommand() {.thread, gcsafe.} =
+  # An echoed ieCommand is a command deferred to the drain (what the input
+  # thread queues for `:!`/mutating commands); the marker makes sure it
+  # lands inside the tool window.
+  let deadline = epochTime() + 30.0
+  while not fileExists("started") and epochTime() < deadline:
+    sleep 1
+  {.cast(gcsafe).}:
+    pushInputEvent(InputEvent(kind: ieCommand, text: ":! echo syscmd",
+                              echoed: true, echoRows: 1))
+
+var t: Thread[void]
+createThread(t, queueCommand)
+discard runTurns(profile, messages, session)
+joinThread(t)
+
+doAssert hasQueuedAutosend(), "deferred command still queued"
+doAssert turnYieldedToQueue, "mid-loop yield must be flagged for the drain"
+doAssert messages.len == 4
+doAssert messages[3]{"role"}.getStr == "tool"
+doAssert "SECOND_REPLY" notin $messages
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " & nimbleDepFlags() & " --nimcache:" &
+      cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
+      probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+
+  test "resuming after the queued system command's drain continues the turn":
+    # The interactive drain's exact sequence, driven headlessly: the turn
+    # yields at the tool boundary for the deferred command, the drain runs
+    # it (a no-op here - its output never reaches the model anyway), then
+    # sends the model back in. The follow-up call must happen and the
+    # conversation must end on the assistant's reply, not on the dangling
+    # tool result.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_syscmd_resume_probe_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": null,
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "arguments": "{\"command\":\"touch started; sleep 0.3; echo tooldone\"}"
+    }
+  }]
+},{
+  "role": "assistant",
+  "content": "SECOND_REPLY"
+}]""")
+    writeFile(probePath, """
+import std/[json, locks, os, strutils, times]
+import threecode
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "first"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "stub", family: "glm", model: "stub-model")
+
+proc queueCommand() {.thread, gcsafe.} =
+  let deadline = epochTime() + 30.0
+  while not fileExists("started") and epochTime() < deadline:
+    sleep 1
+  {.cast(gcsafe).}:
+    pushInputEvent(InputEvent(kind: ieCommand, text: ":! echo syscmd",
+                              echoed: true, echoRows: 1))
+
+var t: Thread[void]
+createThread(t, queueCommand)
+discard runTurns(profile, messages, session)
+joinThread(t)
+
+# The drain (threecode.nim handleBufferedAfterTurn): run the deferred
+# command's event off the queue, then send the model back in because the
+# turn yielded mid-loop and was not interrupted.
+let ev = pollInputEvent()
+doAssert ev.kind == ieCommand and ev.echoed
+doAssert pollInputEvent().kind == ieNone
+let interrupted = false
+if not interrupted and turnYieldedToQueue and
+    messages[^1]{"role"}.getStr == "tool":
+  turnYieldedToQueue = false
+  discard runTurns(profile, messages, session)
+
+doAssert not turnYieldedToQueue
+doAssert messages.len == 5
+doAssert messages[4]{"role"}.getStr == "assistant"
+doAssert "SECOND_REPLY" in messages[4]{"content"}.getStr
+doAssert "tooldone" in messages[3]{"content"}.getStr
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " & nimbleDepFlags() & " --nimcache:" &
+      cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
+      probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+
+  test "runTurns keeps running when an inline command was queued during a tool":
+    # A safe command (`:tokens`, ...) typed during a turn runs inline on
+    # the input thread the moment it is submitted; its un-echoed ieCommand
+    # waits for nothing, so the turn must not stop for it - the model gets
+    # its follow-up call and the reply lands.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_syscmd_inline_probe_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": null,
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "arguments": "{\"command\":\"touch started; sleep 0.3; echo tooldone\"}"
+    }
+  }]
+},{
+  "role": "assistant",
+  "content": "SECOND_REPLY"
+}]""")
+    writeFile(probePath, """
+import std/[json, locks, os, strutils, times]
+import threecode
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "first"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "stub", family: "glm", model: "stub-model")
+
+proc queueCommand() {.thread, gcsafe.} =
+  # An un-echoed ieCommand is one that already ran inline via the command
+  # hook (safe/unknown commands); only its event stays behind for the drain
+  # to skip.
+  let deadline = epochTime() + 30.0
+  while not fileExists("started") and epochTime() < deadline:
+    sleep 1
+  {.cast(gcsafe).}:
+    pushInputEvent(InputEvent(kind: ieCommand, text: ":tokens"))
+
+var t: Thread[void]
+createThread(t, queueCommand)
+discard runTurns(profile, messages, session)
+joinThread(t)
+
+doAssert not hasQueuedAutosend(), "inline command must not count as queued"
+doAssert not turnYieldedToQueue, "turn finished; it never yielded"
+doAssert messages.len == 5
+doAssert messages[4]{"role"}.getStr == "assistant"
+doAssert "SECOND_REPLY" in messages[4]{"content"}.getStr
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " & nimbleDepFlags() & " --nimcache:" &
+      cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
+      probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+
   test "provider stub runs pending tools when autosend is queued during API call":
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_autosend_api_probe_" & pid)

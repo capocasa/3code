@@ -783,13 +783,16 @@ proc pollInputEvent*(): InputEvent =
 proc hasQueuedAutosend*(): bool =
   ## True when the queue holds anything the drain will act on once the turn
   ## yields — a queued prompt (ieLine) or a command deferred to the next
-  ## opportunity (ieCommand). The turn loop consults this to stop before a
-  ## model-initiated follow-up call so queued items run first.
+  ## opportunity (an echoed ieCommand). The turn loop consults this to stop
+  ## before a model-initiated follow-up call so queued items run first. An
+  ## ieCommand that was never echoed already ran inline on the input thread
+  ## (safe/unknown commands do, the moment they were typed), so it waits for
+  ## nothing and must not stop the turn — the drain skips those same events.
   acquire inputStateLock
   try:
     for ev in inputState.eventQueue:
-      if ev.kind in {ieLine, ieCommand}:
-        return true
+      if ev.kind == ieLine: return true
+      if ev.kind == ieCommand and ev.echoed: return true
   finally:
     release inputStateLock
 
