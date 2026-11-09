@@ -881,6 +881,24 @@ verifier that is not allow-private never sees them — the check quietly
 takes the session model instead (a dim note in scrollback says so). Trust a
 verifier with `:private allow` like any other model.
 
+### Private transcripts
+
+A private session's transcript never lands in the ordinary sessions
+directory: it is written to a sibling directory of its own
+(`~/.local/share/3code/sessions-private/` on Linux, next to `sessions/`),
+and the per-session image deliveries sit beside it. Turning private on
+mid-session (`:private on`, `3code -p --resume <id>`) moves the live
+transcript there on the spot, conversation intact. The move is one-way:
+turning private off keeps writing where it is, so private turns can never
+end up in the plain directory.
+
+The sandbox fences that directory absolutely: it rides as a hidden deny
+that no `.sandbox` rule can re-allow, so no agent session — private or
+not — can read private transcripts off disk through bash or the file
+tools. `:sessions`, `--list` and `--find` still show them (marked
+`private`), `--resume` finds them by id, and only `[settings] sandbox = off`
+(or the one-shot `--no-sandbox`) lifts the fence.
+
 ### Picking a private provider
 
 Pick a provider with a zero-training policy you are satisfied with (a strict
@@ -1741,6 +1759,11 @@ macOS and Windows enforce these guards for Bash and in-process tools. Landlock
 cannot subtract a read-only file from an already writable root. On Linux, the
 in-process tools still enforce the guard, but a Bash command under `allow /`
 can write the policy file. Avoid `allow /` if policy-file protection matters.
+
+The same mechanism carries one hidden deny: the private-mode transcript
+directory (see [Private transcripts](#private-transcripts)). No policy rule
+can open it, even under `allow /` — any session able to read it would
+defeat private mode.
 
 A denied Bash command usually reports `Permission denied`. 3code includes the
 active policy path in denial messages, saving you from debugging the wrong

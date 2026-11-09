@@ -85,28 +85,46 @@ const Roles = ["session", "skills", "system", "context", "project_notes",
 proc sessionDir*(): string =
   userDataRoot() / "sessions"
 
+func pathUnderDir(path, dir: string): bool =
+  ## True when `path` names something inside `dir` (not `dir` itself).
+  ## `dir` has no trailing separator; the next char after the prefix must
+  ## be one, so `sessions-backup/x.3log` does not count as under `sessions`.
+  path.len > dir.len and path.startsWith(dir) and
+    (path[dir.len] == '/' or path[dir.len] == '\\')
+
+proc isPrivateSessionPath*(path: string): bool =
+  ## True when `path` lives under the private-mode transcript directory.
+  pathUnderDir(path, privateSessionDir())
+
 proc sessionIdFromPath*(path: string): string =
   let name = path.extractFilename
   if name.endsWith(SessionExt): name[0 ..< name.len - SessionExt.len] else: name
 
 proc sessionImageDir*(sessionPath: string): string =
-  ## Per-session store for vision delivery files: `<sessions>/<id>.img/`,
+  ## Per-session store for vision delivery files: `<dir of the .3log>/<id>.img/`,
   ## a sibling of the session file keyed by its id so resume can find the
   ## exact delivered bytes again (providers' prompt caches key on content
-  ## bytes, so re-sends must be identical). No session file (library use
-  ## without one) lands in a temp dir instead.
+  ## bytes, so re-sends must be identical). Sibling-of-the-file keeps a
+  ## private session's images in the private directory with their
+  ## transcript. No session file (library use without one) lands in a temp
+  ## dir instead.
   if sessionPath.len > 0:
-    sessionDir() / (sessionIdFromPath(sessionPath) & ".img")
+    sessionPath.parentDir / (sessionIdFromPath(sessionPath) & ".img")
   else:
     getTempDir() / "3code-img"
 
 proc newSessionPath*(): string =
+  ## Fresh unique `.3log` path: the plain sessions directory, or the
+  ## private one while private mode is on, so a private session's
+  ## transcript never lands beside (or inside the sandbox reach of) the
+  ## ordinary ones.
+  let dir = if privateMode: privateSessionDir() else: sessionDir()
   let stamp = now().format("yyyyMMdd'T'HHmmss")
-  createDir(sessionDir())
+  createDir(dir)
   var n = 0
   while true:
     let id = if n == 0: stamp else: stamp & "-" & $n
-    let path = sessionDir() / (id & SessionExt)
+    let path = dir / (id & SessionExt)
     # O_EXCL makes the claim atomic; the counter is the tie-breaker when two
     # processes race for the same second.
     when defined(posix):
@@ -540,11 +558,15 @@ proc updateActiveDirLockSession*(sessionPath: string) =
   except CatchableError: discard
 
 proc listSessionPaths*(): seq[string] =
-  let d = sessionDir()
-  if not dirExists(d): return
-  for kind, path in walkDir(d):
-    if kind == pcFile and path.endsWith(SessionExt):
-      result.add path
+  ## Every managed transcript, plain and private, newest-first. The
+  ## listing stays one merge: `:sessions`, `-l`, and `--find` all surface
+  ## private sessions too (marked in display), while the sandbox keeps
+  ## agents out of the directory itself.
+  for d in [sessionDir(), privateSessionDir()]:
+    if not dirExists(d): continue
+    for kind, path in walkDir(d):
+      if kind == pcFile and path.endsWith(SessionExt):
+        result.add path
   result.sort(order = SortOrder.Descending)
 
 # ---------- record parser ----------
@@ -1092,14 +1114,11 @@ proc renderSession*(session: Session, messages: JsonNode): string =
 # ---------- save / load ----------
 
 proc isInSessionDir(path: string): bool =
-  ## True when `path` lives under the managed sessions directory, i.e. when
-  ## it should be (and can be) indexed for cwd lookup. A `-s /custom.3log`
-  ## save target lives elsewhere and is deliberately left unindexed.
-  let dir = sessionDir()
-  if not path.startsWith(dir): return false
-  # dir has no trailing separator; require the next char to be one so that
-  # (say) `sessions-backup/x.3log` doesn't match.
-  path.len > dir.len and (path[dir.len] == '/' or path[dir.len] == '\\')
+  ## True when `path` lives under a managed sessions directory (the plain
+  ## one or the private one), i.e. when it should be (and can be) indexed
+  ## for cwd lookup. A `-s /custom.3log` save target lives elsewhere and is
+  ## deliberately left unindexed.
+  pathUnderDir(path, sessionDir()) or isPrivateSessionPath(path)
 
 proc saveSession*(session: Session, messages: JsonNode) =
   if session.savePath == "": return
@@ -1176,6 +1195,32 @@ proc clearDraft*(session: Session) =
     removeIfExists(draftPathFor(session.savePath))
   if session.cwd != "":
     removeIfExists(pendingDraftPathFor(session.cwd))
+
+proc adoptPrivateTranscriptDir*(session: var Session): bool =
+  ## Move the live session's saves into the private transcript directory,
+  ## for when private mode turns on after the session already exists
+  ## (`:private on`, `-p --resume`). The conversation keeps running in
+  ## memory; the next save re-renders the whole transcript under the new
+  ## path. One direction only: `:private off` never moves a transcript
+  ## back out, so private turns can never land in the plain directory. An
+  ## out-of-tree `-s /custom.3log` target is the user's explicit choice and
+  ## stays put. Returns true when the path moved.
+  if not privateMode or session.savePath == "": return false
+  if not pathUnderDir(session.savePath, sessionDir()): return false
+  clearDraft(session)
+  releaseSessionLock(session.savePath)
+  let oldPath = session.savePath
+  session.savePath = newSessionPath()
+  # A reserved-but-never-saved transcript (startup allocation, `:clear`)
+  # has no content to keep in the plain directory; drop it so the move
+  # does not strand a forever-empty `.3log` in the listing.
+  if not hasSavedSession(oldPath):
+    removeIfExists(oldPath)
+  session.created = $now()
+  session.cwd = safeCwd()
+  acquireSessionLock(session.savePath)
+  updateActiveDirLockSession(session.savePath)
+  true
 
 proc loadDraft*(sessionPath: string): string =
   ## Read the session-id-keyed prompt draft for `sessionPath`, or "" if there
@@ -1529,13 +1574,22 @@ proc previewSession*(path: string): SessionPreview =
       inc result.msgCount
     else: discard
 
+proc sessionPathForId*(id: string): string =
+  ## The managed path for a bare session id, plain or private directory,
+  ## with or without the `.3log` extension. "" when no such file exists.
+  for d in [sessionDir(), privateSessionDir()]:
+    for name in [id & SessionExt, id]:
+      let p = d / name
+      if fileExists(p): return p
+  ""
+
 proc listSessionPathsForCwd*(cwd: string): seq[string] =
   ## Sessions saved under `cwd`, latest-first — read straight from the cwd
   ## index, so it never parses a `.3log`. A missing/stale index entry is
   ## skipped via the `fileExists` check (e.g. a session deleted on disk).
   for id in indexIdsAt(sessionPathIndexDir(), cwd):
-    let p = sessionDir() / (id & SessionExt)
-    if fileExists(p): result.add p
+    let p = sessionPathForId(id)
+    if p.len > 0: result.add p
 
 proc resolveSessionPath*(id: string, cwd = ""): string =
   ## `id` is bare (no extension) or a full path. Returns "" if not found.
@@ -1549,11 +1603,7 @@ proc resolveSessionPath*(id: string, cwd = ""): string =
     if candidates.len == 0: return ""
     return candidates[0]
   if fileExists(id): return id
-  let candidate = sessionDir() / (id & SessionExt)
-  if fileExists(candidate): return candidate
-  let candidate2 = sessionDir() / id
-  if fileExists(candidate2): return candidate2
-  ""
+  sessionPathForId(id)
 
 # ---------- Session-derived display helpers ----------
 

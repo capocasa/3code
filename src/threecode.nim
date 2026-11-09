@@ -757,6 +757,14 @@ proc main() =
     releaseDirLock(session.cwd)
     die(e.msg, ExitConfig)
 
+  # `-p --resume <plain-id>` continues the conversation privately, which
+  # means the transcript continues in the private directory. Resuming a
+  # private session keeps its file (private transcripts never move out).
+  # Runs after the startup locks for the same reason `:clear`'s fork does
+  # its own lock swap mid-session: adopting releases and re-acquires the
+  # session lock itself, so it must not race the one acquired above.
+  discard adoptPrivateTranscriptDir(session)
+
   # Subscription auth: oauth-marked providers resolve their bearer
   # through the token store (auto-refresh) instead of a static key.
   # ChatGPT additionally needs its Codex-backend headers on every call.

@@ -28,7 +28,9 @@
 ## the file says: they ride every load as hidden guard rules
 ## (`hiddenRules`), appended last so no file rule can weaken them,
 ## enforced by the in-process checks and carried through to the box
-## subprocess, but never shown in `:sandbox show`.
+## subprocess, but never shown in `:sandbox show`. The private-mode
+## transcript directory rides the same way as an absolute deny, so no
+## policy can ever let a session read private transcripts off disk.
 ##
 ## `reloadIfChanged` re-reads the active file when its mtime changed
 ## since the last load; it runs before every restricted operation
@@ -415,12 +417,22 @@ proc guardRules*(projectDir: string): seq[Rule] =
   ## the policy out from under 3code, no matter what the file says.
   ## Appended last after every load; a repo file that is also the user
   ## file collapses to one rule.
+  ##
+  ## The private-mode transcript directory rides as a hidden deny for
+  ## the same reason it is separate from `sessions/`: any ordinary
+  ## (non-private) session that could read it would hand private
+  ## conversations to exactly the providers private mode fences them
+  ## from. Stronger than the default `deny /`: no policy file can
+  ## re-allow it, so `allow ~/` or a rubber-stamped ask never opens it.
+  ## Only `[settings] sandbox = off` (guard rules never load) lifts it.
   let user = systemPolicyPath()
   result = @[Rule(access: akReadOnly, kind: rkPath, hidden: true,
                   path: repoPolicyPath(projectDir))]
   if user != result[0].path:
     result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
                     path: user)
+  result.add Rule(access: akDeny, kind: rkPath, hidden: true,
+                  path: privateSessionDir())
 
 proc loadPolicy*(projectDir: string): Policy =
   ## Load the active policy file and remember its mtime for

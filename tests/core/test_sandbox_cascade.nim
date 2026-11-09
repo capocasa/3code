@@ -14,6 +14,7 @@ discard """
 import std/[unittest, os, times, strutils, json]
 import threecode/sandbox
 import threecode/types
+import threecode/util
 import threecode/[minline, ui]
 
 # Use platform-appropriate absolute paths so the test is meaningful on
@@ -471,6 +472,37 @@ suite "single active policy file":
     let pol = parsePolicy(readFile(repoFile), projDir) & sandbox.hiddenRules
     let r = pol.resolve()
     check (repoFile.normalizedPath) in r.readonly
+
+  test "private transcript dir is denied under any policy, hidden from the dump":
+    # The private sessions directory rides as a hidden deny guard: an
+    # ordinary (non-private) session able to read it would hand private
+    # conversations to exactly the providers private mode fences them
+    # from, so no policy file may open it - not `allow /`, not a targeted
+    # allow, not the ask flow.
+    let (home, projDir) = newFixture("guardpriv")
+    let dataHome = home / "data"
+    createDir(dataHome)
+    putEnv("XDG_DATA_HOME", dataHome)
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      putEnv("XDG_DATA_HOME", "")
+      removeDir(home.parentDir)
+    sandbox.hiddenRules = sandbox.guardRules(projDir)
+    defer: sandbox.hiddenRules = @[]
+    let priv = privateSessionDir().normalizedPath
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "allow /\n")
+    var p = loadPolicy(projDir)
+    check p.checkPath(priv) == akDeny
+    check p.checkPath(priv / "20260101T000000.3log") == akDeny
+    check "sessions-private" notin renderSandbox(p)
+    # A targeted allow in the file loses to the appended guard.
+    writeFile(repoFile, "allow /\nallow " & priv & "\n")
+    p = loadPolicy(projDir)
+    check p.checkPath(priv) == akDeny
+    # And the box child sees the compensating deny next to the allow.
+    let r = p.resolve()
+    check priv in r.denied
 
   test "sandboxEnabled default is on (types.nim contract)":
     # The gate lives in types.nim; assert the default so a future change

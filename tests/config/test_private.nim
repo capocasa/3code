@@ -1,8 +1,8 @@
 ## Private mode: [params] allow-private parsing, resolution, persistence,
 ## the known-good curated flag, the `:private` command, and the bar color.
 import std/[json, options, os, strutils, tables, unittest]
-import threecode/[config, display, fatprompt/rendering, minline, prompts, types,
-  ui, util]
+import threecode/[config, display, fatprompt/rendering, minline, prompts, session,
+  types, ui, util]
 
 suite "config: [params] allow-private":
   var tmp = ""
@@ -91,6 +91,8 @@ suite "private mode: :private command":
   var
     savedXdg = ""
     hadXdg = false
+    savedDataXdg = ""
+    hadDataXdg = false
     tempRoot = ""
     savedCurrent = ""
     savedProviders: seq[ProviderRec]
@@ -103,8 +105,11 @@ suite "private mode: :private command":
     privateMode = false
     hadXdg = existsEnv("XDG_CONFIG_HOME")
     savedXdg = getEnv("XDG_CONFIG_HOME")
+    hadDataXdg = existsEnv("XDG_DATA_HOME")
+    savedDataXdg = getEnv("XDG_DATA_HOME")
     tempRoot = getTempDir() / ("3code-test-private-cmd-" & $getCurrentProcessId())
     putEnv("XDG_CONFIG_HOME", tempRoot)
+    putEnv("XDG_DATA_HOME", tempRoot)
     activeProviders = @[ProviderRec(name: "zai", url: "https://api.z.ai/v1",
       key: "k", models: @["glm-5.2", "glm-5.3"])]
     activeCurrent = "zai.glm-5.2"
@@ -119,6 +124,10 @@ suite "private mode: :private command":
       putEnv("XDG_CONFIG_HOME", savedXdg)
     else:
       delEnv("XDG_CONFIG_HOME")
+    if hadDataXdg:
+      putEnv("XDG_DATA_HOME", savedDataXdg)
+    else:
+      delEnv("XDG_DATA_HOME")
     try: removeDir(tempRoot)
     except OSError: discard
 
@@ -178,6 +187,21 @@ suite "private mode: :private command":
     check activeParams.len == n  # upsert, not duplicate
     check activeParams[0].params.allowPrivate == some(false)
     check not privateAllowed(buildProfile("zai.glm-5.2", activeProviders, ""))
+
+  test ":private on moves the live transcript into the private dir":
+    prof = buildProfile("zai.glm-5.2", activeProviders, "")
+    session = Session(savePath: sessionDir() / "20260101T000000.3log",
+      cwd: "/proj/P")
+    createDir(session.savePath.parentDir)
+    writeFile(session.savePath, "")
+    let r = run(":private on")
+    check privateMode
+    check "transcript moved" in r.body
+    check isPrivateSessionPath(session.savePath)
+    discard run(":private off")
+    # Off never moves a transcript back out of the private dir.
+    check isPrivateSessionPath(session.savePath)
+    session = Session()
 
   test ":model refuses a gated model while private":
     privateMode = true

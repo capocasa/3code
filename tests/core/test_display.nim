@@ -95,6 +95,24 @@ suite "display: printSessionList cap":
       let listing = captureList(paths)
       check "of 3" notin listing  # no truncation hint
 
+    test "private sessions are marked in the listing":
+      seedSession("20260301T120000", "plain one")
+      let privDir = privateSessionDir()
+      createDir(privDir)
+      let sess = Session(created: "20260302T120000", profileName: "stub",
+        cwd: cwd)
+      writeFile(privDir / "20260302T120000.3log", renderSession(sess,
+        %*[{"role": "user", "content": "private one"}]))
+      appendSessionIndex(cwd, "20260302T120000")
+      let listing = captureList(listSessionPathsForCwd(cwd))
+      var plainLine = ""
+      var privLine = ""
+      for ln in listing.splitLines():
+        if "20260301T120000" in ln: plainLine = ln
+        if "20260302T120000" in ln: privLine = ln
+      check plainLine.len > 0 and "private" notin plainLine
+      check privLine.len > 0 and "private" in privLine
+
 import threecode/[transcript, types]
 
 suite "display: tool transcript body strips boundary blanks":

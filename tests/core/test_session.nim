@@ -165,6 +165,72 @@ suite "session: save → index → resume-latest integration":
       let saved = sessionDir() / ("20250101T110000" & SessionExt)
       check getFilePermissions(saved) == {fpUserRead, fpUserWrite}
 
+suite "session: private transcript directory":
+  ## Private-mode sessions persist under `sessions-private/`, never in the
+  ## plain directory, and the move into it is one-way. Same XDG isolation
+  ## as the integration suite above.
+  var
+    xdgBefore: string
+    tmpRoot: string
+    savedMode = false
+    seed = 0
+
+  setup:
+    savedMode = privateMode
+    privateMode = false
+    xdgBefore = getEnv("XDG_DATA_HOME")
+    inc seed
+    tmpRoot = getTempDir() / ("3code-test-priv-" & $epochTime().int64 & "-" & $seed)
+    putEnv("XDG_DATA_HOME", tmpRoot)
+
+  teardown:
+    privateMode = savedMode
+    if xdgBefore.len > 0: putEnv("XDG_DATA_HOME", xdgBefore)
+    else: putEnv("XDG_DATA_HOME", "")
+    removeDir(tmpRoot)
+
+  test "allocation and image dir follow the mode":
+    let plain = newSessionPath()
+    check plain.startsWith(sessionDir())
+    check sessionImageDir(plain) ==
+      sessionDir() / (sessionIdFromPath(plain) & ".img")
+    privateMode = true
+    let priv = newSessionPath()
+    check isPrivateSessionPath(priv)
+    check sessionImageDir(priv) ==
+      privateSessionDir() / (sessionIdFromPath(priv) & ".img")
+
+  test "private saves index, list, and resolve like plain ones":
+    privateMode = true
+    var s = Session(created: "20260101T000000", profileName: "test", cwd: "/proj/P")
+    s.savePath = newSessionPath()
+    saveSession(s, %*[{"role": "system", "content": "sys"},
+                      {"role": "user", "content": "hi"}])
+    check isPrivateSessionPath(listSessionPathsForCwd("/proj/P")[0])
+    let back = resolveSessionPath(sessionIdFromPath(s.savePath))
+    check back.len > 0
+    check isPrivateSessionPath(back)
+    check s.savePath in listSessionPaths()
+
+  test "adoptPrivateTranscriptDir moves a plain session, never back out":
+    var s = Session(created: "20260101T000000", profileName: "test", cwd: "/proj/P")
+    s.savePath = newSessionPath()   # mode off in setup: plain reservation
+    check not adoptPrivateTranscriptDir(s)   # mode off: stays put
+    let oldPath = s.savePath
+    privateMode = true
+    check adoptPrivateTranscriptDir(s)
+    check isPrivateSessionPath(s.savePath)
+    check not fileExists(oldPath)   # empty reservation dropped, not stranded
+    check not adoptPrivateTranscriptDir(s)   # already private: idempotent
+    var custom = Session(savePath: tmpRoot / "custom.3log")
+    writeFile(custom.savePath, "")
+    check not adoptPrivateTranscriptDir(custom)   # -s target: user's choice
+    check custom.savePath == tmpRoot / "custom.3log"
+    # The conversation keeps saving into the private dir after the move.
+    saveSession(s, %*[{"role": "user", "content": "kept"}])
+    check readFile(s.savePath).contains("kept")
+    releaseSessionLock(s.savePath)   # later suites assert on the lock state
+
 suite "session: usageFromJson":
   test "parses all fields":
     let j = %*{"promptTokens": 100, "completionTokens": 50,

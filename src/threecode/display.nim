@@ -1035,7 +1035,8 @@ const SessionListCap* = 20
   ## Newest sessions shown by `printSessionList` / `-l` / `:sessions`.
   ## Paths arrive newest-first from `listSessionPaths`, so the cap is a
   ## simple slice. Listing is directory-scoped by design; the full set
-  ## lives under `sessionDir()` for anyone who needs it.
+  ## lives under `sessionDir()` and `privateSessionDir()` for anyone who
+  ## needs it.
 
 proc printSessionListS*(paths: seq[string], currentPath: string,
                         showCwd: bool, skip = 0, moreCmd = ""): string =
@@ -1051,6 +1052,9 @@ proc printSessionListS*(paths: seq[string], currentPath: string,
     let id = sessionIdFromPath(p)
     let preview = previewSession(p)
     let mark = if currentPath == p: "*" else: " "
+    # Private sessions sit in their own directory; say so, so the listing
+    # explains why `--resume <id>` finds them next to the plain ones.
+    let priv = if isPrivateSessionPath(p): " private" else: ""
     let snip =
       if preview.firstUser.len == 0: ""
       elif preview.firstUser.len > 50: "  " & preview.firstUser[0 ..< 47] & "..."
@@ -1059,7 +1063,7 @@ proc printSessionListS*(paths: seq[string], currentPath: string,
       if showCwd and preview.cwd != "": "  " & collapseHome(preview.cwd)
       else: ""
     result.add &"  {mark} " & id &
-      &"   ({preview.msgCount} msg" & (if preview.msgCount == 1: "" else: "s") & ")" &
+      &"   ({preview.msgCount} msg" & (if preview.msgCount == 1: "" else: "s") & priv & ")" &
       cwdStr & snip & "\r\n"
   if paths.len > lastEx:
     if moreCmd.len > 0:
@@ -1083,6 +1087,7 @@ proc printSearchListS*(hits: seq[SearchHit], total: int, showCwd: bool,
   let lastEx = min(skip + SessionListCap, hits.len)
   for h in hits[first ..< lastEx]:
     let id = sessionIdFromPath(h.path)
+    let priv = if isPrivateSessionPath(h.path): " private" else: ""
     let cwdStr =
       if showCwd:
         var c = collapseHome(h.cwd)
@@ -1090,7 +1095,7 @@ proc printSearchListS*(hits: seq[SearchHit], total: int, showCwd: bool,
         c
       else: ""
     let snip = hitSnippet(h, if showCwd: 48 else: 72)
-    result.add &"  {id}  {align($h.score, 3)}×" &
+    result.add &"  {id}{priv}  {align($h.score, 3)}×" &
       (if cwdStr.len > 0: "  " & cwdStr else: "") &
       "  " & snip & "\r\n"
   if total > lastEx:

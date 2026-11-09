@@ -238,6 +238,12 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
     releaseDirLock(s.state.cwd)
     raise newException(AgentError, e.msg)
 
+  # An embedding that turned on private mode continues the resumed
+  # conversation in the private transcript directory, same as the CLI's
+  # `-p --resume`. After the locks, mirroring the CLI's placement:
+  # adopting swaps the session lock itself.
+  discard adoptPrivateTranscriptDir(s.state)
+
   # Headless plumbing last, so a raised init leaves the terminal path
   # untouched.
   termengine.engineOutputEnabled = false

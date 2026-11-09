@@ -600,6 +600,13 @@ proc userDataRoot*(): string =
     let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
   base / "3code"
 
+proc privateSessionDir*(): string =
+  ## Sibling of `sessions/` holding private-mode transcripts. Lives here
+  ## (next to `userDataRoot`) and not in session.nim with the rest of the
+  ## session-path family because sandbox.nim fences this directory with a
+  ## hidden deny rule and must not import the session machinery.
+  userDataRoot() / "sessions-private"
+
 # TLS trust: the embedded/adjacent CA bundle and the process-wide
 # verifying context. Defined after `userDataRoot` because top-level
 # routines resolve in declaration order.

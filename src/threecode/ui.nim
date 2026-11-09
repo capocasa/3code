@@ -1532,10 +1532,17 @@ proc cmdPrivateList(prof: Profile): string =
   if shown == 0:
     result.add hintLnS("  no allow-private providers configured yet")
 
-proc cmdPrivateSelect(target: string, prof: Profile): string =
+proc cmdPrivateSelect(target: string, prof: Profile,
+                       session: var Session): string =
   case target.toLowerAscii
   of "on":
     privateMode = true
+    # Transcripts of private sessions live in their own directory; a
+    # session that already exists moves there now (never back out —
+    # turning private off keeps the file where it is).
+    if adoptPrivateTranscriptDir(session):
+      result.add hintLnS("· transcript moved to " &
+        collapseHome(privateSessionDir()))
   of "off":
     privateMode = false
   else:
@@ -1573,7 +1580,7 @@ proc cmdPrivateAllow(parts: seq[string], allow: bool): string =
   hintLnS((if allow: "private allow " else: "private deny ") &
     prov.name & scope)
 
-proc cmdPrivate(arg: string, prof: var Profile): string =
+proc cmdPrivate(arg: string, prof: var Profile, session: var Session): string =
   let parts = arg.splitWhitespace()
   if parts.len == 0 or (parts.len == 1 and parts[0] == "list"):
     return cmdPrivateList(prof)
@@ -1581,7 +1588,7 @@ proc cmdPrivate(arg: string, prof: var Profile): string =
   of "on", "off":
     if parts.len != 1:
       return errLnS("usage: :private [on|off|allow <provider> [model]]")
-    result.add cmdPrivateSelect(parts[0], prof)
+    result.add cmdPrivateSelect(parts[0], prof, session)
   of "allow", "deny":
     if parts.len < 2 or parts.len > 3:
       return errLnS(&"usage: :private {parts[0]} <provider> [model]")
@@ -2230,7 +2237,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
     of ":retry":
       body.add cmdRetry(arg)
     of ":private":
-      body.add cmdPrivate(arg, prof)
+      body.add cmdPrivate(arg, prof, session)
     of ":computer":
       body.add cmdComputer(arg, prof, session)
     of ":prompt":
