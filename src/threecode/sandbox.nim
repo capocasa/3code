@@ -298,25 +298,86 @@ proc wallEnv*(selfExe, port, sockPath: string;
         "ssh -o ProxyCommand=\"" & selfExe & " wall connect %h %p\"")
 
 when defined(posix):
-  proc installSshShim*(dir, selfExe: string): string =
-    ## Write an `ssh` wrapper into `dir/wallbin` that routes every ssh
-    ## invocation through the wall proxy. OpenSSH ignores the proxy env
-    ## vars, so without the wrapper ssh dies inside the fence (no
-    ## resolver, no route off the netns). The wrapper execs the real
-    ## ssh with a ProxyCommand of `wall connect %h %p` - the same
-    ## tunnel GIT_SSH_COMMAND gives git - so the proxy resolves the
-    ## name and the allowlist decides, loopback and remote targets
-    ## alike. scp, sftp and rsync ride along: they all spawn `ssh`
-    ## from PATH. Returns the shim dir, or "" when there is no ssh on
-    ## PATH to wrap.
-    let ssh = findExe("ssh")
-    if ssh.len == 0: return ""
+  proc wallSshConfig*(dir, selfExe: string): string =
+    ## The ssh config the fence hands to OpenSSH, written to
+    ## `dir/wallbin/ssh_config`. Two jobs in one file:
+    ##
+    ## * route every connection through the wall proxy. OpenSSH
+    ##   ignores the proxy env vars, so the shim passes this file with
+    ##   -F: `wall connect %h %p` is the same tunnel GIT_SSH_COMMAND
+    ##   gives git, the proxy resolves the name, and the allowlist
+    ##   decides, loopback and remote targets alike.
+    ##
+    ## * repair the defaults that break under the fence. The fenced
+    ##   child runs as uid 65534 (nobody), whose passwd home is /, so
+    ##   ssh's pw_dir-based defaults would look under /.ssh: no config
+    ##   aliases, no default identities, no known_hosts. The file
+    ##   carries a copy of ~/.ssh/config with ~ rewritten to the
+    ##   absolute home, plus explicit fallbacks.
+    ##
+    ## Not covered: scp and sftp, whose OpenSSH 9.8+ binaries exec
+    ## /usr/bin/ssh by absolute path - no PATH shim or env reaches
+    ## them, so inside the fence they die for lack of a route (rsync
+    ## and git cover their use cases and are proxied).
+    ##
+    ## The user's stanzas come first (first-obtained wins per option,
+    ## so their ProxyCommand/aliases beat the appended Host * block;
+    ## IdentityFile accumulates). Empty when there is nothing to do
+    ## (no ssh on PATH).
+    if findExe("ssh").len == 0: return ""
     let shimDir = dir / "wallbin"
     createDir(shimDir)
+    let cfgPath = shimDir / "ssh_config"
+    let home = getHomeDir()
+    var text = ""
+    let userCfg = home & ".ssh/config"
+    if fileExists(userCfg):
+      try:
+        # copy with ~ rewritten to the absolute home, minus the
+        # multiplexing options: a ControlMaster listener needs a
+        # writable ControlPath, the fence's ~/.ssh is at best
+        # readonly, and OpenSSH 10 treats the bind failure as fatal
+        for line in readFile(userCfg).splitLines():
+          let t = line.strip().toLowerAscii
+          if t.startsWith("controlmaster") or t.startsWith("controlpath") or
+              t.startsWith("controlpersist"):
+            continue
+          text.add(line.replace("~/", home) & "\n")
+      except CatchableError: discard  # unreadable: defaults only
+    text.add "\n# 3code wall proxy (sandbox fence)\nHost *\n"
+    # the fenced uid is 65534, so ssh would log in as nobody@...;
+    # the launching user's name is the right default (a User in the
+    # user's own stanzas, or user@host / -l, still wins: first match)
+    let loginName = getEnv("LOGNAME", getEnv("USER", ""))
+    if loginName.len > 0:
+      text.add "  User " & loginName & "\n"
+    # multiplexing needs a writable ControlPath; the fence's ~/.ssh is
+    # at best readonly
+    text.add "  ControlMaster no\n  ControlPath none\n"
+    if "userknownhostsfile" notin text.toLowerAscii:
+      text.add "  UserKnownHostsFile " & home & ".ssh/known_hosts\n"
+    for id in ["id_ed25519", "id_ecdsa", "id_rsa",
+               "id_ecdsa_sk", "id_ed25519_sk"]:
+      text.add "  IdentityFile " & home & ".ssh/" & id & "\n"
+    text.add "  ProxyCommand " & selfExe & " wall connect %h %p\n"
+    writeFile(cfgPath, text)
+    cfgPath
+
+  proc installSshShim*(dir, selfExe: string): string =
+    ## Write an `ssh` wrapper into `dir/wallbin`, first on the fenced
+    ## child's PATH, for clients that find ssh through PATH (plain
+    ## ssh, rsync, everything scripting `ssh ...`). It execs the real
+    ## ssh with -F pointing at the wall config (see wallSshConfig),
+    ## which also repairs the pw_dir defaults that break under the
+    ## fence. Returns the shim dir, or "" when there is no ssh on PATH
+    ## to wrap.
+    let ssh = findExe("ssh")
+    let cfg = wallSshConfig(dir, selfExe)
+    if ssh.len == 0 or cfg.len == 0: return ""
+    let shimDir = dir / "wallbin"
     let shim = shimDir / "ssh"
-    writeFile(shim, "#!/bin/sh\nexec " & ssh.quoteShell &
-      " -o " & ("ProxyCommand=" & selfExe & " wall connect %h %p").quoteShell &
-      " \"$@\"\n")
+    writeFile(shim, "#!/bin/sh\nexec " & ssh.quoteShell & " -F " &
+      cfg.quoteShell & " \"$@\"\n")
     setFilePermissions(shim,
       {fpUserRead, fpUserWrite, fpUserExec,
        fpGroupRead, fpGroupExec, fpOthersRead, fpOthersExec})

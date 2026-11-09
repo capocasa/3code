@@ -49,7 +49,19 @@ when defined(posix):
         let shim = readFile(shimDir / "ssh")
         check shim.startsWith("#!/bin/sh")
         check ("exec " & findExe("ssh").quoteShell) in shim
-        check "/x/3code wall connect %h %p" in shim
+        check ("-F " & (shimDir / "ssh_config").quoteShell) in shim
+        # the wall config carries the tunnel plus the pw_dir repairs
+        # (fence uid is 65534; see wallSshConfig)
+        let cfg = readFile(shimDir / "ssh_config")
+        check "/x/3code wall connect %h %p" in cfg
+        check "IdentityFile " in cfg
+        check "UserKnownHostsFile " in cfg
+        if fileExists(getHomeDir() / ".ssh/config"):
+          check "~/" notin cfg
+          # multiplexing cannot work on a readonly ~/.ssh, and a
+          # ControlMaster bind failure is fatal in OpenSSH 10
+          check "ControlMaster auto" notin cfg
+          check "ControlPath ~/.ssh" notin cfg
         var st: Stat
         check posix.stat((shimDir / "ssh").cstring, st) == 0
         check (st.st_mode and 0o111) != 0  # executable
