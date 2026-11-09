@@ -4,7 +4,11 @@ discard """
   # user wrote one, else the built-in default in memory. 3code never
   # creates the user file: a user who never configured anything always
   # gets the current shipped default, not the default a long-ago first
-  # run froze to disk. Never a cascade. The parser itself is
+  # run froze to disk. The repo slot is the directory store's
+  # `.3code/sandbox` with the legacy root-level `.sandbox` as fallback,
+  # and the selection cascades up the parent directories (nearest
+  # wins; the store-file selection and cascade are covered in
+  # tests/config/test_dirsettings.nim). The parser itself is
   # exhaustively tested in sandwall's test_rules; these tests cover
   # the 3code-facing surface: file selection via `activePolicyPath`,
   # the default fallback, the materialization in `appendRule`, and
@@ -38,6 +42,10 @@ proc newFixture(name: string): tuple[home, proj: string] =
   result = (base / "xdg", base / "proj")
   createDir(result.home)
   createDir(result.proj)
+  # The directory-settings store exists so tests that write a policy
+  # straight to `repoPolicyPath` (the `.3code/sandbox` slot) need no
+  # createDir of their own.
+  createDir(result.proj / ".3code")
   putEnv("XDG_CONFIG_HOME", result.home)
 
 suite "single active policy file":

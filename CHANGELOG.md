@@ -2,6 +2,29 @@ Changelog
 
 Unreleased
 
+- **Directory-specific settings: the `.3code` store, cascading up the
+  parents.** Every directory can carry its own settings store — a
+  `.3code` directory right in it (default), or a per-directory
+  directory under `~/.config/3code/dirs/` when `[settings]
+  dirconfig = "user"` says so. The store holds the directory's `config`
+  (a `[settings]` override: `current`, `sandbox = off`,
+  `sandbox_wall_warn`), its `sandbox` policy file, and the harness mode
+  files (`goal`, `achieved`, `goal-cancelled`, `cybernetic`, ...).
+  Resolution cascades: the directory's own store wins, then each
+  ancestor's, nearest first; the user config is the floor. This fixes
+  the "default provider reverts to the first `[provider]` section"
+  report: a provider picked at a project root now sticks in every
+  subdirectory (`:provider`/`:model` still write the per-directory
+  sticky into the store's `config`). `sandbox = off` in a `.3code`
+  config now turns the sandbox off for that tree without touching the
+  user config, and `writeConfigFile` never leaks a directory's
+  effective value into it. The sandbox policy file moves to
+  `.3code/sandbox` (the legacy root-level `.sandbox` still reads and
+  still gets edited in place; the selection walks parents, nearest
+  wins, and `./` targets in an ancestor's policy resolve against the
+  ancestor). goal/cyber mode files arm into the store
+  (`.3code/goal`); a legacy `goal.md` on disk stays detected and
+  retires the way it always did, so nothing breaks on upgrade.
 - **Community prompt findings folded into every shipped system
   prompt.** kay-is's tools-section rewrite (community thread 9, born
   from DS 4.1 Flash failing the patch tool) now rides every family

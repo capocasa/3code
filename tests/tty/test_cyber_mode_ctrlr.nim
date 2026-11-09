@@ -92,17 +92,17 @@ suite "cyber mode surfaces (interactive)":
     # The arm is the file plus one receipt line carrying the parsed
     # counts, then the dim detection hint - and the kickoff turn starts
     # on its own: no prompt is sent, and the reply streams anyway.
-    tty.expectInHistory "cybernetic armed (cybernetic.md, 1 task, 0 done), starting now"
-    tty.expectInHistory "cybernetic.md detected implementing"
+    tty.expectInHistory "cybernetic armed (.3code/cybernetic, 1 task, 0 done), starting now"
+    tty.expectInHistory ".3code/cybernetic detected implementing"
     tty.expectInHistory "PLAN_WORK_DONE"
     # Turn end: the completed hint, then the verifier's green ✓ item,
     # the retirement hint, and the plan retires on disk.
-    tty.expectInHistory "cybernetic.md completed verifying"
+    tty.expectInHistory ".3code/cybernetic completed verifying"
     tty.expectInHistory "\u2713"
-    tty.expectInHistory "cybernetic.md verification successful"
+    tty.expectInHistory ".3code/cybernetic verification successful"
     tty.drain(300)
-    check fileExists(root / "run" / "cybernetic-confirmed.md")
-    check not fileExists(root / "run" / "cybernetic.md")
+    check fileExists(root / "run" / ".3code" / "cybernetic-confirmed")
+    check not fileExists(root / "run" / ".3code" / "cybernetic")
     tty.expectAlive()
 
   test "cybernetic.md present at startup starts the kickoff turn at once":
@@ -256,11 +256,11 @@ suite "cyber mode surfaces (interactive)":
     tty.expect ":cyber arm my plan"
     tty.send "\n"
     tty.drain(100)
-    tty.expectInHistory "cybernetic armed (cybernetic.md"
+    tty.expectInHistory "cybernetic armed (.3code/cybernetic"
     tty.expectInHistory "PLAN_WORK_DONE"
     tty.expectInHistory "\u2713"
     tty.drain(300)
-    check fileExists(root / "run" / "cybernetic-confirmed.md")
+    check fileExists(root / "run" / ".3code" / "cybernetic-confirmed")
     tty.expectAlive()
 
 proc toolReply(name, argsJson: string; content = ""): JsonNode =

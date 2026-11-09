@@ -275,7 +275,8 @@ suite "startGoal (the :goal writer)":
   test "writes goal.md, text stripped and newline-terminated":
     withGoalDir proc (dir: string) =
       check startGoal("  make it so  ").ok
-      check readFile(GoalFileName) == "make it so\n"
+      # New arms land in the settings store (.3code/goal).
+      check readFile(".3code" / "goal") == "make it so\n"
 
   test "refuses to clobber a live goal without force":
     withGoalDir proc (dir: string) =
@@ -283,13 +284,13 @@ suite "startGoal (the :goal writer)":
       let r = startGoal("second")
       check not r.ok
       check ":goal!" in r.err
-      check readFile(GoalFileName).strip == "first"
+      check readFile(".3code" / "goal").strip == "first"
 
   test "force replaces the live goal":
     withGoalDir proc (dir: string) =
       discard startGoal("first")
       check startGoal("second", force = true).ok
-      check readFile(GoalFileName).strip == "second"
+      check readFile(".3code" / "goal").strip == "second"
 
 suite "cancelGoal (the :goal! exit)":
   test "cancel retires goal.md to goal-cancelled.md":
@@ -297,8 +298,8 @@ suite "cancelGoal (the :goal! exit)":
       discard startGoal("doomed")
       check cancelGoal().ok
       check not goalModeActive()
-      check not fileExists(GoalFileName)
-      check readFile(GoalCancelledName).strip == "doomed"
+      check not fileExists(".3code" / "goal")
+      check readFile(".3code" / "goal-cancelled").strip == "doomed"
 
   test "cancel without a live goal is an error":
     withGoalDir proc (dir: string) =

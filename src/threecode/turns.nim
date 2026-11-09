@@ -1024,7 +1024,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       let counts = m.taskCounts(body)
       let rolloverReceipt = receiptBytes(
         "auto: " & m.name & " rollover - plan at " &
-          m.fileName &
+          modeFileLabel(m) &
           (if counts.len > 0: " (" & counts & ")" else: ""))
       termengine.noteNonMessageTail(rolloverReceipt, messages.len)
       commitTranscriptBytes(rolloverReceipt, true)
@@ -1923,6 +1923,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           sendBack(note, mode.name & " update discipline (check unavailable)")
           continue
       elif check.verdict.kind == gvkSatisfied:
+        # Captured before the rename: the retirement hint prints after
+        # the file is gone, when the live-file label lookup would fall
+        # back to the legacy name.
+        let label = modeFileLabel(mode, session.cwd)
         if completeMode(mode, session.cwd):
           session.goalNotified = false
           session.modeSnapshot = ""
@@ -1931,7 +1935,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           # passed; the dim hint says what the harness did about it (the
           # rename is on disk).
           commitHarnessNotice(
-            modeHintLine(mode, "verification successful"), messages)
+            modeHintLine(mode, "verification successful", label), messages)
         else:
           commitHarnessNotice(
             errLnS(mode.name & " satisfied but " & mode.fileName &

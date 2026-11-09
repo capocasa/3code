@@ -32,6 +32,7 @@ when defined(posix):
 when defined(windows):
   import std/[widestrs, winlean]
 import types, prompts, util, actions, images
+import dirsettings
 
 const SessionExt* = ".3log"
 
@@ -186,22 +187,22 @@ proc mangleCwd*(cwd: string): string =
 # ---------------------------------------------------------------------------
 
 proc dirCurrentPathFor*(cwd: string): string =
-  userDataRoot() / "dirs" / (mangleCwd(cwd) & ".current")
+  ## Legacy slot from before the `.3code` store: kept for the fallback
+  ## read and for tests. New writes land in the store's `config`.
+  dirsettings.legacyDirCurrentPath(cwd)
 
 proc loadDirCurrent*(cwd: string): string =
-  ## The sticky `provider.model` for this directory, "" when unset or blank.
-  let path = dirCurrentPathFor(cwd)
-  if not fileExists(path): return ""
-  readFile(path).strip
+  ## The sticky `provider.model` for this directory: the nearest store
+  ## (this dir or any ancestor) whose `config` sets `current`, else the
+  ## legacy per-dir file, else "".
+  dirsettings.dirCurrentFor(cwd)
 
 proc saveDirCurrent*(cwd, current: string) =
-  ## Atomically record `current` for this directory (temp + rename, same
-  ## scheme as drafts), so a crash mid-write never leaves it truncated.
-  let path = dirCurrentPathFor(cwd)
-  createDir(path.parentDir)
-  let tmp = path & ".tmp"
-  writeFile(tmp, current & "\n")
-  moveFile(tmp, path)
+  ## Atomically record `current` for this directory in its OWN store
+  ## (temp + rename, same scheme as drafts), preserving the store
+  ## config's other lines. Falls back to the legacy slot when the store
+  ## directory cannot be created.
+  dirsettings.saveDirCurrentStore(cwd, current)
 
 proc sessionPathIndexDir*(): string =
   userDataRoot() / "session-paths"

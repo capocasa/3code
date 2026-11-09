@@ -35,7 +35,8 @@ import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
                   auth_xai, auth_openai, auth_google, auth_anthropic,
-                  streamexec, cli, search, tabtitle, plugins, goal]
+                  streamexec, cli, search, tabtitle, plugins, goal,
+                  dirsettings]
 import threecode/acp
 import threecode/rpc
 when not defined(android):
@@ -696,6 +697,11 @@ proc main() =
   # consult forward so `sandbox_wall_warn = off` works on the first
   # print. The full parse re-applies them unchanged.
   applyEarlySandboxSettings(configPath())
+  # Directory-specific settings overlay: a `.3code/config` in the
+  # session dir (or any parent, nearest wins) can switch the sandbox
+  # off before it arms, so it runs before initSandbox like the early
+  # global parse above.
+  dirsettings.applyDirConfig(session.cwd)
   # Sandbox is mandatory: the single active policy (repo
   # `.sandbox`, user file, else the built-in default) is loaded.
   # Paths resolve relative to the session cwd so the policy follows
@@ -783,9 +789,14 @@ proc main() =
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
-  # Per-directory sticky current: this directory's last `:provider` / `:model`
-  # wins over the global config when it still resolves. An explicit --model
-  # or a resumed session's own profile still wins over both.
+  # Re-apply the directory overlay after the full parse (it re-applies
+  # the user config's own switches, which would otherwise undo a
+  # directory's `sandbox = off`), then the per-directory sticky current:
+  # the nearest store with a `current` entry wins (this directory or
+  # any parent), so a provider choice made at a project root sticks in
+  # every subdirectory instead of falling back to the global `current`
+  # and from there to the first [provider] section.
+  dirsettings.applyDirConfig(safeCwd())
   block:
     let dirCurrent = loadDirCurrent(safeCwd())
     if dirCurrent != "" and

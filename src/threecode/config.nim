@@ -16,6 +16,7 @@ import plugins
 when defined(posix):
   import std/posix except SocketHandle
 import types, prompts, util, auth_openai, modelname, minline
+import dirsettings
 
 type
   ProviderRec* = object
@@ -358,7 +359,8 @@ const
                   "bash", "auto-update", "tab-title",
                   "allow-empty-prompt", "allow_empty_prompt",
                   "verifier", "verifier_model", "verifier-model",
-                  "computer", "user_agent", "user-agent"]
+                  "computer", "user_agent", "user-agent",
+                  "dirconfig"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -461,6 +463,10 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin ColorModes:
         return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
                "(expected one of: auto, dark, light)"
+      if ent.key == "dirconfig" and
+          ent.value.strip.toLowerAscii notin DirConfigValues:
+        return &"{path}:{ent.line}: bad value '{ent.value}' for 'dirconfig' " &
+               "in [settings] (expected one of: project, user)"
     of "params":
       # `provider` and `model` are scope keys (plain strings, `model` may
       # be empty for a provider-wide entry); the rest carry typed values
@@ -712,6 +718,9 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           bashPathOverride = v
         of "bash":
           bashSourcePref = v.strip.toLowerAscii
+        of "dirconfig":
+          let dv = v.strip.toLowerAscii
+          if dv in DirConfigValues: dirsettings.dirConfigLocation = dv
         of "user_agent", "user-agent":
           # Raw `e.value`, not the env-expanded `v`: the `$vars` in the
           # template belong to modelUserAgent's expansion, not the
@@ -853,11 +862,13 @@ proc mergeForeignEdits(path: string; current: var string,
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
        savedWallWarn, savedMaxTimeout, savedForceTimeout, savedColorMode,
        savedBash, savedBashSrc, savedTabTitle, savedVerifierOn,
-       savedVerifierSpec, savedUserAgent, savedBannerLines) =
+       savedVerifierSpec, savedUserAgent, savedBannerLines,
+       savedDirConfig) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
      sandboxWallWarn, maxTimeoutSetting, forceTimeoutSetting, colorModePref,
      bashPathOverride, bashSourcePref, tabTitleEnabled, verifierEnabled,
-     verifierModelSpec, userAgentTemplate, bannerLinesSetting)
+     verifierModelSpec, userAgentTemplate, bannerLinesSetting,
+     dirsettings.dirConfigLocation)
   let savedParams = activeParams
   let savedWarnings = activeConfigWarnings
   let (diskCurrent, diskProviders, _, _, _, _) =
@@ -882,6 +893,7 @@ proc mergeForeignEdits(path: string; current: var string,
   verifierEnabled = savedVerifierOn
   verifierModelSpec = savedVerifierSpec
   userAgentTemplate = savedUserAgent
+  dirsettings.dirConfigLocation = savedDirConfig
   activeParams = savedParams
   activeConfigWarnings = savedWarnings
   # Same baseline-diff for the `current` line: an instance that never
@@ -973,7 +985,16 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "notify = \"off\"\n"
   if not tabTitleEnabled:
     buf.add "tab-title = \"off\"\n"
-  if not sandboxEnabled:
+  # A directory's `sandbox = off` must not edit the user config: while
+  # a directory override is in effect, persist the user config's own
+  # value instead of the effective one.
+  let effSandbox =
+    if dirsettings.dirSandboxOverridden: dirsettings.globalSandboxEnabled
+    else: sandboxEnabled
+  let effWallWarn =
+    if dirsettings.dirWallWarnOverridden: dirsettings.globalWallWarn
+    else: sandboxWallWarn
+  if not effSandbox:
     buf.add "sandbox = \"off\"\n"
   if not patientRetryEnabled:
     buf.add "patient_retry = \"off\"\n"
@@ -981,8 +1002,12 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "allow-empty-prompt = \"off\"\n"
   if browserFetchEnabled:
     buf.add "browserfetch = \"on\"\n"
-  if not sandboxWallWarn:
+  if not effWallWarn:
     buf.add "sandbox_wall_warn = \"off\"\n"
+  # The store location is a user-config decision; persist it whenever it
+  # is not the default so a re-written config keeps the user's choice.
+  if dirsettings.dirConfigLocation != "project":
+    buf.add "dirconfig = " & quoteVal(dirsettings.dirConfigLocation) & "\n"
   # Bare number, not a quoted literal: the reader parseInts the raw value.
   if maxTimeoutSetting > 0 and maxTimeoutSetting != MaxBashTimeout:
     buf.add "max_timeout = " & $maxTimeoutSetting & "\n"
@@ -1081,7 +1106,8 @@ proc resolveSearchKey*(engine: string; keys: Table[string, string]): string =
 
 proc applyEarlySandboxSettings*(path: string) =
   ## Apply only the two `[settings]` sandbox switches (`sandbox`,
-  ## `sandbox_wall_warn`) from a tolerant parse of `path`. The pre-prompt
+  ## `sandbox_wall_warn`) and the store-location switch (`dirconfig`)
+  ## from a tolerant parse of `path`. The pre-prompt
   ## sandbox warnings print before the full `parseConfigFile` run and
   ## must respect `sandbox_wall_warn = off` on the first print; the full
   ## parse later in startup re-applies everything authoritatively. A
@@ -1103,6 +1129,9 @@ proc applyEarlySandboxSettings*(path: string) =
     of cfgKeyValuePair, cfgOption:
       if section != "settings": continue
       let v = expandEnvValue(e.value).toLowerAscii
+      if e.key == "dirconfig" and v in DirConfigValues:
+        dirsettings.dirConfigLocation = v
+        continue
       case e.key
       of "sandbox", "sandbox_enabled":
         case v

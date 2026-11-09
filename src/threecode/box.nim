@@ -30,6 +30,7 @@ when defined(posix):
 import std/[os, strutils]
 import sandwall
 import sandbox
+import dirsettings
 
 const usage = """
 3code sandbox - filesystem sandbox (Landlock/Seatbelt/ACL)
@@ -122,9 +123,11 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     for f in a.policies:
       texts.add(if fileExists(f): readFile(f) else: "")
     # Relative targets resolve against the project dir: the parent of
-    # the last `.sandbox` policy file, falling back to cwd. The policy
-    # path itself is made absolute first: a relative `.sandbox` would
-    # otherwise resolve `./x` targets against the filesystem root.
+    # the last `.sandbox` policy file, the project owning a
+    # `<dir>/.3code/sandbox` store file (the store's parent), falling
+    # back to cwd. The policy path itself is made absolute first: a
+    # relative `.sandbox` would otherwise resolve `./x` targets against
+    # the filesystem root.
     let last = absolutePath(a.policies[^1])
     var projectDir = getCurrentDir()
     if last.extractFilename == PolicyFile:
@@ -132,6 +135,14 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
       # ".sandbox" (bare) has an empty parentDir; that is cwd, not
       # a blank project root that would make ./bar miss the allow.
       if parent.len > 0: projectDir = parent
+    elif last.extractFilename == sandbox.UserPolicyFile and
+        last.parentDir.splitFile.name == StoreDirName:
+      # `<dir>/.3code/sandbox`: the policy's `./` targets belong to
+      # `<dir>`, the directory the store sits in, not the store itself.
+      # (The user-level `~/.config/3code/sandbox` fails this test on
+      # purpose and keeps the cwd fallback.)
+      let owner = last.parentDir.parentDir
+      if owner.len > 0: projectDir = owner
     # Relative projectDir (".") makes ".\bar" normalize to the same
     # string as the bare allow, so last-wins drops the deny.
     try: projectDir = absolutePath(projectDir)

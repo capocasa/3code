@@ -52,9 +52,9 @@ suite "mode verb (:goal grammar, both modes)":
         false)
       discard startMode(cyberneticMode, "the plan")
       check verb(cyberneticMode, "cancel") == (true,
-        "cybernetic cancelled (cybernetic.md renamed to " &
-          CyberCancelledName & ")", false)
-      check fileExists(CyberCancelledName)
+        "cybernetic cancelled (.3code/cybernetic renamed to " &
+          "cybernetic-cancelled)", false)
+      check fileExists(".3code" / "cybernetic-cancelled")
       check verb(goalMode, "", forced = true) == (false,
         "no goal active", false)
 
@@ -66,7 +66,7 @@ suite "mode verb (:goal grammar, both modes)":
       # controller's arm receipt is the announcement.
       check verb(cyberneticMode, "new first plan") == (true, "", true)
       check verb(cyberneticMode, "new second plan") == (false,
-        "cybernetic.md is already active; use :cyber! to replace it",
+        ".3code/cybernetic is already active; use :cyber! to replace it",
         false)
       check verb(cyberneticMode, "new third plan", forced = true) ==
         (true, "", true)
@@ -74,13 +74,13 @@ suite "mode verb (:goal grammar, both modes)":
       # and after cancelling it the plain-text goal arm goes through —
       # and then it is :cyber's turn to balk.
       check verb(goalMode, "plain text arm") == (false,
-        "cybernetic.md (cybernetic mode) is already active; harness " &
+        ".3code/cybernetic (cybernetic mode) is already active; harness " &
         "modes are mutually exclusive - cancel it first with :cyber!",
         false)
       check verb(cyberneticMode, "cancel").ok
       check verb(goalMode, "plain text arm") == (true, "", true)
       check verb(cyberneticMode, "mine") == (false,
-        "goal.md (goal mode) is already active; harness modes are " &
+        ".3code/goal (goal mode) is already active; harness modes are " &
         "mutually exclusive - cancel it first with :goal!", false)
 
   test "edit re-arms on change, reports unchanged, and validates structure":
@@ -89,11 +89,11 @@ suite "mode verb (:goal grammar, both modes)":
       editorMk("""printf '%s\n' '- [x] did it' >> $1""")
       let r = verb(cyberneticMode, "edit")
       check r == (true, "", true)
-      check "- [x] did it" in readFile(CyberFileName)
+      check "- [x] did it" in readFile(".3code" / "cybernetic")
       # An editor that changes nothing leaves the mode un-kicked.
       editorMk("true")
       check verb(cyberneticMode, "edit") == (true,
-        "cybernetic.md unchanged", false)
+        ".3code/cybernetic unchanged", false)
       # An editor that destroys the format contract refuses the re-arm
       # with the teaching error; the file keeps the broken edit and the
       # structure-loss guard at the next boundary owns the recovery.
@@ -121,27 +121,29 @@ suite "mode verb (:goal grammar, both modes)":
       # A writing editor arms straight from the created file.
       editorMk("""printf '%s\n' 'from scratch' > $1""")
       check verb(goalMode, "edit") == (true, "", true)
-      check readFile(GoalFileName).strip == "from scratch"
+      check readFile(".3code" / "goal").strip == "from scratch"
       check cancelGoal().ok
       # The created-file write is still an arm: a live OTHER mode
       # refuses it before the editor ever runs.
       discard startMode(cyberneticMode, "the plan")
       editorMk("""printf '%s\n' 'nope' > $1""")
       check verb(goalMode, "edit") == (false,
-        "cybernetic.md (cybernetic mode) is already active; harness " &
+        ".3code/cybernetic (cybernetic mode) is already active; harness " &
           "modes are mutually exclusive - cancel it first with :cyber!",
         false)
       check not fileExists(GoalFileName)
+      check not fileExists(".3code" / "goal")
 
   test "edit removing the file cancels; emptying it clears":
     withModeDir proc (dir: string) =
       discard startMode(cyberneticMode, "the plan")
       editorMk("""rm $1""")
       check verb(cyberneticMode, "edit") == (true,
-        "cybernetic cancelled (cybernetic.md removed in the editor)", false)
+        "cybernetic cancelled (.3code/cybernetic removed in the editor)", false)
       check not fileExists(CyberFileName)
+      check not fileExists(".3code" / "cybernetic")
       discard startMode(cyberneticMode, "again")
       editorMk(""": > $1""")
       check verb(cyberneticMode, "edit") == (true,
-        "cybernetic cleared (cybernetic.md renamed to " &
-          CyberCancelledName & ")", false)
+        "cybernetic cleared (.3code/cybernetic renamed to " &
+          "cybernetic-cancelled)", false)

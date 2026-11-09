@@ -35,6 +35,7 @@
 import std/[json, os, strutils, tables, times, atomics]
 import types, util, prompts, session, config, actions, api, display, ui, plugins,
        auth_xai, auth_openai, auth_google, sandbox, minline, transcript, turns
+import dirsettings
 import fatprompt as fatruntime
 import engine as termengine
 
@@ -182,6 +183,11 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
 
   var colorKeys: Table[string, string]
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
+  # Directory-specific overlay (`.3code/config` in the session dir or
+  # any parent, nearest wins) — applied after the full parse so the
+  # user config's own switches cannot undo it. Sandbox-off here must
+  # land before the `if sandboxEnabled` arm below.
+  dirsettings.applyDirConfig(cwd)
   # Per-directory sticky current, same resolution as the CLI main: this
   # directory's last `:provider` / `:model` wins when it still resolves.
   block:

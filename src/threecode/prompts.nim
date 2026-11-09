@@ -2822,7 +2822,7 @@ Over-thinking simple work wastes latency; under-thinking hard work wastes the ru
 
 # Tools
 
-Sandboxed per `.sandbox`; blocks name the policy file.
+Sandboxed per `.3code/sandbox` (or legacy `.sandbox`); blocks name the policy file.
 
 `bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Exact names only. Batch independent calls; sequence only when one result gates the next. Same call fails twice → stop and explain.
 
@@ -2904,7 +2904,7 @@ You carry a binary reasoning toggle (`on`/`off`), on by default. The harness sur
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked call errors with the policy name. Roster: `bash(command, stdin?, timeout?)`, `read(path, offset?, limit?)`, `write(path, body)`, `patch(path, edits)`, `update_plan(items)`, `web_search(query)`, `web_fetch(url)`, `clear(prompt)`. Beyond the schemas:
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox` (or a legacy `.sandbox`); a blocked call errors with the policy name. Roster: `bash(command, stdin?, timeout?)`, `read(path, offset?, limit?)`, `write(path, body)`, `patch(path, edits)`, `update_plan(items)`, `web_search(query)`, `web_fetch(url)`, `clear(prompt)`. Beyond the schemas:
 
 - `bash`: `stdin` is piped in; nonzero `exit=N` is a failure to investigate; large output keeps only the tail. `timeout` raises the 120s default (a hard kill), ceiling 600s.
 - `read`: `offset`/`limit` for targeted reads; 2KB+ lines skipped; 250-line cap without them, `limit:-1` lifts it.
@@ -3833,13 +3833,14 @@ commands:
   :computer on|off   let the model see and drive this desktop for the
                       session (vision models only; a one-time note enters
                       the chat)
-  :goal               show the active goal (goal.md in this directory)
-  :goal TEXT          write goal.md and start working toward it at once:
+  :goal               show the active goal (.3code/goal or goal.md in
+                      this directory)
+  :goal TEXT          write the goal file and start working toward it at once:
                       while the file exists, a read-only verifier checks
                       at every turn end and sends the agent back until
-                      the goal is satisfied (file retired to achieved.md)
+                      the goal is satisfied (file retired to achieved)
   :goal new TEXT      same, but bawks when a goal is already active
-  :goal edit          revise goal.md in $VISUAL/$EDITOR, creating it
+  :goal edit          revise the goal file in $VISUAL/$EDITOR, creating it
                       when missing (a changed file restarts goal work
                       immediately)
   :goal cancel        cancel the active goal (same as :goal!)
