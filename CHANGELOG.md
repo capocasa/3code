@@ -2,6 +2,20 @@ Changelog
 
 Unreleased
 
+- **`max_timeout` raises the default too, and prompts quote the live
+  numbers.** One config line now covers long builds from both ends:
+  `max_timeout = 1800` raises the 600s ceiling (what a model-requested
+  `timeout` is clamped to) *and* the 120s default (what a run gets when
+  the model passes no `timeout`), so a 30-minute compile survives with
+  no model cooperation. Every family prompt and the bash tool schema
+  fill `{{bash_default}}`/`{{bash_ceiling}}` tokens from the live
+  `[settings]` values at request time (`force_timeout` flattens both to
+  its value), so the model is never told a cap the harness would not
+  honor, and a mid-session `max_timeout` edit rebuilds the prompt for
+  the next request (the timeout pair is part of the profile identity).
+  The kill message got plainer about the way out: it names which cap
+  killed the run (the one you requested, the default, the user's
+  `max_timeout`, or `force_timeout`) and what unblocks a rerun.
 - **Community prompt findings folded into every shipped system
   prompt.** kay-is's tools-section rewrite (community thread 9, born
   from DS 4.1 Flash failing the patch tool) now rides every family
