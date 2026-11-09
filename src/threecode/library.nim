@@ -290,17 +290,26 @@ proc close*(s: AgentSession) =
 proc prompt*(s: AgentSession; text: string): string =
   ## Blocking interface: submit a user prompt, run the full turn loop
   ## (model calls + tool calls until the model stops calling tools), and
-  ## return the final assistant text. Events stream to `onEvent` as they
-  ## happen. Raises `AgentError` on turn failure; the session stays valid
+  ## return the final assistant text. An empty (or whitespace-only) text
+  ## continues the session instead: a turn runs on the messages exactly
+  ## as they stand, appending no user message, the embedder's way to say
+  ## "keep going" (e.g. after a cancelled turn). Events stream to `onEvent`
+  ## as they happen. Raises `AgentError` on turn failure, or on an empty
+  ## prompt with no conversation to continue yet; the session stays valid
   ## and saved.
-  var promptText = text
-  pluginOnPrompt(promptText, s.state.savePath, s.profile.name, s.profile.model)
-  s.messages.add %*{"role": "user",
-                    "content": buildUserMessage(s.messages, promptText,
-                      s.state.cwd, s.profile.vision,
-                      sessionImageDir(s.state.savePath))}
-  refreshSystemPrompt(s.messages, s.profile, s.state.promptState)
-  clearDraft(s.state)
+  if text.strip.len == 0:
+    if s.messages.len <= 1:
+      raise newException(AgentError,
+        "empty prompt: no conversation to continue yet")
+  else:
+    var promptText = text
+    pluginOnPrompt(promptText, s.state.savePath, s.profile.name, s.profile.model)
+    s.messages.add %*{"role": "user",
+                      "content": buildUserMessage(s.messages, promptText,
+                        s.state.cwd, s.profile.vision,
+                        sessionImageDir(s.state.savePath))}
+    refreshSystemPrompt(s.messages, s.profile, s.state.promptState)
+    clearDraft(s.state)
   let interrupted = runTurnsInteractive(s.profile, s.messages, s.state)
   saveSession(s.state, s.messages)
   if interrupted:

@@ -286,3 +286,70 @@ suite "acp frontend":
         else: discard
       check userText == "say hello"
       check agentText == "Hello from the stub agent."
+
+  test "empty prompt continues the turn without adding a message":
+    let root = newFixture("acp_empty_continue")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    writeResponses(root, "two.json", %*[
+      {"role": "assistant", "content": "first reply.",
+       "contentChunks": ["first reply."],
+       "usage": {"promptTokens": 10, "completionTokens": 5,
+                 "totalTokens": 15, "cachedTokens": 0}},
+      {"role": "assistant", "content": "continued without a prompt.",
+       "contentChunks": ["continued without a prompt."],
+       "usage": {"promptTokens": 10, "completionTokens": 5,
+                 "totalTokens": 15, "cachedTokens": 0}}])
+    block: # nothing to continue yet: an empty prompt on a fresh session errors
+      let s = spawnAcp(stub, root, root / "run" / "two.json")
+      s.send(frame(1, "initialize", %*{"protocolVersion": 1}))
+      discard s.waitFor(1)
+      s.send(frame(2, "session/new", %*{"cwd": root / "proj"}))
+      let sid = s.waitFor(2){"result"}{"sessionId"}.getStr
+      s.send(frame(3, "session/prompt", %*{"sessionId": sid, "prompt": []}))
+      let err = s.waitFor(3)
+      check err{"error"}{"code"}.getInt == -32000
+      check "no conversation" in err{"error"}{"message"}.getStr
+      check closeAcp(s) == 0
+    block: # one real turn, then an empty prompt: the turn continues
+      let s = spawnAcp(stub, root, root / "run" / "two.json")
+      s.send(frame(1, "initialize", %*{"protocolVersion": 1}))
+      discard s.waitFor(1)
+      s.send(frame(2, "session/new", %*{"cwd": root / "proj"}))
+      let sid = s.waitFor(2){"result"}{"sessionId"}.getStr
+      s.send(frame(3, "session/prompt", %*{
+        "sessionId": sid,
+        "prompt": [{"type": "text", "text": "begin"}]}))
+      check s.waitFor(3){"result"}{"stopReason"}.getStr == "end_turn"
+      # The empty prompt: a continue, not an invalid-params error.
+      s.send(frame(4, "session/prompt", %*{"sessionId": sid, "prompt": []}))
+      check s.waitFor(4){"result"}{"stopReason"}.getStr == "end_turn"
+      var text = ""
+      for c in s.updatesOf("agent_message_chunk"):
+        text.add c{"content"}{"text"}.getStr
+      check "first reply." in text
+      check "continued without a prompt." in text
+      check s.updatesOf("user_message_chunk").len == 0
+      writeFile(root / "run" / "sid.txt", sid)
+      check closeAcp(s) == 0
+    block: # load replay: one user message, two agent replies, nothing else
+      let sid = readFile(root / "run" / "sid.txt")
+      let s = spawnAcp(stub, root, root / "run" / "two.json")
+      defer: discard closeAcp(s)
+      s.send(frame(1, "initialize", %*{"protocolVersion": 1}))
+      discard s.waitFor(1)
+      s.send(frame(2, "session/load",
+        %*{"sessionId": sid, "cwd": root / "proj", "mcpServers": []}))
+      discard s.waitFor(2)
+      var userText = ""
+      var agentText = ""
+      for u in s.seenUpdates():
+        case u{"sessionUpdate"}.getStr
+        of "user_message_chunk":
+          userText.add u{"content"}{"text"}.getStr
+        of "agent_message_chunk":
+          agentText.add u{"content"}{"text"}.getStr
+        else: discard
+      check userText == "begin"
+      check "first reply." in agentText
+      check "continued without a prompt." in agentText

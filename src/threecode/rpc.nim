@@ -10,7 +10,9 @@
 ##                                empty when the session is live)
 ##   POST /session/new?dir=DIR    reopen the session in DIR; answer:
 ##                                sessionid, or `error: ...`
-##   POST /prompt                 body: the whole prompt; answer:
+##   POST /prompt                 body: the whole prompt; an empty body
+##                                continues the ongoing turn (no message
+##                                appended); answer:
 ##                                started | busy | error: ...
 ##   POST /cancel                 ok (turn interrupted) | idle
 ##   GET  /events?after=N         long-poll (<= 25 s) TSV rows:
@@ -181,7 +183,9 @@ proc scrollbackRows(st: RpcState): string =
 
 proc runRpcTurn(job: RpcJob) =
   let st = job.st
-  st.push("user", job.text)
+  # An empty prompt is a continue, not a message: no user row in the
+  # event stream, the turn runs on the stored messages as they stand.
+  if job.text.strip.len > 0: st.push("user", job.text)
   var mid = 1
   st.s.onEvent = proc(ev: AgentEvent) =
     case ev.kind
@@ -295,8 +299,6 @@ proc handle(st: RpcState; req: Request): Future[void] {.async, gcsafe.} =
       let body = req.body.strip
       if st.s == nil:
         await text(req, Http500, "error: " & st.initError & "\n")
-      elif body.len == 0:
-        await text(req, Http400, "error: empty prompt\n")
       elif st.busy.load():
         await text(req, Http409, "busy\n")
       else:

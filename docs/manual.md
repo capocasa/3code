@@ -1969,7 +1969,10 @@ resumes any past 3code conversation and `session/resume` reconnects without
 replaying it. Prompt turns stream as `session/update` notifications
 (message and reasoning chunks, tool activity, token usage when the context
 window is known); `session/cancel` is Ctrl-C over the wire and answers the
-prompt with `cancelled`. Model and provider come from the normal config
+prompt with `cancelled`. An empty `prompt` array is a continue: the turn
+runs on the stored messages as they stand, nothing appended. That is what
+a client sends after a cancelled turn to say "keep going". Model and
+provider come from the normal config
 (`-m` picks, `:model` philosophy otherwise); the sandbox and loop guard run
 exactly as in the terminal.
 
