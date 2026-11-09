@@ -1072,7 +1072,8 @@ proc main() =
     messages.add kickoff
     saveSession(session, messages)
     commitTranscriptBytes(
-      formatItem(agentPromptItem(kickoff{"content"}.getStr)), true)
+      formatItem(agentPromptItem(kickoff{"content"}.getStr,
+        agentPromptMarker(kickoff))), true)
     result = runTurnWithSafetyNet()
 
   # Run a prompt that arrived on the command line (or was queued during

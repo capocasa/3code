@@ -1034,7 +1034,10 @@ proc renderSession*(session: Session, messages: JsonNode): string =
       let c = m{"content"}
       # `+agent` marks a harness-autosent prompt (empty-reply steer): replay
       # renders it as a `»` agent-prompt item, never a user `❯` echo.
-      let hdr = if m{"agentSent"}.getBool(false): "user +agent" else: "user"
+      # `+goal` narrows it to the goal-mode `⚑` marker.
+      let hdr = if m{"agentSent"}.getBool(false):
+        (if m{"goalSent"}.getBool(false): "user +agent +goal" else: "user +agent")
+      else: "user"
       # Image-bearing user message: persist the text blocks, then one
       # `image` record per block naming the delivered file on disk and its
       # sha1 — never the base64. Resume re-embeds the exact bytes, so the
@@ -1439,6 +1442,7 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       pendingNotes = ""
       let msg = %{"role": %"user", "content": %content}
       if "agent" in flags: msg["agentSent"] = %true
+      if "goal" in flags: msg["goalSent"] = %true
       messages.add msg
       lastAssistant = nil
     of "image":

@@ -767,7 +767,7 @@ proc formatQueuedPromptItem*(line: string): string =
 proc formatAgentPromptItem*(line: string; marker = "»"): string =
   ## Format a harness-autosent prompt (empty-reply steer, flail prod, and
   ## future matter-of-course harness turns) as a scrollback item body: a
-  ## bold marker (default `»`; the goal kickoff carries `◎`) with a
+  ## bold marker (default `»`; goal-mode autosends carry `⚑`) with a
   ## default-fg body, the harness-voice tier, peer
   ## of the plain user echo. Monochrome on purpose: the color tiers stay
   ## exclusive (cyan = token bookkeeping, magenta = errors), it is

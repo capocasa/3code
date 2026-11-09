@@ -638,7 +638,7 @@ Each conversation event gets a one-character marker or banner icon:
 | --- | --- |
 | `❯` | your prompt, echoed as submitted |
 | `●` | assistant message, rendered as markdown (headings, code fences, tables fitted to the terminal width, `[text](url)` links as clickable OSC 8 hyperlinks with the target kept visible) |
-| `»` | a harness-autosend: a note 3code itself sent to the model (empty-reply steer, loop nudges), with the exact text shown |
+| `»` | a harness-autosend: a note 3code itself sent to the model (empty-reply steer, loop nudges), with the exact text shown; goal-mode autosends carry `⚑` instead |
 | `$` | bash command with its command line; the icon turns `Ø` when the exit code is nonzero |
 | `r` | file read (path and line range) |
 | `w` | file write (path; the diff follows) |
@@ -1333,10 +1333,12 @@ it to end goal mode silently, interrupt to pause. Arming starts work
 immediately: `:goal <text>` writes the file, answers with one receipt
 line, prints the dim `goal.md detected implementing` hint, and runs the
 kickoff turn; a `goal.md` that is already on disk when 3code starts does
-the same before any prompt. Each turn end prints `goal.md completed
-verifying` and runs the check; the outcome speaks as `goal.md
-verification successful` (retired to `achieved.md`) or `goal.md
-verification failed` (the verifier's feedback sends the agent back in).
+the same before any prompt. Each turn end runs the check; the verifier's
+reply is the whole display, a dim quote block led by a green `✓` or a
+red `✗` (the verdict line itself is stripped). A satisfied verdict
+retires the file to `achieved.md`; an unmet one sends the agent back
+in: the feedback lands as a `⚑` row and the next turn starts on its
+own, no key pressed.
 `:goal cancel` (or
 `:goal!`) cancels
 the active goal, retiring the file to `goal-cancelled.md` (`:goal new

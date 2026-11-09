@@ -404,10 +404,11 @@ when not defined(windows):
 
     test "harness-autosent messages replay as » items":
       # A `agentSent` user message is a steer: replay renders it with the
-      # `»` agent-prompt marker, never as a user `❯` echo.
+      # `»` agent-prompt marker, never as a user `❯` echo. A `goalSent`
+      # one carries the goal flag instead.
       let msgs = %*[
         {"role": "user", "content": "Goal check: keep going.",
-         "agentSent": true},
+         "agentSent": true, "goalSent": true},
         {"role": "assistant", "content": "on it.",
          "usage": {"promptTokens": 60, "completionTokens": 5,
                    "totalTokens": 65, "cachedTokens": 0}},
@@ -415,8 +416,9 @@ when not defined(windows):
            "Answer now, or continue with a tool call.",
          "agentSent": true}]
       let rendered = captureReplay(msgs, @[], window = 1000)
-      check BoldOn & "» " & Reset & "Goal check: keep going." in rendered
+      check BoldOn & "⚑ " & Reset & "Goal check: keep going." in rendered
       check BoldOn & "» " & Reset & "Your last reply came back empty." in rendered
+      check "❯ Goal check" notin rendered
 
     test "flail-noted call replays as its tool item plus the » note":
       # A flail-escalated call executes: replay renders the real tool item

@@ -1843,7 +1843,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add kickoff
         saveSession(session, messages)
         commitTranscriptBytes(
-          formatItem(agentPromptItem(kickoff{"content"}.getStr)), true)
+          formatItem(agentPromptItem(kickoff{"content"}.getStr,
+            agentPromptMarker(kickoff))), true)
         debugOut "runTurns: " & mode.fileName & " detected, kickoff"
         continue
       # Verifier steps land in scrollback as they happen: same commit
@@ -1866,18 +1867,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           receiptBytes(mode.name & " check: plan structure lost"), messages)
         messages.add harnessNote(guard)
         saveSession(session, messages)
-        let checkReceipt = receiptBytes(
-          "auto: " & mode.name & " check - continuing toward " &
-            mode.fileName)
-        termengine.noteNonMessageTail(checkReceipt, messages.len)
-        commitTranscriptBytes(checkReceipt, true)
         commitTranscriptBytes(formatItem(agentPromptItem(guard)), true)
         debugOut "runTurns: " & mode.name & " structure lost, continuing"
         continue
-      # The turn's work is done; the dim hint says what happens to it
-      # next, then the verifier side call runs.
-      commitHarnessNotice(modeHintLine(mode, "completed verifying"),
-                          messages)
+      # The turn's work is done; the verifier side call runs and its
+      # reply is the whole display: a verdict icon row in scrollback,
+      # nothing before or after it.
       let check = runGoalCheck(p, mode, modeText, buildGoalEvidence(messages),
                                session.modeSnapshot, session.readCache)
       # The side call ran the bar/spinner hooks again; its usage is not
@@ -1899,12 +1894,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if session.readCache != nil:
         session.changeCountStart = session.readCache.changes.len
       template sendBack(content: string; why: string) =
-        messages.add mode.feedbackMessage(modeText, content)
+        # The continuation speaks only through its item; no receipt
+        # announces it - the next turn starting IS the announcement.
+        let cont = mode.feedbackMessage(modeText, content)
+        messages.add cont
         saveSession(session, messages)
-        commitHarnessNotice(
-          receiptBytes("auto: " & mode.name & " check - continuing toward " &
-            mode.fileName), messages)
-        commitTranscriptBytes(formatItem(agentPromptItem(content)), true)
+        commitTranscriptBytes(
+          formatItem(agentPromptItem(content, agentPromptMarker(cont))), true)
         debugOut "runTurns: " & why
       if not check.ok:
         # Verifier call failed (network, provider): note it in the
@@ -1927,18 +1923,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           session.goalNotified = false
           session.modeSnapshot = ""
           session.changeCountStart = 0
-          # The green ✓ verdict row under the verifier's reply says what
-          # passed; the dim hint says what the harness did about it (the
-          # rename is on disk).
-          commitHarnessNotice(
-            modeHintLine(mode, "verification successful"), messages)
+          # The green ✓ verdict row is the whole display; the rename it
+          # reports is on disk.
         else:
           commitHarnessNotice(
             errLnS(mode.name & " satisfied but " & mode.fileName &
               " could not be renamed to " & mode.confirmedName), messages)
       elif check.verdict.kind == gvkFeedback:
-        commitHarnessNotice(modeHintLine(mode, "verification failed"),
-                            messages)
         var fb = check.verdict.feedback
         if note.len > 0: fb.add "\n\nAlso: " & note
         sendBack(fb, mode.name & " check feedback, continuing")

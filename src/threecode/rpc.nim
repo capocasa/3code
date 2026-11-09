@@ -200,7 +200,7 @@ proc runRpcTurn(job: RpcJob) =
       if ev.text.startsWith("● ") or ev.text.startsWith("❯ ") or
           isEmptyReplyMsg(ev.text):
         return
-      if ev.text.startsWith("» ") or ev.text.startsWith("◎ "):
+      if ev.text.startsWith("» ") or ev.text.startsWith("⚑ "):
         st.push("notice", ev.text)
         return
       st.push("tool", ev.text)
