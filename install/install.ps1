@@ -58,7 +58,15 @@ try {
   # release, so what lands in PATH is what was built
   $sums = $null
   try {
-    $sums = (Invoke-WebRequest -UseBasicParsing -Uri $sumsUrl).Content
+    # .Content is a byte[] when the server sends no text Content-Type
+    # (a plain nginx file reply has none for .txt), which would make the
+    # -split below join the bytes with spaces and never match a line.
+    $resp = Invoke-WebRequest -UseBasicParsing -Uri $sumsUrl
+    $sums = if ($resp.Content -is [byte[]]) {
+      [Text.Encoding]::UTF8.GetString($resp.Content)
+    } else {
+      $resp.Content
+    }
   } catch { }
   if ($sums) {
     $want = $null

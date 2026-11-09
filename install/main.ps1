@@ -33,7 +33,15 @@ try {
   # build carried one (main builds publish them; old ones predate them)
   $want = $null
   try {
-    $want = ((Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256").Content -split '\s+')[0]
+    # decode a byte[] Content (no text Content-Type on the wire), else
+    # the -split joins the bytes with spaces and the hash never matches
+    $resp = Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256"
+    $sumText = if ($resp.Content -is [byte[]]) {
+      [Text.Encoding]::UTF8.GetString($resp.Content)
+    } else {
+      $resp.Content
+    }
+    $want = ($sumText -split '\s+')[0]
   } catch { }
   if ($want) {
     $got = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()

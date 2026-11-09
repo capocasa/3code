@@ -13,7 +13,12 @@ discard """
 ##   * mismatched checksum    -> refuses, nothing lands in the install dir
 ##   * sums absent            -> refuses (THREECODE_ALLOW_UNVERIFIED=1
 ##                               installs with a warning)
-import std/[net, os, osproc, strutils, unittest]
+##
+## The same three paths run for `install/install.ps1` when a `pwsh` is on
+## PATH (macOS runners ship one; the Linux CI images do not, so the leg
+## skips there - the sh leg covers the shared SHASUMS256 contract).
+import std/[net, os, osproc, strutils, tables, unittest]
+import zippy/ziparchives
 
 const Script = "install/install.sh"
 
@@ -105,6 +110,40 @@ proc runInstaller(base, home: string; extraEnv = ""): tuple[code: int,
   let r = execCmdEx(cmd)
   (r.exitCode, r.output)
 
+proc pwshExe(): string =
+  ## "" when no PowerShell is runnable (leg skips). Beyond PATH, the
+  ## dotnet-tool install location is probed: that is how this box gets
+  ## its pwsh.
+  let onPath = findExe("pwsh")
+  if onPath.len > 0: return onPath
+  let tool = getHomeDir() / ".dotnet" / "tools" / "pwsh"
+  when defined(windows):
+    result = if fileExists(tool & ".exe"): tool & ".exe" else: ""
+  else:
+    result = if fileExists(tool): tool else: ""
+
+proc fakeZipAsset(): string =
+  ## The Windows archive shape: a zip with 3code.exe at its root.
+  result = getTempDir() / ("3code_inst_asset_" & $getCurrentProcessId() &
+                           ".zip")
+  var entries = initOrderedTable[string, string]()
+  entries["3code.exe"] = "MZ fake 3code binary\r\n"
+  writeFile(result, createZipArchive(entries))
+
+proc runInstallerPwsh(base, home: string; extraEnv = ""):
+    tuple[code: int, outp: string] =
+  let pwsh = pwshExe()
+  doAssert pwsh.len > 0, "pwsh leg must be guarded by pwshExe()"
+  let cmd = "THREECODE_RELEASE_BASE=" & quoteShell(base) &
+            " THREECODE_INSTALL_DIR=" & quoteShell(home / "bin") &
+            " HOME=" & quoteShell(home) &
+            " LOCALAPPDATA=" & quoteShell(home) &
+            (if extraEnv.len > 0: " " & extraEnv else: "") &
+            " " & quoteShell(pwsh) & " -NoProfile -File " &
+            quoteShell(getCurrentDir() / "install" / "install.ps1")
+  let r = execCmdEx(cmd)
+  (r.exitCode, r.output)
+
 suite "installer checksum verification":
   test "matching SHASUMS256.txt installs after verifying":
     let root = getTempDir() / ("3code_inst_good_" & $getCurrentProcessId())
@@ -159,3 +198,49 @@ suite "installer checksum verification":
     check code2 == 0
     check "installing unverified" in outp2
     check fileExists(home / "bin" / "3code")
+
+suite "installer checksum verification (PowerShell)":
+  test "install.ps1 verifies, refuses, and warns on the same sums paths":
+    let pwsh = pwshExe()
+    if pwsh.len == 0:
+      skip()
+    else:
+      let root = getTempDir() / ("3code_inst_ps_" & $getCurrentProcessId())
+      removeDir(root)
+      let (base, srv) = startFakeReleases(root)
+      defer: stopFakeReleases(srv)
+      let zip = fakeZipAsset()
+      copyFile(zip, root / "3code-windows-amd64.zip")
+      discard execCmdEx("sha256sum " &
+                        quoteShell(root / "3code-windows-amd64.zip") &
+                        " | awk '{print $1 \"  3code-windows-amd64.zip\"}' > " &
+                        quoteShell(root / "SHASUMS256.txt"))
+      let home = root / "home"
+      createDir(home)
+      # matching sums install after verifying
+      var (code, outp) = runInstallerPwsh(base, home)
+      checkpoint(outp)
+      check code == 0
+      check "checksum verified" in outp
+      check fileExists(home / "bin" / "3code.exe")
+      # mismatched sums refuse
+      removeDir(home / "bin")
+      writeFile(root / "SHASUMS256.txt",
+                "deadbeef  3code-windows-amd64.zip\n")
+      (code, outp) = runInstallerPwsh(base, home)
+      checkpoint(outp)
+      check code != 0
+      check "checksum mismatch" in outp
+      check not fileExists(home / "bin" / "3code.exe")
+      # sums absent refuse; the env hatch installs with a warning
+      removeFile(root / "SHASUMS256.txt")
+      (code, outp) = runInstallerPwsh(base, home)
+      checkpoint(outp)
+      check code != 0
+      check "no SHASUMS256.txt published" in outp
+      (code, outp) = runInstallerPwsh(base, home,
+                                      "THREECODE_ALLOW_UNVERIFIED=1")
+      checkpoint(outp)
+      check code == 0
+      check "installing unverified" in outp
+      check fileExists(home / "bin" / "3code.exe")
