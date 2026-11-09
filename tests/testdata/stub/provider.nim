@@ -319,12 +319,14 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
       let category = retryCategory(errMsg, nil, code)
       if category.len == 0 or attempt >= StubMaxAttempts:
         hookStopSpinner()
-        # Mirror the real transport's raise: an HTTP-status failure is an
-        # HttpError carrying the code, so turn-level recovery can branch on
-        # it exactly like it would against a live provider.
+        # Mirror the real transport's raises: an HTTP-status failure is an
+        # HttpError carrying the code and the provider attribution, and a
+        # transport failure surfaces as a 3code-side report, exactly like
+        # the live callModel paths.
         if code > 0:
-          raise newHttpError(code, errMsg, stubErrBody(lastFailure, node))
-        raise newException(ApiError,
+          raise newProviderHttpError(p, code, errMsg,
+            stubErrBody(lastFailure, node))
+        raise newException(ApiError, "3code: " &
           formatApiDetail(errMsg, stubErrBody(lastFailure, node), code))
       let retryAfter = try: parseInt(stubRetryAfter(node)) except CatchableError: 0
       let backoff =

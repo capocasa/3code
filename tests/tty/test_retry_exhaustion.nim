@@ -171,3 +171,56 @@ suite "retry exhaustion regression":
     tty.send "\n"
     tty.expectInHistory "recovered"
     echo "  PASS: retry exhaustion returned to a usable prompt"
+
+  test "401 with a JSON error body renders as a provider error with the fix":
+    # The jasonfi report (community thread 16): his expired OpenCode key
+    # surfaced as the raw provider body with no indication which side
+    # produced it or what to do next. A 401 turn failure must name the
+    # provider (not 3code) and carry the re-key fix. 401 is not retryable,
+    # so the turn fails on the first attempt - no backoff to wait out.
+    let root = newFixture("retry_exhaust_401")
+    writeConfiguredProvider(root)
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      {"failure": "http-401",
+       "body": "{\"error\":{\"message\":\"This API key has expired. " &
+                "Create a new API key\"}}"},
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "after re-keying", "contentChunks": ["after re-keying"],
+       "usage": {"promptTokens": 5, "completionTokens": 1,
+                 "totalTokens": 6, "cachedTokens": 0}}
+    ]))
+    let stub = ensureStubBinary(extraDefines = "-d:fastStubRetries")
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
+    # The rendered error names the provider, surfaces the body's own text
+    # and status, and points at the fix.
+    tty.expectInHistory "stub error: This API key has expired"
+    tty.expectInHistory "(code 401)"
+    tty.expectInHistory ":provider edit stub"
+    tty.expectAlive()
+    var settled = false
+    for _ in 0 ..< 60:
+      tty.drain(250)
+      if tty.frames[^1].promptSettled():
+        settled = true
+        break
+    doAssert settled,
+      "401: prompt never settled after the failed turn; last frame: col=" &
+        $tty.frames[^1].cursorCol & " row=" & $tty.frames[^1].cursorRow &
+        " hidden=" & $tty.frames[^1].cursorHidden
+    # The prompt is usable again after the failure.
+    tty.send "hello model"
+    tty.expect "hello model"
+    tty.send "\n"
+    tty.expectInHistory "after re-keying"
+    echo "  PASS: 401 rendered as a provider error with the re-key fix"
