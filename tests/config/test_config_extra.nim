@@ -208,7 +208,12 @@ suite "config: [settings] browserfetch":
   test "parse accepts on and off":
     writeFile(tmp, "[settings]\nbrowserfetch = on\n")
     discard parseConfigFile(tmp)
-    check browserFetchEnabled
+    # The line only arms a -d:browserFetch build; a default build keeps
+    # the tier off and the browser code out of the binary entirely.
+    when browserFetchBuild:
+      check browserFetchEnabled
+    else:
+      check not browserFetchEnabled
     writeFile(tmp, "[settings]\nbrowserfetch = \"off\"\n")
     discard parseConfigFile(tmp)
     check not browserFetchEnabled
@@ -216,10 +221,14 @@ suite "config: [settings] browserfetch":
   test "writer persists on and omits the default off":
     browserFetchEnabled = true
     writeConfigFile(tmp, "test.model-a", @[])
-    check readFile(tmp).find("browserfetch = \"on\"") >= 0
+    when browserFetchBuild:
+      check readFile(tmp).find("browserfetch = \"on\"") >= 0
+    else:
+      check readFile(tmp).find("browserfetch") < 0
     browserFetchEnabled = false
     discard parseConfigFile(tmp)
-    check browserFetchEnabled
+    when browserFetchBuild:
+      check browserFetchEnabled
     # a write with the setting off and no on-disk copy omits it again.
     # (writeConfigFile re-parses the disk file, which re-sets the globals,
     # so the omission needs the file gone first.)

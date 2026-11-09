@@ -683,8 +683,11 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "browserfetch":
           # Same boolean dialect, default off (types.nim): opting in keeps
           # a shared headless Chrome around for JS-shell web fetches.
+          # Inert unless compiled with -d:browserFetch
+          # (browserFetchBuild, the kill-switch).
           case v.toLowerAscii
-          of "on", "true", "yes", "1": browserFetchEnabled = true
+          of "on", "true", "yes", "1":
+            if browserFetchBuild: browserFetchEnabled = true
           of "off", "false", "no", "0": browserFetchEnabled = false
           else: discard
         of "sandbox_wall_warn":
@@ -1000,8 +1003,9 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "patient_retry = \"off\"\n"
   if not allowEmptyPromptEnabled:
     buf.add "allow-empty-prompt = \"off\"\n"
-  if browserFetchEnabled:
-    buf.add "browserfetch = \"on\"\n"
+  when browserFetchBuild:
+    if browserFetchEnabled:
+      buf.add "browserfetch = \"on\"\n"
   if not effWallWarn:
     buf.add "sandbox_wall_warn = \"off\"\n"
   # The store location is a user-config decision; persist it whenever it

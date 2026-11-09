@@ -2,6 +2,11 @@ Changelog
 
 Unreleased
 
+- **The optional headless-Chrome `web_fetch` tier is now compile-time
+  disabled and undocumented.** `browserfetch` (the shared headless
+  Chrome that re-fetched JS-shell pages) is out of the docs and out of
+  packaged builds; the config line stays accepted but is inert. The
+  tier lives on behind a build switch for developer use.
 - **`:show N` follows a running tool call live.** While a bash call
   streams, `:show N` (or `:show` bare, or a click on the capped
   viewport) flushes the held lines into scrollback and every new line

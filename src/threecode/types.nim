@@ -95,12 +95,17 @@ var allowEmptyPromptEnabled*: bool = true
   ## The way to say "keep going" without polluting the transcript. Default
   ## on; `[settings]` `allow-empty-prompt = off` restores the old no-op.
 
+const browserFetchBuild* = defined(browserFetch)
+  ## Kill-switch: the headless-Chrome `web_fetch` tier (browse.nim) only
+  ## compiles in with `-d:browserFetch`. Without it the config line is
+  ## inert (the var stays false) and no browser code is linked at all.
 var browserFetchEnabled*: bool = false
-  ## `[settings]` `browserfetch = on`: when a plain `web_fetch` returns a
-  ## page whose text is next to nothing after tag stripping (a JS shell),
-  ## redo the fetch in the shared headless browser and return the rendered
-  ## text (browse.nim). Default off: it keeps a machine-wide headless
-  ## Chrome on 127.0.0.1:9223 running, so only opt in.
+  ## `[settings]` `browserfetch = on` (a `-d:browserFetch` build only):
+  ## when a plain `web_fetch` returns a page whose text is next to nothing
+  ## after tag stripping (a JS shell), redo the fetch in the shared
+  ## headless browser and return the rendered text (browse.nim). Default
+  ## off: it keeps a machine-wide headless Chrome on 127.0.0.1:9223
+  ## running, so only opt in.
 
 var patientRetryEnabled*: bool = true
   ## Patient retry. When true, retryable API failures (429, 5xx, network
