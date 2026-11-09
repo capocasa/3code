@@ -413,8 +413,13 @@ suite "prompts: setup — deepseek":
       check "Nonzero `exit=N` is a failure to investigate" in s.prompt
       check "keeps only the tail" in s.prompt
       check "hard kill" in s.prompt
+      check "2KB+ lines skipped" in s.prompt
+      check "250-line cap without offset/limit" in s.prompt
+      check "`limit:-1` lifts the cap" in s.prompt
       check "FIRST match" in s.prompt
       check "2-3 lines of unique context" in s.prompt
+      check "fuzzy ladder: exact → indent → whitespace" in s.prompt
+      check "re-read the region if the diff looks off" in s.prompt
       check ("All edits must match or nothing is written" in s.prompt and
              "resend the entire call" in s.prompt)
       check "Empty `search` is rejected" in s.prompt
@@ -426,6 +431,10 @@ suite "prompts: setup — deepseek":
       check "keeps only the tail" in s.prompt
       check "first match" in s.prompt
       check "nothing is written" in s.prompt
+      check "2KB+ lines skipped" in s.prompt
+      check "250-line cap" in s.prompt
+      check "exact → indent → whitespace" in s.prompt
+      check "re-read the region if the diff looks off" in s.prompt
 
   test "mistral read bullet documents the cap lift":
     let s = setup(Profile(name: "mistral.m", model: "m", family: "mistral"))
