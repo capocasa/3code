@@ -2,6 +2,22 @@ Changelog
 
 Unreleased
 
+- **`:model` takes `provider.model`: what `--good` prints is what you
+  type.** `3code --good` lists curated combos as
+  `opencodego.deepseek-v4.1-flash`, but `:model` resolved its argument
+  only against the current provider, so pasting a printed id answered
+  "unknown model". `:model provider.model` (or `provider/model`) now
+  switches provider and model in one step - sticky per provider,
+  persisted, and gated like any other selection - and every id the
+  listing prints resolves verbatim, slash-carrying wire ids
+  (`baseten.zai-org/GLM-5.2`) included. A bare name still selects on
+  the current provider, a dotted bare id (`glm-5.3`) is never mistaken
+  for a prefix, and an explicit prefix wins over a same-named model on
+  the current provider. The unknown-model error got helpful: it names
+  the provider it looked on, offers the model's real homes as
+  prefixed specs (`did you mean deepseek.deepseek-v4.1-flash?` or a
+  `close:` list), and says `provider has no model X` when the provider
+  exists but lacks the model.
 - **An empty message now means "continue" on every embedding surface,
   not just the terminal.** Embedders (the GUI via `--rpc`, editors via
   `--acp`) used to get an error back for an empty prompt, exactly the
