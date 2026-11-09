@@ -1704,14 +1704,26 @@ allowlist or a blocklist.
 On Linux and macOS, fenced commands reach the network through a local CONNECT
 and SOCKS5 allowlist proxy. Linux puts the command in a network namespace;
 macOS confines it to loopback with Seatbelt. 3code sets the standard proxy
-variables for the child process, and routes two proxy-unaware clients
+variables for the child process, and routes the proxy-unaware clients
 itself: git gets an SSH proxy command, and ``ssh`` is shadowed by a wrapper
-that tunnels through the wall proxy (``scp``, ``sftp`` and ``rsync`` spawn
-``ssh`` and ride along). Every TCP protocol is carried the same way - the
-allowlist decides per host and port, loopback targets included (on Linux
-they go through the proxy too; the fenced namespace has no loopback of the
-host's). Denied HTTP connections return 403; denied SSH targets fail with
-a ``proxy denied`` message from the wrapper.
+that tunnels through the wall proxy (``rsync`` and anything scripting
+``ssh`` spawn it from PATH and ride along). Local hostnames such as
+``martin`` or ``martin.local`` resolve at the proxy, so mDNS and search-domain
+names work inside the fence like they do outside. Every TCP protocol is
+carried the same way - the allowlist decides per host and port, loopback
+targets included (on Linux they go through the proxy too; the fenced
+namespace has no loopback of the host's). Denied HTTP connections return
+403; denied SSH targets fail with a ``proxy denied`` message from the wrapper.
+The wrapper also points ssh at a copy of ``~/.ssh/config`` (with ``~``
+rewritten to absolute paths) and at your real keys and ``known_hosts``:
+the fenced child runs as uid 65534, whose passwd home is ``/``, so ssh's
+own defaults would look under ``/.ssh`` and every login would die at
+host-key or auth.
+
+``scp`` and ``sftp`` are the exception: their binaries exec ``/usr/bin/ssh``
+by absolute path (OpenSSH 9.8+), where no PATH wrapper or environment
+variable can follow, so inside the fence they cannot reach the proxy and
+fail. Use ``rsync``, ``ssh``, or git instead - same job, proxied.
 
 .. note::
 
