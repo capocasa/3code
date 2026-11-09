@@ -19,7 +19,7 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v2
         with:
-          nim-version: 2.2.12
+          nim-version: 2.4.0
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain

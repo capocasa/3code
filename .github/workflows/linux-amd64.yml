@@ -55,14 +55,14 @@ jobs:
         # the same compiler forever. Bump deliberately, together with
         # regenerating nimble.lock (its `nim` entry records the version).
         run: |
-          NIM_SHA256=7df1611449a6842af69322aa2c1206942982650a5f6bc0d37bc8ec109932f638
+          NIM_SHA256=23c1c83d9031c498a2b3ad0bce153b8905710d04eb5922cf8ebd8f9d12125743
           # --retry-all-errors: plain --retry skips connect failures (curl
           # exit 7), which is exactly how the Oct 12 run died mid-download.
           curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/nim.tar.xz \
-            https://nim-lang.org/download/nim-2.2.12-linux_x64.tar.xz
+            https://nim-lang.org/download/nim-2.4.0-linux_x64.tar.xz
           echo "${NIM_SHA256}  /tmp/nim.tar.xz" | sha256sum -c -
           tar -xJf /tmp/nim.tar.xz -C /opt
-          mv /opt/nim-2.2.12 /opt/nim-toolchain
+          mv /opt/nim-2.4.0 /opt/nim-toolchain
           echo "/opt/nim-toolchain/bin" >> "$GITHUB_PATH"
           /opt/nim-toolchain/bin/nim --version | head -1
 
@@ -164,7 +164,7 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v2
         with:
-          nim-version: 2.2.12
+          nim-version: 2.4.0
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
