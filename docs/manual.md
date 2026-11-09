@@ -227,7 +227,8 @@ keep the global config default. All of this lives in the config file; see
 
 A model name can carry its provider: `:model nvidia.gpt-oss-20b` (or
 `nvidia/gpt-oss-20b`) switches both in one step, and every id printed by
-`3code --good` works verbatim as a `:model` argument.
+`3code --good` works verbatim as a `:model` argument. Tab completion
+follows suit: type the provider and the dot, get that provider's models.
 
 When a provider ships new models, `:provider update <name>` re-runs just
 the models step of the wizard: the offered list refreshes (curated in

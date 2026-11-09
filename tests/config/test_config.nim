@@ -633,6 +633,39 @@ suite "config: sticky model across provider switches":
     # writeConfigFile stores normalized ids; buildProfile maps back to wire.
     check cfg.contains("current = \"baseten.glm-5.2\"")
 
+  test ":model provider.model switches provider and model in one word":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    discard run(":model baseten.glm-5.2")
+    check prof.name == "baseten.zai-org/GLM-5.2"
+    check activeCurrent == "baseten.zai-org/GLM-5.2"
+    # the full wire spelling works too (findModel matches it exactly)
+    discard run(":model zai.glm-5.2")
+    check prof.model == "glm-5.2"
+    check activeCurrent == "zai.glm-5.2"
+
+  test ":model provider.model with unknown model errors and keeps state":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    let before = activeCurrent
+    let res = run(":model baseten.glm-9.9")
+    check "baseten has no model glm-9.9" in res.body
+    check activeCurrent == before
+    check prof.model == "glm-5.2"
+
+  test ":model with a dotted model name stays in the current provider":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    # `glm-5.3`'s dot prefix (`glm-5`) is not a provider name, so the
+    # whole word must resolve against zai, the current provider
+    discard run(":model glm-5.3")
+    check prof.model == "glm-5.3"
+    check activeCurrent == "zai.glm-5.3"
+
+  test ":provider then :model changes within the new provider":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    discard run(":provider baseten")
+    discard run(":model glm-5.2")
+    check prof.name == "baseten.zai-org/GLM-5.2"
+    check activeCurrent == "baseten.zai-org/GLM-5.2"
+
   test "provider without a recorded selection lands on its first model":
     prof = buildProfile(activeCurrent, activeProviders, "")
     discard run(":provider baseten")

@@ -587,6 +587,10 @@ suite "terminal visual contract":
       (":reasoning", "reasoning:"),
       (":model stub-large", "provider  stub"),
       (":reasoning high", "reasoning high"),
+      # one-word `provider.model` switch, same spelling `-m` takes: from
+      # stub straight to alt's second model; `alt-large` has no earlier
+      # echo in this run, so the profile row proves the pair switched
+      (":model alt.alt-large", "model     alt-large"),
       (":provider alt", "provider  alt"),
       (":tokens", "no tokens used yet"),
       (":clear", "═══"),

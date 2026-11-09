@@ -59,6 +59,7 @@ names, model names, and paths where supported.
 | `:clear` | reset the conversation, keep provider and model |
 | `:model` | list models for the current provider, `*` marks the current |
 | `:model X` | switch to model X within the current provider |
+| `:model P.X` | switch to model X on provider P in one word (the `-m` spelling) |
 | `:provider` | list configured providers; the current one shows its model |
 | `:provider X` | switch to provider X |
 | `:provider add` | add a provider (interactive wizard, verified) |
