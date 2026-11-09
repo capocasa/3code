@@ -81,6 +81,11 @@ jobs:
           cp dl/3code-windows-amd64/3code-windows-amd64.zip    . 2>/dev/null || true
           cp dl/3code-termux-arm64/3code-termux-arm64.tar.gz   . 2>/dev/null || true
           ls -la *.tar.gz *.zip
+          # Published checksums: the installers verify the archive they
+          # download against this file before installing (a release asset,
+          # so latest/download/ serves it too).
+          sha256sum *.tar.gz *.zip > SHASUMS256.txt
+          cat SHASUMS256.txt
 
       - name: Create release
         env:
@@ -99,4 +104,5 @@ jobs:
             3code-linux-arm64.tar.gz \
             3code-macos-universal.tar.gz \
             3code-windows-amd64.zip \
-            3code-termux-arm64.tar.gz
+            3code-termux-arm64.tar.gz \
+            SHASUMS256.txt

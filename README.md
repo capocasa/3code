@@ -59,15 +59,22 @@ Tip: you can use expensive models on small subscriptions with 3code. Leave the t
 **2. Install 3code and enter your API key.**
 
 ```
-# macOS / Linux
-curl -fsSL https://3code.capocasa.dev/install | sh
+# macOS / Linux: download the installer, read it, run it
+curl -fsSLO https://3code.capocasa.dev/install
+less install                 # see for yourself what it does
+sh install
 
 # Windows (PowerShell)
-irm https://3code.capocasa.dev/install.ps1 | iex
+irm https://3code.capocasa.dev/install.ps1 -OutFile install.ps1
+notepad install.ps1           # see for yourself what it does
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 # Termux on Android arm64
-pkg install curl && curl -fsSL https://3code.capocasa.dev/install | sh
+pkg install curl && curl -fsSLO https://3code.capocasa.dev/install && sh install
 ```
+
+The installer verifies the release archive against the `SHASUMS256.txt`
+published with each release before installing it.
 
 ```
 $ mkdir myprojectdir
@@ -170,10 +177,12 @@ Patches welcome! Open an issue, send a PR, or just try the bleeding edge and rep
 
 ```
 # macOS / Linux
-curl -fsSL https://3code.capocasa.dev/main/install | sh
+curl -fsSLO https://3code.capocasa.dev/main/install
+less install && sh install
 
 # Windows (PowerShell)
-irm https://3code.capocasa.dev/main/install.ps1 | iex
+irm https://3code.capocasa.dev/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 ## License
