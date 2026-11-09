@@ -772,12 +772,17 @@ proc pollInputEvent*(): InputEvent =
 proc hasQueuedAutosend*(): bool =
   ## True when the queue holds anything the drain will act on once the turn
   ## yields — a queued prompt (ieLine) or a command deferred to the next
-  ## opportunity (ieCommand). The turn loop consults this to stop before a
-  ## model-initiated follow-up call so queued items run first.
+  ## opportunity (an echoed ieCommand; the drain skips un-echoed ones, the
+  ## tombstones of safe commands that already ran inline via
+  ## activeCommandHook). The turn loop consults this to stop before a
+  ## model-initiated follow-up call so queued items run first. Counting the
+  ## tombstones too ended the turn right after a tool exec — silently, with
+  ## the model never seeing the tool result — whenever a safe command like
+  ## `:tokens` was submitted mid-turn.
   acquire inputStateLock
   try:
     for ev in inputState.eventQueue:
-      if ev.kind in {ieLine, ieCommand}:
+      if ev.kind == ieLine or (ev.kind == ieCommand and ev.echoed):
         return true
   finally:
     release inputStateLock

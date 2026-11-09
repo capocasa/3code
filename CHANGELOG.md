@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **A safe `:command` typed mid-turn no longer ends the turn under the
+  tool that was running.** `:tokens`, `:help`, and the other
+  safe-immediate commands run inline the moment Enter is pressed, but
+  their queue event stayed behind as a tombstone the post-turn drain
+  skips. The turn loop's queued-work check counted those tombstones as
+  pending input, so the turn stopped at the next boundary — right after
+  the current tool exec, silently, with the tool result never sent back
+  to the model and the prompt back as if the model had finished. The
+  check now counts only what the drain will act on: queued prompts and
+  deferred (echoed) commands. Covered by new stub probes in
+  `tests/api/test_api.nim`, including the counterfactual: a deferred
+  mutating command still yields the turn before the follow-up model
+  call.
 - **`:btw` asks the model a side question about the conversation without
   it entering the context.** `:btw why did we pick the parser rewrite?`
   fires one meta-call over the live history (a dedicated aside system
