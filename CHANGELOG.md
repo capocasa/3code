@@ -2,6 +2,20 @@ Changelog
 
 Unreleased
 
+- **Sessions can carry a name, and every session lookup accepts it.**
+  `:rename Feature xyz` names the running session (issue #67), bare
+  `:rename` shows the stored name, `:rename off` clears it. The name
+  rides the session record's body in the `.3log`, so the listing peek
+  reads it without parsing the message tree, `--find` matches it like
+  any other content, and copy/move of the file carries it along
+  (a header arg would not survive, the space-split args would split
+  "Feature xyz"). `:sessions`, `--list`, and `--search` show the name
+  quoted next to the id, and `:resume` / `-r` resolve an exact id, a
+  unique id prefix, or a name, case-insensitively, ids before prefixes
+  before names; several matches at one stage are an error listing the
+  candidate ids, never a silent pick. `:clear` and the turn-rotation
+  fresh id start unnamed, and a rename never touches the terminal tab
+  title (`:tab-title` stays the owner of display chrome).
 - **Jarvislabs' Token Factory joins the catalog.** The India GPU cloud's
   per-token API (`models.jarvislabs.net/v1`) is known-good: GLM-5.3 on
   the served 230K window, GLM-5.3-Flash and DeepSeek V4.1 Flash (plus
