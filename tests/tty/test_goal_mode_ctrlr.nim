@@ -390,6 +390,40 @@ suite ":retry and goal mode (interactive)":
     check not fileExists(root / "run" / "goal.md")
     tty.expectAlive()
 
+  test "inline verdict ending the verifier's prose line is honored":
+    let root = newFixture("goal_inline_verdict")
+    writeConfiguredProvider(root)
+    writeFile(root / "run" / "goal.md", "make the stub do one turn\n")
+    # The shape a live verifier produced: the contract words terminate
+    # the prose line instead of owning one. The reply's last words are
+    # still the verdict, so the check must honor them - a red-x row
+    # quoting `VERDICT: SATISFIED` it refuses is the bug.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("GOAL_WORK_DONE"),
+      reply("The work is done and recorded. VERDICT: SATISFIED"),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.expectInHistory "\u2691 make the stub do one turn"
+    tty.expectInHistory "GOAL_WORK_DONE"
+    # The icon row honors the inline verdict: green check, contract
+    # words stripped from the prose, goal retired.
+    tty.expectInHistory "The work is done and recorded."
+    tty.expectInHistory "\u2713"
+    tty.expectNeverInHistory "VERDICT"
+    tty.drain(300)
+    check fileExists(root / "run" / "achieved.md")
+    check not fileExists(root / "run" / "goal.md")
+    tty.expectAlive()
+
 suite "goal mode mid-turn detection (interactive)":
   test "goal.md written during a turn kicks off at the turn's end":
     let root = newFixture("goal_midturn_detect")

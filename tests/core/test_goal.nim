@@ -77,6 +77,37 @@ suite "goal mode":
     check parseVerdict("VERDICT: FEEDBACK:  ").kind == gvkNone
     check parseVerdict("VERDICT: FEEDBACK:").kind == gvkNone
 
+  test "verdict contract: contract words ending the prose line count":
+    # The deviation a live verifier made: the verdict terminating its
+    # prose line instead of owning a line. It is still the reply's last
+    # words, so it is the verdict - refusing it painted a red-x step
+    # quoting `VERDICT: SATISFIED` it would not honor, and the goal
+    # never retired.
+    let pasted = parseVerdict(
+      "The diff adds the rows across providers, tests passed. " &
+      "Catalog goal shown complete. VERDICT: SATISFIED")
+    check pasted.kind == gvkSatisfied
+    check stripVerdictLine(
+      "The diff adds the rows. VERDICT: SATISFIED") ==
+      "The diff adds the rows."
+    let fb = parseVerdict("Checked the tree. VERDICT: FEEDBACK: run tests")
+    check fb.kind == gvkFeedback
+    check fb.feedback == "run tests"
+    check stripVerdictLine(
+      "Checked the tree. VERDICT: FEEDBACK: run tests") ==
+      "Checked the tree."
+    # The icon row honors the inline verdict: green check, no contract
+    # text on screen.
+    let step = goalStepBytes(GoalStep(
+      prose: stripVerdictLine("All rows verified. VERDICT: SATISFIED"),
+      verdict: parseVerdict("All rows verified. VERDICT: SATISFIED").kind))
+    check "\u2713" in step
+    check "\u2717" notin step
+    check "VERDICT" notin step
+    # The marker quoted mid-sentence, not ending the reply, is prose.
+    check parseVerdict(
+      "I would only write VERDICT: SATISFIED with proof").kind == gvkNone
+
   test "completion renames goal.md to achieved.md":
     withGoalDir proc (dir: string) =
       writeFile(GoalFileName, "the goal\n")
