@@ -1563,7 +1563,10 @@ Recipes for stacks past the basics. The default policy already covers
 git, mercurial, C, Zig, Go, Nim, Python (pip, uv, venv), Rust, and the
 npm/pip caches; on macOS `javac` itself runs too (the JDK homes are
 read-only by default, the JVM's system-level lookups ride the sandbox
-profile) - nothing below is needed for those. Copy the
+profile: the `kern.grade_cputype` sysctl, opendirectoryd for user
+lookups, and the dirhelper mach service that backs temp-dir
+resolution - without the last one `java` hangs before `main` on a
+Mac) - nothing below is needed for those. Copy the
 lines you need into `.sandbox` (via `:sandbox allow` /
 `:sandbox readonly`), or into `~/.config/3code/sandbox` to make them
 your baseline. Each entry is the tool's own documented home, narrowed

@@ -210,6 +210,13 @@ jobs:
           out=$("$BIN" sandbox --policy .sandbox-java restrict -- java Hello) \
             || fail "java under the sandbox"
           [ "$out" = "jvm-ok" ] || fail "sandboxed java printed '$out'"
+          # gh #64 verbatim: the JVM's os::get_temp_directory() ->
+          # confstr resolves through the com.apple.bsd.dirhelper mach
+          # service; without the profile's allow the bootstrap lookup
+          # EPERMs and java hangs on mach_msg before main (the
+          # `-version` path hits the same startup sequence).
+          "$BIN" sandbox --policy .sandbox-java restrict -- java -version \
+            || fail "java -version under the sandbox (gh #64 dirhelper)"
 
           echo "sandbox matrix: all checks passed"
 

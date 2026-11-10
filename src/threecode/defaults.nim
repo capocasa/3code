@@ -34,7 +34,9 @@
 ##   on Windows ~/AppData/Local/zig). Node rides the project's
 ##   node_modules, ~/.npm, and the baseline. Java joins on macOS: the
 ##   JVM's non-path needs (kern.grade_cputype sysctl, opendirectoryd
-##   user lookup) are granted by the sandwall seatbelt profile itself,
+##   user lookup, the dirhelper mach service behind confstr's temp-dir
+##   resolution - without it java hangs before main, 3code #64) are
+##   granted by the sandwall seatbelt profile itself,
 ##   and the JDK homes under $HOME ride readonly lines below (the
 ##   system ones - /Library/Java, brew's /opt, the /usr/libexec/java_home
 ##   shim - are already baseline-readable). Everything past that -
