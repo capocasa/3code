@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **Java runs under the macOS sandbox.** The JVM's first startup call
+  resolves its temp dir through the `com.apple.bsd.dirhelper` mach
+  service, and under the bare `(deny default)` that bootstrap lookup
+  EPERMs and every `java` hangs on `mach_msg` before `main` (#64).
+  The sandbox profile now allows that one lookup (next to the
+  opendirectoryd allow it sits beside) and tags the default deny with
+  `with message "sandbox_3code"`, so `log show --predicate
+  'eventMessage contains "sandbox_3code"'` can tell 3code's denies
+  apart from every other sandboxed process on the box. The manual
+  names the new profile rider, and the macOS CI matrix runs plain
+  `java -version` under the sandbox.
+
 - **The optional headless-Chrome `web_fetch` tier is now compile-time
   disabled and undocumented.** `browserfetch` (the shared headless
   Chrome that re-fetched JS-shell pages) is out of the docs and out of
