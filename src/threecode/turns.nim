@@ -1719,6 +1719,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             session.savePath = newSessionPath()
             session.created = $now()
             session.cwd = safeCwd()
+            # Fresh conversation, unnamed session: the cleared name must
+            # not follow the new id (same rule as the REPL :clear).
+            session.name = ""
             acquireSessionLock(session.savePath)
             updateActiveDirLockSession(session.savePath)
           saveSession(session, messages)

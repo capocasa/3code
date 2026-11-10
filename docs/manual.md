@@ -1144,6 +1144,32 @@ attached, `=`/`:`-separated, or space-separated):
 3code -r:abc123
 ```
 
+A unique prefix of an ID works too (`3code -r 2026` resumes the one
+session of this directory started in 2026), and so does a session name:
+
+### Naming a session
+
+Timestamp IDs are hard to remember, so a session can carry a name. From
+inside the session:
+
+```
+:rename Feature xyz
+```
+
+names it; bare `:rename` shows the current name and `:rename off` clears
+it. Named sessions list with the name quoted next to the ID in
+`:sessions` and `--list`, and both `:resume Feature xyz` and
+`3code -r "Feature xyz"` find it by name (quote names containing spaces
+on the command line). Names are matched case-insensitively within the
+current directory's sessions, exactly before by prefix; several matches
+are an error that lists the candidates, never a silent pick. The name
+lives in the session's `.3log` (the session record's body), so it
+survives copy and move with the file and `--find` matches it like any
+other content.
+
+The name is session identity, not display chrome: the terminal tab title
+(`:tab-title`) is a separate feature and a rename does not touch it.
+
 Or, without restarting, from inside a running 3code: `:resume` lists this
 directory's sessions, `:resume abc123` swaps the running REPL onto that
 session (state, locks, and profile move with it; the scrollback is not

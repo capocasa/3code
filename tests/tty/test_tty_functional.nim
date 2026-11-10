@@ -717,6 +717,105 @@ suite "terminal visual contract":
     tty.send ":q\n"
     tty.expectExit(0, timeoutMs = 5000)
 
+  test "rename names the session and the listings plus resume find it":
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "rename_command":
+      check true
+    else:
+      # #67: `:rename Feature xyz` labels the live session; the name rides
+      # the session record's body in the .3log, `:sessions` shows it quoted
+      # next to the id, and `:resume <name>` resolves it ("already on
+      # session" here, and from a cleared session a full swap). The bare
+      # form shows the name, `off` clears it, and the terminal tab title is
+      # deliberately untouched (display chrome, owned by :tab-title).
+      let root = newFixture("rename_command")
+      writeHarnessProviders(root)
+      writeStubResponses(root, %*[
+        {"role": "assistant", "preStreamDelayMs": 50,
+         "content": "reply", "contentChunks": ["reply"],
+         "usage": {"promptTokens": 10, "completionTokens": 2,
+                    "totalTokens": 12, "cachedTokens": 0}}])
+      # Seed an unnamed prior session for this cwd so `:sessions` shows the
+      # named and unnamed shapes side by side.
+      let targetId = "20260401T120000"
+      let sessDir = root / "data" / "3code" / "sessions"
+      createDir(sessDir)
+      createDir(root / "data" / "3code" / "session-paths")
+      writeFile(sessDir / (targetId & ".3log"),
+        "session " & targetId & " profile=stub.stub-model" &
+        " cwd=" & (root / "run") & "\n\n" &
+        "user\n  seeded question\n\n")
+      appendIndexAt(root / "data" / "3code" / "session-paths", root / "run",
+                    targetId)
+
+      let tty = startStub(root)
+      defer:
+        tty.writeFrameArtifact(root / "frames.txt")
+        tty.close()
+
+      tty.expect "❯"
+      # Bare :rename: nothing named yet.
+      tty.send ":rename\n"
+      tty.expectInHistory "this session has no name; name it with :rename <name>"
+      # Name it; the ack lands and the .3log gains the name as the session
+      # record's body (the save happens in the handler, but poll anyway —
+      # the save trails the history commit like every turn-end save).
+      tty.send ":rename Feature xyz\n"
+      tty.expectInHistory "session named: Feature xyz"
+      var liveId = ""
+      var liveLog = ""
+      let deadline = epochTime() + 10.0
+      while epochTime() < deadline:
+        for p in walkFiles(sessDir / "*.3log"):
+          if p.extractFilename != targetId & ".3log":
+            liveId = p.extractFilename[0 ..< ^5]
+            liveLog = readFile(p)
+        if liveId != "" and "Feature xyz" in liveLog: break
+        tty.drain(100)
+      check liveId != ""
+      # The record header carries the ISO created stamp, not the filename
+      # id; the name body line is the part this feature adds.
+      check liveLog.startsWith("session ") and "profile=stub.stub-model" in liveLog
+      check "  Feature xyz\n" in liveLog
+      # Bare again: shows the stored name.
+      tty.send ":rename\n"
+      tty.expectNewInHistory("session name: Feature xyz", 0)
+      # The listing shows the name quoted next to the id; the seeded
+      # unnamed session stays in the old shape (no quotes on its row).
+      tty.send ":sessions\n"
+      tty.expectInHistory "\"Feature xyz\""
+      tty.expectInHistory targetId
+      # Name lookup from the REPL: resolves to the session we are on.
+      tty.send ":resume Feature xyz\n"
+      tty.expectInHistory "already on session " & liveId
+      # Clear the name: ack, the body leaves the .3log, and the name no
+      # longer resolves.
+      tty.send ":rename off\n"
+      tty.expectInHistory "session name cleared"
+      let clearedDeadline = epochTime() + 10.0
+      while epochTime() < clearedDeadline:
+        liveLog = readFile(sessDir / (liveId & ".3log"))
+        if "Feature xyz" notin liveLog: break
+        tty.drain(100)
+      check "Feature xyz" notin liveLog
+      tty.send ":resume Feature xyz\n"
+      tty.expectInHistory "session not found: Feature xyz"
+      # Rename again, wipe the conversation (:clear rotates to a fresh
+      # unnamed id), and resume the named session by name alone.
+      tty.send ":rename Feature xyz\n"
+      tty.expectInHistory "session named: Feature xyz"
+      tty.send ":clear\n"
+      tty.expectInHistory "══════════"
+      tty.send ":resume Feature xyz\n"
+      tty.expectInHistory "resumed " & liveId
+      # :session reports the swapped-in id (snapshot the count before the
+      # send: the result can commit faster than a post-send snapshot).
+      let sessionsBefore = tty.countInHistory(liveId)
+      tty.send ":session\n"
+      tty.expectNewInHistory(liveId, sessionsBefore)
+      tty.send ":q\n"
+      tty.expectExit(0, timeoutMs = 5000)
+
   test "profile commands return to prompt and accept further input":
     let root = newFixture("profile_cmd_noexit")
     writeHarnessProviders(root)
