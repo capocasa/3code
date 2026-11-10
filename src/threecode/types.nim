@@ -314,6 +314,8 @@ type
     profileName*: string
     created*: string
     cwd*: string
+    name*: string  ## user-facing label (`:rename`), rides the session
+                   ## record's body; "" when unnamed
     plan*: seq[PlanItem]
     readCache*: ReadCache
     goalNotified*: bool  ## the mode's kickoff stanza already reached the

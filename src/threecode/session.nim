@@ -52,7 +52,15 @@ const SessionExt* = ".3log"
 # Roles:
 #   session     - one per file, top of the file. Created stamp + profile + cwd
 #                 (+ prompt_identity, the cache stamp of the profile that
-#                 built the conversation's system prompt).
+#                 built the conversation's system prompt). The body, when
+#                 present, is the session's user-facing name (`:rename`):
+#                 a body rather than a header arg because names carry
+#                 spaces, which the space-separated header grammar
+#                 cannot (the same reason `cwd=` breaks on spaces). The
+#                 listing peek (`previewSession`) reads only this record,
+#                 so a named session lists without parsing the message
+#                 tree; and because the body is content, `--find` terms
+#                 match it like any other text.
 #   skills      - the discovered skills catalog substituted into the system
 #                 prompt: the dynamic input, persisted so the resume-time
 #                 rebuild reproduces the live prompt bytes. The prompt
@@ -324,6 +332,11 @@ proc sessionLockPathFor*(path: string): string =
   sessionLockDir() / ($secureHash(identity) & ".lock")
 
 type SessionLocked* = object of CatchableError
+
+type SessionAmbiguous* = object of CatchableError
+  ## `resolveSessionPath` raises this when a prefix or name lookup matches
+  ## more than one session; `msg` names the lookup and lists the matching
+  ## session ids so the caller can disambiguate.
 
 # Windows access rights/disposition constants used by the atomic lock create.
 # Guarded so they (and winlean) only participate in a Windows build; on POSIX
@@ -1005,7 +1018,10 @@ proc renderSession*(session: Session, messages: JsonNode): string =
   # model it must never be fed again on resume (the mode stays armed
   # and the end-call boundary goes straight to the check).
   if session.goalNotified: hdr.add " goal_notified=1"
-  emitHeaderOnly s, hdr
+  # The user-facing name rides the record body (spaces survive there); a
+  # header arg would split on the first space of "Feature xyz".
+  if session.name.len > 0: emitRecord s, hdr, session.name
+  else: emitHeaderOnly s, hdr
   # The dynamic input the system prompt substituted: persisted so the
   # resume-time rebuild re-sends the exact catalog bytes the live session
   # sent. The prompt template itself is constructed from the profile.
@@ -1423,6 +1439,7 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
         sess.promptState.identity = kv["prompt_identity"]
       if kv.getOrDefault("goal_notified") == "1":
         sess.goalNotified = true
+      if r.body.len > 0: sess.name = r.body
     of "skills":
       # The catalog the system prompt was built with (first record wins;
       # only the resume-time rebuild consumes it, never the wire).
@@ -1565,6 +1582,7 @@ type SessionPreview* = object
   profile*: string
   msgCount*: int
   firstUser*: string
+  name*: string
 
 proc previewSession*(path: string): SessionPreview =
   ## Fast peek for `--list` and `:sessions` — reads the file, parses just
@@ -1577,6 +1595,8 @@ proc previewSession*(path: string): SessionPreview =
     of "session":
       if "profile" in kv: result.profile = kv["profile"]
       if "cwd" in kv: result.cwd = kv["cwd"]
+      if r.body.len > 0:
+        result.name = r.body.replace("\n", " ").replace("\r", " ").strip
     of "system": inc result.msgCount
     of "user":
       inc result.msgCount
@@ -1604,10 +1624,17 @@ proc listSessionPathsForCwd*(cwd: string): seq[string] =
     if p.len > 0: result.add p
 
 proc resolveSessionPath*(id: string, cwd = ""): string =
-  ## `id` is bare (no extension) or a full path. Returns "" if not found.
-  ## When `id` is empty and `cwd` is set, returns the latest session for that
-  ## cwd via the cwd index (no session parsed); with `cwd` unset, the latest
-  ## of any via a plain directory listing.
+  ## `id` is bare (no extension), a full path, a unique prefix of a session
+  ## id, or a session name (`:rename`, matched case-insensitively, exact
+  ## before prefix). Returns "" if not found; raises `SessionAmbiguous`
+  ## when a lookup matches several. Exact ids win over prefixes and
+  ## prefixes win over names, so a timestamp-shaped query never resolves
+  ## to a session merely named alike. Prefix and name matching scan the
+  ## cwd's sessions when `cwd` is set (the same scope `:sessions` lists),
+  ## else every managed transcript. When `id` is empty and `cwd` is set,
+  ## returns the latest session for that cwd via the cwd index (no session
+  ## parsed); with `cwd` unset, the latest of any via a plain directory
+  ## listing.
   if id == "":
     let candidates =
       if cwd != "": listSessionPathsForCwd(cwd)
@@ -1615,7 +1642,36 @@ proc resolveSessionPath*(id: string, cwd = ""): string =
     if candidates.len == 0: return ""
     return candidates[0]
   if fileExists(id): return id
-  sessionPathForId(id)
+  block exactId:
+    let exact = sessionPathForId(id)
+    if exact != "": return exact
+  let candidates =
+    if cwd != "": listSessionPathsForCwd(cwd)
+    else: listSessionPaths()
+  var idHits, nameHits, namePrefixHits: seq[string]
+  let lowId = id.toLowerAscii
+  for p in candidates:
+    # A timestamp prefix can never collide with a name match below: ids
+    # are checked first and win outright.
+    if sessionIdFromPath(p).startsWith(id):
+      idHits.add p
+      continue
+    let name = previewSession(p).name.toLowerAscii
+    if name.len == 0: continue
+    if name == lowId: nameHits.add p
+    elif name.startsWith(lowId): namePrefixHits.add p
+  template pickStage(hits: seq[string], label: string): string =
+    if hits.len == 1: return hits[0]
+    if hits.len > 1:
+      var ids: seq[string]
+      for p in hits: ids.add sessionIdFromPath(p)
+      raise newException(SessionAmbiguous,
+        "ambiguous session " & label & " \"" & id & "\": " & ids.join(", "))
+    ""
+  discard pickStage(idHits, "id prefix")
+  discard pickStage(nameHits, "name")
+  discard pickStage(namePrefixHits, "name prefix")
+  ""
 
 # ---------- Session-derived display helpers ----------
 

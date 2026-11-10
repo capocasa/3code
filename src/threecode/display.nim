@@ -1194,6 +1194,10 @@ proc printSessionListS*(paths: seq[string], currentPath: string,
     # Private sessions sit in their own directory; say so, so the listing
     # explains why `--resume <id>` finds them next to the plain ones.
     let priv = if isPrivateSessionPath(p): " private" else: ""
+    # The `:rename` label, quoted so its extent is visible next to the id
+    # and the first-message snippet. Unnamed sessions list exactly as before.
+    let nameStr =
+      if preview.name.len > 0: " \"" & preview.name & "\"" else: ""
     let snip =
       if preview.firstUser.len == 0: ""
       elif preview.firstUser.len > 50: "  " & preview.firstUser[0 ..< 47] & "..."
@@ -1201,7 +1205,7 @@ proc printSessionListS*(paths: seq[string], currentPath: string,
     let cwdStr =
       if showCwd and preview.cwd != "": "  " & collapseHome(preview.cwd)
       else: ""
-    result.add &"  {mark} " & id &
+    result.add &"  {mark} " & id & nameStr &
       &"   ({preview.msgCount} msg" & (if preview.msgCount == 1: "" else: "s") & priv & ")" &
       cwdStr & snip & "\r\n"
   if paths.len > lastEx:
@@ -1227,6 +1231,7 @@ proc printSearchListS*(hits: seq[SearchHit], total: int, showCwd: bool,
   for h in hits[first ..< lastEx]:
     let id = sessionIdFromPath(h.path)
     let priv = if isPrivateSessionPath(h.path): " private" else: ""
+    let nameStr = if h.name.len > 0: " \"" & h.name & "\"" else: ""
     let cwdStr =
       if showCwd:
         var c = collapseHome(h.cwd)
@@ -1234,7 +1239,7 @@ proc printSearchListS*(hits: seq[SearchHit], total: int, showCwd: bool,
         c
       else: ""
     let snip = hitSnippet(h, if showCwd: 48 else: 72)
-    result.add &"  {id}{priv}  {align($h.score, 3)}×" &
+    result.add &"  {id}{priv}{nameStr}  {align($h.score, 3)}×" &
       (if cwdStr.len > 0: "  " & cwdStr else: "") &
       "  " & snip & "\r\n"
   if total > lastEx:

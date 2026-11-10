@@ -3884,8 +3884,11 @@ commands:
   :log                list all tool calls this session
   :sessions           list recent sessions saved in this directory (max 20)
   :session            show this session's id (for --resume=ID / :resume ID)
+  :rename NAME        name this session (lists in :sessions; bare shows it,
+                      off clears it; :resume and --resume accept the name)
   :resume             list sessions of this directory, pick with :resume <id>
   :resume ID          swap this running 3code onto saved session ID
+                      (ID is an id, a unique id prefix, or a session name)
   :summarize          collapse old turns into a synthetic recap (meta model call)
   :btw QUESTION       ask the model a side question about this conversation;
                       the answer shows here and never enters the context

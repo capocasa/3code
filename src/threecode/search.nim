@@ -27,6 +27,7 @@ type
   SearchHit* = object
     path*: string
     cwd*: string   ## cwd recorded in the newest `session` header, "" if none
+    name*: string  ## `:rename` label (the session record's body), "" if none
     score*: int    ## total occurrences of all terms
     pos*: int      ## first match start, in raw-file byte coordinates
     mlen*: int     ## raw bytes from match start to the end of its last word
@@ -66,14 +67,23 @@ type
     low*: string        ## lowered raw text, header lines blanked to spaces
     lineStart*: seq[int32] ## per line: start offset, negated-1 for headers
     cwd*: string
+    name*: string  ## the `session` record's body (the `:rename` label),
+                   ## taken from the raw text before blanking
 
 proc mapString*(text: string): FileMap =
   ## One lowered copy plus per-line geometry. Header lines (column-0
   ## non-whitespace: roles with their args, `~~` terminators) are blanked
   ## so they can never match; `cwd` is pulled from the newest `session`
-  ## header before blanking (last one wins, like `previewSession`).
+  ## header before blanking (last one wins, like `previewSession`), and
+  ## the `:rename` name from the body line right under that header — it
+  ## stays searchable content, the copy is only for the hit list.
   result.low = text.toLowerAscii
   var off = 0
+  # Set right after a `session` header: the name rides that record's body,
+  # so the immediately following indented line IS the name (an immediate
+  # blank or another header cancels the want). Searched like any content,
+  # but surfaced next to the id in the hit list.
+  var wantName = false
   while off <= result.low.len:
     var lineEnd = result.low.len
     let nl = result.low.find('\n', off)
@@ -81,14 +91,19 @@ proc mapString*(text: string): FileMap =
     let lineLen = lineEnd - off
     if lineLen > 0 and result.low[off] notin {' ', '\t'}:
       result.lineStart.add -int32(off + 1)
+      wantName = false
       if lineLen >= 7 and (lineLen == 7 or result.low[off + 7] == ' ') and
           equalMem(addr result.low[off], unsafeAddr SessionWord[0], 7):
         for part in text[off ..< lineEnd].split(' '):
           if part.len > 4 and part.startsWith("cwd="):
             result.cwd = part[4 .. ^1]
+        wantName = true
       for i in off ..< lineEnd: result.low[i] = ' '
     else:
       result.lineStart.add int32(off)
+      if wantName:
+        wantName = false
+        if lineLen > 0: result.name = text[off ..< lineEnd].strip
     if nl < 0: break
     off = nl + 1
 
@@ -146,7 +161,7 @@ proc searchSessions*(paths: seq[string], terms: seq[string]): seq[SearchHit] =
     inc order
     let m = mapFile(p)
     if m.low.len == 0: continue
-    var hit = SearchHit(path: p, cwd: m.cwd, order: order)
+    var hit = SearchHit(path: p, cwd: m.cwd, name: m.name, order: order)
     for words in parsed:
       let (n, first, firstLen) = countTerm(m.low, words)
       if n == 0: continue

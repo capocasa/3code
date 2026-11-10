@@ -123,8 +123,10 @@ proc usage() {.noreturn.} =
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -c, --config FILE    read providers and settings from FILE
                       (default: the config: path shown below)
-  -r, --resume[=ID]    resume latest session from this directory, or one by id
-                      (value options take -r ID | -rID | -r=ID | -r:ID | --resume=ID)
+  -r, --resume[=ID]    resume latest session from this directory, or one by
+                      id, unique id prefix, or name (set with :rename)
+                      (value options take -r ID | -rID | -r=ID | -r:ID | --resume=ID;
+                      quote names containing spaces)
   -i, --interactive    drop into the REPL after running an initial prompt
                       (without it, a prompt runs once and exits)
   -l, --list           list recent sessions for this directory (max 20) and exit
@@ -677,8 +679,16 @@ proc main() =
   # bogus id fails fast (no skill extraction, no lock) the same way a
   # usage error does. A prompt alongside --resume is now legitimate
   # (run it once resumed), so only the id is checked here.
+  var resolved = ""
   if resume:
-    if resolveSessionPath(resumeId, safeCwd()) == "":
+    # Same lookup `:resume` runs: exact id, then unique id prefix, then a
+    # `:rename` name (case-insensitive). Several matches at one stage die
+    # listing the candidates.
+    try:
+      resolved = resolveSessionPath(resumeId, safeCwd())
+    except SessionAmbiguous as e:
+      die(e.msg, ExitConfig)
+    if resolved == "":
       if resumeId == "":
         die("no saved sessions for " & safeCwd(), ExitConfig)
       else:
@@ -712,7 +722,7 @@ proc main() =
     # `resolveSessionPath` already ran (and bailed) above; recompute the
     # resolved path here without re-validating, since nothing between the two
     # points can change the on-disk set.
-    (session, messages) = loadSessionFile(resolveSessionPath(resumeId, safeCwd()))
+    (session, messages) = loadSessionFile(resolved)
     # Recover any prompt that was in-flight when the previous process ended
     # (kill, power-off, Ctrl-C). Only restored when no explicit --prompt was
     # passed: the user's command-line intent wins over the recovered draft.

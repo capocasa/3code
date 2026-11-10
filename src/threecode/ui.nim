@@ -25,7 +25,7 @@ else:
 const CommandNames* = @[":help", ":tokens", ":clear", ":goal", ":cyber", ":model",
                       ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":verifier",
-                      ":show", ":unshow", ":cmd", ":log", ":sessions", ":session", ":resume", ":summarize", ":btw",
+                      ":show", ":unshow", ":cmd", ":log", ":sessions", ":session", ":resume", ":rename", ":summarize", ":btw",
                       ":version", ":sandbox", ":sb", ":retry", ":private",
                       ":quit", ":exit"] & ComputerCommandNames
 
@@ -152,6 +152,10 @@ proc classifyCommand*(cmd: string): CommandKind =
     # verbs append to the sandbox file and reload, so they mutate.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "show"): ckSafeImmediate
     else: ckMutating
+  of ":rename":
+    # Bare `:rename` shows the current name; any text (or `off`) writes the
+    # session file, so it queues behind a running turn like other writes.
+    if parts.len == 0: ckSafeImmediate else: ckMutating
   of ":clear", ":resume", ":summarize":
     ckMutating
   of ":btw":
@@ -2389,6 +2393,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         session.savePath = newSessionPath()
         session.created = $now()
         session.cwd = safeCwd()
+        # A fresh conversation is an unnamed session: the cleared name
+        # must not follow the new id.
+        session.name = ""
         acquireSessionLock(session.savePath)
         updateActiveDirLockSession(session.savePath)
       resp "════════════════════════════════════════"
@@ -2538,6 +2545,26 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       body.add listToolsS(session.toolLog)
     of ":session":
       resp sessionIdFromPath(session.savePath)
+    of ":rename":
+      # Session identity, not display chrome: the name rides the session
+      # record's body in the `.3log` (spaces survive a body, unlike the
+      # space-split header args), so `previewSession` picks it up for the
+      # listings and `:resume`/`--resume` accept it. The terminal tab title
+      # is display chrome and stays owned by `:tab-title` — a rename never
+      # touches it.
+      if parts.len == 0:
+        if session.name.len > 0:
+          resp "session name: " & session.name
+        else:
+          resp "this session has no name; name it with :rename <name>"
+      elif arg.strip.toLowerAscii == "off":
+        session.name = ""
+        saveSession(session, messages)
+        resp "session name cleared"
+      else:
+        session.name = arg.strip
+        saveSession(session, messages)
+        resp "session named: " & session.name
     of ":sessions":
       # Directory-scoped by default, like `-l`; `:sessions all` widens to
       # every directory and shows each session's cwd, like `-la`.
@@ -2567,8 +2594,18 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           body.add printSessionListS(paths, session.savePath, false)
           resp "resume with :resume <id>"
       else:
-        let path = resolveSessionPath(arg, safeCwd())
-        if path == "":
+        var path = ""
+        var lookupErr = ""
+        try:
+          path = resolveSessionPath(arg, safeCwd())
+        except SessionAmbiguous as e:
+          # A name or id prefix matched several sessions: list them so the
+          # caller can retry with an id.
+          lookupErr = e.msg
+        if lookupErr.len > 0:
+          ok = false
+          respErr lookupErr
+        elif path == "":
           ok = false
           respErr "session not found: " & arg
         elif path == session.savePath:
