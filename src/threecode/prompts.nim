@@ -157,6 +157,21 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # low/high/max).
     ("platte", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
 
+    # neuralwatt (api.neuralwatt.com): energy-metered hosted vLLM fleet,
+    # per-request Wh and CO2 reporting on every response. One reasoning
+    # knob for every family: top-level `reasoning_effort` over
+    # none/minimal/low/medium/high/xhigh/max with per-model aliasing,
+    # where `none` truly skips the reasoning phase (see the neuralwatt
+    # branches in applyQwenReasoning / applyMimoReasoning /
+    # applyKimiReasoning; glm-5.3 and deepseek ride the hosted-stack
+    # else branches unchanged). Vision flags and contexts are from
+    # their public /v1/models metadata, not a live image probe yet.
+    # The nw-* tracking aliases and -flex/-speed price tiers stay off
+    # the table: aliases re-point at newer models under the same id,
+    # tiers only change scheduling and price.
+    ("neuralwatt", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("neuralwatt", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
+
     # gpt-oss
     ("baseten", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
     ("cerebras", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
@@ -241,6 +256,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepseek", "deepseek-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
     ("deepseek", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
+    ("neuralwatt", "deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
@@ -545,6 +561,12 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # applyQwenReasoning, api.nim). Context 128K per Groq.
     ("litellm", "qwen3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
 
+    # neuralwatt: bare ids, one graded reasoning_effort knob (qwen3.6
+    # is high/none binary, qwen3.8 grades xhigh/medium/low/none with
+    # high aliased to xhigh; neuralwatt branch in applyQwenReasoning).
+    ("neuralwatt", "qwen-3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 262_144, false, true),
+    ("neuralwatt", "qwen3.6-35b", "qwen", "3.6", "35b", "on", 0.2, 8192, tbNone, false, 262_144, false, true),
+
     # qwen first-party (DashScope compatible-mode, intl/cn/us hosts; bare
     # model ids). Contexts per the Model Studio model list.
     ("qwen", "qwen3.8-max", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -584,6 +606,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # Tencent's tokenhub gateway resells the V2.5-Pro weights; deepinfra
     # and nano-gpt host the V2.6 pair, novita still V2.5.)
     ("xiaomi", "mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
+    ("neuralwatt", "mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("xiaomi", "mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("xiaomi", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("xiaomi", "mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -612,6 +635,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "kimi-k2-6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("venice", "kimi-k2-7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("venice", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("neuralwatt", "kimi-k3", "kimi", "3", "", "max", 0.6, 8192, tbAllTurns, false, 1_000_000, false, true),
     # Venice's validator rejects chat_template_kwargs outright, so the
     # K3.1 rows default to the effort knob instead (verified live:
     # reasoning_effort max accepted, temperature omitted fine, image
@@ -4370,6 +4394,11 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # novita, venice and cheaperinference; venice additionally
         # rejects `chat_template_kwargs`, so `on` is not offered.
         return @["low", "high", "max"]
+      if fam == "kimi" and p == "neuralwatt":
+        # k3 keeps the graded ladder on neuralwatt's vLLM line and
+        # `none` is a real skip there (unlike first-party, where k3
+        # always thinks), so off joins low/high/max.
+        return @["off", "low", "high", "max"]
       if fam == "kimi" and p in ["kimi", "kimicode"]:
         # First-party Kimi (api.moonshot.ai / api.kimi.com/coding) does
         # not speak the vLLM `enable_thinking` knob the aggregators take.
@@ -4382,6 +4411,11 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         if combo.variant.startsWith("7-code"):
           return @[]
         return @["off", "on"]
+      if fam == "qwen" and p == "neuralwatt":
+        # qwen3.6 is high/none binary, qwen3.8 grades xhigh/medium/low
+        # with high aliased to xhigh; all four 3code levels are valid
+        # wire values on both.
+        return @["off", "low", "medium", "high"]
       if fam in ["laguna", "kimi", "qwen", "longcat", "minimax", "mimo", "ling", "nemotron"]:
         # These families have no graded effort knob on the OpenAI-compatible
         # surface (see `applyMiniMaxReasoning` / `applyMimoReasoning` in

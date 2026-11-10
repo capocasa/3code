@@ -255,6 +255,63 @@ suite "api: applyReasoning — deepseek":
     check body{"reasoning_effort"}.getStr == "high"
     check not body.hasKey("thinking")
 
+suite "api: applyReasoning — neuralwatt":
+  # One knob for every hosted family: top-level reasoning_effort, where
+  # `none` is a true skip of the reasoning phase. Families with their
+  # own procs get a neuralwatt branch; glm-5.3 and deepseek ride the
+  # hosted-stack else branches unchanged.
+  test "qwen off skips reasoning, graded levels pass through":
+    for (effort, expected) in [("off", "none"), ("low", "low"),
+                               ("medium", "medium"), ("high", "high"),
+                               ("on", "high")]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "neuralwatt.qwen-3.8-27b", family: "qwen",
+                      model: "qwen-3.8-27b", reasoning: effort)
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == expected
+      check not body.hasKey("chat_template_kwargs")
+
+  test "kimi off maps to none, on leaves the server default":
+    block off:
+      var body = %*{"stream": true}
+      let p = Profile(name: "neuralwatt.kimi-k3", family: "kimi",
+                      model: "kimi-k3", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "none"
+      check not body.hasKey("chat_template_kwargs")
+    block on:
+      var body = %*{"stream": true}
+      let p = Profile(name: "neuralwatt.kimi-k3", family: "kimi",
+                      model: "kimi-k3", reasoning: "on")
+      applyReasoning(p, body)
+      check not body.hasKey("reasoning_effort")
+      check not body.hasKey("chat_template_kwargs")
+
+  test "mimo off is none, on is high (its only depth there)":
+    for (effort, expected) in [("off", "none"), ("on", "high")]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "neuralwatt.mimo-v2.6-pro", family: "mimo",
+                      model: "mimo-v2.6-pro", reasoning: effort)
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == expected
+      check not body.hasKey("chat_template_kwargs")
+
+  test "glm-5.3 and deepseek keep the hosted-stack mapping":
+    block glm53:
+      var body = %*{"stream": true}
+      let p = Profile(name: "neuralwatt.glm-5.3", family: "glm",
+                      model: "glm-5.3", version: "5", variant: "3",
+                      reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+    block deepseek:
+      var body = %*{"stream": true}
+      let p = Profile(name: "neuralwatt.deepseek-v4.1-flash", family: "deepseek",
+                      model: "deepseek-v4.1-flash", reasoning: "low")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "none"
+      check not body.hasKey("thinking")
+
 suite "api: applyReasoning — minimax":
   # M-series on the OpenAI-compatible surface exposes a binary on/off
   # knob (`chat_template_kwargs.enable_thinking`). low/medium/high are

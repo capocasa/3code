@@ -412,6 +412,7 @@ login that rides on `anthropic`.
 | arcee | US | |
 | friendli | US | Korean-founded inference cloud |
 | perplexity | US | |
+| neuralwatt | US and EU (multi-region) | energy-metered vLLM fleet: per-request Wh and CO2 on every response, pay-per-kWh or token pricing; one graded reasoning knob across families |
 
 ### EU providers
 

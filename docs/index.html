@@ -275,6 +275,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <tr><td>arcee</td><td>US</td><td></td></tr>
 <tr><td>friendli</td><td>US</td><td>Korean-founded inference cloud</td></tr>
 <tr><td>perplexity</td><td>US</td><td></td></tr>
+<tr><td>neuralwatt</td><td>US and EU (multi-region)</td><td>energy-metered vLLM fleet: per-request Wh and CO2 on every response, pay-per-kWh or token pricing; one graded reasoning knob across families</td></tr>
 </table>
 <h3 id="eu-providers">EU providers</h3><p>Where to point 3code when data must stay under EU jurisdiction.</p>
 <table border="1" class="docutils"><tr><th>provider</th><th>hosting</th><th>notes</th></tr>
@@ -661,7 +662,7 @@ allow ./</pre></p>
 <p>Windows grants network capability when no host rules are present.</p>
 <p>When no policy file exists, the built-in default is materialized into a per-run temporary file for the Bash sandbox; nothing is written into the project or the config directory. The default grants the project directory itself (<tt class="docutils literal"><span class="pre">allow ./</span></tt>), so a fresh project is writable out of the box.</p>
 
-<h3 id="sandbox-settings-collection">Sandbox settings collection</h3><p>Recipes for stacks past the basics. The default policy already covers git, mercurial, C, Zig, Go, Nim, Python (pip, uv, venv), Rust, and the npm/pip caches; on macOS <tt class="docutils literal"><span class="pre">javac</span></tt> itself runs too (the JDK homes are read-only by default, the JVM's system-level lookups ride the sandbox profile) - nothing below is needed for those. Copy the lines you need into <tt class="docutils literal"><span class="pre">.sandbox</span></tt> (via <tt class="docutils literal"><span class="pre">:sandbox allow</span></tt> / <tt class="docutils literal"><span class="pre">:sandbox readonly</span></tt>), or into <tt class="docutils literal"><span class="pre">~/.config/3code/sandbox</span></tt> to make them your baseline. Each entry is the tool's own documented home, narrowed wherever the tool keeps credentials next to its data; the Windows line is given when the paths move.</p>
+<h3 id="sandbox-settings-collection">Sandbox settings collection</h3><p>Recipes for stacks past the basics. The default policy already covers git, mercurial, C, Zig, Go, Nim, Python (pip, uv, venv), Rust, and the npm/pip caches; on macOS <tt class="docutils literal"><span class="pre">javac</span></tt> itself runs too (the JDK homes are read-only by default, the JVM's system-level lookups ride the sandbox profile: the <tt class="docutils literal"><span class="pre">kern.grade_cputype</span></tt> sysctl, opendirectoryd for user lookups, and the dirhelper mach service that backs temp-dir resolution - without the last one <tt class="docutils literal"><span class="pre">java</span></tt> hangs before <tt class="docutils literal"><span class="pre">main</span></tt> on a Mac) - nothing below is needed for those. Copy the lines you need into <tt class="docutils literal"><span class="pre">.sandbox</span></tt> (via <tt class="docutils literal"><span class="pre">:sandbox allow</span></tt> / <tt class="docutils literal"><span class="pre">:sandbox readonly</span></tt>), or into <tt class="docutils literal"><span class="pre">~/.config/3code/sandbox</span></tt> to make them your baseline. Each entry is the tool's own documented home, narrowed wherever the tool keeps credentials next to its data; the Windows line is given when the paths move.</p>
 <p><tt class="docutils literal"><span class="pre">maven</span></tt> (Java)::</p>
 <pre>allow ~/.m2/repository
 
@@ -866,7 +867,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-09 21:12:16 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-10 12:45:23 UTC</small>
       </div>
     </div>
   </div>
