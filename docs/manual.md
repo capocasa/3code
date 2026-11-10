@@ -85,14 +85,20 @@ serve quantized weights.
 ### Install
 
 ```
-# macOS / Linux
-curl -fsSL https://3code.capocasa.dev/install | sh
+# macOS / Linux: download the installer, read it, run it
+curl -fsSLO https://3code.capocasa.dev/install
+less install                 # see for yourself what it does
+sh install
 
 # Windows (PowerShell)
-irm https://3code.capocasa.dev/install.ps1 | iex
+irm https://3code.capocasa.dev/install.ps1 -OutFile install.ps1
+notepad install.ps1           # see for yourself what it does
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The install script is the recommended way to install 3code. npm is there
+The install script is the recommended way to install 3code; it verifies
+the release archive against the `SHASUMS256.txt` published with each
+release before installing. npm is there
 for those who prefer it:
 
 ```
@@ -136,10 +142,12 @@ instead; there the run must come from an admin account or elevated shell).
 
 ### Termux on Android arm64
 
-Inside Termux, the same one-liner installs the Android arm64 build:
+Inside Termux, the same installer installs the Android arm64 build:
 
 ```
-curl -fsSL https://3code.capocasa.dev/install | sh
+pkg install curl
+curl -fsSLO https://3code.capocasa.dev/install
+less install && sh install
 ```
 
 It detects Termux via `$PREFIX` and installs to `$PREFIX/bin`, which is
@@ -666,8 +674,13 @@ hyperlink (OSC 8) over a dump of the full output in
 `$TMPDIR/3code_out_<pid>/T<N>.log(.diff)`, so terminals that support links
 open it in the `file:` handler (e.g. `$VISUAL`) on a click; the visible
 file name keeps the row honest where links are unsupported, and the dumps
-live as long as the session does. Diffs are painted green/red, and a long
-diff is clipped the same linked way rather than flooding the screen.
+live as long as the session does. Diffs are painted green/red, and every
+painted row is itself a hyperlink into the edited file at that row's line
+(`file://path:line`: the line is the number after the last colon, so a
+`file:` handler that understands `path:line` (a `$VISUAL` wrapper, an IDE)
+lands on the exact spot; the `r`/`w`/`p` banner paths link the same way).
+A long diff is clipped the same linked way rather than flooding the
+screen, and the `w` write block's diff rows carry the same per-line links.
 Failed tools mark their banner so a red `Ø`/`✕` scan tells you where a
 turn went wrong without reading anything.
 

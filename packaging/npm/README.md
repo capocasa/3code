@@ -9,11 +9,15 @@
 The install script is the recommended way in:
 
 ```sh
-# macOS / Linux
-curl -fsSL https://3code.capocasa.dev/install | sh
+# macOS / Linux: download the installer, read it, run it
+curl -fsSLO https://3code.capocasa.dev/install
+less install                 # see for yourself what it does
+sh install
 
 # Windows (PowerShell)
-irm https://3code.capocasa.dev/install.ps1 | iex
+irm https://3code.capocasa.dev/install.ps1 -OutFile install.ps1
+notepad install.ps1           # see for yourself what it does
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 npm is here for those who prefer it:

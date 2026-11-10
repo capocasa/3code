@@ -39,6 +39,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   dirsettings]
 import threecode/acp
 import threecode/rpc
+import threecode/signals
 when not defined(android):
   import tinotify
 else:
@@ -840,6 +841,23 @@ proc main() =
       discard posix.raise(sig)
     signal(SIGTERM, signalCleanup)
     signal(SIGHUP, signalCleanup)
+    # Fatal-signal terminal restore: termios restore plus one write(2)
+    # of the mode-reset escapes only - the stdio lock may be held by
+    # whichever thread crashed, so buffered output would hang instead of
+    # dying. Registration policy (which signals) lives in signals.nim.
+    proc fatalSignalRestore(sig: cint) {.noconv, gcsafe.} =
+      signal(sig, SIG_DFL)  # first: no recursive re-entry
+      fatprompt.restoreCancelTermios()
+      fatprompt.restoreInputTermios()
+      # One literal, one write: no allocation on a possibly-corrupt heap.
+      # Mirrors minline.restoreTerminal (cursor, attrs, bracketed paste,
+      # kitty pop) plus DECSET 2026l, which restoreTerminal balances only
+      # on balanced paints - a crash mid-paint would otherwise leave the
+      # terminal swallowing output until the next reset.
+      let resetModes = "\x1b[?2026l\x1b[?25h\x1b[0m\x1b[?2004l\x1b[<1u"
+      discard posix.write(1.cint, unsafeAddr resetModes[0], resetModes.len)
+      discard posix.raise(sig)
+    signals.installFatalHandlers(fatalSignalRestore)
   editor.completionCallback = proc(ed: minline.LineEditor): seq[string] =
     completionFor(ed.lineText)
   # The bootstrap provider wizard (and every later prompt) reads via the

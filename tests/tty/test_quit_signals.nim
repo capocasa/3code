@@ -20,6 +20,7 @@
 import std/[json, os, strutils, unittest]
 when defined(posix):
   import posix
+  import posix/termios
 import tty_expect
 import stub_helpers
 
@@ -457,3 +458,85 @@ suite "quit signals":
       tty.expectExit(0, timeoutMs = 5000)
       assertNoTrace(tty)
       echo "  PASS: SIGINT interrupted the turn, then quit cleanly at idle"
+
+when defined(posix):
+  # Abnormal exits (signals, crashes) must hand the terminal back in the
+  # same state a clean :q does: termios echo+canonical restored, bracketed
+  # paste and kitty keyboard popped. The PTY termios is shared between
+  # master and slave, so reading the master after the child died shows
+  # exactly what the user's shell inherits (the macOS report: invisible
+  # typing after quitting, `reset` to recover).
+  proc ptyEchoes(s: TtySession): bool =
+    var t: Termios
+    if tcGetAttr(s.masterFd.cint, addr t) != 0:
+      return false
+    (t.c_lflag and Cflag(ECHO or ICANON)) == Cflag(ECHO or ICANON)
+
+  proc rawFrom(s: TtySession; mark: int): string =
+    ## Bytes emitted after `mark` (a snapshot of `s.raw.len`), so restore
+    ## sequences can be asserted on the post-kill tail only.
+    if mark < s.raw.len: s.raw[mark ..< s.raw.len] else: ""
+
+  proc startTurnAndSignal(root: string; sig: cint): tuple[tty: TtySession, mark: int] =
+    ## Drive the stub to a live turn (30s pre-stream delay: only the signal
+    ## ends it), then deliver `sig` to the child pid. Returns the session
+    ## and the raw-stream mark taken just before the kill.
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[{"role": "assistant", "preStreamDelayMs": 30000,
+        "content": "done.", "contentChunks": ["done."],
+        "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}}])
+    let tty = startStub(root)
+    tty.expect "\u276f"
+    for ch in "go":
+      tty.send($ch); tty.drain(10)
+    tty.send "\n"
+    tty.expect "\u25cb0%"       # hard sync: the turn is running
+    tty.drain(200)
+    let mark = tty.raw.len
+    discard posix.kill(tty.pid, sig)
+    (tty, mark)
+
+  suite "abnormal exit restores the terminal":
+    test "SIGTERM mid-turn":
+      let root = newFixture("exit_restore_sigterm")
+      let (tty, mark) = startTurnAndSignal(root, posix.SIGTERM)
+      defer: tty.close()
+      tty.expectExit(143, timeoutMs = 5000)
+      check ptyEchoes(tty)
+      let tail = rawFrom(tty, mark)
+      check "\x1b[?2004l" in tail   # bracketed paste off
+      check "\x1b[<1u" in tail      # kitty keyboard popped
+      echo "  PASS: SIGTERM mid-turn restored echo + terminal modes"
+
+    test "SIGHUP mid-turn (terminal closed)":
+      let root = newFixture("exit_restore_sighup")
+      let (tty, mark) = startTurnAndSignal(root, posix.SIGHUP)
+      defer: tty.close()
+      tty.expectExit(129, timeoutMs = 5000)
+      check ptyEchoes(tty)
+      check "\x1b[?2004l" in rawFrom(tty, mark)
+      echo "  PASS: SIGHUP mid-turn restored echo + terminal modes"
+
+    test "SIGSEGV mid-run (crash exit)":
+      # Fatal signals die with the default disposition and skip every exit
+      # proc; the crash handler must restore termios before re-raising so
+      # a crash does not also eat the shell.
+      let root = newFixture("exit_restore_sigsegv")
+      let (tty, mark) = startTurnAndSignal(root, posix.SIGSEGV)
+      defer: tty.close()
+      tty.expectExit(139, timeoutMs = 5000)
+      check ptyEchoes(tty)
+      let tail = rawFrom(tty, mark)
+      check "\x1b[?2004l" in tail
+      check "\x1b[?2026l" in tail   # sync-output mode left by a mid-paint crash
+      echo "  PASS: SIGSEGV crash exit restored echo + terminal modes"
+
+    test "SIGABRT mid-run (crash exit)":
+      let root = newFixture("exit_restore_sigabrt")
+      let (tty, mark) = startTurnAndSignal(root, posix.SIGABRT)
+      defer: tty.close()
+      tty.expectExit(134, timeoutMs = 5000)
+      check ptyEchoes(tty)
+      check "\x1b[?2004l" in rawFrom(tty, mark)
+      echo "  PASS: SIGABRT crash exit restored echo + terminal modes"
