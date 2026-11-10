@@ -1335,11 +1335,15 @@ opens it in `$VISUAL/$EDITOR`, creating it when missing; a changed file
 restarts the goal work at once), delete
 it to end goal mode silently, interrupt to pause. Arming starts work
 immediately: `:goal <text>` writes the file, answers with one receipt
-line, prints the dim `goal.md detected implementing` hint, and runs the
-kickoff turn; a `goal.md` that is already on disk when 3code starts does
-the same before any prompt. Each turn end runs the check; the verifier's
+line, and runs the kickoff turn; a `goal.md` that is already on disk
+when 3code starts does the same before any prompt. The kickoff speaks
+as one scrollback item — the `⚑` flag plus the goal text alone — and
+the stanza is fed exactly once per arming: resuming a session never
+re-feeds it, the check just runs at the next turn end. Each turn end
+runs the check; the verifier's
 reply is the whole display, a dim quote block led by a green `✓` or a
-red `✗` (the verdict line itself is stripped). A satisfied verdict
+red `✗` (the verdict line itself is stripped; a failed or unreadable
+check shows the same red `✗` row). A satisfied verdict
 retires the file to `achieved.md`; an unmet one sends the agent back
 in: the feedback lands as a `⚑` row and the next turn starts on its
 own, no key pressed.

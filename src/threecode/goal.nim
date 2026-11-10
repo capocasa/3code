@@ -11,8 +11,11 @@
 ## `goal.md` in the project root keeps a session on one goal. The file
 ## IS the mode, and work starts the moment it exists: startup detection,
 ## every `:goal` write path, and a turn-end detection of a file that
-## appeared mid-session all print the dim `goal.md detected
-## implementing` hint and run the kickoff turn at once. The other hook
+## appeared mid-session all run the kickoff turn at once - the kickoff
+## item (the `⚑` flag plus the goal text alone) is the whole
+## announcement - and the stanza is fed exactly once per arming: a
+## resumed session never re-sends it (the latch is persisted, and the
+## `Goal armed:` content lead witnesses older sessions). The other hook
 ## is the end-call boundary in `turns.nim`: when the turn's final model
 ## call completes and the harness is about to hand the prompt back to
 ## the user, it stats `goal.md`; bare existence activates (v1 waives
@@ -176,6 +179,34 @@ proc goalFeedbackMessage*(feedback: string): JsonNode =
        "satisfied. Verifier feedback:\n\n" & feedback &
        "\n\nAddress it and keep working toward the goal; the " &
        "satisfaction check runs again when this turn ends."}
+
+proc modeKickoffIn*(messages: JsonNode): bool =
+  ## True when the conversation already carries a mode kickoff - a
+  ## harness-autosent prompt leading with `Goal armed:`. That stanza
+  ## reached the model in an earlier run, so a resumed session must not
+  ## feed it again: the kickoff fires once per arming, never once per
+  ## run. The content lead, not a marker field, is the witness, so
+  ## sessions saved before any of this mattered still count.
+  if messages == nil or messages.kind != JArray: return false
+  for m in messages:
+    if m.kind != JObject: continue
+    if m{"role"}.getStr == "user" and m{"agentSent"}.getBool(false) and
+        m{"content"}.getStr("").startsWith("Goal armed:"):
+      return true
+  false
+
+proc kickoffDisplayText*(content: string): string =
+  ## The kickoff item's scrollback body: the goal (or plan) text alone.
+  ## The wire message wraps it in a `Goal armed:` header and a trailing
+  ## instruction paragraph; the display drops both - the flag icon plus
+  ## the goal itself is the whole item. Byte-shape inverse of the
+  ## kickoff builders; the full content comes back when the shape does
+  ## not match (a hand-edited or foreign message).
+  if not content.startsWith("Goal armed:"): return content
+  let parts = content.strip.split("\n\n")
+  if parts.len < 2: return content
+  let body = if parts.len >= 3: parts[1 .. ^2] else: parts[1 .. ^1]
+  body.join("\n\n").strip
 
 proc goalKickoffMessage*(goalText: string): JsonNode =
   ## The harness-autosent prompt that starts goal achievement the
@@ -657,18 +688,6 @@ proc modeConflictLabel*(m, other: ModeDesc): string =
     "harness modes are mutually exclusive (" & m.verb & "! cancels " &
     m.name & " mode, then " & other.verb & " arms the plan)"
 
-proc modeHintLine*(m: ModeDesc; state: string; label = ""): string =
-  ## The mode's lifecycle hint: one line in error-message shape but dim
-  ## white - state changing, not attention owed - naming the trigger
-  ## file and the state, e.g. `goal.md detected implementing`. Detection
-  ## speaks through here; verdict moments speak as the verifier step's
-  ## icon row, so no hint may grow around the check. `label` overrides
-  ## the computed file name: a hint printing after the file was renamed
-  ## away would fall back to the legacy name, so the caller captures
-  ## the label first.
-  GreyFg & (if label.len > 0: label else: modeFileLabel(m)) & " " & state &
-    Reset & "\r\n"
-
 # The goal-mode entry points: the registry walk for entry #1.
 
 proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
@@ -920,7 +939,7 @@ var goalStepHook*: proc (step: GoalStep) = nil
   ## in tests and headless use, so a step is data, never a paint
   ## obligation.
 
-proc stepProse(text: string; verdict = gvkNone) =
+proc emitGoalStep*(text: string; verdict = gvkNone) =
   ## Emit a verifier step. A bare verdict with no prose still emits (an
   ## icon-only check is legible); an informational note with neither
   ## prose nor verdict is nothing at all.
@@ -948,7 +967,11 @@ proc runVerifierSideCall(p: Profile, preamble, prompt: string):
   except ApiError as e:
     return (false, "", e.msg)
   let text = msg{"content"}.getStr("")
-  stepProse(stripVerdictLine(text), parseVerdict(text).kind)
+  let v = parseVerdict(text)
+  var prose = stripVerdictLine(text)
+  if v.kind == gvkNone and prose.strip.len == 0:
+    prose = "no verdict line in the reply; retrying next turn"
+  emitGoalStep(prose, v.kind)
   (true, text, "")
 
 # ---------- decision verifier (System One) ----------
@@ -1067,7 +1090,10 @@ proc runDecisionCheck(p: Profile; m: ModeDesc; modeText, evidence,
       buildSessionDiff(cache)), decisionQuestions(), usage)
     let answers = resp{"answers"}
     let v = verdictFromDecision(answers)
-    stepProse(decisionSummaryLine(answers), v.kind)
+    var line = decisionSummaryLine(answers)
+    if v.kind == gvkNone and line.len == 0:
+      line = "no readable decision answers; retrying next turn"
+    emitGoalStep(line, v.kind)
     GoalCheckResult(ok: true, verdict: v)
   except ApiError as e:
     GoalCheckResult(ok: false, err: e.msg)
@@ -1082,7 +1108,7 @@ proc verifierProfileFor*(p: Profile): Profile =
   if not verifierEnabled or verifierModelSpec == "": return p
   let (cand, err) = buildVerifierProfile(verifierModelSpec, activeProviders)
   if err != "":
-    stepProse("verifier " & verifierModelSpec & " unavailable (" & err &
+    emitGoalStep("verifier " & verifierModelSpec & " unavailable (" & err &
       "), checking with the session model")
     return p
   if privateMode and not privateAllowed(cand):
@@ -1090,7 +1116,7 @@ proc verifierProfileFor*(p: Profile): Profile =
     # exactly the data private mode exists to fence: an untrusted
     # verifier never sees it. The session model (already allow-private,
     # or it would not be running) takes the check instead.
-    stepProse("verifier " & verifierModelSpec & " is not allow-private, " &
+    emitGoalStep("verifier " & verifierModelSpec & " is not allow-private, " &
       "checking with the session model")
     return p
   cand

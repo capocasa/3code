@@ -420,6 +420,28 @@ when not defined(windows):
       check BoldOn & "» " & Reset & "Your last reply came back empty." in rendered
       check "❯ Goal check" notin rendered
 
+    test "a kickoff replays as the flag plus the goal text alone":
+      # The kickoff item's body is the goal text alone - the `Goal
+      # armed:` scaffold and the trailing instruction paragraph never
+      # reach scrollback, live or replay. The flag comes from the
+      # `Goal armed:` content lead itself, so a kickoff persisted before
+      # the `+goal` marker existed still replays under it.
+      let kickoff = goalKickoffMessage("fix the login bug\n\nthen ship it")
+      let msgs = %*[
+        kickoff,
+        {"role": "assistant", "content": "on it.",
+         "usage": {"promptTokens": 60, "completionTokens": 5,
+                   "totalTokens": 65, "cachedTokens": 0}}]
+      for strip in [false, true]:
+        if strip:
+          kickoff.delete("goalSent")  # a session saved before the marker
+        let rendered = captureReplay(msgs, @[], window = 1000)
+        check BoldOn & "⚑ " & Reset & "fix the login bug" in rendered
+        check "Goal armed:" notin rendered
+        check "Start working toward it now" notin rendered
+        check "then ship it" in rendered   # multi-paragraph goal stays whole
+        check "❯ fix the login" notin rendered
+
     test "flail-noted call replays as its tool item plus the » note":
       # A flail-escalated call executes: replay renders the real tool item
       # (banner + output) AND the `»` note item from `flailNote`, never the

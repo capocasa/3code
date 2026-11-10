@@ -119,13 +119,55 @@ suite "goal mode":
     var session: Session
     check "user +agent +goal" in renderSession(session, %*[msg])
 
-  test "mode hints are dim-white single lines naming the file":
-    # Error-message shape, but GreyFg instead of magenta: state
-    # changing, not attention owed. Detection is the only lifecycle
-    # moment that still speaks through a hint; the check itself speaks
-    # as the verifier step's icon row.
-    let hint = modeHintLine(goalMode, "detected implementing")
-    check hint == GreyFg & GoalFileName & " detected implementing" & Reset & "\r\n"
+  test "kickoff display is the goal text alone":
+    # The wire message carries the `Goal armed:` scaffold and the
+    # trailing instruction paragraph; the scrollback item shows the
+    # flag plus the goal text alone - the byte-shape inverse of the
+    # kickoff builder, with the full content as fallback for a
+    # hand-edited or foreign message.
+    let content = goalKickoffMessage(
+      "fix the login bug\n\nthen ship it"){"content"}.getStr
+    check kickoffDisplayText(content) == "fix the login bug\n\nthen ship it"
+    check kickoffDisplayText("Goal armed: goal.md\n\nshort goal") ==
+      "short goal"                      # single-paragraph goal
+    check kickoffDisplayText(content) != content
+    check kickoffDisplayText("an ordinary steer") == "an ordinary steer"
+
+  test "kickoff witness: the stanza is fed once, never re-fed on resume":
+    # `modeKickoffIn` is the resume guard: a conversation that already
+    # carries a mode kickoff (any mode, any marker vintage - the
+    # `Goal armed:` content lead is the witness) must not be fed the
+    # stanza again.
+    check not modeKickoffIn(nil)
+    check not modeKickoffIn(%*[{"role": "user", "content": "go"}])
+    check not modeKickoffIn(%*[
+      {"role": "user", "content": "Goal check: keep going.",
+       "agentSent": true, "goalSent": true}])  # feedback is not a kickoff
+    let marked = %*[goalKickoffMessage("ship the feature")]
+    check modeKickoffIn(marked)
+    var preMarker = marked[0]
+    preMarker.delete("goalSent")          # a session saved before the mark
+    check modeKickoffIn(%*[preMarker])
+    check modeKickoffIn(%*[cyberKickoffMessage(
+      "- [ ] first\n\n## Current state\n\nNot begun.\n")])
+
+  test "the goalNotified latch round-trips through the session file":
+    # Once the kickoff stanza reached the model, a resumed session must
+    # not feed it again: the latch persists in the session record and
+    # restores on load.
+    proc loadTmp(text: string): Session =
+      let (f, path) = createTempFile("goal-latch-", ".3log")
+      f.write text
+      f.close()
+      defer: removeFile(path)
+      result = loadSessionFile(path)[0]
+    var session = Session(cwd: ".")
+    session.goalNotified = true
+    check "goal_notified=1" in renderSession(session, newJArray()).
+      splitLines()[0]
+    check loadTmp(renderSession(session, newJArray())).goalNotified
+    check not loadTmp(renderSession(Session(cwd: "."),
+      newJArray())).goalNotified
 
   test "evidence builder: last turn's tool calls, no model prose":
     let msgs = %*[

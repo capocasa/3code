@@ -10,14 +10,17 @@ discard """
 ##   when it lands (the transport-level contract is covered by
 ##   tests/stream; this is the wiring).
 ## - Goal mode wiring: the file is the whole mode, and work starts the
-##   moment it exists. `:goal TEXT` answers with the arm receipt, prints
-##   the dim `goal.md detected implementing` hint, and runs the kickoff
-##   turn at once; a goal.md already on disk at startup does the same
-##   before any prompt. Each turn end runs the verifier whose reply is
-##   the whole display - a quote block led by the green `✓` or red `✗`
-##   icon, no notice before or after it. An unmet verdict sends the
-##   agent back in under the `⚑` marker and the next turn starts on
-##   its own; a satisfied one retires goal.md to achieved.md.
+##   moment it exists. `:goal TEXT` answers with the arm receipt and runs
+##   the kickoff turn at once; a goal.md already on disk at startup does
+##   the same before any prompt. The kickoff's scrollback item is the
+##   `⚑` flag plus the goal text alone - no hint line, no `Goal armed:`
+##   scaffold - and the stanza is fed exactly once per arming: a
+##   resumed session never re-feeds it. Each turn end runs the verifier
+##   whose reply is the whole display - a quote block led by the green
+##   `✓` or red `✗` icon, no notice before or after it. An unmet
+##   verdict sends the agent back in under the `⚑` marker and the next
+##   turn starts on its own; a satisfied one retires goal.md to
+##   achieved.md.
 import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
@@ -155,8 +158,11 @@ suite ":retry and goal mode (interactive)":
     # kickoff turn starts on its own - no prompt is sent, and the reply
     # streams anyway.
     tty.expectInHistory "goal armed (.3code/goal), starting now"
-    tty.expectInHistory ".3code/goal detected implementing"
-    tty.expectInHistory "⚑ Goal armed: .3code/goal"
+    # No hint line - the kickoff item is the whole announcement: the
+    # flag plus the goal text alone, scaffold dropped.
+    tty.expectNeverInHistory "detected implementing"
+    tty.expectInHistory "⚑ make the stub say the word"
+    tty.expectNeverInHistory "Goal armed:"
     tty.expectInHistory "GOAL_WORK_DONE"
     # Turn end: the verifier's reply renders as a dim quote block led by
     # the green ✓ icon (verdict line stripped) - the whole display, with
@@ -208,10 +214,11 @@ suite ":retry and goal mode (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Nothing is typed: the detection hint fires and the kickoff turn
-    # runs on its own, before any prompt.
-    tty.expectInHistory "goal.md detected implementing"
-    tty.expectInHistory "⚑ Goal armed: goal.md"
+    # Nothing is typed: the kickoff turn runs on its own, before any
+    # prompt - the flag-led goal item is the whole announcement.
+    tty.expectNeverInHistory "detected implementing"
+    tty.expectInHistory "⚑ make the stub say GOAL_WORK_DONE"
+    tty.expectNeverInHistory "Goal armed:"
     tty.expectInHistory "GOAL_WORK_DONE"
     check fileExists(root / "run" / "goal.md")
     # The kickoff turn's end runs the check - the verifier's ✓ icon row
@@ -325,7 +332,7 @@ suite ":retry and goal mode (interactive)":
     # The kickoff turn runs on its own and its reply lands; the
     # turn-end verifier's slow model call (8000ms delay) then runs.
     tty.expectInHistory "GOAL_WORK_DONE"
-    tty.expectInHistory ".3code/goal detected implementing"
+    tty.expectNeverInHistory "detected implementing"
     # Ctrl-C while the verifier's slow model call runs: the interrupt is
     # honored after the side call returns, skips the satisfaction check,
     # and ends the turn. goal.md survives.
@@ -361,7 +368,8 @@ suite ":retry and goal mode (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    tty.expectInHistory "⚑ Goal armed: goal.md"
+    tty.expectInHistory "⚑ make the stub do two turns"
+    tty.expectNeverInHistory "Goal armed:"
     tty.expectInHistory "WORK_TURN_ONE"
     # The unmet evaluation: the red ✗ quote row is the whole display.
     # The feedback rides the ⚑ continuation item and the next turn
@@ -416,11 +424,12 @@ suite "goal mode mid-turn detection (interactive)":
     tty.expect "go"
     tty.send "\n"
     # The turn writes the file and finishes; no verifier judges that
-    # turn - the detection hint and the kickoff's `⚑` continuation item
-    # land instead, and the kickoff turn runs without any prompt.
+    # turn - the kickoff's flag-led goal item lands instead (no hint
+    # line), and the kickoff turn runs without any prompt.
     tty.expectInHistory "GOAL_WRITTEN"
-    tty.expectInHistory "goal.md detected implementing"
-    tty.expectInHistory "⚑ Goal armed: goal.md"
+    tty.expectNeverInHistory "detected implementing"
+    tty.expectInHistory "⚑ make the stub say GOAL_WORK_DONE"
+    tty.expectNeverInHistory "Goal armed:"
     tty.expectInHistory "GOAL_WORK_DONE"
     # The kickoff turn's end is the first check.
     tty.expectInHistory "\u2713"
@@ -430,3 +439,68 @@ suite "goal mode mid-turn detection (interactive)":
     check fileExists(root / "run" / "achieved.md")
     check not fileExists(root / "run" / "goal.md")
     tty.expectAlive()
+
+suite "goal mode resume (interactive)":
+  test "a resumed session never re-feeds the kickoff stanza":
+    let root = newFixture("goal_resume_no_refeed")
+    writeConfiguredProvider(root)
+    # Phase 1 arms the goal and leaves the mode live: the kickoff turn
+    # answers, the turn-end verifier is Ctrl-C'd mid-call (the check is
+    # skipped, goal.md stays), and the session exits with the kickoff
+    # stanza already in the conversation.
+    createDir(root / "run" / ".3code")
+    writeFile(root / "run" / ".3code" / "goal",
+      "keep working after resume\n")
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("WORK_TURN_ONE"),
+      reply("never reached\nVERDICT: SATISFIED", delayMs = 8000),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    tty.expect "\u276f"
+    tty.expectInHistory "⚑ keep working after resume"
+    tty.expectInHistory "WORK_TURN_ONE"
+    tty.drain(400)
+    tty.send "\x03"
+    tty.expectInHistory "interrupted by user"
+    tty.drain(300)
+    tty.ctrlD()
+    tty.expectExit(0, timeoutMs = 5000)
+    check fileExists(root / "run" / ".3code" / "goal")
+    # Phase 2 resumes. The stub queue holds exactly two replies: the
+    # answer to the typed prompt, then its turn-end verifier. If the
+    # kickoff stanza were re-fed, it would consume the first reply and
+    # every later assertion falls apart - the re-feed itself is what
+    # the never-assertions catch.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("NEXT_AFTER_RESUME"),
+      reply("all good\nVERDICT: SATISFIED"),
+    ]))
+    let tty2 = newTtySession(stub,
+                            args = ["-x", "-i", "-r"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty2.writeFrameArtifact(root / "frames.txt")
+      tty2.close()
+    tty2.expectIdleCaret(timeoutMs = 8000)
+    tty2.drain(300)
+    # The replayed kickoff renders as the flag plus the goal text (old
+    # sessions too), and nothing announces again: no stanza, no hint.
+    tty2.expectInHistory "⚑ keep working after resume"
+    tty2.expectNeverInHistory "Goal armed:"
+    tty2.expectNeverInHistory "detected implementing"
+    # The prompt answers with the first queued reply - proof no kickoff
+    # turn burned it - and its turn-end check retires the goal.
+    tty2.send "hello again"
+    tty2.expect "hello again"
+    tty2.send "\n"
+    tty2.expectInHistory "NEXT_AFTER_RESUME"
+    tty2.expectInHistory "\u2713"
+    tty2.drain(300)
+    check fileExists(root / "run" / ".3code" / "achieved")
+    check not fileExists(root / "run" / ".3code" / "goal")
+    tty2.expectAlive()

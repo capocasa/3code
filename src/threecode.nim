@@ -1058,26 +1058,24 @@ proc main() =
       result = true
 
   # A mode was just armed (`:goal TEXT`, `:cyber ...`) or detected at
-  # startup: print the dim detection hint, append the harness-autosent
-  # kickoff prompt, and run the turn now - the mode's work begins the
-  # moment the file is written (or found), never at the next turn
-  # boundary. The discipline baselines bind here: the first turn is
-  # compared against the file as armed, and work-happened starts from
-  # the change log as armed. No refreshSystemPrompt: the kickoff rides
-  # the existing system prompt exactly like the in-turn feedback
-  # continuation in turns.nim. Returns true if a buffered
-  # quit/interrupt should end the session.
+  # startup: append the harness-autosent kickoff prompt and run the
+  # turn now - the mode's work begins the moment the file is written
+  # (or found), never at the next turn boundary. The kickoff item in
+  # scrollback is the flag icon plus the goal text alone - no hint line
+  # before it, the item itself says what started. The discipline
+  # baselines bind here: the first turn is compared against the file as
+  # armed, and work-happened starts from the change log as armed. No
+  # refreshSystemPrompt: the kickoff rides the existing system prompt
+  # exactly like the in-turn feedback continuation in turns.nim.
+  # Returns true if a buffered quit/interrupt should end the session.
   proc runModeKickoff(m: ModeDesc): bool =
     let modeText = readModeText(m, session.cwd)
     session.goalNotified = true
     session.modeSnapshot = modeText
     if session.readCache != nil:
       session.changeCountStart = session.readCache.changes.len
-    let hintBytes = modeHintLine(m, "detected implementing")
-    termengine.noteNonMessageTail(hintBytes, messages.len)
-    commitTranscriptBytes(hintBytes, true)
     # A second mode's file on disk while one mode starts is a refused
-    # arming: say so once, right under the detection hint (same order as
+    # arming: say so once, right above the kickoff item (same order as
     # the turn-boundary detection in turns.nim).
     let other = conflictingMode(m, session.cwd)
     if not noMode(other):
@@ -1088,7 +1086,8 @@ proc main() =
     messages.add kickoff
     saveSession(session, messages)
     commitTranscriptBytes(
-      formatItem(agentPromptItem(kickoff{"content"}.getStr,
+      formatItem(agentPromptItem(
+        kickoffDisplayText(kickoff{"content"}.getStr),
         agentPromptMarker(kickoff))), true)
     result = runTurnWithSafetyNet()
 
@@ -1171,13 +1170,16 @@ proc main() =
     # A mode trigger file that is already on disk when the session opens
     # is just as armed as one written by its verb: the file is the whole
     # protocol, and whoever wrote it (the user, another tool, a previous
-    # session) meant work to happen. Announce it (and any conflict) and
-    # kick the mode's work off now - the same kickoff path `:goal TEXT`
-    # takes - instead of waiting for the first prompt to hit a turn-end
-    # boundary. Session cwd, not process cwd: same authority as the
-    # turn-end check in turns.nim.
+    # session) meant work to happen. Kick the mode's work off now - the
+    # same kickoff path `:goal TEXT` takes - instead of waiting for the
+    # first prompt to hit a turn-end boundary - UNLESS the kickoff
+    # stanza already reached the model (a resumed session: the latch is
+    # persisted, and the content-lead witness covers sessions saved
+    # before the latch existed). Session cwd, not process cwd: same
+    # authority as the turn-end check in turns.nim.
     let mode = activeMode(session.cwd)
-    if not noMode(mode):
+    if not noMode(mode) and not session.goalNotified and
+        not modeKickoffIn(messages):
       if runModeKickoff(mode):
         quit(0)
     if prompt != "" and runInitialPrompt(prompt):

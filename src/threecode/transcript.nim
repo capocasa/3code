@@ -6,7 +6,7 @@
 
 import std/[json, strutils, tables]
 
-import actions, display, fatprompt, session, types, util, images
+import actions, display, fatprompt, goal, session, types, util, images
 import engine as termengine
 
 export isEmptyReplyMsg
@@ -66,8 +66,13 @@ proc agentPromptItem*(line: string; marker = AgentPromptMarker): TranscriptItem 
 proc agentPromptMarker*(m: JsonNode): string =
   ## The marker a harness-autosent message replays under: `⚑` when the
   ## message carries the goal-mode mark, `»` for every other autosend
-  ## (steers, flail notes, cybernetic continuations).
-  if m != nil and m.kind == JObject and m{"goalSent"}.getBool(false):
+  ## (steers, flail notes, cybernetic continuations). A kickoff's
+  ## `Goal armed:` content lead also claims the flag: sessions saved
+  ## before the marker existed still replay their kickoff under it.
+  if m != nil and m.kind == JObject and
+      (m{"goalSent"}.getBool(false) or
+       (m{"agentSent"}.getBool(false) and
+        m{"content"}.getStr("").startsWith("Goal armed:"))):
     GoalPromptMarker
   else:
     AgentPromptMarker
@@ -75,6 +80,15 @@ proc agentPromptMarker*(m: JsonNode): string =
 proc assistantItem*(content: string): TranscriptItem =
   TranscriptItem(kind: tiAssistant, marker: "●", body: content,
                  attachSeparator: true)
+
+proc agentPromptItemFor*(m: JsonNode; c: string): TranscriptItem =
+  ## The scrollback item for a harness-autosent message with body `c`:
+  ## the marker by marking, and a kickoff's body stripped to the goal
+  ## text alone (the flag plus the goal is the whole item, live and
+  ## replay alike).
+  agentPromptItem(
+    if c.startsWith("Goal armed:"): kickoffDisplayText(c) else: c,
+    agentPromptMarker(m))
 
 proc toolItem*(act: Action; res: string; code, idx: int; diff = "";
                elapsedS = -1): TranscriptItem =
@@ -219,11 +233,12 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
       # A harness-autosent continuation renders as the agent-prompt
-      # item the live path committed (`⚑` for goal autosends, `»`
-      # otherwise), never as a user `❯` echo.
+      # item the live path committed (`⚑` for goal autosends and every
+      # kickoff, `»` otherwise - goal text alone for a kickoff), never
+      # as a user `❯` echo.
       let item =
         if m{"agentSent"}.getBool(false):
-          agentPromptItem(c, agentPromptMarker(m))
+          agentPromptItemFor(m, c)
         else: userPromptItem(c)
       # No length truncation: the live path echoes the full submitted line
       # (wrapped at terminal width by `formatUserPromptItem`), so the replay
@@ -457,7 +472,7 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
       if c.len == 0: continue
       let item =
         if m{"agentSent"}.getBool(false):
-          agentPromptItem(c, agentPromptMarker(m))
+          agentPromptItemFor(m, c)
         else: userPromptItem(c)
       emit anchor, formatItem(item)
     of "assistant":

@@ -1001,6 +1001,10 @@ proc renderSession*(session: Session, messages: JsonNode): string =
   # from the same profile (and builds fresh when it no longer matches).
   if session.promptState.identity.len > 0:
     hdr.add " prompt_identity=" & session.promptState.identity
+  # The mode-kickoff latch: once the kickoff stanza has reached the
+  # model it must never be fed again on resume (the mode stays armed
+  # and the end-call boundary goes straight to the check).
+  if session.goalNotified: hdr.add " goal_notified=1"
   emitHeaderOnly s, hdr
   # The dynamic input the system prompt substituted: persisted so the
   # resume-time rebuild re-sends the exact catalog bytes the live session
@@ -1417,6 +1421,8 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       if "cwd" in kv: sess.cwd = kv["cwd"]
       if "prompt_identity" in kv:
         sess.promptState.identity = kv["prompt_identity"]
+      if kv.getOrDefault("goal_notified") == "1":
+        sess.goalNotified = true
     of "skills":
       # The catalog the system prompt was built with (first record wins;
       # only the resume-time rebuild consumes it, never the wire).
