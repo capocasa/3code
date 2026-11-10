@@ -456,6 +456,7 @@ route before blaming the model.
 | vercel | US company, upstreams worldwide | Vercel AI Gateway; no markup on list prices, DeepSeek routes below list (`vck_...` keys) |
 | aihubmix | China | aggregator speaking four wire protocols; a one-time $1 top-up unlocks permanent daily free GLM/Kimi/MiniMax coding quotas |
 | engy | varies (GPU fleet) | verified inference from a permissionless fleet; cheapest DS 4.1 flash around, GLM capped at 328K context |
+| jarvislabs | India | GPU cloud's per-token Token Factory API: GLM, DeepSeek, Qwen, Nemotron on their own H200s (fp8/fp4), one credit balance with their GPU rentals |
 | huggingface | varies | router to partner clouds |
 | cheaperinference | varies | discount aggregator |
 

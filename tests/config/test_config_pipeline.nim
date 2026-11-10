@@ -178,6 +178,23 @@ suite "config: new known-good providers":
         check combo.contextWindow == 327_680
         check combo.maxTokens == 32768
 
+  test "jarvislabs rows ride the hosted families":
+    check knownGoodFamily("jarvislabs", "glm-5.3") == "glm"
+    check knownGoodFamily("jarvislabs", "glm-5.3-flash") == "glm"
+    check knownGoodFamily("jarvislabs", "deepseek-v4.1-flash-1017-cyber") ==
+      "deepseek"
+    check knownGoodTags("jarvislabs", "nemotron-3.5-super-vl-120b-a12b-nvfp4") ==
+      ("nemotron", "3.5", "super-vl")
+    check knownGoodTags("jarvislabs", "qwen-3.8-27b-fp8") ==
+      ("qwen", "3.8", "27b")
+
+  test "jarvislabs caps GLM-5.3 at the served 230K window":
+    for combo in KnownGoodCombos:
+      if combo.provider == "jarvislabs" and combo.model == "glm-5.3":
+        check combo.contextWindow == 235_520
+      if combo.provider == "jarvislabs" and combo.model == "glm-5.3-flash":
+        check combo.contextWindow == 1_000_000
+
 suite "config: curatedFor":
   test "returns models for known provider":
     let models = curatedFor("zai")
