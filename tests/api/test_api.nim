@@ -163,6 +163,13 @@ suite "api request shaping":
       applyGenerationDefaults(p, body)
       check "temperature" notin body
       check body{"max_tokens"}.getInt == 8192
+    block neuralwatt:
+      var body = %*{"stream": true}
+      let p = Profile(name: "neuralwatt.kimi-k3.1-pro", family: "kimi",
+                      model: "kimi-k3.1-pro")
+      applyGenerationDefaults(p, body)
+      check "temperature" notin body
+      check body{"max_tokens"}.getInt == 8192
 
   test "mimo ultraspeed rides the v2.6-pro generation defaults":
     var body = %*{"stream": true}

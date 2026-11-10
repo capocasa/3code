@@ -640,6 +640,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "kimi-k2-7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("venice", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("neuralwatt", "kimi-k3", "kimi", "3", "", "max", 0.6, 8192, tbAllTurns, false, 1_000_000, false, true),
+    # K3.1 Pro joined the fleet after the provider landed; catalog
+    # metadata says multimodal + graded reasoning on the served 1M
+    # window. Same effort-only knob and no-temp shape as the other
+    # K3.1 hosts; -flex stays off the table like every scheduling tier.
+    ("neuralwatt", "kimi-k3.1-pro", "kimi", "3.1", "pro", "max", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     # Venice's validator rejects chat_template_kwargs outright, so the
     # K3.1 rows default to the effort knob instead (verified live:
     # reasoning_effort max accepted, temperature omitted fine, image

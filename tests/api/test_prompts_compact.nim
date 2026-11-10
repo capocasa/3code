@@ -190,6 +190,8 @@ suite "prompts: defaultReasoningsFor":
       @["low", "high", "max"]
     check defaultReasoningsFor("fireworks", "accounts/fireworks/models/kimi-k3p1-pro", "kimi") ==
       @["low", "high", "max"]
+    check defaultReasoningsFor("neuralwatt", "kimi-k3.1-pro", "kimi") ==
+      @["low", "high", "max"]
 
   test "gpt 6.1 terra keeps a true off, the pro tiers do not":
     check defaultReasoningsFor("openai", "gpt-6.1-terra", "gpt") ==

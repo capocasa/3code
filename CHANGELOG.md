@@ -57,6 +57,11 @@ Unreleased
   round. Also seen and left alone: `kimi-k2.8-preview` lists on
   Tencent only (a prior-line preview, not the latest), and Tencent's
   key currently can't call even its existing known-good rows.
+  Neuralwatt (which landed after this sweep ran) turned up K3.1 Pro on
+  its public `/v1/models` catalog — multimodal, graded reasoning, 1M
+  window — and joins with that row; completions there are key-gated
+  here, so it is table-verified, and the `-flex` tier stays off the
+  table like every other scheduling tier.
 - **Jarvislabs' Token Factory joins the catalog.** The India GPU cloud's
   per-token API (`models.jarvislabs.net/v1`) is known-good: GLM-5.3 on
   the served 230K window, GLM-5.3-Flash and DeepSeek V4.1 Flash (plus

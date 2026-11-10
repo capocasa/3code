@@ -47,7 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 324
+    check visionRows == 325
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
@@ -75,6 +75,7 @@ suite "vision: known-good curation":
     check knownGoodVision("together", "moonshotai/Kimi-K3.1-Pro")
     check knownGoodVision("deepinfra", "moonshotai/Kimi-K3.1-Pro")
     check knownGoodVision("fireworks", "accounts/fireworks/models/kimi-k3p1-pro")
+    check knownGoodVision("neuralwatt", "kimi-k3.1-pro")
     check not knownGoodVision("nebius", "moonshotai/Kimi-K3.1-Pro")
     # mimo v2.6 is full-modal on every host, ultraspeed included.
     check knownGoodVision("novita", "xiaomimimo/mimo-v2.6-pro")
