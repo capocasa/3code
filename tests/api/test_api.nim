@@ -156,6 +156,21 @@ suite "api request shaping":
       applyGenerationDefaults(p, body)
       check "temperature" notin body
       check body{"max_tokens"}.getInt == 8192
+    block baseten:
+      var body = %*{"stream": true}
+      let p = Profile(name: "baseten.moonshotai/Kimi-K3.1-Pro", family: "kimi",
+                      model: "moonshotai/Kimi-K3.1-Pro")
+      applyGenerationDefaults(p, body)
+      check "temperature" notin body
+      check body{"max_tokens"}.getInt == 8192
+
+  test "mimo ultraspeed rides the v2.6-pro generation defaults":
+    var body = %*{"stream": true}
+    let p = Profile(name: "xiaomi.mimo-v2.6-pro-ultraspeed", family: "mimo",
+                    model: "mimo-v2.6-pro-ultraspeed")
+    applyGenerationDefaults(p, body)
+    check body{"temperature"}.getFloat == 0.2
+    check body{"max_tokens"}.getInt == 8192
 
   test "kimi effort levels send top-level reasoning_effort":
     block aggregator:

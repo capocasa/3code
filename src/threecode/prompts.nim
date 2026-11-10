@@ -227,6 +227,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-6-sol", "gpt", "", "6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("openai", "gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false, true),
     ("openai", "gpt-6.1-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("openai", "gpt-6.1-terra", "gpt", "", "6.1-terra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
 
     # deepseek. V4.1 Flash (2026-09-10): first-party canonical id is
     # `deepseek-flash` (the v4-flash / v4-flash-vision-exp ids now route
@@ -579,15 +580,18 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # `thinking.type` on the first-party API (api.xiaomimimo.com),
     # `chat_template_kwargs.enable_thinking` on vLLM stacks, and
     # `reasoning: {enabled}` on OpenRouter. Returns `reasoning_content`.
-    # mimo-v2.6-pro-ultraspeed also exists (same checkpoint, ~10x output
-    # speed) but is a contact-us service first-party; add when it opens.
-    # Tencent's tokenhub gateway resells the V2.5-Pro weights; deepinfra
-    # and nano-gpt host the V2.6 pair, novita still V2.5.)
+    # mimo-v2.6-pro-ultraspeed is the same checkpoint at ~10x output
+    # speed, now public first-party and on OpenRouter, nano-gpt and
+    # cheaperinference. The V2.6 pair is hosted first-party and on
+    # OpenRouter, deepinfra, nano-gpt, novita, tencent's tokenhub
+    # gateway and cheaperinference; venice lists flash only.)
     ("xiaomi", "mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
+    ("xiaomi", "mimo-v2.6-pro-ultraspeed", "mimo", "2.6", "pro-us", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("xiaomi", "mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("xiaomi", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("xiaomi", "mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "xiaomi/mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
+    ("openrouter", "xiaomi/mimo-v2.6-pro-ultraspeed", "mimo", "2.6", "pro-us", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("openrouter", "xiaomi/mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("openrouter", "xiaomi/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "xiaomi/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -631,6 +635,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "openai-gpt-6-sol", "gpt", "", "6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("venice", "openai-gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false, true),
     ("venice", "openai-gpt-61-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("venice", "openai-gpt-61-terra", "gpt", "", "6.1-terra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("venice", "openai-gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
     ("venice", "qwen-3-6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("venice", "qwen-3-7-max", "qwen", "3.7", "max", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -648,6 +653,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "qwen3-coder-480b-a35b-instruct-turbo", "qwen", "3", "coder-480b", "on", 0.2, 8192, tbNone, false, 256_000, false, false),
     ("venice", "qwen3-next-80b", "qwen", "3", "next-80b-a3b", "on", 0.2, 8192, tbNone, false, 256_000, false, false),
     ("venice", "xiaomi-mimo-v2-5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("venice", "xiaomi-mimo-v2-6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("venice", "z-ai-glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("venice", "zai-org-glm-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("venice", "zai-org-glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
@@ -679,6 +685,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("cheaperinference", "kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("cheaperinference", "kimi-k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("cheaperinference", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
+    ("cheaperinference", "mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
+    ("cheaperinference", "mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
+    ("cheaperinference", "mimo-v2.6-pro-ultraspeed", "mimo", "2.6", "pro-us", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("cheaperinference", "qwen3-6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("cheaperinference", "qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
 
@@ -697,6 +706,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("novita", "qwen/qwen3.7-max", "qwen", "3.7", "max", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("novita", "xiaomimimo/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
     ("novita", "xiaomimimo/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
+    ("novita", "xiaomimimo/mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, true, true),
+    ("novita", "xiaomimimo/mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, true, true),
     ("openrouter", "meituan/longcat-2.0", "longcat", "2", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("openrouter", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
@@ -723,6 +734,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "openai/gpt-6-sol", "gpt", "", "6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("openrouter", "openai/gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false, true),
     ("openrouter", "openai/gpt-6.1-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("openrouter", "openai/gpt-6.1-sol-pro", "gpt", "", "6.1-sol-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("openrouter", "openai/gpt-6.1-terra", "gpt", "", "6.1-terra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("openrouter", "openai/gpt-6.1-terra-pro", "gpt", "", "6.1-terra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("openrouter", "openai/o1", "gpt", "", "o1", "medium", 0.2, 8192, tbNone, false, 200_000, false, true),
     ("openrouter", "openai/o3", "gpt", "", "o3", "medium", 0.2, 8192, tbNone, false, 200_000, false, true),
     ("openrouter", "openai/o3-mini", "gpt", "", "o3-mini", "medium", 0.2, 8192, tbNone, false, 200_000, false, false),
@@ -757,6 +771,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "tencent/hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 256_000, false, true),
     ("fireworks", "accounts/fireworks/models/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, true, false),
+    # Fireworks spells the dot generation flat: k3p1 = 3.1.
+    ("fireworks", "accounts/fireworks/models/kimi-k3p1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, true, true),
     ("fireworks", "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b", "nemotron", "3.5", "lightning", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     ("fireworks", "accounts/fireworks/models/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, true, false),
     ("tensorx", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false, false),
@@ -768,6 +784,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("tensorx", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("tensorx", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("tensorx", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("tensorx", "moonshotai/kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("tensorx", "z-ai/glm-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("tensorx", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("tensorx", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
@@ -820,6 +837,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("lyceum", "qwen/qwen3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
     ("together", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, true, false),
     ("together", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, true, false),
+    ("together", "moonshotai/Kimi-K3.1-Pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, true, true),
     ("opencode", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, tbNone, false, 400_000, false, true),
     ("opencode", "gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, tbNone, false, 400_000, false, true),
     ("opencode", "gpt-5.3-codex", "gpt", "", "5.3-codex", "medium", 0.2, 8192, tbNone, false, 400_000, false, false),
@@ -896,6 +914,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "xiaomi/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nanogpt", "xiaomi/mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("nanogpt", "xiaomi/mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
+    ("nanogpt", "xiaomi/mimo-v2.6-pro-ultraspeed", "mimo", "2.6", "pro-us", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("nanogpt", "xiaomi/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nanogpt", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("cheaperinference", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
@@ -948,9 +967,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("opencodego", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("baseten", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("baseten", "moonshotai/Kimi-K3.1-Pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("sambanova", "MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nebius", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("nebius", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    # nebius carries K3.1 Pro but its proxy still rejects image parts,
+    # so the row stays vision-off like the rest of the host's.
+    ("nebius", "moonshotai/Kimi-K3.1-Pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("deepinfra", "Qwen/Qwen3.6-27B", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false, false),
     ("deepinfra", "Qwen/Qwen3.6-35B-A3B", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("deepinfra", "Qwen/Qwen3.7-Max", "qwen", "3.7", "max", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -961,6 +984,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "inclusionAI/Ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("deepinfra", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("deepinfra", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("deepinfra", "moonshotai/Kimi-K3.1-Pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("deepinfra", "thinkingmachines/Inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 256_000, false, true),
     ("ovh", "Qwen3.5-9B", "qwen", "3.5", "9b", "on", 0.2, 4096, tbNone, false, 128_000, true, false),
     ("ovh", "Qwen3.6-27B", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, true, false),
@@ -1022,6 +1046,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "mistralai/mistral-large", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "mistralai/mistral-large-2407", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "openai/gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("openrouter", "openai/gpt-6-astra-pro", "gpt", "", "6-astra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("openrouter", "poolside/laguna-s-2.1:free", "laguna", "2", "s-free", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen-plus", "qwen", "3", "plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "qwen/qwen3.8-max-0902", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -1044,6 +1069,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "gemini-3-8-flash", "gemini", "3", "8-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("venice", "gemini-3-flash-preview", "gemini", "3", "0-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("venice", "openai-gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("venice", "openai-gpt-6-astra-pro", "gpt", "", "6-astra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("venice", "qwen-3-8-flash", "qwen", "3.8", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("venice", "z-ai-glm-5-3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("mistral", "glm-5-2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -1099,9 +1125,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "mistralai/mistral-large", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("nanogpt", "mistralai/mistral-medium-3.5", "mistral", "", "medium", "high", 0.7, 32768, tbNone, false, 262_144, false, false),
     ("nanogpt", "openai/gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("nanogpt", "openai/gpt-6-astra-pro", "gpt", "", "6-astra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("nanogpt", "openai/gpt-6-sol", "gpt", "", "6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("nanogpt", "openai/gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false, true),
     ("nanogpt", "openai/gpt-6.1-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("nanogpt", "openai/gpt-6.1-terra", "gpt", "", "6.1-terra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("nanogpt", "qwen/qwen-plus", "qwen", "3", "plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nanogpt", "qwen/qwen3-14b", "qwen", "3", "14b", "on", 0.2, 4096, tbNone, false, 131_072, false, false),
     ("nanogpt", "qwen/qwen3-235b-a22b", "qwen", "3", "235b-a22b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -1157,6 +1185,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("tencent", "kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("tencent", "kimi-k3.1-pro-highspeed", "kimi", "3.1", "pro-hs", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
     ("tencent", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("tencent", "mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
+    ("tencent", "mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("tencent", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("tencent", "minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("tencent", "minimax-m3.1-flash", "minimax", "3.1", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -1174,6 +1204,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("cheaperinference", "gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("cheaperinference", "google/gemini-3.5-flash-lite", "gemini", "3", "5-flash-lite", "low", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("cheaperinference", "gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("cheaperinference", "gpt-6.1-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("cheaperinference", "gpt-6.1-terra", "gpt", "", "6.1-terra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("cheaperinference", "qwen-3-8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("cheaperinference", "qwen-3-8-max", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("cheaperinference", "qwen3-5-35b-a3b", "qwen", "3.5", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -4339,16 +4371,19 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         if combo.variant == "5-pro": return @["high"]
         if combo.variant == "5.5-pro": return @["medium", "high", "xhigh"]
         if combo.variant == "5.3-codex": return @["low", "medium", "high", "xhigh"]
-        if combo.variant in ["5.6-sol-pro", "5.6-terra-pro", "5.6-luna-pro"]:
+        if combo.variant in ["5.6-sol-pro", "5.6-terra-pro", "5.6-luna-pro",
+                             "6-astra-pro", "6.1-sol-pro", "6.1-terra-pro"]:
           # The 5.6/6 pro tiers select `reasoning.mode`, not a different
           # model; effort still applies inside pro mode (medium default),
           # but `none` is off that ladder.
           return @["low", "medium", "high", "xhigh", "max"]
         if combo.variant.startsWith("5.6"):
           return @["none", "low", "medium", "high", "xhigh", "max"]
+        # 6.1 Sol always thinks like Astra; 6.1 Terra keeps a true off
+        # (effort none verified live on cheaperinference and venice).
         if combo.variant == "6-astra" or combo.variant == "6.1-sol":
           return @["low", "medium", "high", "xhigh", "max"]
-        if combo.variant in ["6-sol", "6-luna"]:
+        if combo.variant in ["6-sol", "6-luna", "6.1-terra"]:
           return @["none", "low", "medium", "high", "xhigh", "max"]
         if combo.variant.startsWith("5.4") or combo.variant.startsWith("5.5"):
           return @["none", "low", "medium", "high", "xhigh"]

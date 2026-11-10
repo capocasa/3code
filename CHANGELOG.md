@@ -2,6 +2,32 @@ Changelog
 
 Unreleased
 
+- **The latest Kimi, MiMo and GPT generations land on every provider
+  that serves them.** A live `/models` sweep of every keyed provider
+  found no generation newer than Kimi K3.1 Pro, MiMo V2.6 and GPT-6.1 —
+  but plenty of hosts carrying them that the catalog lacked. Kimi K3.1
+  Pro joins BaseTen, Tensorx, Together, DeepInfra, Nebius and
+  Fireworks (their dedicated `models/kimi-k3p1-pro` spelling), taking
+  the family to twenty-eight rows on twenty hosts; each id was pinged
+  live with a one-token completion where a working key existed (all
+  six answered). Nebius' row stays vision-off with the rest of that
+  host — its proxy still rejects image parts. MiMo V2.6 Pro/Flash is
+  known-good on Novita, Tencent's tokenhub gateway and Cheaperinference
+  (Flash only on Venice), and the `pro-ultraspeed` speed edition — same
+  checkpoint, ~10x output — turned up public on the first-party API,
+  OpenRouter, nano-gpt and Cheaperinference; it rides the V2.6-Pro
+  wire shapes as variant `pro-us`. GPT-6.1 Terra (a true effort off:
+  `none` verified live on Cheaperinference and Venice) is known-good on
+  OpenAI first-party, OpenRouter, nano-gpt, Venice and Cheaperinference,
+  and the pro-mode tiers reconcile across the line: `6-astra-pro`
+  (live-verified on Venice) joins Venice, OpenRouter and nano-gpt while
+  `6.1-sol-pro`/`6.1-terra-pro` join OpenRouter. OpenRouter and nano-gpt
+  keys here are placeholder/invalid, so those
+  rows are table-verified against their public catalogs; the OpenCode
+  Zen and Go keys have expired, so those catalogs are unverified this
+  round. Also seen and left alone: `kimi-k2.8-preview` lists on
+  Tencent only (a prior-line preview, not the latest), and Tencent's
+  key currently can't call even its existing known-good rows.
 - **Jarvislabs' Token Factory joins the catalog.** The India GPU cloud's
   per-token API (`models.jarvislabs.net/v1`) is known-good: GLM-5.3 on
   the served 230K window, GLM-5.3-Flash and DeepSeek V4.1 Flash (plus
