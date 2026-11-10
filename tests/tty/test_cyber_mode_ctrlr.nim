@@ -90,10 +90,10 @@ suite "cyber mode surfaces (interactive)":
     tty.send "\n"
     tty.drain(100)
     # The arm is the file plus one receipt line carrying the parsed
-    # counts, then the dim detection hint - and the kickoff turn starts
-    # on its own: no prompt is sent, and the reply streams anyway.
+    # counts - and the kickoff turn starts on its own: no prompt is
+    # sent, no hint line, and the reply streams anyway.
     tty.expectInHistory "cybernetic armed (.3code/cybernetic, 1 task, 0 done), starting now"
-    tty.expectInHistory ".3code/cybernetic detected implementing"
+    tty.expectNeverInHistory "detected implementing"
     tty.expectInHistory "PLAN_WORK_DONE"
     # Turn end: the verifier's green ✓ item is the whole display, and
     # the plan retires on disk.
@@ -132,9 +132,9 @@ suite "cyber mode surfaces (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Nothing is typed: the detection hint fires and the kickoff turn
-    # runs on its own, before any prompt.
-    tty.expectInHistory "cybernetic.md detected implementing"
+    # Nothing is typed: the kickoff turn runs on its own, before any
+    # prompt (no hint line).
+    tty.expectNeverInHistory "detected implementing"
     tty.expectInHistory "PLAN_WORK_DONE"
     # The kickoff turn's end runs the check and retires the plan.
     tty.expectInHistory "\u2713"
@@ -178,8 +178,8 @@ suite "cyber mode surfaces (interactive)":
 
     tty.expect "\u276f"
     # goal mode wins the registry walk and its kickoff turn runs before
-    # any prompt; the refusal names both verbs under the detection hint.
-    tty.expectInHistory "goal.md detected implementing"
+    # any prompt; the refusal names both verbs above the kickoff item.
+    tty.expectNeverInHistory "detected implementing"
     tty.expectInHistory "GOAL_DONE"
     tty.expectInHistory "cybernetic.md is also on disk but goal mode is active; harness modes are mutually exclusive (:goal! cancels goal mode, then :cyber arms the plan)"
     tty.expectInHistory "\u2713"
@@ -232,7 +232,7 @@ suite "cyber mode surfaces (interactive)":
     tty.expect "\u276f"
     # The startup kickoff turn runs on its own; Ctrl-C mid-stream
     # pauses it before the reply lands.
-    tty.expectInHistory "goal.md detected implementing"
+    tty.expectNeverInHistory "detected implementing"
     tty.drain(400)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
@@ -304,7 +304,7 @@ suite "cyber mode direction machinery (interactive)":
     # mutation runs (the bash output lands in the session change log
     # too, powering work-happened), the plan file stays untouched. A
     # reads-only turn would owe no update note.
-    tty.expectInHistory "cybernetic.md detected implementing"
+    tty.expectNeverInHistory "detected implementing"
     tty.expectInHistory "real work"
     # Turn end: FEEDBACK from the verifier AND the discipline note, one
     # continuation carrying both; the verdict speaks as the ✗ icon row

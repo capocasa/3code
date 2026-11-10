@@ -312,9 +312,10 @@ type
     cwd*: string
     plan*: seq[PlanItem]
     readCache*: ReadCache
-    goalNotified*: bool  ## goal-mode activation receipt already shown (the
-                         ## flag is per session: a resumed session announces
-                         ## again at its first end-call boundary)
+    goalNotified*: bool  ## the mode's kickoff stanza already reached the
+                         ## model. Persisted (session record `goal_notified`):
+                         ## a resumed session never re-feeds the stanza - the
+                         ## end-call boundary goes straight to the check
     modeSnapshot*: string  ## the armed mode's file bytes at this turn's
                            ## start: the update-discipline and delta
                            ## baseline (transient; a resumed session starts

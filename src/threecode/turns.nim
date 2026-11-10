@@ -1847,31 +1847,36 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         return true
       if not session.goalNotified:
         # Detection: the file appeared during the turn, so the work the
-        # verifier would judge was never aimed at the goal. Announce,
-        # bind the discipline baselines, and send the kickoff - the
-        # same immediate start a startup detection and a `:verb` arm
-        # take. The check first runs at the end of the kickoff turn.
+        # verifier would judge was never aimed at the goal - unless the
+        # kickoff stanza already reached the model in an earlier run (a
+        # resumed session: the kickoff fires once per arming, never per
+        # run), in which case the boundary goes straight to the check.
+        # Bind the discipline baselines and send the kickoff - the same
+        # immediate start a startup detection and a `:verb` arm take;
+        # the flag-led item is the whole announcement. The check first
+        # runs at the end of the kickoff turn.
         session.goalNotified = true
-        commitHarnessNotice(modeHintLine(mode, "detected implementing"),
-                            messages)
-        # A second mode's file on disk while one mode runs is a refused
-        # arming: say so once, right under the detection hint.
-        let other = conflictingMode(mode, session.cwd)
-        if not noMode(other):
-          commitHarnessNotice(receiptBytes(modeConflictLabel(mode, other)),
-                              messages)
-        let detectedText = readModeText(mode, session.cwd)
-        session.modeSnapshot = detectedText
-        if session.readCache != nil:
-          session.changeCountStart = session.readCache.changes.len
-        let kickoff = mode.kickoffMessage(detectedText)
-        messages.add kickoff
-        saveSession(session, messages)
-        commitTranscriptBytes(
-          formatItem(agentPromptItem(kickoff{"content"}.getStr,
-            agentPromptMarker(kickoff))), true)
-        debugOut "runTurns: " & mode.fileName & " detected, kickoff"
-        continue
+        if not modeKickoffIn(messages):
+          # A second mode's file on disk while one mode runs is a
+          # refused arming: say so once, right above the kickoff item.
+          let other = conflictingMode(mode, session.cwd)
+          if not noMode(other):
+            commitHarnessNotice(
+              receiptBytes(modeConflictLabel(mode, other)), messages)
+          let detectedText = readModeText(mode, session.cwd)
+          session.modeSnapshot = detectedText
+          if session.readCache != nil:
+            session.changeCountStart = session.readCache.changes.len
+          let kickoff = mode.kickoffMessage(detectedText)
+          messages.add kickoff
+          saveSession(session, messages)
+          commitTranscriptBytes(
+            formatItem(agentPromptItem(
+              kickoffDisplayText(kickoff{"content"}.getStr),
+              agentPromptMarker(kickoff))), true)
+          debugOut "runTurns: " & mode.fileName & " detected, kickoff"
+          continue
+        debugOut "runTurns: " & mode.fileName & " kickoff already sent"
       # Verifier steps land in scrollback as they happen: same commit
       # path as the receipts around them, an item rendered like a reply
       # that speaks its verdict in color, icon first, through and
@@ -1928,18 +1933,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           formatItem(agentPromptItem(content, agentPromptMarker(cont))), true)
         debugOut "runTurns: " & why
       if not check.ok:
-        # Verifier call failed (network, provider): note it in the
-        # receipt, retry at the next boundary. The mode file is
-        # untouched, so the mode is still on; the discipline note still
-        # sends the agent back.
+        # Verifier call failed (network, provider): the red ✗ verdict
+        # row says so - one step, no receipt around it - and the retry
+        # happens at the next boundary. The mode file is untouched, so
+        # the mode is still on; the discipline note still sends the
+        # agent back.
         debugOut mode.name & " check failed: " & check.err
-        # First line only: an ApiError msg can span lines, a receipt is one.
+        # First line only: an ApiError msg can span lines, a step is one.
         let why = check.err.strip.splitLines[0]
-        commitHarnessNotice(
-          receiptBytes(
-            (if why.len > 0: mode.name & " check unavailable (" & why & ")"
-             else: mode.name & " check unavailable") & ", retrying next turn"),
-          messages)
+        emitGoalStep(
+          (if why.len > 0: mode.name & " check unavailable (" & why & ")"
+           else: mode.name & " check unavailable") & ", retrying next turn")
         if note.len > 0:
           sendBack(note, mode.name & " update discipline (check unavailable)")
           continue
@@ -1960,10 +1964,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         sendBack(fb, mode.name & " check feedback, continuing")
         continue
       else:
-        commitHarnessNotice(
-          receiptBytes(mode.name &
-            " check returned no verdict, retrying next turn"),
-          messages)
+        # No verdict line: the side call already painted its red ✗ step
+        # (the transports substitute a retry note when the reply carried
+        # no prose at all), so nothing further belongs in scrollback.
         if note.len > 0:
           sendBack(note, mode.name & " update discipline (no verdict)")
           continue
