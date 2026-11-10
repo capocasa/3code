@@ -2896,6 +2896,13 @@ proc applyKimiReasoning(p: Profile, body: JsonNode) =
     return
   else: discard
   if providerOf(p) in ["kimicode", "kimi"]: return
+  if providerOf(p) == "neuralwatt":
+    # Single-knob stack: k3 keeps the graded reasoning_effort ladder
+    # and `none` is a true skip there (unlike first-party, where k3
+    # always thinks), so off maps to none and on leaves the server
+    # default (max on k3).
+    if p.reasoning == "off": body["reasoning_effort"] = %"none"
+    return
   case p.reasoning
   of "off":
     body["chat_template_kwargs"] = %*{"enable_thinking": false}
@@ -2929,6 +2936,16 @@ proc applyQwenReasoning(p: Profile, body: JsonNode) =
     of "off": body["reasoning_effort"] = %"none"
     of "on": body["reasoning_effort"] = %"default"
     else: discard
+    return
+  if providerOf(p) == "neuralwatt":
+    # One graded knob for every hosted family: off skips the reasoning
+    # phase entirely (reasoning_effort none), on and the graded levels
+    # pass through with per-model aliasing (qwen3.8 maps high onto its
+    # native xhigh, qwen3.6 has only high).
+    case p.reasoning
+    of "off": body["reasoning_effort"] = %"none"
+    of "on": body["reasoning_effort"] = %"high"
+    else: body["reasoning_effort"] = %p.reasoning
     return
   case p.reasoning
   of "off":
@@ -3006,6 +3023,13 @@ proc applyMimoReasoning(p: Profile, body: JsonNode) =
     case p.reasoning
     of "off": body["reasoning"] = %*{"enabled": false}
     of "on": body["reasoning"] = %*{"enabled": true}
+    else: discard
+  of "neuralwatt":
+    # One knob: reasoning_effort none is a true skip, high is mimo's
+    # only reasoning depth there (their aliasing folds max onto it).
+    case p.reasoning
+    of "off": body["reasoning_effort"] = %"none"
+    of "on": body["reasoning_effort"] = %"high"
     else: discard
   else:
     # vLLM stacks (and any other OpenAI-compatible host): the
