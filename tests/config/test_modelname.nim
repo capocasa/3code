@@ -79,6 +79,23 @@ suite "modelname: normalizeModelName":
       "kimi-k3.1-pro-highspeed"
     check normalizeModelName("kimi-k3.1-pro-highspeed") ==
       "kimi-k3.1-pro-highspeed"
+    # Fireworks spells the generation flat without the dot: k3p1
+    check normalizeModelName("accounts/fireworks/models/kimi-k3p1-pro") ==
+      "kimi-k3.1-pro"
+
+  test "mimo v2.6 hosts":
+    check normalizeModelName("xiaomi/mimo-v2.6-pro-ultraspeed") ==
+      "mimo-2.6-pro-ultraspeed"
+    check normalizeModelName("xiaomimimo/mimo-v2.6-flash") ==
+      "mimo-2.6-flash"
+    check normalizeModelName("xiaomi-mimo-v2-6-flash") == "mimo-2.6-flash"
+
+  test "gpt 6.1 spellings":
+    check normalizeModelName("gpt-6.1-terra") == "gpt-6.1-terra"
+    check normalizeModelName("openai/gpt-6.1-sol-pro") == "gpt-6.1-sol-pro"
+    # Venice dash-spells the dot; both sides normalize alike so the
+    # known-good lookup matches the row.
+    check normalizeModelName("openai-gpt-61-terra") == "gpt-61-terra"
 
   test "context-size qualifier after series version":
     check normalizeModelName("kimi-k3-256k") == "kimi-k3-256k"

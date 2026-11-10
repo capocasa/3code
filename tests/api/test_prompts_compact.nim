@@ -186,6 +186,28 @@ suite "prompts: defaultReasoningsFor":
       @["low", "high", "max"]
     check defaultReasoningsFor("venice", "kimi-k3-1-pro", "kimi") ==
       @["low", "high", "max"]
+    check defaultReasoningsFor("baseten", "moonshotai/Kimi-K3.1-Pro", "kimi") ==
+      @["low", "high", "max"]
+    check defaultReasoningsFor("fireworks", "accounts/fireworks/models/kimi-k3p1-pro", "kimi") ==
+      @["low", "high", "max"]
+
+  test "gpt 6.1 terra keeps a true off, the pro tiers do not":
+    check defaultReasoningsFor("openai", "gpt-6.1-terra", "gpt") ==
+      @["none", "low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("cheaperinference", "gpt-6.1-terra", "gpt") ==
+      @["none", "low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("venice", "openai-gpt-61-terra", "gpt") ==
+      @["none", "low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("openai", "gpt-6.1-sol", "gpt") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("openrouter", "openai/gpt-6.1-sol-pro", "gpt") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("openrouter", "openai/gpt-6.1-terra-pro", "gpt") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("venice", "openai-gpt-6-astra-pro", "gpt") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("openai", "gpt-6-astra", "gpt") ==
+      @["low", "medium", "high", "xhigh", "max"]
 
   test "level-based families still use ReasoningLevels":
     check defaultReasoningsFor("openai", "gpt-oss-1", "gpt-oss") ==

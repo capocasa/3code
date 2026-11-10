@@ -47,7 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 297
+    check visionRows == 324
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
@@ -68,6 +68,28 @@ suite "vision: known-good curation":
     check knownGoodVision("venice", "kimi-k3-1-pro")
     check knownGoodVision("cheaperinference", "kimi-k3.1-pro-highspeed")
     check knownGoodVision("kimicode", "k3.1-pro")
+    # K3.1 Pro hostings added after the vision rollout inherit the mark;
+    # nebius stays the exception (its proxy rejects image parts).
+    check knownGoodVision("baseten", "moonshotai/Kimi-K3.1-Pro")
+    check knownGoodVision("tensorx", "moonshotai/kimi-k3.1-pro")
+    check knownGoodVision("together", "moonshotai/Kimi-K3.1-Pro")
+    check knownGoodVision("deepinfra", "moonshotai/Kimi-K3.1-Pro")
+    check knownGoodVision("fireworks", "accounts/fireworks/models/kimi-k3p1-pro")
+    check not knownGoodVision("nebius", "moonshotai/Kimi-K3.1-Pro")
+    # mimo v2.6 is full-modal on every host, ultraspeed included.
+    check knownGoodVision("novita", "xiaomimimo/mimo-v2.6-pro")
+    check knownGoodVision("tencent", "mimo-v2.6-flash")
+    check knownGoodVision("venice", "xiaomi-mimo-v2-6-flash")
+    check knownGoodVision("cheaperinference", "mimo-v2.6-pro-ultraspeed")
+    check knownGoodVision("xiaomi", "mimo-v2.6-pro-ultraspeed")
+    # gpt 6.1 rides the multimodal chat line.
+    check knownGoodVision("openai", "gpt-6.1-terra")
+    check knownGoodVision("cheaperinference", "gpt-6.1-sol")
+    check knownGoodVision("openrouter", "openai/gpt-6.1-terra-pro")
+    # the 6-astra-pro tier reconciled onto the hosts that list it.
+    check knownGoodVision("venice", "openai-gpt-6-astra-pro")
+    check knownGoodVision("openrouter", "openai/gpt-6-astra-pro")
+    check knownGoodVision("nanogpt", "openai/gpt-6-astra-pro")
     check not knownGoodVision("nebius", "zai-org/GLM-5.3-Flash")
     check not knownGoodVision("nebius", "deepseek-ai/DeepSeek-V4.1-Flash")
     check not knownGoodVision("nebius", "nvidia/Nemotron-3.5-Super-VL")
