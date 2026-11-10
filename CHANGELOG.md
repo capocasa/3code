@@ -2,6 +2,21 @@ Changelog
 
 Unreleased
 
+- **Neuralwatt joins the catalog, an energy-metered hosted vLLM stack.**
+  `api.neuralwatt.com/v1` bills per kWh or per token and reports Wh and
+  CO2 per request on every response. Seven known-good rows: GLM-5.3 and
+  GLM-5.3-Flash, DeepSeek V4.1 Flash, Qwen 3.8 27B and Qwen 3.6 35B,
+  MiMo V2.6 Pro, and Kimi K3, each riding its family's prompts and tools
+  on a 1M window (262K for the qwens). One graded reasoning knob for
+  every family: a top-level reasoning_effort where `none` truly skips
+  the reasoning phase (first-party Kimi K3 always thinks) and the
+  server folds per-model aliasing (qwen3.8's high lands on its native
+  xhigh, qwen3.6 is high/none binary, mimo's max folds onto high), so
+  all four 3code levels are valid wire values everywhere. Vision flags
+  and contexts come from their public /v1/models metadata, not a live
+  image probe yet. The nw-* tracking aliases and the -flex/-speed
+  scheduling tiers stay off the table: aliases re-point at newer models
+  under the same id, and tiers only change scheduling and price.
 - **Sessions can carry a name, and every session lookup accepts it.**
   `:rename Feature xyz` names the running session (issue #67), bare
   `:rename` shows the stored name, `:rename off` clears it. The name
