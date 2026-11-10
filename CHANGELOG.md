@@ -2,6 +2,21 @@ Changelog
 
 Unreleased
 
+- **Goal mode display and the once-per-arming kickoff.** The kickoff
+  stanza is fed exactly once per arming: `goalNotified` persists in the
+  session record (`goal_notified=1`), and a `Goal armed:` content lead
+  in the conversation witnesses sessions saved before the latch
+  existed, so resuming a session no longer re-feeds the goal text to
+  the model — the end-call boundary goes straight to the check. The
+  `goal.md detected implementing` hint line is gone; the kickoff's
+  scrollback item is the whole announcement, and it shrank to the `⚑`
+  flag plus the goal text alone (the `Goal armed:` scaffold and the
+  trailing instruction paragraph never reach scrollback, live or
+  replay; replay also gives old, marker-less kickoffs the flag). A
+  failed or unreadable check now speaks as the same red `✗` verdict
+  row the verifier steps use — `check unavailable (...), retrying
+  next turn` or a no-verdict note — instead of a cyan receipt.
+
 - **Java runs under the macOS sandbox.** The JVM's first startup call
   resolves its temp dir through the `com.apple.bsd.dirhelper` mach
   service, and under the bare `(deny default)` that bootstrap lookup
