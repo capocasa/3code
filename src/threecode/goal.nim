@@ -141,32 +141,79 @@ proc readGoalText*(dir = "."): string =
   try: readFile(modePathForName(GoalFileName, dir))
   except CatchableError: ""
 
+const
+  VerdictSatWords = ["VERDICT", ":", "SATISFIED"]
+  VerdictFbWords = ["VERDICT", ":", "FEEDBACK", ":"]
+
+proc contractMatch(up: string; at: int; words: openArray[string]): int =
+  ## `words` matched at byte offset `at` of an uppercased line, with
+  ## any amount of whitespace (or none) between the fixed words - the
+  ## freedom live verifiers take with the contract's spelling. Byte
+  ## just past the match, or -1.
+  var i = at
+  for w in words:
+    while i < up.len and up[i] in {' ', '\t'}: inc i
+    if up.len - i < w.len or up[i ..< i + w.len] != w: return -1
+    inc i, w.len
+  i
+
+proc inlineVerdict(l: string): tuple[kind: GoalVerdictKind, feedback, head: string] =
+  ## The verdict contract as the reply's final (whitespace-stripped)
+  ## line carries it: the contract words case-insensitively, any or no
+  ## whitespace between them, either owning the line or ending it -
+  ## the spellings live verifiers produce. The reply's last words are
+  ## the verdict; a marker quoted mid-line without ending it is prose.
+  ## `head` is the line minus the verdict: the prose an icon row still
+  ## owes scrollback (empty when the whole line was the verdict).
+  let up = l.toUpperAscii
+  var at = 0
+  while true:
+    let v = up.find("VERDICT", start = at)
+    if v < 0: break
+    if contractMatch(up, v, VerdictSatWords) == up.len:
+      return (gvkSatisfied, "", (if v == 0: "" else: l[0 ..< v].strip))
+    at = v + 1
+  at = 0
+  while true:
+    let v = up.find("VERDICT", start = at)
+    if v < 0: break
+    let e = contractMatch(up, v, VerdictFbWords)
+    if e >= 0:
+      let fb = l[e ..^ 1].strip
+      if fb.len > 0:
+        return (gvkFeedback, fb, (if v == 0: "" else: l[0 ..< v].strip))
+      break
+    at = v + 1
+  (gvkNone, "", l)
+
 proc parseVerdict*(text: string): GoalVerdict =
-  ## The output contract: the FINAL non-empty line is exactly
-  ## `VERDICT: SATISFIED` or `VERDICT: FEEDBACK: <what is missing / what
-  ## to do next>`. Fixed words match case-insensitively, the shape is
-  ## strict, and nothing else ever counts as satisfied: a check without a
-  ## verdict line is a failed check, not a passing one.
+  ## The output contract: the FINAL non-empty line (whitespace
+  ## stripped) is `VERDICT: SATISFIED` or `VERDICT: FEEDBACK: <what is
+  ## missing / what to do next>`, either owning the line or ending it;
+  ## the fixed words match case-insensitively with any or no
+  ## whitespace between them, and nothing else ever counts as
+  ## satisfied: a check without verdict words is a failed check, not a
+  ## passing one.
   let lines = text.strip.splitLines
   if lines.len == 0: return
-  let last = lines[^1].strip
-  let up = last.toUpperAscii
-  if up == "VERDICT: SATISFIED":
-    result.kind = gvkSatisfied
-  elif up.startsWith("VERDICT: FEEDBACK:"):
-    result.kind = gvkFeedback
-    result.feedback = last["VERDICT: FEEDBACK:".len ..^ 1].strip
-    if result.feedback.len == 0: result.kind = gvkNone
+  let v = inlineVerdict(lines[^1].strip)
+  result.kind = v.kind
+  result.feedback = v.feedback
 
 proc stripVerdictLine*(text: string): string =
   ## The display half of the verdict contract: the reply minus its
-  ## final verdict line, so scrollback never needs to show the contract
-  ## text (the verdict is an icon row instead). No verdict line means
-  ## the text comes back unchanged.
-  if parseVerdict(text).kind == gvkNone: return text
+  ## verdict, so scrollback never needs to show the contract text (the
+  ## verdict is an icon row instead). No verdict words means the text
+  ## comes back unchanged; an inline verdict takes only its own words,
+  ## leaving the prose it rode in on.
   let lines = text.strip.splitLines
-  if lines.len <= 1: return ""
-  lines[0 .. ^2].join("\n")
+  if lines.len == 0: return text
+  let v = inlineVerdict(lines[^1].strip)
+  if v.kind == gvkNone: return text
+  if v.head.len == 0:
+    return if lines.len <= 1: "" else: lines[0 .. ^2].join("\n")
+  if lines.len == 1: return v.head
+  lines[0 .. ^2].join("\n") & "\n" & v.head
 
 proc goalFeedbackMessage*(feedback: string): JsonNode =
   ## The harness-autosent continuation. Marked `agentSent` exactly like
