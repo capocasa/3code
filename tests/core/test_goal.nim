@@ -108,6 +108,27 @@ suite "goal mode":
     check parseVerdict(
       "I would only write VERDICT: SATISFIED with proof").kind == gvkNone
 
+  test "verdict contract: whitespace inside the contract words is free":
+    # Strip the line's ends, match the words case-insensitively, and
+    # allow any or no whitespace between them: the spellings a live
+    # verifier produces around the fixed contract words.
+    for spell in ["VERDICT:SATISFIED", "VERDICT : SATISFIED",
+                  "verdict:\tsatisfied", "Verdict:  Satisfied",
+                  "VERDICT: SATISFIED   "]:
+      check parseVerdict("Work done. " & spell).kind == gvkSatisfied
+    check parseVerdict("VERDICT:SATISFIED").kind == gvkSatisfied
+    check stripVerdictLine("Work done. VERDICT :SATISFIED") ==
+      "Work done."
+    let fb = parseVerdict("Checked. verdict:feedback: run tests")
+    check fb.kind == gvkFeedback
+    check fb.feedback == "run tests"
+    check stripVerdictLine("Checked. VERDICT:\tFEEDBACK: run tests") ==
+      "Checked."
+    # The freedom is between the words, not after them: a satisfied
+    # marker that does not end the reply is still prose.
+    check parseVerdict(
+      "I write VERDICT : SATISFIED only with proof").kind == gvkNone
+
   test "completion renames goal.md to achieved.md":
     withGoalDir proc (dir: string) =
       writeFile(GoalFileName, "the goal\n")

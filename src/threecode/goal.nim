@@ -142,36 +142,58 @@ proc readGoalText*(dir = "."): string =
   except CatchableError: ""
 
 const
-  VerdictSatisfied = "VERDICT: SATISFIED"
-  VerdictFeedback = "VERDICT: FEEDBACK:"
+  VerdictSatWords = ["VERDICT", ":", "SATISFIED"]
+  VerdictFbWords = ["VERDICT", ":", "FEEDBACK", ":"]
+
+proc contractMatch(up: string; at: int; words: openArray[string]): int =
+  ## `words` matched at byte offset `at` of an uppercased line, with
+  ## any amount of whitespace (or none) between the fixed words - the
+  ## freedom live verifiers take with the contract's spelling. Byte
+  ## just past the match, or -1.
+  var i = at
+  for w in words:
+    while i < up.len and up[i] in {' ', '\t'}: inc i
+    if up.len - i < w.len or up[i ..< i + w.len] != w: return -1
+    inc i, w.len
+  i
 
 proc inlineVerdict(l: string): tuple[kind: GoalVerdictKind, feedback, head: string] =
-  ## The verdict contract as the reply's final line carries it: the
-  ## whole line exactly, or - the deviation live verifiers make - the
-  ## contract words terminating a prose line instead of owning one.
-  ## The reply's last words are the verdict either way; a marker quoted
-  ## mid-line without ending it is prose. `head` is the line minus an
-  ## inline verdict: the prose an icon row still owes scrollback (empty
-  ## when the whole line was the verdict).
+  ## The verdict contract as the reply's final (whitespace-stripped)
+  ## line carries it: the contract words case-insensitively, any or no
+  ## whitespace between them, either owning the line or ending it -
+  ## the spellings live verifiers produce. The reply's last words are
+  ## the verdict; a marker quoted mid-line without ending it is prose.
+  ## `head` is the line minus the verdict: the prose an icon row still
+  ## owes scrollback (empty when the whole line was the verdict).
   let up = l.toUpperAscii
-  if up == VerdictSatisfied:
-    return (gvkSatisfied, "", "")
-  if up.endsWith(VerdictSatisfied):
-    return (gvkSatisfied, "", l[0 ..< l.len - VerdictSatisfied.len].strip)
-  let fbAt = up.find(VerdictFeedback)
-  if fbAt >= 0:
-    let fb = l[fbAt + VerdictFeedback.len ..^ 1].strip
-    if fb.len > 0:
-      return (gvkFeedback, fb,
-              (if fbAt == 0: "" else: l[0 ..< fbAt].strip))
+  var at = 0
+  while true:
+    let v = up.find("VERDICT", start = at)
+    if v < 0: break
+    if contractMatch(up, v, VerdictSatWords) == up.len:
+      return (gvkSatisfied, "", (if v == 0: "" else: l[0 ..< v].strip))
+    at = v + 1
+  at = 0
+  while true:
+    let v = up.find("VERDICT", start = at)
+    if v < 0: break
+    let e = contractMatch(up, v, VerdictFbWords)
+    if e >= 0:
+      let fb = l[e ..^ 1].strip
+      if fb.len > 0:
+        return (gvkFeedback, fb, (if v == 0: "" else: l[0 ..< v].strip))
+      break
+    at = v + 1
   (gvkNone, "", l)
 
 proc parseVerdict*(text: string): GoalVerdict =
-  ## The output contract: the FINAL non-empty line is `VERDICT:
-  ## SATISFIED` or `VERDICT: FEEDBACK: <what is missing / what to do
-  ## next>`, either owning the line or ending it. Fixed words match
-  ## case-insensitively, and nothing else ever counts as satisfied: a
-  ## check without verdict words is a failed check, not a passing one.
+  ## The output contract: the FINAL non-empty line (whitespace
+  ## stripped) is `VERDICT: SATISFIED` or `VERDICT: FEEDBACK: <what is
+  ## missing / what to do next>`, either owning the line or ending it;
+  ## the fixed words match case-insensitively with any or no
+  ## whitespace between them, and nothing else ever counts as
+  ## satisfied: a check without verdict words is a failed check, not a
+  ## passing one.
   let lines = text.strip.splitLines
   if lines.len == 0: return
   let v = inlineVerdict(lines[^1].strip)
