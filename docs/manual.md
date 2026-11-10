@@ -2053,6 +2053,34 @@ elicitation, modes, and authentication.
 Diagnostics go to stderr; stdout is protocol records only, so the stream
 stays parseable.
 
+## Headless and native GUI frontends
+
+`3code --headless [flags] [prompt words...]` runs the agent with ZERO
+output: no TUI, no banner, no tool lines, no stderr on failure. The exit
+code is the whole report (0 ok, 1 turn failed or interrupted, 2 usage, 3
+config), the session is saved like any other, and the flags are the usual
+ones (`-m`, `-c`, `-r[=id]`, `-s`, `-x`, `-p`, `--no-sandbox`, `-D`). An
+empty prompt with `-r` continues the resumed conversation one turn —
+scriptable "keep going". Everything else (provider, sandbox, plugins,
+sessions) is exactly the interactive setup.
+
+`3code --gui` is the same headless process with a different owner: a
+plugin. Any plugin exporting `tc_frontend` gets its own thread to be the
+user interface — a native window, a webview — and drives the agent
+in-process through the plugin `agent*` services: open the session, start
+turns, poll streaming events, run colon commands, read scrollback. No
+sockets, no second binary; see the [plugin manual](plugins.html) for the
+full contract and a worked frontend.
+
+`nimble gui` builds `bin/3code-gui`: the same program as a native
+GUI-subsystem binary (`--app:gui`). On Windows that means WinMain with no
+console attached — double-clicking opens no terminal — and the runtime
+refuses anything but `--headless`/`--gui` (alerting with a MessageBox)
+because a terminal UI without a console would be blind. On macOS the same
+build links the GUI frameworks; on Linux it equals the console binary.
+Installed beside the console binary, `3code-gui --gui` with a frontend
+plugin IS the native app.
+
 ## Build from source
 
 ```

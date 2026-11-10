@@ -511,6 +511,57 @@ proc configWarnings*(path: string; entries: seq[RawEntry]): seq[string] =
         not permittedKey(ent.section, ent.key):
       result.add &"{path}:{ent.line}: unknown key '{ent.key}' in [{ent.section}] (ignored)"
 
+proc applyPluginConfigDefaults() =
+  ## Set every `[settings]` global a plugin registered a default for,
+  ## immediately before the user's own entries parse over them. The
+  ## precedence ladder is: compiled default < plugin default < the
+  ## user's config line < a CLI flag (flags apply after every parse).
+  ## Called at every parse start, so the mid-session re-parse in
+  ## writeConfigFile lands on the same values the session started with.
+  ## Key set and value dialect mirror plugins.nim's registration-time
+  ## validation (pluginDefaultCheck); a key that slips past one side is
+  ## ignored by the other, never fatal.
+  for d in plugins.pluginConfigDefaultsAll():
+    if d.section != "settings": continue
+    let v = d.value.strip
+    case d.key
+    of "notify": notifyEnabled = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "streaming": streamingEnabled = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "sandbox", "sandbox_enabled":
+      sandboxEnabled = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "patient_retry", "patient-retry":
+      patientRetryEnabled = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "sandbox_wall_warn":
+      sandboxWallWarn = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "browserfetch":
+      browserFetchEnabled = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "allow-empty-prompt", "allow_empty_prompt":
+      allowEmptyPromptEnabled = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "tab-title":
+      tabTitleEnabled = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "computer":
+      if computerUseBuild:
+        computerUseEnabled = v.toLowerAscii in ["on", "true", "yes", "1"]
+    of "max_timeout", "max-timeout":
+      try: maxTimeoutSetting = v.parseInt
+      except ValueError: discard
+    of "force_timeout", "force-timeout":
+      try: forceTimeoutSetting = v.parseInt
+      except ValueError: discard
+    of "banner_lines", "banner-lines":
+      try: bannerLinesSetting = v.parseInt
+      except ValueError: discard
+    of "tone", "mode":
+      case v.toLowerAscii
+      of "auto": colorModePref = cmAuto
+      of "dark": colorModePref = cmDark
+      of "light": colorModePref = cmLight
+      else: discard
+    of "bash": bashSourcePref = v
+    of "bash_path", "bash-path": bashPathOverride = v
+    of "user_agent", "user-agent": userAgentTemplate = v
+    else: discard
+
 proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) {.raises: [ValueError, IOError, OSError].} =
   ## Streaming parse so that repeated [provider] and [params] sections
   ## accumulate as lists. Returns
@@ -545,6 +596,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   var inParams = false
   var entries: seq[RawEntry]
   var verifierExplicit = false
+  applyPluginConfigDefaults()
   let stream = newFileStream(path, fmRead)
   if stream == nil: raise newException(ValueError, "cannot open " & path)
   var p: CfgParser

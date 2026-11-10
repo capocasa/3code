@@ -181,6 +181,14 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   api.bearerHook = subscriptionBearer
   api.extraHeadersHook = extraHeadersFor
 
+  # Plugins load BEFORE the full config parse, exactly like the CLI:
+  # a tolerant pre-parse supplies the [plugins] gates (disable, lib),
+  # then tc_register_config defaults are in the table by the time the
+  # real parse below applies them. In a CLI/headless run the load
+  # already happened at argv time and both calls are no-ops.
+  discard tryLoadStateOrEmpty(configPath())
+  pluginsDiscoverAndLoad()
+
   var colorKeys: Table[string, string]
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
   # Directory-specific overlay (`.3code/config` in the session dir or

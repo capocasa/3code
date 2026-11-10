@@ -38,6 +38,8 @@ import threecode/[types, util, prompts, shell, session, compact,
                   streamexec, cli, search, tabtitle, plugins, goal,
                   dirsettings]
 import threecode/acp
+import threecode/headless
+import threecode/pluginagent
 import threecode/rpc
 import threecode/signals
 when not defined(android):
@@ -113,6 +115,10 @@ proc usage() {.noreturn.} =
                                   # configure a provider without the wizard
        3code sandbox restrict DIR -- CMD   # run CMD sandboxed (alias: sb)
        3code setup                  # one-time elevated sandbox setup (Windows)
+       3code --headless [opts] [prompt...]
+                                  # run the agent with ZERO output (exit code only)
+       3code --gui [opts]          # headless + an in-process plugin GUI frontend
+                                  # (--headless/--gui must be the first argument)
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -c, --config FILE    read providers and settings from FILE
@@ -331,8 +337,33 @@ unhandledExceptionHook = proc(e: ref Exception) {.nimcall, gcsafe, raises: [], t
     minline.restoreTerminal()
     restoreCancelTermios()
 
+when defined(tcNativeGui):
+  proc nativeGuiAlert(msg: string) =
+    ## The native GUI-subsystem build has no console on Windows: stderr
+    ## goes nowhere, so a misuse notice is a real alert box there. On
+    ## macOS/Linux the same build is a plain binary and stderr works.
+    when defined(windows):
+      proc MessageBoxW(hWnd: pointer, text, caption: WideCString,
+                       uType: uint32): int32 {.importc, stdcall, dynlib: "user32", discardable.}
+      proc toWide(s: string): WideCString =
+        result = newWideCString(s)
+      discard MessageBoxW(nil, toWide(msg), toWide("3code"), 0x30'u32)
+    else:
+      stderr.writeLine "3code: " & msg
+
 proc main() =
   startupTrace("main-enter")
+  when defined(tcNativeGui):
+    # Native GUI-subsystem build (`nimble gui`): headless only. A
+    # GUI-subsystem Windows binary has no console attached, so anything
+    # but the headless frontends would run blind; refuse loudly instead.
+    block:
+      let gp = commandLineParams()
+      if gp.len == 0 or gp[0] notin ["--headless", "--gui"]:
+        nativeGuiAlert("3code-gui is the native GUI build and runs " &
+          "headless only. Start it with --gui (a plugin frontend) or " &
+          "--headless; the terminal UI lives in the console 3code binary.")
+        quit(ExitUsage)
   # `sandbox` is the built-in sandwall CLI: the bash tool re-execs this
   # binary as `3code sandbox restrict ...`. Dispatch before any other
   # startup so the sandboxed command isn't weighed down by 3code's
@@ -411,6 +442,13 @@ proc main() =
       inc i
     discard tryLoadStateOrEmpty(configPath())
     pluginsDiscoverAndLoad()
+  # Headless frontends: `--headless` runs turns with zero output,
+  # `--gui` keeps the process alive for a plugin's in-process GUI
+  # (both see headless.nim). Dispatched here, after the load above: a
+  # `--gui` run needs the frontend registered, and a plugin's config
+  # defaults land in the same window as every other run.
+  if rawParams.len > 0 and rawParams[0] in ["--headless", "--gui"]:
+    quit(headlessMain(rawParams))
   for a in rawParams:
     if a in ["-h", "--help"]: usage()
   # Non-interactive provider management (see cli.nim). Dispatches with

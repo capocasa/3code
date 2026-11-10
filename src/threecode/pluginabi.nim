@@ -37,6 +37,16 @@ const
   tcTakeover* = 3.cint  ## skip execution; `message` is the whole result
   tcWrap* = 4.cint      ## run the original between `message` (pre) and `post`
 
+const
+  taeUser* = 0.cint       ## agent event: the user prompt a turn started with
+  taeDelta* = 1.cint      ## agent event: streamed assistant text chunk
+  taeReasoning* = 2.cint  ## agent event: streamed reasoning chunk
+  taeTool* = 3.cint       ## agent event: committed tool result / line
+  taeRetry* = 4.cint      ## agent event: provider retry notice
+  taeNotice* = 5.cint     ## agent event: harness notice (steer, compact, usage)
+  taeDone* = 6.cint       ## agent event: model call finished (usage fields)
+  taeError* = 7.cint      ## agent event: turn failed (`text` is the message)
+
 type
   TcStr* = object
     ## Read-only byte view. `data` is not NUL-terminated.
@@ -77,6 +87,47 @@ type
       ## option (plus `-shortName` when non-empty) accepted by the
       ## main option parser and delivered to `tc_on_cli_options`.
       ## Same return codes; 2 also covers a bad short name.
+    overrideDefault*: proc (s: ptr TcState; section, key, value: cstring): cint {.
+                              cdecl, gcsafe.}
+      ## Legal only inside `tc_register_config`. Overrides the DEFAULT
+      ## of a `[section]` config key: applied when the user's own
+      ## config file does not set it, ignored when it does. `section`
+      ## is "settings" today; `key` is the plain spelling. Returns 0
+      ## on success, 1 outside registration, 2 for a key plugins
+      ## cannot default, 3 for a bad value.
+    agentOpen*: proc (s: ptr TcState; optsJson: cstring; optsLen: int32): cint {.
+                              cdecl, gcsafe.}
+      ## In-process agent (frontend only): open the process's one
+      ## AgentSession. `optsJson` is `{"model": ..., "cwd": ...,
+      ## "resume": true, "resumeId": ..., "sessionPath": ...,
+      ## "experimental": bool}` (all keys optional). 0 ok, 1 already
+      ## open, 2 busy, 3 open failed (see `agentLastError`).
+    agentClose*: proc (s: ptr TcState): cint {.cdecl, gcsafe.}
+      ## Persist and release the session (waits for a running turn).
+    agentStart*: proc (s: ptr TcState; prompt: cstring; promptLen: int32): cint {.
+                              cdecl, gcsafe.}
+      ## Kick a turn on a host worker thread; returns at once. Empty
+      ## prompt continues the conversation. 0 started, 1 busy, 2 no
+      ## session. Events land via `agentPollEvent`.
+    agentCancel*: proc (s: ptr TcState): cint {.cdecl, gcsafe.}
+      ## Interrupt the in-flight turn. 0 interrupted, 1 idle.
+    agentBusy*: proc (s: ptr TcState): cint {.cdecl, gcsafe.}
+      ## 1 while a turn (started by `agentStart`) is running, else 0.
+    agentCommand*: proc (s: ptr TcState; cmd: cstring; cmdLen: int32;
+                         output: ptr TcMutStr): cint {.cdecl, gcsafe.}
+      ## Run a colon command (`:tokens`, `:model ...`) and fill
+      ## `output`. 0 ok, 1 busy, 2 no session, 3 command refused.
+    agentScrollback*: proc (s: ptr TcState; output: ptr TcMutStr): cint {.
+                              cdecl, gcsafe.}
+      ## Stored conversation as JSON array text `[{"role": ...,
+      ## "content": ...}]`, plain text, tools stripped. Same codes as
+      ## `agentCommand`.
+    agentLastError*: proc (s: ptr TcState): cstring {.cdecl, gcsafe.}
+      ## The last agent service failure message, or "". A view; copy it.
+    agentPollEvent*: proc (s: ptr TcState; ev: ptr TcAgentEvent): cint {.
+                              cdecl, gcsafe.}
+      ## Pop one event into the caller-owned `ev` block (zeroed first).
+      ## 1 delivered, 0 queue empty. Poll from the frontend loop.
 
   TcState* = object
     ## Per-plugin context, host-owned, stable address for the process
@@ -191,6 +242,24 @@ type
     options*: TcStr        ## JSON object text: option name -> value
                            ## string, or true for value-less flags
 
+  TcFrontendEvent* = object
+    abi*, structSize*: cint
+    cwd*: TcStr            ## process working directory
+    argv*: TcStr           ## JSON array text of the full command line,
+                           ## verbatim (the plugin parses what it wants)
+
+  TcAgentEvent* = object
+    ## One queued agent event, copied out by `agentPollEvent`. `text`
+    ## is a view into host memory valid ONLY for that call; copy it
+    ## (tcView) before returning.
+    abi*, structSize*: cint
+    kind*: cint            ## one of the tae* kinds
+    text*: TcStr
+    promptTokens*: int32
+    completionTokens*: int32
+    reasoningTokens*: int32
+    elapsedMs*: int32
+
 # Hook proc shapes. Void hooks return nothing; verdict hooks return a
 # cint the host also reads back from `ev.verdict` (the return value
 # wins when they disagree).
@@ -249,6 +318,67 @@ proc registerCliCommand*(s: ptr TcState; name, help: string): bool {.inline.} =
   proc grab(src: string): cstring =
     if src.len == 0: cstring"" else: cast[cstring](addr src[0])
   s.services.registerCliCommand(s, grab(name), grab(help)) == 0
+
+proc overrideDefault*(s: ptr TcState; section, key, value: string): bool {.
+    inline.} =
+  ## SDK convenience for `services.overrideDefault` (legal only
+  ## inside `registerConfig`). False when the host refused the key or
+  ## value — check `:plugins`, refusals are listed there.
+  if s == nil or s.services == nil: return false
+  proc grab(src: string): cstring =
+    if src.len == 0: cstring"" else: cast[cstring](addr src[0])
+  s.services.overrideDefault(s, grab(section), grab(key), grab(value)) == 0
+
+proc agentOpen*(s: ptr TcState; optsJson: string): cint {.inline.} =
+  ## SDK conveniences for the in-process agent services (legal only
+  ## from `frontend` on the host's frontend thread).
+  if s == nil or s.services == nil: return 3.cint
+  if optsJson.len == 0:
+    s.services.agentOpen(s, nil, 0)
+  else:
+    s.services.agentOpen(s, cast[cstring](addr optsJson[0]),
+                         optsJson.len.int32)
+
+proc agentStart*(s: ptr TcState; prompt: string): cint {.inline.} =
+  if s == nil or s.services == nil: return 2.cint
+  if prompt.len == 0:
+    s.services.agentStart(s, nil, 0)
+  else:
+    s.services.agentStart(s, cast[cstring](addr prompt[0]), prompt.len.int32)
+
+proc agentCommand*(s: ptr TcState; cmd: string; output: var TcMutStr): cint {.
+    inline.} =
+  if s == nil or s.services == nil or cmd.len == 0: return 2.cint
+  s.services.agentCommand(s, cast[cstring](addr cmd[0]), cmd.len.int32,
+                          addr output)
+
+proc agentPollEvent*(s: ptr TcState; ev: var TcAgentEvent): cint {.inline.} =
+  if s == nil or s.services == nil: return 0.cint
+  s.services.agentPollEvent(s, addr ev)
+
+proc agentLastErrorStr*(s: ptr TcState): string {.inline.} =
+  ## Copy of the last agent service failure (empty when none). The
+  ## raw service returns a transient cstring view; this is the one to
+  ## keep.
+  if s == nil or s.services == nil: return ""
+  let cs = s.services.agentLastError(s)
+  if cs == nil: "" else: $cs
+
+proc agentClose*(s: ptr TcState): cint {.inline.} =
+  if s == nil or s.services == nil: return 1.cint
+  s.services.agentClose(s)
+
+proc agentCancel*(s: ptr TcState): cint {.inline.} =
+  if s == nil or s.services == nil: return 1.cint
+  s.services.agentCancel(s)
+
+proc agentBusy*(s: ptr TcState): cint {.inline.} =
+  if s == nil or s.services == nil: return 0.cint
+  s.services.agentBusy(s)
+
+proc agentScrollback*(s: ptr TcState; output: var TcMutStr): cint {.inline.} =
+  if s == nil or s.services == nil: return 2.cint
+  s.services.agentScrollback(s, addr output)
 
 proc registerCliOption*(s: ptr TcState; longName: string; shortName: char;
                         help: string; takesValue = true): bool {.inline.} =
