@@ -1288,6 +1288,21 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("cortecs", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
     ("cortecs", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
     ("cortecs", "deepseek-v4.1-flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_048_576, false, false),
+
+    # jarvislabs: Jarvislabs' Token Factory (models.jarvislabs.net/v1),
+    # the per-token API of their India GPU cloud. Open weights served on
+    # their own H200s; "prompts aren't stored" is a marketing claim, not
+    # a published API-terms commitment, so allowPrivate stays opt-in.
+    # GLM-5.3 rides the served 230K window, flash and DeepSeek the 1M.
+    # The Gemma ids have no family yet and stay experimental. No live
+    # image probe yet, so every row starts vision-off (`[params] vision
+    # = "on"` opts in after you've probed it).
+    ("jarvislabs", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 235_520, false, false),
+    ("jarvislabs", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("jarvislabs", "deepseek-v4.1-flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("jarvislabs", "deepseek-v4.1-flash-1017-cyber", "deepseek", "4.1", "flash-1017-cyber", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("jarvislabs", "nemotron-3.5-super-vl-120b-a12b-nvfp4", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("jarvislabs", "qwen-3.8-27b-fp8", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, thinkBack, contextWindow) tuples.
