@@ -774,6 +774,7 @@ suite "config: concurrent instances don't clobber each other":
 
   teardown:
     removeFile(tmp)
+    dirStickyCurrent = ""
 
   proc loadLikeStartup(path: string): (string, seq[ProviderRec]) =
     # Model an instance's startup: parse the file AND record the baseline
@@ -916,6 +917,61 @@ suite "config: concurrent instances don't clobber each other":
     let before = readFile(tmp)
     writeConfigFile(tmp, bCurrent, bProviders)
     check readFile(tmp) == before
+
+  test "a directory-sticky session's unrelated write does not hoist its sticky":
+    # A session that booted on a directory's sticky current holds a
+    # `current` that differs from its startup baseline without ever
+    # having switched in-session. The baseline-diff read that as this
+    # instance's own switch and wrote the sticky into the user config
+    # on any unrelated flush (`:reasoning`, `:streaming`, ...), so the
+    # global `current` kept moving to whichever directory wrote last -
+    # the reported "provider switches back to nvidia gpt-oss-20b /
+    # baseten without a system command".
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"]),
+      ProviderRec(name: "beta", url: "https://b.test", key: "sk-b",
+                  models: @["model-b"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    let (bCurrent, bProviders) = loadLikeStartup(tmp)
+    check bCurrent == "alpha.model-a"
+    # This instance booted in a directory whose sticky is beta: no
+    # switch command ran, the overlay alone put beta in memory.
+    dirStickyCurrent = "beta.model-b"
+    writeConfigFile(tmp, "beta.model-b", bProviders)  # unrelated flush
+    let (current, _, _, _, _, _) = parseConfigFile(tmp)
+    check current == "alpha.model-a"
+
+  test "a directory-sticky session's in-session switch does persist":
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"]),
+      ProviderRec(name: "beta", url: "https://b.test", key: "sk-b",
+                  models: @["model-b"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    let (bCurrent, bProviders) = loadLikeStartup(tmp)
+    dirStickyCurrent = "alpha.model-a"
+    writeConfigFile(tmp, "beta.model-b", bProviders)  # a real :provider switch
+    let (current, _, _, _, _, _) = parseConfigFile(tmp)
+    check current == "beta.model-b"
+
+  test "a sticky session keeps another instance's switch even when sticky equals the baseline":
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"]),
+      ProviderRec(name: "beta", url: "https://b.test", key: "sk-b",
+                  models: @["model-b"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    let (bCurrent, bProviders) = loadLikeStartup(tmp)
+    check bCurrent == "alpha.model-a"
+    dirStickyCurrent = "alpha.model-a"  # overlay happens to equal the baseline
+    writeConfigFile(tmp, "beta.model-b", providers)   # another instance switches
+    writeConfigFile(tmp, bCurrent, bProviders)        # this instance: unrelated flush
+    let (current, _, _, _, _, _) = parseConfigFile(tmp)
+    check current == "beta.model-b"
 
   test "a fresh config with no disk file still writes":
     # The skip only applies to a file that exists but cannot be parsed;

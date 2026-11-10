@@ -102,6 +102,14 @@ var baselineProviders*: seq[ProviderRec]
   ## Same startup snapshot for the provider list. A provider that differs
   ## from BOTH this baseline and the in-memory list was edited by another
   ## 3code instance since startup; `writeConfigFile` keeps the disk version.
+var dirStickyCurrent*: string
+  ## The per-directory sticky current this instance applied at startup
+  ## ("" when none). A session that booted on a sticky holds a `current`
+  ## that differs from the baseline without an in-session switch; without
+  ## this marker the merge read that difference as this instance's own
+  ## switch, and every unrelated config write (`:reasoning`, `:streaming`,
+  ## ...) hoisted the directory's pick into the user config — the global
+  ## `current` kept moving to whichever directory wrote last.
 var activeParams*: seq[ParamsRec]
   ## Every `[params]` section from the active config, in file order. Kept
   ## so `writeConfigFile` can persist them and `buildProfile` can resolve
@@ -952,9 +960,12 @@ proc mergeForeignEdits(path: string; current: var string,
   activeParams = savedParams
   activeConfigWarnings = savedWarnings
   # Same baseline-diff for the `current` line: an instance that never
-  # switched in-session still holds the startup value, so a different
-  # non-empty value on disk is another instance's switch and survives.
-  if diskCurrent != "" and current == baselineCurrent:
+  # switched in-session still holds the startup value (or the directory
+  # sticky it booted on), so a different non-empty value on disk is
+  # another instance's switch and survives — and this instance's own
+  # write must not hoist its value over it.
+  if diskCurrent != "" and (current == baselineCurrent or
+      (dirStickyCurrent != "" and current == dirStickyCurrent)):
     current = diskCurrent
   var diskByName: Table[string, ProviderRec]
   for pr in diskProviders: diskByName[pr.name] = pr

@@ -851,6 +851,10 @@ proc main() =
     if dirCurrent != "" and
        buildProfile(dirCurrent, activeProviders, "").name.len > 0:
       activeCurrent = dirCurrent
+      # The overlay is not a switch: mark it so config writes know this
+      # instance never authored its current and must not hoist it into
+      # the user config (see config.dirStickyCurrent).
+      dirStickyCurrent = dirCurrent
   if activeProviders.len == 0 and activeCurrent != "":
     # A config that sets `current` but has no [provider] section used to
     # fall through to the first-run wizard, which then refused every name

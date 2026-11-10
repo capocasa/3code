@@ -203,6 +203,10 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
     if dirCurrent != "" and
        buildProfile(dirCurrent, activeProviders, "").name.len > 0:
       activeCurrent = dirCurrent
+      # The overlay is not a switch: mark it so config writes know this
+      # instance never authored its current and must not hoist it into
+      # the user config (see config.dirStickyCurrent).
+      dirStickyCurrent = dirCurrent
   if sandboxEnabled:
     sandbox.current = sandbox.loadPolicy(cwd)
     sandbox.active = true

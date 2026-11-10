@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **A directory's provider choice no longer leaks into the user
+  config.** Since the `.3code` store landed, a session that booted on
+  a directory's sticky `current` held a provider that differed from
+  its startup baseline without an in-session switch — and the config
+  merge read that difference as this instance's own edit. Every
+  unrelated flush (`:reasoning`, `:streaming`, `:verifier`, ...) then
+  hoisted the directory's pick into the user config, and adopted
+  whichever value another directory had left there, so `current`
+  kept drifting back to long-stale defaults (nvidia gpt-oss-20b
+  medium, baseten) with no switch command anywhere in sight. Startup
+  now records the sticky overlay, and the merge only honors a
+  `current` that differs from both the baseline and the overlay.
 - **Neuralwatt joins the catalog, an energy-metered hosted vLLM stack.**
   `api.neuralwatt.com/v1` bills per kWh or per token and reports Wh and
   CO2 per request on every response. Seven known-good rows: GLM-5.3 and
