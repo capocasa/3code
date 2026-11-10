@@ -1260,6 +1260,16 @@ proc commitQueuedEchoSend*(text: string) =
     commitTranscriptBytes(formatQueuedPromptItem(text),
                           restoreEditor = true, reserveFooter = true)
 
+proc dropQueuedEcho*() =
+  ## Drain-send transition for a queued command whose announcement lives
+  ## elsewhere (a mode arm's `⚑` kickoff item shows the goal text, so the
+  ## echoed command line would only repeat it): drop the echo from the
+  ## pinned set and consume its painted rows, committing nothing. The
+  ## event was already polled off the queue.
+  withTerminalWriteLock:
+    termengine.setPinnedEchoItems(echoedQueueTexts())
+    commitTranscriptBytes("", restoreEditor = true, reserveFooter = true)
+
 proc popQueuedEchoTail*(ed: ptr minline.LineEditor): bool =
   ## Backspace at the buffer's left edge (empty buffer, or caret at
   ## position 0 of a draft) with an unsent queued item above: remove the

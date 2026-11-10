@@ -89,11 +89,12 @@ suite "cyber mode surfaces (interactive)":
     tty.expect ":cyber make the stub say the word"
     tty.send "\n"
     tty.drain(100)
-    # The arm is the file plus one receipt line carrying the parsed
-    # counts - and the kickoff turn starts on its own: no prompt is
-    # sent, no hint line, and the reply streams anyway.
-    tty.expectInHistory "cybernetic armed (.3code/cybernetic, 1 task, 0 done), starting now"
+    # The arm announces with the ⚑ kickoff item alone - no echoed
+    # command, no receipt - and the kickoff turn starts on its own: no
+    # prompt is sent, no hint line, and the reply streams anyway.
+    tty.expectNeverInHistory "cybernetic armed"
     tty.expectNeverInHistory "detected implementing"
+    tty.expectInHistory "⚑ # make the stub say the word"
     tty.expectInHistory "PLAN_WORK_DONE"
     # Turn end: the verifier's green ✓ item is the whole display, and
     # the plan retires on disk.
@@ -190,13 +191,14 @@ suite "cyber mode surfaces (interactive)":
     tty.send "\n"
     tty.expect "stale hand-written plan"
     tty.drain(100)
-    # Force replace through the verb; the arm answers with its receipt
-    # and the kickoff turn runs the plan to completion on its own.
+    # Force replace through the verb; the arm announces with the ⚑
+    # kickoff item and the kickoff turn runs the plan to completion on
+    # its own.
     tty.send ":cyber! make the stub say PLAN_WORK_DONE"
     tty.expect ":cyber! make the stub say PLAN_WORK_DONE"
     tty.send "\n"
     tty.drain(100)
-    tty.expectInHistory "cybernetic armed (cybernetic.md, 1 task, 0 done), starting now"
+    tty.expectNeverInHistory "cybernetic armed"
     tty.expectInHistory "PLAN_WORK_DONE"
     tty.expectInHistory "\u2713"
     tty.drain(300)
@@ -256,7 +258,7 @@ suite "cyber mode surfaces (interactive)":
     tty.expect ":cyber arm my plan"
     tty.send "\n"
     tty.drain(100)
-    tty.expectInHistory "cybernetic armed (.3code/cybernetic"
+    tty.expectNeverInHistory "cybernetic armed"
     tty.expectInHistory "PLAN_WORK_DONE"
     tty.expectInHistory "\u2713"
     tty.drain(300)

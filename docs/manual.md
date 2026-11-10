@@ -1375,9 +1375,11 @@ the moment the file exists. Edit `goal.md` mid-run to steer (`:goal edit`
 opens it in `$VISUAL/$EDITOR`, creating it when missing; a changed file
 restarts the goal work at once), delete
 it to end goal mode silently, interrupt to pause. Arming starts work
-immediately: `:goal <text>` writes the file, answers with one receipt
-line, and runs the kickoff turn; a `goal.md` that is already on disk
-when 3code starts does the same before any prompt. The kickoff speaks
+immediately: `:goal <text>` writes the file and runs the kickoff turn
+with no echoed command line and no receipt — the kickoff item is the
+arm's whole announcement, and repeating the goal text above it would
+say it twice; a `goal.md` that is already on disk when 3code starts
+does the same before any prompt. The kickoff speaks
 as one scrollback item — the `⚑` flag plus the goal text alone — and
 the stanza is fed exactly once per arming: resuming a session never
 re-feeds it, the check just runs at the next turn end. Each turn end

@@ -62,6 +62,16 @@ Unreleased
   window — and joins with that row; completions there are key-gated
   here, so it is table-verified, and the `-flex` tier stays off the
   table like every other scheduling tier.
+- **A mode arm announces with the `⚑` kickoff item alone.** `:goal
+  <text>` (and `:cyber ...`) used to commit the echoed command line and
+  a `goal armed (...), starting now` receipt on top of the flag item —
+  the goal text spelled twice in a row. The arm write's echo is now
+  dropped (typed mid-turn or at the prompt alike; the typed rows are
+  consumed and the kickoff lands in their place), the receipt is gone,
+  and the kickoff turn starts on the Enter that submitted the command.
+  A refused arm still echoes above its refusal, and cancel/`edit` keep
+  their ordinary echoed receipts — those have no flag item to double.
+
 - **Jarvislabs' Token Factory joins the catalog.** The India GPU cloud's
   per-token API (`models.jarvislabs.net/v1`) is known-good: GLM-5.3 on
   the served 230K window, GLM-5.3-Flash and DeepSeek V4.1 Flash (plus
