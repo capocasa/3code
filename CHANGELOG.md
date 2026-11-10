@@ -2,6 +2,29 @@ Changelog
 
 Unreleased
 
+- **Plugins can override default config values, own a GUI in-process,
+  and the binary runs headless — including as a native Windows GUI
+  app.** The plugin ABI grows three surfaces. `tc_register_config` +
+  `overrideDefault(section, key, value)` lets a plugin retune the
+  `[settings]` DEFAULTS (max_timeout, sandbox, notify, tone, ...) with
+  a strict ladder: compiled default < plugin default < the user's own
+  config line < a CLI flag — a plugin never overrides what the user
+  wrote, and provider selection is not defaultable at all; refusals
+  are listed in `:plugins`. `tc_frontend` + the `agent*` services give
+  a plugin a whole frontend: `3code --gui` runs headless, hands every
+  frontend plugin its own thread, and the plugin drives the internal
+  API in-process (open, start, poll events, command, scrollback —
+  same session, sandbox, and saves as the terminal, no sockets).
+  `3code --headless` is the same zero-output run without a frontend
+  (exit code is the whole report; nothing prints on success OR
+  failure). `nimble gui` builds `bin/3code-gui` with `--app:gui
+  -d:tcNativeGui`: a real Windows GUI-subsystem binary (WinMain, no
+  console ever attached) that runs `--headless`/`--gui` only and
+  alerts with a MessageBox on anything else; on macOS it links the
+  GUI frameworks, on Linux it equals the console build. New module
+  `pluginagent.nim` (the in-process agent backend), `--headless`/
+  `--gui` dispatch in the entry point, and docs/plugins.md + the
+  manual cover the full contracts.
 - **Crash exits restore the terminal.** A crash used to die with the
   signals' default disposition and so skip every exit proc: the shell
   the user landed in inherited raw mode, invisible typing until `reset`
