@@ -2,6 +2,14 @@ Changelog
 
 Unreleased
 
+- **Jarvislabs' Token Factory joins the catalog.** The India GPU cloud's
+  per-token API (`models.jarvislabs.net/v1`) is known-good: GLM-5.3 on
+  the served 230K window, GLM-5.3-Flash and DeepSeek V4.1 Flash (plus
+  the `-cyber` variant) at 1M, Nemotron 3.5 Super VL NVFP4, and Qwen
+  3.8 27B FP8, each riding its family's prompt and tools. Rows start
+  vision-off until an image probe earns the mark, and allowPrivate
+  stays an explicit opt-in because the no-retention line is a site
+  claim, not published API terms.
 - **Plugins can override default config values, own a GUI in-process,
   and the binary runs headless — including as a native Windows GUI
   app.** The plugin ABI grows three surfaces. `tc_register_config` +
