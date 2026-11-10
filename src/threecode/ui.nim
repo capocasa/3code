@@ -2448,16 +2448,24 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         resp "usage: :plugin [list|debug on|off]  (also :plugins)"
     of ":sandbox", ":sb":
-      # `:sandbox show` (or bare) dumps the rules; allow/readonly/deny
+      # `:sandbox show` (or bare) dumps the rules while the session
+      # enforces, else names the setting state; allow/readonly/deny
       # append a line and reload. The path arg is written verbatim so
       # relative paths stay portable in the file.
       let verb = if parts.len == 0: "show" else: parts[0]
       case verb
       of "show":
-        if sandbox.active:
-          resp sandbox.renderSandbox(sandbox.current)
+        # `active` means this session enforces; `sandboxEnabled` is the
+        # persisted setting. A mid-session `:sandbox on` sets only the
+        # second, so name that state instead of a bare "not active" that
+        # reads like the setting did not take.
+        if not sandboxEnabled:
+          resp "sandbox: off  (run unconfined)"
+        elif not sandbox.active:
+          resp "sandbox: on  (this session stays unconfined; " &
+            "enforcement starts at the next launch)"
         else:
-          resp "sandbox not active"
+          resp sandbox.renderSandbox(sandbox.current)
       of "on", "off":
         body.add cmdSandboxSettingSelect(verb)
       of "edit":
