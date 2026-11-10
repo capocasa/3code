@@ -2667,8 +2667,14 @@ proc inputThreadProc() {.thread.} =
               # the editor as keystrokes; anything ESC-led that is NOT an
               # SGR report is pushed back byte-for-byte).
               if mouseClickActive.load(moAcquire) and pendingInput[0] == 27:
-                if tryMouseReport():
-                  continue
+                # Both outcomes need a loop restart: `true` means the SGR
+                # report was dispatched; `false` means the consumed bytes
+                # (a lone Esc or a non-mouse sequence) were parked in
+                # `mousePushback` — pendingInput is empty here, so falling
+                # through to `pendingInput[0]` would raise IndexDefect. The
+                # top-of-loop drain hands the parked bytes back as input.
+                discard tryMouseReport()
+                continue
             draftLastKeyAt = epochTime()
             result = pendingInput[0]
             pendingInput.delete(0)
