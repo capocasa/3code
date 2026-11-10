@@ -96,7 +96,7 @@ suite "command prefix resolution":
       let r = handleCommandResult(cmd, messages, session, prof, editor)
       check r.recognized and r.ok
       check r.name == "goal"
-      check "goal armed" in r.body
+      check r.body == ""
       check readFile(StoreGoal) == "goal description\non several alines\n"
 
   test "bare :goal shows the live goal text":
@@ -122,14 +122,26 @@ suite "goal command verbs":
   var prof = Profile()
   var editor: LineEditor
 
-  test ":goal TEXT arms and answers with the one arm receipt":
+  test "modeArmWrite classifies the arm-shaped writes":
+    check modeArmWrite(":goal make it so")
+    check modeArmWrite(":g new other text")
+    check modeArmWrite(":goal! replacement text")
+    check modeArmWrite(":cyber ship the plan")
+    check not modeArmWrite(":goal cancel")
+    check not modeArmWrite(":goal!")
+    check not modeArmWrite(":goal edit")
+    check not modeArmWrite(":tokens")
+    check not modeArmWrite("plain text")
+
+  test ":goal TEXT arms silently; the kickoff item is the announcement":
     withCommandDir:
       let r = handleCommandResult(":goal make it so", messages, session,
                                   prof, editor)
       check r.recognized and r.ok
-      # The receipt says the file is armed; the controller starts the
-      # kickoff turn right after it (startGoalTurn is the signal).
-      check r.body == "goal armed (.3code/goal), starting now\n"
+      # An arm answers with no body: the controller commits the ⚑ kickoff
+      # item (flag plus goal text alone) as the whole announcement, and a
+      # receipt or echoed command would only repeat the goal text.
+      check r.body == ""
       check r.startGoalTurn
       check readFile(StoreGoal).strip == "make it so"
 
@@ -138,7 +150,7 @@ suite "goal command verbs":
       let r = handleCommandResult(":goal new first goal", messages, session,
                                   prof, editor)
       check r.recognized and r.ok
-      check "goal armed" in r.body
+      check r.body == ""
       check readFile(StoreGoal).strip == "first goal"
       let balk = handleCommandResult(":goal new second goal", messages,
                                      session, prof, editor)
@@ -175,7 +187,7 @@ suite "goal command verbs":
         let r = handleCommandResult(":goal edit", messages, session, prof,
                                     editor)
         check r.recognized and r.ok
-        check "goal armed" in r.body
+        check r.body == ""
         check readFile(StoreGoal).strip == "fresh goal"
 
     test ":goal edit creating nothing arms nothing":
@@ -203,7 +215,7 @@ suite "goal command verbs":
         let r = handleCommandResult(":goal edit", messages, session, prof,
                                     editor)
         check r.recognized and r.ok
-        check "goal armed" in r.body
+        check r.body == ""
         check readFile(StoreGoal).strip == "edited text"
 
     test ":goal edit with an emptied file cancels the goal":

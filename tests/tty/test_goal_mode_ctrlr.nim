@@ -10,11 +10,12 @@ discard """
 ##   when it lands (the transport-level contract is covered by
 ##   tests/stream; this is the wiring).
 ## - Goal mode wiring: the file is the whole mode, and work starts the
-##   moment it exists. `:goal TEXT` answers with the arm receipt and runs
-##   the kickoff turn at once; a goal.md already on disk at startup does
-##   the same before any prompt. The kickoff's scrollback item is the
-##   `⚑` flag plus the goal text alone - no hint line, no `Goal armed:`
-##   scaffold - and the stanza is fed exactly once per arming: a
+##   moment it exists. `:goal TEXT` runs the kickoff turn at once; a
+##   goal.md already on disk at startup does the same before any prompt.
+##   The arm announces with the kickoff item alone - the `⚑` flag plus
+##   the goal text, no echoed command line, no receipt, no hint line,
+##   no `Goal armed:` scaffold - and the stanza is fed exactly once per
+##   arming: a
 ##   resumed session never re-feeds it. Each turn end runs the verifier
 ##   whose reply is the whole display - a quote block led by the green
 ##   `✓` or red `✗` icon, no notice before or after it. An unmet
@@ -154,10 +155,11 @@ suite ":retry and goal mode (interactive)":
     tty.expect ":goal make the stub say the word"
     tty.send "\n"
     tty.drain(100)
-    # The arm receipt lands, the dim detection hint follows, and the
+    # The arm announces with the ⚑ kickoff item alone: no echoed
+    # command line (it would repeat the goal text), no receipt. The
     # kickoff turn starts on its own - no prompt is sent, and the reply
     # streams anyway.
-    tty.expectInHistory "goal armed (.3code/goal), starting now"
+    tty.expectNeverInHistory "goal armed"
     # No hint line - the kickoff item is the whole announcement: the
     # flag plus the goal text alone, scaffold dropped.
     tty.expectNeverInHistory "detected implementing"
@@ -277,7 +279,7 @@ suite ":retry and goal mode (interactive)":
     tty.send ":goal make the stub say the word"
     tty.send "\n"
     tty.drain(100)
-    tty.expectInHistory "goal armed (.3code/goal), starting now"
+    tty.expectInHistory "⚑ make the stub say the word"
     # The kickoff turn runs on its own; its reply lands without any
     # prompt being sent.
     tty.expectInHistory "GOAL_WORK_DONE"
@@ -328,7 +330,7 @@ suite ":retry and goal mode (interactive)":
     tty.send ":goal work toward it"
     tty.send "\n"
     tty.drain(100)
-    tty.expectInHistory "goal armed (.3code/goal), starting now"
+    tty.expectInHistory "⚑ work toward it"
     # The kickoff turn runs on its own and its reply lands; the
     # turn-end verifier's slow model call (8000ms delay) then runs.
     tty.expectInHistory "GOAL_WORK_DONE"
@@ -438,6 +440,62 @@ suite "goal mode mid-turn detection (interactive)":
     tty.drain(300)
     check fileExists(root / "run" / "achieved.md")
     check not fileExists(root / "run" / "goal.md")
+    tty.expectAlive()
+
+  test "a goal queued mid-turn arms with the ⚑ item alone at the drain":
+    let root = newFixture("goal_queued_midturn")
+    writeConfiguredProvider(root)
+    # `:goal TEXT` typed while a turn runs queues with the hourglass
+    # echo like any line. At the drain the arm runs: the queue-time echo
+    # is dropped instead of committed (the ⚑ kickoff item shows the goal
+    # text, so the committed command line would repeat it), no receipt
+    # lands, and the kickoff turn starts at once.
+    # Response 1: the held-open first turn. Response 2: the kickoff
+    # turn's reply. Response 3: its verifier.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      {"role": "assistant", "waitForTestContinue": true,
+       "content": "FIRST_TURN_DONE", "contentChunks": ["FIRST_TURN_DONE"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      reply("GOAL_WORK_DONE"),
+      reply("all done\nVERDICT: SATISFIED"),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "start the turn\n"
+    # Queue the arm mid-turn: the queue-time hourglass echo paints at
+    # once (the queue's waiting-room display), pinned below the turn.
+    tty.send ":goal make the stub say GOAL_WORK_DONE"
+    tty.expect ":goal make the stub say GOAL_WORK_DONE"
+    tty.send "\n"
+    tty.expectInHistory "⧖"
+    # Release the held reply; the drain arms the goal at the boundary.
+    tty.continueStubApi()
+    tty.expectInHistory "FIRST_TURN_DONE"
+    # The committed record is the ⚑ item alone: the echo never commits
+    # (the committed form has no hourglass) and no receipt lands.
+    tty.expectInHistory "⚑ make the stub say GOAL_WORK_DONE"
+    tty.expectNeverInHistory "goal armed"
+    tty.expectNeverInHistory "Goal armed:"
+    tty.expectInHistory "GOAL_WORK_DONE"
+    # The kickoff turn's end runs the check; SATISFIED retires the file.
+    tty.expectInHistory "\u2713"
+    tty.drain(300)
+    # The dropped echo never reaches the committed record: not on the
+    # settled screen, where the ⚑ item is the only goal announcement.
+    check tty.rowContaining("❯ :goal make the stub") == -1
+    check tty.rowContaining("goal armed") == -1
+    check tty.rowContaining("⚑ make the stub say GOAL_WORK_DONE") >= 0
+    check fileExists(root / "run" / ".3code" / "achieved")
+    check not fileExists(root / "run" / ".3code" / "goal")
     tty.expectAlive()
 
 suite "goal mode resume (interactive)":

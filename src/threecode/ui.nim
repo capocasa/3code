@@ -164,6 +164,29 @@ proc classifyCommand*(cmd: string): CommandKind =
   else:
     ckUnknown
 
+proc modeArmWrite*(cmd: string): bool =
+  ## True for a mode-verb arm write (`:goal TEXT`, `:goal new TEXT`,
+  ## `:goal! TEXT`, same for `:cyber`): an arming announces itself with
+  ## the `⚑` kickoff item alone, so the command's own scrollback echo is
+  ## dropped - the goal text would otherwise show twice. Cancel/rename
+  ## and `edit` stay ordinary echoed commands: their receipts are the
+  ## announcement, and `edit` hands the terminal to an external editor
+  ## while the echo is still pinned.
+  let c = colonForm(cmd).strip
+  if c.len == 0 or c[0] != ':':
+    return false
+  let sp = c.find(Whitespace)
+  var name = if sp < 0: c else: c[0 ..< sp]
+  let forced = not name.startsWith(":!") and name.endsWith("!")
+  if forced: name = name[0 ..< ^1]
+  let (canon, ambig) = canonicalCommandName(name)
+  if ambig.len > 0: return false
+  case canon
+  of ":goal", ":cyber":
+    let parts = (if sp < 0: "" else: c[sp+1 .. ^1]).splitWhitespace()
+    parts.len > 0 and parts[0] notin ["cancel", "edit"]
+  else: false
+
 proc pathCompletions*(frag: string): seq[string] =
   let base = safeCwd()
   var dir = base
@@ -2102,10 +2125,11 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
   ## line out: bare = status, bare with `!` or `cancel` = retire,
   ## `new TEXT` / bare TEXT = arm (balking at a live mode without `!`),
   ## `edit` = revise the live file in $VISUAL/$EDITOR. A successful arm
-  ## answers with an empty line here - the controller adds the one
-  ## receipt line (the arm receipt with the mode's counts) on top of
-  ## it. `armed` marks every arm/re-arm path so the controller starts
-  ## the mode's kickoff turn immediately after the receipt.
+  ## answers with no line at all - the `⚑` kickoff item the controller
+  ## commits is the arm's whole announcement, and an echoed command or
+  ## receipt line would only repeat the goal text. `armed` marks every
+  ## arm/re-arm path so the controller starts the mode's kickoff turn
+  ## immediately.
   result.ok = true
   # Captured before any mutation: the retire/clear messages print after
   # the file is renamed away, when the live-file label lookup would
@@ -2342,7 +2366,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       # The mode-verb grammar lives in `modeVerbResult`; the command name
       # picks the registry entry (`:goal` #1, `:cyber` #2). An arm sets
       # `startGoalTurn` so the controller kicks the mode's work off
-      # immediately; the receipt says the file is armed and work starts.
+      # immediately; the `⚑` kickoff item is the arm's whole announcement,
+      # so an arm answers with no body at all.
       let m = if name == ":cyber": cyberneticMode else: goalMode
       let r = modeVerbResult(m, parts, arg, forced)
       if not r.ok:
@@ -2350,9 +2375,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         respErr r.line
       elif r.armed:
         armGoal = true
-        let counts = m.taskCounts(readModeText(m))
-        resp m.name & " armed (" & modeFileLabel(m) &
-          (if counts.len > 0: ", " & counts else: "") & "), starting now"
       elif r.line.len > 0:
         resp r.line
     of ":help", ":?":

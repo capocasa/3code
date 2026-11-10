@@ -972,8 +972,15 @@ proc main() =
     # pinned at the bottom. A queued command never enters the messages,
     # so its echo is journal content like the idle path's echo+body
     # bundle (a queued PROMPT does become a message and needs nothing).
-    termengine.noteNonMessageTail(formatQueuedPromptItem(cmd), messages.len)
-    commitQueuedEchoSend(cmd)
+    # A mode-verb arm write defers the decision instead: armed, the ⚑
+    # kickoff item is the whole announcement and the echo would only
+    # repeat the goal text; refused, the echo commits above the refusal
+    # like any command's. These handlers paint and spawn nothing, so
+    # running one before the echo commit is safe.
+    let deferEcho = modeArmWrite(cmd)
+    if not deferEcho:
+      termengine.noteNonMessageTail(formatQueuedPromptItem(cmd), messages.len)
+      commitQueuedEchoSend(cmd)
     if classifyCommand(cmd) == ckModal:
       # A modal wizard paints its own prompts and output flush at the
       # cursor without committing, so the idle chrome the turn-end paint
@@ -995,6 +1002,12 @@ proc main() =
       if res.clearFooter:
         emitFatPromptEvent clearPendingHintEvent()
         emitFatPromptEvent clearBarEvent()
+    if deferEcho:
+      if res.ok and res.startGoalTurn:
+        dropQueuedEcho()
+      else:
+        termengine.noteNonMessageTail(formatQueuedPromptItem(cmd), messages.len)
+        commitQueuedEchoSend(cmd)
     if res.body.len > 0:
       let bodyBytes = plainCommandBodyBytes(res.body)
       termengine.noteNonMessageTail(bodyBytes, messages.len)
@@ -1332,9 +1345,20 @@ proc main() =
         # output) into a single transcript commit. `appendTranscript`
         # prepends exactly one separator before the whole blob; the blank
         # between the echo and the command output must be inserted here.
-        let echoBytes = formatItem(userPromptItem(line))
+        # A mode-verb arm write echoes nothing: the `⚑` kickoff item is
+        # the whole announcement, and the ⚑-led goal text below would
+        # only repeat the echoed command line. With the arm receipt also
+        # gone the commit is empty - it consumes the typed line's rows
+        # and commits nothing, and the kickoff lands in their place.
+        let suppressEcho = commandResult.ok and commandResult.startGoalTurn and
+          modeArmWrite(line)
+        let echoBytes =
+          if suppressEcho: ""
+          else: formatItem(userPromptItem(line))
         let commandBytes = plainCommandBodyBytes(commandResult.body)
-        let bytes = echoBytes & "\r\n\r\n" & commandBytes
+        let bytes =
+          if suppressEcho: commandBytes
+          else: echoBytes & "\r\n\r\n" & commandBytes
         proc clearSubmittedCommandEditor() =
           # No editor model reset here: the commit's walk-up must still see
           # the multi-row command the terminal is showing. clearEditor below
