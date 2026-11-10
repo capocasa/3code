@@ -21,7 +21,8 @@
 ## the plugin ABI is cstring+len views into them.
 ]##
 
-import std/[algorithm, dynlib, json, locks, os, strformat, strutils, tables, times]
+import std/[algorithm, atomics, dynlib, json, locks, os, strformat,
+           strutils, tables, times]
 import types, util, pluginabi
 
 # -- config surface ([plugins] section, :plugin command) ------------
@@ -87,7 +88,8 @@ type
   HookId* = enum
     hInit, hShutdown, hRegisterTools, hPrompt, hSysPrompt, hToolPre,
     hToolResult, hToolExec, hTurnStart, hTurnEnd, hRetry, hSession,
-    hCompact, hFileWrite, hRegisterCli, hCliCommand, hCliOptions
+    hCompact, hFileWrite, hRegisterCli, hRegisterConfig, hCliCommand,
+    hCliOptions, hFrontend
 
   PluginTool* = object
     name*: string
@@ -135,8 +137,8 @@ const HookSyms: array[HookId, string] = [
   "tc_on_system_prompt", "tc_on_tool_pre", "tc_on_tool_result",
   "tc_tool_exec", "tc_on_turn_start", "tc_on_turn_end",
   "tc_on_model_retry", "tc_on_session_start", "tc_on_compact",
-  "tc_on_file_write", "tc_register_cli", "tc_cli_command",
-  "tc_on_cli_options"]
+  "tc_on_file_write", "tc_register_cli", "tc_register_config",
+  "tc_cli_command", "tc_on_cli_options", "tc_frontend"]
 
 # Names the option parser and the early subcommand dispatchers already
 # own; a plugin CLI registration colliding with any of these is refused
@@ -164,8 +166,42 @@ var
   sysPromptCache: Table[string, string]
   registeringLib = -1           # services.registerTool gate
   registeringCliLib = -1        # services.registerCli* gate
+  registeringConfigLib = -1     # services.overrideDefault gate
   started = false
 
+# Config defaults plugins registered ([settings] keys a plugin may
+# default when the user's own config does not set them). Keyed
+# "section.key"; the value dialect and the applicable-key list live
+# here (validated at registration) — config.nim applies them at parse
+# start. Later registrations overwrite earlier ones, load order like
+# every other plugin chain.
+var
+  pCfgDefaults: Table[string, tuple[value, owner: string]]
+  pCfgNotes: seq[string]        # refused defaults, for :plugins
+
+# The in-process agent backend (see pluginagent.nim): installed by the
+# frontend host before any plugin frontend runs. Nil services answer
+# with the failure codes, so a plugin calling agent* outside a
+# `--gui` run gets a clean error instead of a crash.
+type
+  PluginAgentServices* = object
+    open*: proc (optsJson: string): cint {.gcsafe.}
+    closeImpl*: proc (): cint {.gcsafe.}
+    start*: proc (prompt: string): cint {.gcsafe.}
+    cancel*: proc (): cint {.gcsafe.}
+    busy*: proc (): cint {.gcsafe.}
+    command*: proc (cmd: string; output: var string): cint {.gcsafe.}
+    scrollback*: proc (output: var string): cint {.gcsafe.}
+    lastError*: proc (): string {.gcsafe.}
+    pollEvent*: proc (ev: ptr TcAgentEvent): cint {.gcsafe.}
+
+var pluginAgentServices*: PluginAgentServices
+  ## Set by pluginagent.nim (the library half cannot be imported here:
+  # config -> plugins would cycle). Nil fields = not installed.
+var pluginAgentLastError = ""
+
+var
+  frontendLive: Atomic[int]  # live frontend threads; see pluginsShutdown
   pLock: Lock
   pCond: Cond
   syncDispLock: Lock            # serializes dispatchers (one sync slot)
@@ -257,10 +293,19 @@ proc freeViews(ev: pointer; hook: HookId) =
   of hCliOptions:
     let e = cast[ptr TcCliOptionsEvent](ev)
     f(e.options.data); dealloc(e)
-  of hInit, hShutdown, hRegisterTools, hRegisterCli:
+  of hFrontend:
+    let e = cast[ptr TcFrontendEvent](ev)
+    f(e.cwd.data); f(e.argv.data); dealloc(e)
+  of hInit, hShutdown, hRegisterTools, hRegisterCli, hRegisterConfig:
     discard  # no event block
 
 # -- services (called on the plugin thread) -------------------------
+
+proc noteCfg(msg: string) =
+  pLock.acquire()
+  pCfgNotes.add msg
+  pLock.release()
+  pdbg "plugin: " & msg
 
 proc noteLoad(msg: string) =
   pLock.acquire()
@@ -355,6 +400,159 @@ proc svcRegisterCliOption(s: ptr TcState; longName, shortName, help: cstring;
     pLock.release()
     0.cint
 
+# Keys a plugin may default, with their value dialects. This list is
+# the plugin-side half of a pair: config.nim's applyPluginConfigDefaults
+# is the other. `current` and provider sections are deliberately absent
+# — a plugin defaulting the user's provider selection would be a policy
+# bypass, not a default.
+const
+  PluginDefaultBoolKeys = [
+    "notify", "streaming", "sandbox", "sandbox_enabled",
+    "patient_retry", "patient-retry", "sandbox_wall_warn",
+    "browserfetch", "allow-empty-prompt", "allow_empty_prompt",
+    "tab-title", "computer"]
+  PluginDefaultIntKeys = [
+    "max_timeout", "max-timeout", "force_timeout", "force-timeout",
+    "banner_lines", "banner-lines"]
+  PluginDefaultToneValues = ["auto", "dark", "light"]
+
+proc pluginDefaultCheck(key, value: string): string =
+  ## "" when the (key, value) pair is a legal default; otherwise the
+  ## refusal reason for :plugins.
+  let v = value.strip
+  if v == "": return "empty value"
+  if key in PluginDefaultBoolKeys:
+    if v.toLowerAscii notin ["on", "true", "yes", "1", "off", "false",
+                             "no", "0"]: return "bad bool: " & v
+  elif key in PluginDefaultIntKeys:
+    try:
+      let n = parseInt(v)
+      if n < 0 or (key.startsWith("banner") and n < 1):
+        return "out of range: " & v
+    except ValueError: return "not a number: " & v
+  elif key in ["tone", "mode"]:
+    if v.toLowerAscii notin PluginDefaultToneValues:
+      return "bad tone: " & v
+  elif key in ["bash", "bash_path", "user_agent"]:
+    discard  # any non-empty string
+  else:
+    return "key not defaultable"
+  ""
+
+proc svcOverrideDefault(s: ptr TcState; section, key, value: cstring): cint {.
+    cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if registeringConfigLib < 0: return 1.cint
+    let sect = tcView(TcStr(data: section, len: int32(lenCstring(section))))
+    let k = tcView(TcStr(data: key, len: int32(lenCstring(key))))
+    let v = tcView(TcStr(data: value, len: int32(lenCstring(value))))
+    if sect != "settings": return 2.cint
+    let why = pluginDefaultCheck(k, v)
+    if why != "":
+      noteCfg libs[registeringConfigLib].name &
+        ": settings." & k & " default refused (" & why & ")"
+      return 3.cint
+    let owner = libs[registeringConfigLib].name
+    pLock.acquire()
+    pCfgDefaults[sect & "." & k] = (v, owner)
+    pLock.release()
+    inc regGen
+    pdbg &"plugin: {owner} defaults settings.{k} = {v}"
+    0.cint
+
+# -- agent services (called from a plugin frontend thread) ---------
+#
+# The real backend lives in pluginagent.nim; these forwards just cross
+# the C ABI. Strings built from (cstring, len) views, TcMutStr outputs
+# written in place bounded by the plugin's cap (the ordinary mutstr
+# contract, plugin-allocated this time).
+
+proc mutstrOut(m: ptr TcMutStr; s: string): bool =
+  ## Copy `s` into a plugin-provided buffer. False (and the host's
+  ## refusal note) when it does not fit; never a silent truncation.
+  # Plain pointer writes plus a global string note: the agent services
+  # run on one frontend thread at a time by contract, like the sync
+  # services run on the plugin thread.
+  {.cast(gcsafe).}:
+    if m == nil or m.data == nil: return false
+    if s.len > m.cap.int:
+      pluginAgentLastError = "output over the buffer cap"
+      return false
+    if s.len > 0: copyMem(m.data, addr s[0], s.len)
+    m.len = s.len.int32
+    true
+
+proc svcAgentOpen(s: ptr TcState; optsJson: cstring; optsLen: int32): cint {.
+    cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.open == nil:
+      pluginAgentLastError = "agent not available (no frontend run)"
+      return 3.cint
+    let o = tcView(TcStr(data: optsJson, len: optsLen))
+    pluginAgentServices.open(o)
+
+proc svcAgentClose(s: ptr TcState): cint {.cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.closeImpl == nil: return 1.cint
+    pluginAgentServices.closeImpl()
+
+proc svcAgentStart(s: ptr TcState; prompt: cstring; promptLen: int32): cint {.
+    cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.start == nil:
+      pluginAgentLastError = "agent not available (no frontend run)"
+      return 2.cint
+    pluginAgentServices.start(tcView(TcStr(data: prompt, len: promptLen)))
+
+proc svcAgentCancel(s: ptr TcState): cint {.cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.cancel == nil: return 1.cint
+    pluginAgentServices.cancel()
+
+proc svcAgentBusy(s: ptr TcState): cint {.cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.busy == nil: return 0.cint
+    pluginAgentServices.busy()
+
+proc svcAgentCommand(s: ptr TcState; cmd: cstring; cmdLen: int32;
+                     output: ptr TcMutStr): cint {.cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.command == nil:
+      pluginAgentLastError = "agent not available (no frontend run)"
+      return 2.cint
+    var body = ""
+    let rc = pluginAgentServices.command(
+      tcView(TcStr(data: cmd, len: cmdLen)), body)
+    if rc == 0.cint and not mutstrOut(output, body):
+      return 3.cint
+    rc
+
+proc svcAgentScrollback(s: ptr TcState; output: ptr TcMutStr): cint {.
+    cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.scrollback == nil:
+      pluginAgentLastError = "agent not available (no frontend run)"
+      return 2.cint
+    var body = ""
+    let rc = pluginAgentServices.scrollback(body)
+    if rc == 0.cint and not mutstrOut(output, body):
+      return 3.cint
+    rc
+
+proc svcAgentLastError(s: ptr TcState): cstring {.cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.lastError != nil:
+      pluginAgentLastError = pluginAgentServices.lastError()
+    if pluginAgentLastError.len == 0: return cstring""
+    cast[cstring](addr pluginAgentLastError[0])
+
+proc svcAgentPollEvent(s: ptr TcState; ev: ptr TcAgentEvent): cint {.
+    cdecl, gcsafe.} =
+  {.cast(gcsafe).}:
+    if pluginAgentServices.pollEvent == nil: return 0.cint
+    if ev == nil: return 0.cint
+    pluginAgentServices.pollEvent(ev)
+
 # -- plugin thread --------------------------------------------------
 
 proc runHook(lib: PluginLib; hook: HookId; ev: pointer) =
@@ -379,8 +577,17 @@ proc runHook(lib: PluginLib; hook: HookId; ev: pointer) =
           registeringCliLib = libs.find(lib)
           cast[TcVoidFn](lib.hooks[hRegisterCli])(s, nil)
           registeringCliLib = -1
+      of hRegisterConfig:
+        if lib.hooks[hRegisterConfig] != nil:
+          registeringConfigLib = libs.find(lib)
+          cast[TcVoidFn](lib.hooks[hRegisterConfig])(s, nil)
+          registeringConfigLib = -1
       of hCliCommand:
         discard cast[TcIntFn](lib.hooks[hCliCommand])(s, ev)
+      of hFrontend:
+        # Never dispatched from here: a frontend runs on its own thread
+        # (pluginsFrontendRun), for the process lifetime of the GUI.
+        discard
       of hCliOptions:
         cast[TcVoidFn](lib.hooks[hCliOptions])(s, ev)
       of hToolPre:
@@ -607,7 +814,17 @@ proc pluginsDiscoverAndLoad*() =
       log: svcLog,
       registerTool: svcRegisterTool,
       registerCliCommand: svcRegisterCliCommand,
-      registerCliOption: svcRegisterCliOption)
+      registerCliOption: svcRegisterCliOption,
+      overrideDefault: svcOverrideDefault,
+      agentOpen: svcAgentOpen,
+      agentClose: svcAgentClose,
+      agentStart: svcAgentStart,
+      agentCancel: svcAgentCancel,
+      agentBusy: svcAgentBusy,
+      agentCommand: svcAgentCommand,
+      agentScrollback: svcAgentScrollback,
+      agentLastError: svcAgentLastError,
+      agentPollEvent: svcAgentPollEvent)
     lib.nameC = tcAlloc(stem.len + 1)
     copyMem(lib.nameC, unsafeAddr stem[0], stem.len)
     lib.statePtr[] = TcState(
@@ -644,6 +861,13 @@ proc pluginsDiscoverAndLoad*() =
     if lib.hooks[hRegisterCli] != nil:
       if syncCall(i, hRegisterCli, nil, syncTimeoutMs()):
         noteLoad lib.name & ": tc_register_cli timed out"
+  # Same for config defaults: the full config parse runs right after
+  # this returns (both the CLI and the library path), and a default
+  # registered late would miss its own application window.
+  for i, lib in libs:
+    if lib.hooks[hRegisterConfig] != nil:
+      if syncCall(i, hRegisterConfig, nil, syncTimeoutMs()):
+        noteLoad lib.name & ": tc_register_config timed out"
   for i, lib in libs:
     if lib.hooks[hRegisterTools] != nil:
       if syncCall(i, hRegisterTools, nil, syncTimeoutMs()):
@@ -654,7 +878,12 @@ proc pluginsDiscoverAndLoad*() =
 
 proc pluginsShutdown*() =
   ## Drain, call tc_shutdown on the plugin thread, join, unload.
+  ## Skipped while a frontend thread is alive: a plugin GUI that closes
+  ## its own agent session mid-run must not unload the library its own
+  ## thread is executing; the `--gui` entry reaps everything once every
+  ## frontend has returned.
   if not started or not threadUp: return
+  if frontendLive.load(moAcquire) > 0: return
   pLock.acquire()
   for i, lib in libs:
     if lib.hooks[hShutdown] != nil:
@@ -1107,6 +1336,82 @@ proc pluginOnFileWrite*(path: string; bytes: int; kind: int) =
   viewFill(ev.path, path)
   fireAsync(hFileWrite, ev)
 
+# -- config-default accessors (main thread) -----------------------
+
+proc pluginConfigDefaultsAll*(): seq[tuple[section, key, value, owner: string]] =
+  ## Locked copy for config.nim's apply-at-parse-start and `:plugins`.
+  pLock.acquire()
+  for k, v in pCfgDefaults.pairs:
+    let dot = k.find('.')
+    result.add (k[0 ..< dot], k[dot + 1 ..^ 1], v.value, v.owner)
+  pLock.release()
+
+proc pluginConfigDefault*(section, key: string): tuple[value, owner: string] =
+  ## The registered default for `section.key`, empty when no plugin
+  ## claimed it.
+  pLock.acquire()
+  if section & "." & key in pCfgDefaults:
+    result = pCfgDefaults[section & "." & key]
+  pLock.release()
+
+# -- plugin frontend (`--gui`) -------------------------------------
+
+type
+  FrontendArgObj = object
+    libIdx*: int
+    ev*: ptr TcFrontendEvent
+
+proc frontendThreadMain(arg: ptr FrontendArgObj) {.thread.} =
+  {.cast(gcsafe).}:
+    # One dedicated thread per frontend plugin. Unlike every other
+    # hook this one owns its thread for as long as the GUI runs — no
+    # deadline, no plugin-thread round trip — and the plugin drives the
+    # host back through the agent* services from here.
+    discard frontendLive.fetchAdd(1)
+    let lib =
+      if arg.libIdx >= 0 and arg.libIdx < libs.len: libs[arg.libIdx]
+      else: nil
+    if lib != nil and lib.hooks[hFrontend] != nil:
+      inc lib.hookCalls
+      try:
+        cast[TcVoidFn](lib.hooks[hFrontend])(lib.statePtr, arg.ev)
+      except CatchableError as e:
+        pdbg &"plugin {lib.name} frontend raised: {e.msg}"
+    freeViews(arg.ev, hFrontend)
+    dealloc(arg)
+    discard frontendLive.fetchAdd(-1)
+
+proc pluginFrontendCount*(): int =
+  ## Plugins exporting `tc_frontend` (the `--gui` surface).
+  if not started: return 0
+  for lib in libs:
+    if lib.hooks[hFrontend] != nil: inc result
+
+proc pluginsFrontendRun*(cwd, argvJson: string): bool =
+  ## `3code --gui`: give every frontend plugin its own thread and block
+  ## until all returned (a GUI quit ends its thread). False when no
+  ## plugin provides a frontend — the caller decides how to complain.
+  ## Threads are created straight into pre-sized seq slots: a Thread
+  ## handle must never be copied (the copy's original destroys the
+  ## shared start box under the still-starting thread).
+  if not started: return false
+  var owners: seq[int]
+  for i, lib in libs:
+    if lib.hooks[hFrontend] != nil: owners.add i
+  if owners.len == 0: return false
+  var threads = newSeq[Thread[ptr FrontendArgObj]](owners.len)
+  for k, i in owners:
+    let ev = cast[ptr TcFrontendEvent](alloc0(sizeof(TcFrontendEvent)))
+    ev[] = TcFrontendEvent(abi: TcAbiVersion,
+                           structSize: sizeof(TcFrontendEvent).int32)
+    viewFill(ev.cwd, cwd)
+    viewFill(ev.argv, argvJson)
+    let arg = cast[ptr FrontendArgObj](alloc0(sizeof(FrontendArgObj)))
+    arg[] = FrontendArgObj(libIdx: i, ev: ev)
+    createThread(threads[k], frontendThreadMain, arg)
+  for k in 0 ..< threads.len: joinThread(threads[k])
+  true
+
 # -- :plugins / :plugin ----------------------------------------------
 
 proc pluginsListBody*(): string =
@@ -1116,11 +1421,13 @@ proc pluginsListBody*(): string =
   result = "plugins: " & $libs.len & " loaded, " &
     $tools.len & " registered tool(s), " &
     $cliCmds.len & " cli command(s), " &
+    $pluginFrontendCount() & " frontend(s), " &
     "tools gate " & (if pluginsToolsEnabled: "on" else: "off") & "\n"
   for lib in libs:
     var hooks: seq[string]
     for h in HookId:
-      if h in {hInit, hShutdown, hRegisterTools, hRegisterCli}: continue
+      if h in {hInit, hShutdown, hRegisterTools, hRegisterCli,
+               hRegisterConfig}: continue
       if lib.hooks[h] != nil: hooks.add HookSyms[h][3 ..^ 1]
     result.add &"- {lib.name}: {lib.hookCalls} calls"
     if lib.strikes > 0:
@@ -1135,9 +1442,15 @@ proc pluginsListBody*(): string =
   for c in cliCmds:
     if c.owner >= 0 and c.owner < libs.len:
       result.add &"- command {c.name} (plugin {libs[c.owner].name})\n"
+  for d in pluginConfigDefaultsAll():
+    result.add &"- default {d.section}.{d.key} = {d.value} (plugin {d.owner})\n"
   for n in loadNotes:
+    result.add "- " & n & "\n"
+  pLock.acquire()
+  let cfgNotes = pCfgNotes
+  pLock.release()
+  for n in cfgNotes:
     result.add "- " & n & "\n"
   if libs.len == 0 and loadNotes.len == 0:
     result.add "(none installed — drop .so files in " &
       userDataRoot() / "lib" & ")\n"
-

@@ -21,6 +21,10 @@ var privateMode*: bool = false
   ## private color so the mode is visible on every frame.
 var debugEnabled*: bool = false
   ## Set by `-D`/`--debug`.
+var headlessMode*: bool = false
+  ## Set by `--headless`/`--gui`: the process produces no output on any
+  ## stream, including `die` diagnostics — the exit code is the report.
+  ## Scripts and native GUI frontends want the work, not the paint.
 var streamingEnabled*: bool = true
   ## Whether model calls use SSE streaming (`"stream": true`) or a single
   ## request/response. Default on for live output. The non-streaming path is
@@ -460,8 +464,10 @@ proc die*(msg: string, code = 1) {.noreturn.} =
   # cursor sits at the end of the just-submitted prompt line, which has no
   # trailing newline. Without this, the error appends to the prompt on the
   # same row. At startup the cursor is at col 0, so the extra line is inert.
-  stderr.write "\n3code: " & msg & "\n"
-  stderr.flushFile
+  # Headless runs say nothing on any path; the exit code is the report.
+  if not headlessMode:
+    stderr.write "\n3code: " & msg & "\n"
+    stderr.flushFile
   when defined(windows):
     # Under the ConPTY tty harness the pseudoconsole host relays the child's
     # output asynchronously. A child that writes and exits immediately races

@@ -205,6 +205,115 @@ collect into a JSON object delivered once to every plugin exporting
 strings, flags as `true`. `3code -h` lists both surfaces in an "added
 by plugins" block, so your additions are discoverable.
 
+### Overriding default config values
+
+The same registration pattern reaches the config file's defaults. A
+plugin may retune what 3code uses when the user's own config is
+SILENT on a key — never what the user wrote:
+
+```nim
+proc registerConfig*(s: ptr TcState) =
+  discard s.overrideDefault("settings", "max_timeout", "1800")
+  discard s.overrideDefault("settings", "sandbox_wall_warn", "off")
+```
+
+`registerConfig` runs once at load, before the config file parses.
+The precedence ladder is exactly: compiled default < plugin default <
+the user's config line < a CLI flag. If the user writes
+`max_timeout = 60`, the user wins; if they write nothing, yours
+applies. A plugin that ships a GUI can default `notify = "on"`, a
+long-build shop can default `max_timeout`, a kiosk setup can default
+`tone = "light"` — without touching anyone's config file.
+
+Defaultable keys: the booleans (`notify`, `streaming`, `sandbox`,
+`patient_retry`, `sandbox_wall_warn`, `browserfetch`,
+`allow-empty-prompt`, `tab-title`, `computer`), the integers
+(`max_timeout`, `force_timeout`, `banner_lines`), `tone`/`mode`
+(`auto|dark|light`), and the strings (`bash`, `bash_path`,
+`user_agent`). Provider selection (`current`) and provider sections
+are deliberately NOT defaultable — a plugin picking the user's
+provider would be a policy bypass, not a default. Values use the same
+dialect as the config file; refusals (unknown key, bad value) are
+logged and listed in `:plugins`, and later registrations win in load
+order like every other plugin chain.
+
+### An in-process GUI frontend
+
+`--gui` is the fourth embedding surface, and the one a plugin owns:
+the process runs headless (zero terminal output, exactly like
+`--headless`) and every plugin exporting `tc_frontend` gets its own
+thread to be the user interface — a native window, a webview,
+anything — while talking to the agent through the `agent*` services,
+in-process, no sockets and no second binary:
+
+```nim
+include threecode/pluginabi
+import std/[json, os, strutils]
+
+proc frontend*(ev: var TcFrontendEvent) =
+  # runs on a dedicated host thread; loop here until the GUI quits.
+  # A real frontend runs its event loop and marshals agent events to
+  # its UI thread; this sketch polls.
+  let s = tcCurrentState
+  if s.agentOpen("{}") != 0:
+    return  # no provider configured; tell the user your way
+  discard s.agentStart("explain this repo")
+  while true:
+    var aev: TcAgentEvent
+    while s.agentPollEvent(aev) == 1:
+      case aev.kind
+      of taeDelta:  paintText(tcView(aev.text))
+      of taeTool:   paintLine(tcView(aev.text))
+      of taeDone:   paintUsage(aev.promptTokens, aev.completionTokens)
+      of taeError:  paintError(tcView(aev.text))
+      else: discard
+    if s.agentBusy() == 0 and userClosedWindow(): break
+    pollGuiEvents(20)          # your toolkit's idle/wait
+  discard s.agentClose()
+
+include threecode/plugin_sdk
+```
+
+The contract in one breath: `agentOpen(optsJson)` opens the process's
+one session (`{"model", "cwd", "resume", "resumeId", "sessionPath",
+"experimental"}`, all optional); `agentStart(prompt)` kicks a turn on
+a host worker thread and returns immediately (empty prompt =
+continue; 1 if busy); `agentBusy()`, `agentCancel()` are what they
+say; `agentCommand(":tokens")` runs a colon command into a
+plugin-allocated `TcMutStr` (refuses with 1 while a turn runs);
+`agentScrollback()` returns the stored conversation as JSON array
+text (`[{"role","content"}]`, tools stripped); `agentPollEvent`
+pops one event into a caller-owned `TcAgentEvent` (1 delivered, 0
+empty — poll from your loop, `text` is a view valid only for the
+call). `agentLastErrorStr()` explains any nonzero return. All agent
+services are legal only from `frontend`'s thread.
+
+`TcFrontendEvent` hands you `cwd` and `argv` (the full command line
+as JSON array text, verbatim — parse what you want). Returning from
+`frontend` ends your thread; when every frontend returned, the
+process saves, shuts down, and exits 0. The host refuses to start
+(`--gui` exits 3, silently, like all headless paths) when no plugin
+exports `tc_frontend`.
+
+`--headless` (no plugin needed) is the same machinery without a
+frontend: prompt words run as one turn with ZERO output on any stream
+— no TUI, no banner, no stderr on failure; the exit code is the whole
+report (0 ok, 1 turn failed/interrupted, 2 usage, 3 config). Flags:
+`-m`, `-c`, `-r[=id]`, `-s`, `-x`, `-p`, `--no-sandbox`, `-D`.
+
+#### The native Windows GUI build
+
+`nimble gui` builds `bin/3code-gui` with `--app:gui -d:tcNativeGui`:
+a Windows GUI-subsystem binary (WinMain, no console attached —
+double-clicking opens no terminal), a framework-linked binary on
+macOS, the console build on Linux. `-d:tcNativeGui` makes the runtime
+refuse everything except `--headless`/`--gui`: without a console,
+a terminal-UI run would be blind, so the binary alerts (a real
+MessageBox on Windows, stderr elsewhere) and exits 2 instead. Ship it
+beside the console binary: `3code-gui --gui` with a frontend plugin
+installed IS the native app; the model, config, sandbox, sessions,
+and plugins are all the same, in one process.
+
 ### Long work and interruption
 
 A sync hook that runs long gets its default outcome applied without it
@@ -235,6 +344,8 @@ worked example of every hook, heavily commented.
 | `tc_init(s)` | `init(s): cint` | 2 s | once after load, before any hook; return 0 |
 | `tc_register_tools(s)` | `registerTools(s)` | 2 s | once after init |
 | `tc_register_cli(s)` | `registerCli(s)` | 2 s | once after init, before argv is parsed |
+| `tc_register_config(s)` | `registerConfig(s)` | 2 s | once after init, before the config parses |
+| `tc_frontend(s, ev)` | `frontend(ev: var TcFrontendEvent)` | yours | `3code --gui`: run the GUI, drive the agent, return when it quits |
 | `tc_shutdown(s)` | `shutdown(s)` | - | at process exit, before unload |
 | `tc_on_prompt(s, ev)` | `onPrompt(ev: var TcPromptEvent)` | 2 s | user submits a prompt |
 | `tc_on_system_prompt(s, ev)` | `onSystemPrompt(ev: var TcSysPromptEvent)` | 2 s | once per provider/model/family (memoized), then cached |
@@ -301,6 +412,15 @@ arguments that followed the subcommand, verbatim. Out fields:
 collected from argv (`{"deploy-env": "prod", "verbose": true}`).
 Read-only.
 
+**TcFrontendEvent**: `cwd`, `argv` (JSON array text of the whole
+command line, verbatim). Read-only; yours until `frontend` returns.
+
+**TcAgentEvent** (filled by `agentPollEvent`): `kind` (one of the
+`tae*` kinds: user, delta, reasoning, tool, retry, notice, done,
+error), `text`, and on `taeDone` the usage fields `promptTokens`,
+`completionTokens`, `reasoningTokens`, `elapsedMs`. `text` is a view
+valid only for the poll call.
+
 ## Strings and buffers
 
 `TcStr` is a read-only `data`+`len` view into host memory, not
@@ -341,6 +461,17 @@ host when the user interrupts while your call is in flight), and
   inside `registerCli`. Adds a `--longName` option and, when
   `shortName` is a non-empty string, a `-x` short form. 3 covers a
   builtin long name or short letter, 2 a bad name.
+- `overrideDefault(section, key, value)`: legal only inside
+  `registerConfig`. Sets the default of a `[settings]` key (see
+  [overriding default config values](#overriding-default-config-values)).
+  0 ok, 1 outside registration, 2 for a key plugins cannot default
+  (or a non-settings section), 3 for a bad value.
+- the agent services (`agentOpen`, `agentClose`, `agentStart`,
+  `agentCancel`, `agentBusy`, `agentCommand`, `agentScrollback`,
+  `agentPollEvent`, `agentLastError`): legal only from `frontend`'s
+  thread. See [an in-process GUI frontend](#an-in-process-gui-frontend)
+  for the full contract; the Nim-side wrappers are the `s.agent*`
+  conveniences, plus `agentLastErrorStr` for a copy of the message.
 
 The SDK keeps the current call's state pointer in the threadvar
 `tcCurrentState`; `tcCancelled(tcCurrentState)` is the polite way to

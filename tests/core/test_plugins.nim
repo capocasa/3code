@@ -11,7 +11,7 @@ discard """
 
 import std/[json, os, sequtils, strutils, times, unittest]
 import ../plugin_helpers
-import threecode/[plugins, pluginabi]
+import threecode/[plugins, pluginabi, config, types]
 
 var
   root: string
@@ -193,6 +193,47 @@ suite "plugin host":
       proc(l: string): bool = l.startsWith("compact|30->6"))
     check pluginWaitForLog(logPath,
       proc(l: string): bool = l.startsWith("filewrite|src/a.nim"))
+
+  test "config defaults: registered, refusals noted":
+    check pluginConfigDefault("settings", "max_timeout").value == "1800"
+    check pluginConfigDefault("settings", "patient_retry").value == "off"
+    check pluginConfigDefault("settings", "patient_retry").owner ==
+      "plugin_fixture"
+    check pluginConfigDefault("settings", "current").value == ""
+    check pluginConfigDefault("settings", "notify").value == ""
+    let body = pluginsListBody()
+    check "default settings.max_timeout = 1800 (plugin plugin_fixture)" in body
+    check "default refused" in body
+
+  test "plugin default applies when the user's config is silent":
+    let cfg = root / "share" / "cfg-silent"
+    writeFile(cfg, "[settings]\nnotify = on\n")
+    discard parseConfigFile(cfg)
+    check maxTimeoutSetting == 1800
+    check not patientRetryEnabled
+    check notifyEnabled  # the user's own line still lands
+
+  test "the user's config line beats the plugin default":
+    let cfg = root / "share" / "cfg-wins"
+    writeFile(cfg, "[settings]\nmax_timeout = 42\npatient_retry = on\n")
+    discard parseConfigFile(cfg)
+    check maxTimeoutSetting == 42
+    check patientRetryEnabled
+
+  test "frontend hook: own thread, agent services answer":
+    resetLog()
+    check pluginFrontendCount() == 1
+    check pluginsFrontendRun("/tmp/fe-cwd", """["3code","--gui"]""")
+    let lines = logLines()
+    check lines.filterIt(it.startsWith("frontend|/tmp/fe-cwd")).len == 1
+    check "argv=[\"3code\",\"--gui\"]" in
+      lines.filterIt(it.startsWith("frontend|")).join(";")
+    check "agent|busy=0" in lines
+    # agent services are unwired in this process (no frontend host): a
+    # clean refusal through the ABI, not a crash
+    check lines.filterIt(it.startsWith("open|3 ")).len == 1
+    check "poll|0" in lines
+    check "frontend-done|" in lines
 
   test "trace channel logs calls and mutation diffs":
     check fileExists(dbgPath)

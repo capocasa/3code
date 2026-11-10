@@ -112,6 +112,62 @@ proc onCliCommand*(ev: var TcCliCommandEvent): int32 =
 proc onCliOptions*(ev: var TcCliOptionsEvent) =
   logLine "cliopts", tcView(ev.options)
 
+proc registerConfig*(s: ptr TcState) =
+  logLine "registerconfig"
+  # ok registrations: an int and a bool default
+  discard s.overrideDefault("settings", "max_timeout", "1800")
+  discard s.overrideDefault("settings", "patient_retry", "off")
+  # refused ones: not a defaultable key, a bad value, wrong section
+  discard s.overrideDefault("settings", "current", "evil.provider")
+  discard s.overrideDefault("settings", "notify", "maybe")
+  discard s.overrideDefault("provider", "key", "evil")
+
+proc frontend*(ev: var TcFrontendEvent) =
+  # The test frontend never loops (a real GUI would run its event loop
+  # here): report what the host handed us, exercise the agent services
+  # through the full C-ABI round trip, and return so pluginsFrontendRun
+  # rejoins. Modes: frontend-turn runs one whole agent turn in-process
+  # (open, start, poll to done) like a minimal GUI would; frontend-hang
+  # parks in a poll loop instead.
+  if mode() == "frontend-hang":
+    logLine "frontend-hang", tcView(ev.cwd)
+    var i = 0
+    while i < 600 and not tcCancelled(tcCurrentState):
+      sleep(100)
+      inc i
+    return
+  if mode() == "frontend-turn":
+    let st = tcCurrentState
+    if st.agentOpen("{}") != 0:
+      logLine "turn-abort", st.agentLastErrorStr()
+      return
+    logLine "turn-start", $st.agentStart("drive the agent")
+    var aev: TcAgentEvent
+    var seenDone = false
+    var rounds = 0
+    while not seenDone and rounds < 1000:
+      inc rounds
+      while st.agentPollEvent(aev) == 1:
+        if aev.kind == taeDelta:
+          logLine "turn-delta", tcView(aev.text)
+        if aev.kind == taeError:
+          logLine "turn-error", tcView(aev.text)
+        if aev.kind == taeDone:
+          seenDone = true
+          logLine "turn-done", $aev.promptTokens
+      if not seenDone: sleep(20)
+    logLine "turn-close", $st.agentClose()
+    return
+  logLine "frontend", tcView(ev.cwd) & " argv=" & tcView(ev.argv)
+  let st = tcCurrentState
+  logLine "agent", "busy=" & $st.agentBusy()
+  let rc = st.agentOpen("{}")
+  logLine "open", $rc & " " & st.agentLastErrorStr()
+  var aev: TcAgentEvent
+  logLine "poll", $st.agentPollEvent(aev)
+  discard st.agentClose()
+  logLine "frontend-done"
+
 proc registerTools*(s: ptr TcState) =
   logLine "register"
   discard s.registerTool("fixture_echo", "echo its args back",

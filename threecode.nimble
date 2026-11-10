@@ -78,6 +78,16 @@ proc addPageToc(path: string) =
             html[titleEnd + 5 ..< footer] & "</div>\n</div>\n" &
             html[footer .. ^1])
 
+task gui, "Build bin/3code-gui: native GUI-subsystem build, headless only":
+  # --app:gui makes a WinMain (GUI subsystem) binary on Windows: no
+  # console is ever attached, double-clicking opens no terminal. On
+  # macOS it links the GUI frameworks (no Terminal spawn either when
+  # launched from a bundle); on Linux it equals the console build.
+  # -d:tcNativeGui makes the runtime refuse anything but --headless/
+  # --gui: without a console, a terminal-UI run would be blind.
+  exec "sh tests/tools/build_binary.sh bin/3code-gui src/threecode.nim " &
+      "--app:gui -d:tcNativeGui"
+
 task test, "Run the test suite via testament (all, or named files)":
   var files: seq[string] = @[]
   for p in commandLineParams:

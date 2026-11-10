@@ -43,6 +43,12 @@
 ##   registerTools(s: ptr TcState)        call s.registerTool N times
 ##   registerCli(s: ptr TcState)          call s.registerCliCommand /
 ##                                        s.registerCliOption N times
+##   registerConfig(s: ptr TcState)     call s.overrideDefault N times
+##                                        (config value defaults)
+##   frontend(ev: var TcFrontendEvent)  run an alternate in-process GUI:
+##                                        loop here, drive the agent via
+##                                        the s.agent* services, return
+##                                        when the GUI quits
 ##   onCliCommand(ev: var TcCliCommandEvent): int32
 ##                                        a `3code <name>` subcommand ran
 ##   onCliOptions(ev: var TcCliOptionsEvent)
@@ -105,6 +111,17 @@ when declared(registerCli):
   proc tc_register_cli*(s: ptr TcState) {.exportc, dynlib, cdecl.} =
     tcEnter(s)
     registerCli(s)
+
+when declared(registerConfig):
+  proc tc_register_config*(s: ptr TcState) {.exportc, dynlib, cdecl.} =
+    tcEnter(s)
+    registerConfig(s)
+
+when declared(frontend):
+  proc tc_frontend*(s: ptr TcState; ev: ptr TcFrontendEvent) {.exportc,
+      dynlib, cdecl.} =
+    tcEnter(s)
+    frontend(ev[])
 
 when declared(onCliCommand):
   proc tc_cli_command*(s: ptr TcState; ev: ptr TcCliCommandEvent): cint {.
