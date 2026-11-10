@@ -382,7 +382,7 @@ suite "quit signals":
       tty.drain(100)
       for row in tty.screenText().splitLines():
         let r = row.strip
-        if "from stub: rate limit" in r and "retry" notin r:
+        if "stub error: rate limit" in r and "retry" notin r:
           over = true
           break
       if over: break
