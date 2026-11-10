@@ -2,6 +2,37 @@ Changelog
 
 Unreleased
 
+- **Crash exits restore the terminal.** A crash used to die with the
+  signals' default disposition and so skip every exit proc: the shell
+  the user landed in inherited raw mode, invisible typing until `reset`
+  (the macOS crash reports). A fatal-signal handler (SIGSEGV, SIGBUS,
+  SIGILL, SIGFPE, SIGABRT) now restores termios and writes the
+  mode-reset escapes (sync-mode off, cursor, attributes, bracketed
+  paste, kitty keyboard pop) with a single async-signal-safe write(2)
+  before re-raising with SIG_DFL: the stdio lock may be held by
+  whichever thread crashed, so buffered output would hang instead of
+  dying. SIGPIPE is deliberately left to the runtime instead: a broken
+  stdout surfaces as IOError(EPIPE), which 3code turns into a clean
+  exit whose ordinary exit procs restore the terminal
+  (`test_broken_stdout_exit`).
+
+- **Diff rows link into the edited file at their line.** Every painted
+  row of a `w` write block's diff is a `file://path:line` hyperlink
+  (the line is the number after the last colon), so a terminal `file:`
+  handler that understands `path:line` (a `$VISUAL` wrapper, an IDE)
+  lands on the exact spot; the `r`/`w`/`p` banner paths link the same
+  way, and a clipped long diff keeps the per-line links through the
+  hidden middle.
+
+- **The installers verify published checksums, and the docs say
+  download-read-run.** `install/` in the repo now versions
+  `install.sh` and `install.ps1` (the site serves those copies), and
+  each verifies the downloaded release archive against the
+  `SHASUMS256.txt` published with the release before installing. The
+  quickstart dropped the pipe-to-shell one-liner for download, read,
+  then run, Termux included: an installer you can read first is the
+  one you can trust.
+
 - **Goal mode display and the once-per-arming kickoff.** The kickoff
   stanza is fed exactly once per arming: `goalNotified` persists in the
   session record (`goal_notified=1`), and a `Goal armed:` content lead
