@@ -48,11 +48,11 @@ proc writeConfiguredProvider(root: string; extraSettings = "") =
   cfg.add "key = \"stub\"\nfamily = \"glm\"\nmodels = \"stub-model\"\n"
   writeFile(root / "xdg" / "3code" / "config", cfg)
 
-proc writeHarnessProviders(root: string) =
+proc writeHarnessProviders(root: string; extraSettings = "") =
   createDir(root / "xdg" / "3code")
-  writeFile(root / "xdg" / "3code" / "config", """
-[settings]
-current = "stub.stub-model"
+  var cfg = "[settings]\ncurrent = \"stub.stub-model\"\n"
+  cfg.add extraSettings
+  writeFile(root / "xdg" / "3code" / "config", cfg & """
 
 [provider]
 name = "stub"
@@ -2781,7 +2781,9 @@ max-tokens = "8192"
     # queued prompt's turn.
     tty.expectInHistory "sandbox updated: allow ./foo"
     tty.expectInHistory "After the rule."
-    let ruleFile = root / "run" / ".sandbox"
+    # First materialization lands in the .3code store (5e61b040); the
+    # legacy root-level .sandbox is only kept when it already exists.
+    let ruleFile = root / "run" / ".3code" / "sandbox"
     doAssert fileExists(ruleFile), "rule file missing: " & ruleFile
     check readFile(ruleFile).contains("./foo")
 
@@ -4308,7 +4310,15 @@ max-tokens = "8192"
     # expectNeverInHistory through every interaction rather than relying on a
     # golden file at the end.
     let root = newFixture("shakedown_contract")
-    writeHarnessProviders(root)
+    # The sandbox legs below need the setting to start off, like a session
+    # launched before the sandbox was ever enabled.
+    writeHarnessProviders(root, "sandbox = \"off\"\n")
+    # ... and a fixture-local policy, so the armed `:sandbox` dump is
+    # deterministic: the cascade must pick the session dir's file, never
+    # whatever policy happens to exist in an ancestor of the test tree
+    # on the developer's machine.
+    createDir(root / "run")
+    writeFile(root / "run" / ".sandbox", "deny /\nallow ./\n")
     writeStubResponses(root, %*[
       # Turn 1: plain prompt and reply.
       {"role": "assistant", "preStreamDelayMs": 50,
@@ -4424,6 +4434,45 @@ max-tokens = "8192"
     tty.drain(200)
     tty.expect "❯"  # prompt must return
     tty.expectAlive()  # must not exit after :model
+
+    # --- :sandbox on arms enforcement for the running session (no
+    # restart needed); a bare :sandbox then dumps the armed rules instead
+    # of the old bare "sandbox not active", which read like the setting
+    # did not take. The session boots with the setting off (fixture
+    # config), matching a session launched before the sandbox was ever
+    # enabled. deny / and allow ./ are in every platform's default
+    # policy, so the armed dump asserts the same lines on all of them. ---
+    tty.send ":sandbox on"
+    tty.send "\n"
+    tty.expectInHistory "sandbox: on  (this session enforces"
+    tty.expectNeverInHistory "enforcement starts at the next launch"
+    tty.drain(300)
+    tty.send ":sandbox"
+    tty.send "\n"
+    tty.expectInHistory "deny      /"
+    tty.expectInHistory "allow     ./"
+    tty.expectNeverInHistory "sandbox not active"
+    tty.drain(200)
+    # --- :sandbox off disarms the running session live; a bare :sandbox
+    # names the off state. ---
+    tty.send ":sandbox off"
+    tty.send "\n"
+    tty.expectInHistory "sandbox: off  (this session runs unconfined)"
+    tty.drain(200)
+    tty.send ":sandbox"
+    tty.send "\n"
+    tty.expectInHistory "sandbox: off  (run unconfined)"
+    tty.drain(200)
+    # --- Re-arm after a disarm: the session must fence again. ---
+    tty.send ":sandbox on"
+    tty.send "\n"
+    tty.expectInHistory "sandbox: on  (this session enforces"
+    tty.drain(300)
+    tty.send ":sandbox off"
+    tty.send "\n"
+    tty.expectInHistory "sandbox: off  (this session runs unconfined)"
+    tty.expect "❯"
+    tty.expectAlive()
 
     # --- Multiline prompt; every line must survive into scrollback. ---
     tty.send "line alpha"

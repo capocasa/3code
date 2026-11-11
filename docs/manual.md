@@ -1861,11 +1861,15 @@ file already covers rewrites that rule where it sits instead of stacking a new
 one at the end; the order you wrote is the order that is enforced, and moving a
 rule would silently change what falls under it (the last matching rule wins).
 
-`:sandbox off` disables filesystem and network enforcement for the session.
-The setting is stored as `sandbox = off` in `[settings]`. Use `:sandbox on` to
-restore enforcement. The one-shot equivalent is the `--no-sandbox` flag, and
-`3code sandbox --policy FILE restrict -- CMD` runs a single command under a
-policy without starting the REPL.
+`:sandbox off` disables filesystem and network enforcement for the session,
+live: the fence lifts (ask approvals included) and the wall proxy stops. The
+setting is stored as `sandbox = off` in `[settings]`. `:sandbox on` restores
+enforcement just as live: the running session arms with the same steps a
+launch uses, so bash and the file tools fence immediately and bare `:sandbox`
+dumps the armed rules. A command already running keeps its fence until it
+exits; there is no un-fencing a live process. The one-shot equivalent is the
+`--no-sandbox` flag, and `3code sandbox --policy FILE restrict -- CMD` runs a
+single command under a policy without starting the REPL.
 
 To allow the full filesystem, replace the policy with `allow /`. Without host
 rules, the network is unrestricted too. This is yolo mode. 3code makes you ask

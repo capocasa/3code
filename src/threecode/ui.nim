@@ -1839,14 +1839,17 @@ proc cmdSandboxSettingSelect(target: string): string =
   dirsettings.dirSandboxOverridden = false
   dirsettings.globalSandboxEnabled = sandboxEnabled
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  result = hintLnS("sandbox: " & (if sandboxEnabled: "on" else: "off") &
-    "  (on = enforce the .3code/sandbox policy, off = run unconfined)")
-  # `sandbox.active` is only set at session init, so a mid-session `on`
-  # cannot arm enforcement for the running session; say so instead of
-  # letting the user believe bash is already fenced (asks included).
-  if sandboxEnabled and not sandbox.active:
-    result.add hintLnS(
-      "this session stays unconfined; enforcement starts at the next launch")
+  # Enforcement follows the setting live: `on` arms the running session
+  # with the same steps launch uses, `off` lifts the fence (asks
+  # included) and stops the wall proxy. A bash child already launched
+  # keeps its fence until it exits; there is no un-fencing a running
+  # process.
+  if sandboxEnabled:
+    sandbox.arm(getCurrentDir())
+    return hintLnS("sandbox: on  (this session enforces; policy: " &
+      sandbox.activePolicyPath(getCurrentDir()) & ")")
+  sandbox.disarm()
+  result = hintLnS("sandbox: off  (this session runs unconfined)")
 
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
@@ -2470,16 +2473,24 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         resp "usage: :plugin [list|debug on|off]  (also :plugins)"
     of ":sandbox", ":sb":
-      # `:sandbox show` (or bare) dumps the rules; allow/readonly/deny
+      # `:sandbox show` (or bare) dumps the rules while the session
+      # enforces, else names the setting state; allow/readonly/deny
       # append a line and reload. The path arg is written verbatim so
       # relative paths stay portable in the file.
       let verb = if parts.len == 0: "show" else: parts[0]
       case verb
       of "show":
-        if sandbox.active:
-          resp sandbox.renderSandbox(sandbox.current)
+        # `active` means this session enforces, `sandboxEnabled` is the
+        # persisted setting, and a mid-session `:sandbox on` arms live.
+        # Both on but the session unarmed only happens on a provider-stub
+        # boot (the harness skips launch arming); name it instead of a
+        # bare "not active" that reads like the setting did not take.
+        if not sandboxEnabled:
+          resp "sandbox: off  (run unconfined)"
+        elif not sandbox.active:
+          resp "sandbox: on  (session not armed; :sandbox on arms it)"
         else:
-          resp "sandbox not active"
+          resp sandbox.renderSandbox(sandbox.current)
       of "on", "off":
         body.add cmdSandboxSettingSelect(verb)
       of "edit":

@@ -409,6 +409,59 @@ suite "single active policy file":
     finally:
       setCurrentDir(oldCwd)
 
+  test "mid-session arm and disarm flip the live gates":
+    # `:sandbox on` / `:sandbox off` mid-session call sandbox.arm /
+    # sandbox.disarm: the same steps launch uses, so the in-process
+    # checks and ask coverage follow the setting without a restart, and
+    # a re-arm reads the policy file fresh from disk.
+    let (home, projDir) = newFixture("arm_disarm")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    writeFile(repoPolicyPath(projDir), "allow ./\n")
+    let wasActive = sandbox.active
+    let saved = sandbox.current
+    let savedHidden = sandbox.hiddenRules
+    let wasEnabled = sandboxEnabled
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    sandboxEnabled = true
+    try:
+      sandbox.arm(projDir)
+      check sandbox.active
+      let (okIn, _) = checkRawPath(projDir / "file.txt", needsWrite = true)
+      check okIn
+      let (okOut, reason) = checkRawPath(opt / "locked.txt", needsWrite = true)
+      check not okOut
+      check "denied by the policy" in reason
+      # Ask coverage only ever exists while armed.
+      check not sandbox.askCoveredPath(opt / "locked.txt")
+
+      sandbox.disarm()
+      check not sandbox.active
+      check sandbox.current.len == 0
+      let (okLifted, _) = checkRawPath(opt / "locked.txt", needsWrite = true)
+      check okLifted
+      check not sandbox.askCoveredPath(opt / "locked.txt")
+
+      # A rule written while disarmed must be live after the re-arm:
+      # loadPolicy re-reads the file instead of trusting stale state.
+      sleep(1100)
+      writeFile(repoPolicyPath(projDir),
+        "allow ./\nallow " & opt & "\n")
+      sandbox.arm(projDir)
+      check sandbox.active
+      let (okGranted, _) = checkRawPath(opt / "locked.txt", needsWrite = true)
+      check okGranted
+      let (okStillIn, _) = checkRawPath(projDir / "file.txt", needsWrite = true)
+      check okStillIn
+    finally:
+      sandbox.active = wasActive
+      sandbox.current = saved
+      sandbox.hiddenRules = savedHidden
+      sandboxEnabled = wasEnabled
+      setCurrentDir(oldCwd)
+
   test "checkRawPath messages show the contracted path":
     let (home, projDir) = newFixture("msg")
     defer:
