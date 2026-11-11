@@ -2,6 +2,15 @@ Changelog
 
 Unreleased
 
+- **Terminal resize no longer repaints the transcript tail upside
+  down.** The rebreak window (committed rows re-wrapped at the new
+  width above the prompt on a width change) walked its budget scan
+  newest-first and then painted that order as-is, so the newest item —
+  the turn's final answer — landed at the top of the re-rendered tail,
+  above the older items it answers. Emission now reverses the scan:
+  oldest at the top (head-truncated as before), final answer directly
+  above the prompt, harness notices in commit order.
+
 - **A directory's provider choice no longer leaks into the user
   config.** Since the `.3code` store landed, a session that booted on
   a directory's sticky `current` held a provider that differed from
