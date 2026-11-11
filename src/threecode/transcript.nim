@@ -577,10 +577,13 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
     of "tool":
       discard
     else: discard
-  # Merge the journal and cut to the budget, newest first. The newest unit
-  # sits directly above the volatile block, whose own top row is the gap —
-  # it costs no separator; every older unit costs the one blank separator
-  # row a live commit writes between items.
+  # Merge the journal and cut to the budget. The scan walks the tail
+  # backwards, so `picked` accumulates newest-first; emission below
+  # reverses it, because the window paints top-to-bottom and must show
+  # the oldest (head-truncated) unit at the top and the newest unit
+  # directly above the volatile block, whose own top row is the gap —
+  # that one costs no separator; every older unit costs the one blank
+  # separator row a live commit writes between items.
   var picked: seq[seq[string]] = @[]
   var used = 0
   var iu = units.len - 1
@@ -608,6 +611,6 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
       if sep == 1: picked.add @[""]
       picked.add rows[rows.len - keep .. ^1]
     break
-  for rows in picked:
-    for row in rows:
+  for i in countdown(picked.len - 1, 0):
+    for row in picked[i]:
       result.add row
