@@ -3970,7 +3970,7 @@ commands:
   :sandbox deny T     add a deny rule (deny T)
   :sandbox ask P      deny P, but offer a one-key approval when a
                       sandboxed command is blocked on P (allow on
-                      f = file, d = its directory; n/timeout keeps the
+                      a = path, f = its folder; d/timeout keeps the
                       denial)
   :sandbox edit       open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Project paths write as ./foo,

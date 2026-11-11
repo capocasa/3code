@@ -328,9 +328,9 @@ proc askGateAvailable*(): bool =
 
 proc requestAskKey*(timeoutMs = -1): char =
   ## Arm the ask gate and block for one decisive keypress. Returns
-  ## 'f', 'd', or 'n'; '\0' when the gate is unavailable (headless) or
-  ## the wait timed out. Both map to "deny, do not retry" at the call
-  ## site, so callers may treat '\0' as n.
+  ## 'a', 'f', 'd', or 'n'; '\0' when the gate is unavailable (headless)
+  ## or the wait timed out. 'd'/'n'/'\0' all map to "deny, do not retry"
+  ## at the call site, so callers may treat '\0' as n.
   if not askGateAvailable(): return '\0'
   let cap = if timeoutMs > 0: timeoutMs else: askTimeoutMs()
   askGateAnswered.store(false, moRelease)
@@ -353,6 +353,9 @@ proc askGateConsume(b: int): bool =
   ## the editor sees anything. ESC is deliberately not decisive: an
   ## arrow key's lead byte would otherwise deny the ask.
   case b
+  of 'a'.ord, 'A'.ord:
+    askGateAnswer.store('a'.ord, moRelaxed)
+    askGateAnswered.store(true, moRelease)
   of 'f'.ord, 'F'.ord:
     askGateAnswer.store('f'.ord, moRelaxed)
     askGateAnswered.store(true, moRelease)
@@ -491,6 +494,7 @@ proc getFrameModel*(): FrameModel {.gcsafe.} =
         result.viewport.lines[i] =
           freshString(frameModelShared.viewport.lines[i])
       result.viewport.committed = frameModelShared.viewport.committed
+      result.viewport.icon = freshString(frameModelShared.viewport.icon)
     finally:
       release frameModelLock
 
@@ -578,12 +582,14 @@ proc clearAnimViewport*() {.gcsafe.} =
 
 proc pushAnimViewport*(banner: string; lines: openArray[string];
                        exitCode: int; idx, maxLines: int;
-                       flowedDelta = 0) {.gcsafe.} =
+                       flowedDelta = 0; icon = "") {.gcsafe.} =
   ## `setAnimViewport` with live-follow bookkeeping: `committed` counts
   ## buffer lines already flowed to scrollback, so a later flush (or
   ## re-follow) never re-commits them. The turn thread passes
   ## `flowedDelta` for each line it committed; a new call (idx change)
-  ## resets the count. All committed-mutations happen under this lock,
+  ## resets the count. `icon` overrides the command-row symbol for this
+  ## snapshot (the ask card's `?`); empty keeps the rotating $ ticker.
+  ## All committed-mutations happen under this lock,
   ## serialized with `startFollowRunning`'s flush grab.
   {.cast(gcsafe).}:
     acquire frameModelLock
@@ -595,7 +601,7 @@ proc pushAnimViewport*(banner: string; lines: openArray[string];
     frameModelShared.viewport = ViewportSnapshot(
       active: true, banner: freshString(banner), lines: @lines,
       exitCode: exitCode, idx: idx, maxLines: maxLines,
-      committed: committed)
+      committed: committed, icon: icon)
     release frameModelLock
 
 proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
@@ -1407,8 +1413,11 @@ proc guiLoop(unused: string) {.thread.} =
           # frame (~320ms/symbol) so it reads as a slow ticker, not a blur.
           # In test mode the index never advances so every captured frame
           # shows `$`, matching the golden fixtures. Skip once exitCode > 0:
-          # `commandIcon` bakes the terminal `Ø` then.
-          if commandStatusActive.load(moRelaxed) and snap.exitCode <= 0:
+          # `commandIcon` bakes the terminal `Ø` then. A snapshot icon
+          # override (the ask card's `?`) outranks the ticker.
+          if snap.icon.len > 0:
+            view.symbol = snap.icon
+          elif commandStatusActive.load(moRelaxed) and snap.exitCode <= 0:
             if not testFrameMode() and i mod 4 == 0:
               discard commandSymbolIndex.fetchAdd(1, moRelease)
             view.symbol = nextCommandSymbol()

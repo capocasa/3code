@@ -12,6 +12,7 @@ when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api, plugins,
   display, fatprompt, streamexec, toolstream, transcript, images, screen
+from shell import bashMutationPath
 import sandbox
 import tabtitle
 import goal
@@ -544,40 +545,43 @@ proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
   result.code = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
   result.diff = stub{"diff"}.getStr("")
 
-proc askGateDecide(deniedPath: string; renderLine: proc(line: string);
+proc askGateDecide(deniedPath: string; cmd: string; writeAccess: bool;
+    renderLine: proc(line: string);
     retryNoun: string): tuple[fired: bool, granted: bool, marker: string] =
-  ## The interactive half of the sandbox ask gate: render the question,
-  ## wait for the one decisive key diverted from the input thread
-  ## (fatprompt requestAskKey), and on f/d rewrite the ask rule's root
-  ## (or its parent) to allow via sandbox.grantAskAllow. No retry runs
-  ## here: callers that have something to rerun use runAskGate, callers
-  ## that ask pre-emptively (apply_patch) run their single action after
-  ## all asks are decided. The marker records the decision for the tool
-  ## output; the zero-init result (fired=false) is the not-covered
-  ## verdict the callers break on.
+  ## The interactive half of the sandbox ask gate: render the question
+  ## card, wait for the one decisive key diverted from the input thread
+  ## (fatprompt requestAskKey), and on a/f grant the denied path (or its
+  ## whole folder) via sandbox.grantAskAllow. `cmd` names the denied
+  ## action (`? <cmd>` headline); empty when the caller's viewport
+  ## already paints it. `writeAccess` picks the access the question
+  ## names. No retry runs here: callers that have something to rerun
+  ## use runAskGate, callers that ask pre-emptively (apply_patch) run
+  ## their single action after all asks are decided. The marker records
+  ## the decision for the tool output; the zero-init result (fired=false)
+  ## is the not-covered verdict the callers break on.
   let rootPath = sandbox.askRuleRoot(deniedPath)
   if rootPath.len == 0: return
-  # Narrow offer = the ask rule root (a file grant under an ask
-  # DIRECTORY cannot pierce the Linux mount mask, so the root is
-  # the narrowest grant that takes effect); broad offer = the
-  # root's parent directory, one level up. A root at / has no
-  # parent: the broad offer collapses onto the root instead of
-  # rendering an empty target (an empty grant target would parse
-  # as the project dir, which is not what the key sits next to).
-  var broadPath = parentDir(rootPath)
-  if broadPath.len == 0: broadPath = rootPath
-  renderLine("sandbox ask: " & sandbox.askPathDisplay(deniedPath) &
-    " is ask-protected.  [f] " & sandbox.askPathDisplay(rootPath) &
-    "  [d] " & sandbox.askPathDisplay(broadPath) &
-    "  [n]o  (" & $(askTimeoutMs() div 1000) & "s)")
+  # Folder offer = the ask rule root when it names a directory, the
+  # root's parent when the rule names a single file ("the entire
+  # folder" of an ask-protected file is the directory holding it).
+  let folderPath = if dirExists(rootPath): rootPath else: parentDir(rootPath)
+  if cmd.len > 0:
+    renderLine("? " & cmd)
+    renderLine("")
+  renderLine("  allow " & (if writeAccess: "write" else: "read") &
+    " access to " & sandbox.askPathDisplay(deniedPath) & "?")
+  renderLine("  (a) allow")
+  renderLine("  (f) allow the entire folder")
+  renderLine("  (d) deny in " & $(askTimeoutMs() div 1000) & "s")
   let key = requestAskKey()
   var marker = ""
   # The model-visible record of the decision, appended to the tool
   # output after any retry (each side sees what was decided and
   # whether a retry happened).
   var granted = false
-  if key == 'f' or key == 'd':
-    let target = if key == 'd': broadPath else: rootPath
+  if key == 'a' or key == 'f':
+    let target = sandbox.askCanonical(
+      if key == 'f': folderPath else: deniedPath)
     if sandbox.grantAskAllow(target):
       granted = true
       renderLine("· allowed " & sandbox.askPathDisplay(target) &
@@ -595,7 +599,8 @@ proc askGateDecide(deniedPath: string; renderLine: proc(line: string);
     marker = why & "; not retried"
   (true, granted, marker)
 
-proc runAskGate*(deniedPath: string; renderLine: proc(line: string);
+proc runAskGate*(deniedPath: string; cmd: string; writeAccess: bool;
+    renderLine: proc(line: string);
     retry: proc(): tuple[output: string, code: int, diff: string];
     retryNoun: string): tuple[fired: bool, granted: bool, marker: string,
     result: tuple[output: string, code: int, diff: string]] =
@@ -604,7 +609,8 @@ proc runAskGate*(deniedPath: string; renderLine: proc(line: string);
   ## (an ask-covered denied path) and how the marker lands in the tool
   ## output; on anything but a grant the original denial stands and the
   ## caller's unretried result is the verdict.
-  let decide = askGateDecide(deniedPath, renderLine, retryNoun)
+  let decide = askGateDecide(deniedPath, cmd, writeAccess, renderLine,
+                             retryNoun)
   if not decide.fired: return
   var retried: tuple[output: string, code: int, diff: string]
   if decide.granted: retried = retry()
@@ -639,6 +645,23 @@ proc toolAskGateApplies(act: Action): bool =
   else:
     false
 
+proc askGateCmd(act: Action; deniedPath: string): string =
+  ## The `? <cmd>` headline of the ask card for the file tools: the
+  ## tool verb and its target (apply_patch carries its paths per-op, so
+  ## the denied op's path headlines). Empty for anything else - the
+  ## bash viewport paints its own headline from the command itself.
+  case act.kind
+  of akRead: "read " & act.path
+  of akWrite: "write " & act.path
+  of akPatch: "patch " & act.path
+  of akApplyPatch: "apply_patch " & deniedPath
+  else: ""
+
+proc askGateWrites(act: Action): bool =
+  ## Whether the denied access the ask card names is a write (the read
+  ## tool reads; every file-mutating tool writes).
+  act.kind != akRead
+
 proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
     visionDir: string): tuple[output: string, code: int, diff: string] =
   ## The file-tool ask flow: ask first, run once. A grant retries (here:
@@ -672,10 +695,12 @@ proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
         roots.add r
         display.add op.path
     for deniedPath in display:
-      let decide = askGateDecide(deniedPath, renderLine, "tool")
+      let decide = askGateDecide(deniedPath, askGateCmd(act, deniedPath),
+        askGateWrites(act), renderLine, "tool")
       if decide.fired: markers.add decide.marker
   else:
-    let decide = askGateDecide(act.path, renderLine, "tool")
+    let decide = askGateDecide(act.path, askGateCmd(act, act.path),
+      askGateWrites(act), renderLine, "tool")
     if decide.fired: markers.add decide.marker
   result = runAction(act, cache, vision, visionDir)
   if result.output.len > 0 and not result.output.endsWith("\n"):
@@ -700,13 +725,15 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
     # and re-wraps it at the live terminal width each tick (so a resize
     # between output lines re-wraps instead of replaying stale rows). The
     # GUI thread owns the rotating command symbol too, so don't set it
-    # here. In test mode, request one paint and wait for the ack so the
+    # here - pass the symbol only when the ask card has overridden it.
+    # In test mode, request one paint and wait for the ack so the
     # harness captures each streamed line as a discrete frame (the frame
     # event fires after this returns). In normal mode the 80ms cadence
     # paints the rows. `flowedDelta` advances the live-follow `committed`
     # count when the caller just committed lines to scrollback itself.
     pushAnimViewport(view.banner, view.buf, view.exitCode, view.idx,
-                     view.maxLines, flowedDelta)
+                     view.maxLines, flowedDelta,
+                     if view.symbol == "$": "" else: view.symbol)
     requestViewportPaint()
 
   proc takeLine(line: string) =
@@ -764,12 +791,12 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
       # Sandbox ask gate: a failed command that smells like an EACCES
       # from the sandbox, whose denied target is covered by an `ask`
       # rule (not a hard deny), can be redeemed by the user once. The
-      # question rides the tool viewport; the answer is a single key
-      # diverted from the input thread (fatprompt requestAskKey). On
-      # f/d the ask rule's root (or its parent directory) is appended
-      # to the active policy file as `allow` and the command is
-      # retried once; on n, an undecided key, or a timeout the denial
-      # stands and the result goes back to the model unretried.
+      # question card rides the tool viewport; the answer is a single
+      # key diverted from the input thread (fatprompt requestAskKey).
+      # On a/f the denied path (or its whole folder) lands in the
+      # active policy file as `allow` and the command is retried once;
+      # on d, an undecided key, or a timeout the denial stands and the
+      # result goes back to the model unretried.
       block askGate:
         if result.code == 0: break askGate
         if not sandboxEnabled or not sandbox.active: break askGate
@@ -779,7 +806,17 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
         if not askGateAvailable(): break askGate
         let deniedPath = sandbox.deniedAskPath(act.body, result.output)
         if deniedPath.len == 0: break askGate
-        let gate = runAskGate(deniedPath,
+        # The ask card replaces the failed run's picture: the `?`
+        # headline is this viewport's command banner and the streamed
+        # denial lines drop, so the question block is all the user
+        # sees while it waits.
+        view.setSymbol("?")
+        view.buf = @[]
+        view.total = 0
+        renderView()
+        emitTestFrameEvent()
+        let gate = runAskGate(deniedPath, "",
+          bashMutationPath(act.body).len > 0,
           proc(line: string) =
             view.addLine(line)
             renderView(),
