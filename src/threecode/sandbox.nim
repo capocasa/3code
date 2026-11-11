@@ -605,6 +605,30 @@ proc reloadIfChanged*(projectDir: string): bool =
     syncWallProxyPolicy(projectDir)
   true
 
+proc arm*(projectDir: string) =
+  ## Arm enforcement for the running session: seed the guard rules,
+  ## load the active policy, resolve the bash fence backend. Session
+  ## init calls this when the setting is on and `:sandbox on` calls it
+  ## mid-session; the steps and the failure semantics are identical (a
+  ## backend that cannot restrict clears `procboxExe` so the bash tool
+  ## degrades to the unconfined setsid path, while the in-process
+  ## checks stay in force via `active`).
+  hiddenRules = guardRules(projectDir)
+  current = loadPolicy(projectDir)
+  active = true
+  procboxExe = findProcbox()
+  if not backendWorks(procboxExe):
+    procboxExe = ""
+
+proc disarm*() =
+  ## Lift enforcement for the running session (`:sandbox off`): the
+  ## in-process checks pass through, no further bash launch is fenced,
+  ## and the wall proxy shuts down. `current` drops so no rules linger
+  ## in memory; a later `arm` reloads from the file.
+  active = false
+  current = @[]
+  stopWall()
+
 proc policyHint*(): string =
   ## Where the agent can inspect the rules that bound it. Appended to
   ## sandbox denial messages so a blocked tool call points at the

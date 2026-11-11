@@ -204,11 +204,7 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
        buildProfile(dirCurrent, activeProviders, "").name.len > 0:
       activeCurrent = dirCurrent
   if sandboxEnabled:
-    sandbox.current = sandbox.loadPolicy(cwd)
-    sandbox.active = true
-    sandbox.procboxExe = sandbox.findProcbox()
-    if not sandbox.backendWorks(sandbox.procboxExe):
-      sandbox.procboxExe = ""
+    sandbox.arm(cwd)
 
   var s = AgentSession()
   s.editor = minline.initEditor(historyFile = "")

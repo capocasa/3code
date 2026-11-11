@@ -236,21 +236,16 @@ proc initSandbox(cwd: string) =
       return
   if not sandboxEnabled:
     return
-  sandbox.hiddenRules = sandbox.guardRules(cwd)
-  sandbox.current = sandbox.loadPolicy(cwd)
-  sandbox.active = true
-  # The bash tool re-execs this binary as `3code sandbox restrict ...`, so
-  # resolve our own path once. The sandbox subcommand is always compiled in, but
-  # the OS-native restriction can still be nonfunctional (a kernel without
-  # Landlock, a CI runner under a seccomp filter that blocks the syscall).
-  # On failure, clear procboxExe so the bash tool degrades to the unconfined
-  # setsid path instead of failing every command. The in-process
-  # read/write/patch checks stay in force via `active` regardless. The
-  # probe runs silently; the backend being unavailable is a host limitation,
-  # not an error the user can act on.
-  sandbox.procboxExe = sandbox.findProcbox()
-  if not sandbox.backendWorks(sandbox.procboxExe):
-    sandbox.procboxExe = ""
+  # The same steps a mid-session `:sandbox on` runs (see sandbox.arm).
+  # The bash tool re-execs this binary as `3code sandbox restrict ...`;
+  # when the OS-native backend cannot restrict (a kernel without
+  # Landlock, a CI runner under a seccomp filter that blocks the
+  # syscall), arm clears procboxExe so the bash tool degrades to the
+  # unconfined setsid path instead of failing every command. The
+  # in-process read/write/patch checks stay in force via `active`
+  # regardless. The probe runs silently; the backend being unavailable
+  # is a host limitation, not an error the user can act on.
+  sandbox.arm(cwd)
 
 proc setupTlsEnv() =
   ## macOS packaging builds link OpenSSL statically (config.nims

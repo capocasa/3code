@@ -4313,6 +4313,12 @@ max-tokens = "8192"
     # The sandbox legs below need the setting to start off, like a session
     # launched before the sandbox was ever enabled.
     writeHarnessProviders(root, "sandbox = \"off\"\n")
+    # ... and a fixture-local policy, so the armed `:sandbox` dump is
+    # deterministic: the cascade must pick the session dir's file, never
+    # whatever policy happens to exist in an ancestor of the test tree
+    # on the developer's machine.
+    createDir(root / "run")
+    writeFile(root / "run" / ".sandbox", "deny /\nallow ./\n")
     writeStubResponses(root, %*[
       # Turn 1: plain prompt and reply.
       {"role": "assistant", "preStreamDelayMs": 50,
@@ -4429,28 +4435,42 @@ max-tokens = "8192"
     tty.expect "❯"  # prompt must return
     tty.expectAlive()  # must not exit after :model
 
-    # --- :sandbox on mid-session flips the persisted setting, never the
-    # live session; a bare :sandbox must then report that state instead of
-    # the old bare "sandbox not active", which read like the setting did
-    # not take. The session boots with the setting off (fixture config),
-    # matching a session launched before the sandbox was ever enabled. ---
+    # --- :sandbox on arms enforcement for the running session (no
+    # restart needed); a bare :sandbox then dumps the armed rules instead
+    # of the old bare "sandbox not active", which read like the setting
+    # did not take. The session boots with the setting off (fixture
+    # config), matching a session launched before the sandbox was ever
+    # enabled. deny / and allow ./ are in every platform's default
+    # policy, so the armed dump asserts the same lines on all of them. ---
     tty.send ":sandbox on"
     tty.send "\n"
-    tty.expectInHistory "sandbox: on"
-    tty.expectInHistory "this session stays unconfined"
-    tty.drain(200)
+    tty.expectInHistory "sandbox: on  (this session enforces"
+    tty.expectNeverInHistory "enforcement starts at the next launch"
+    tty.drain(300)
     tty.send ":sandbox"
     tty.send "\n"
-    tty.expectInHistory "sandbox: on  (this session stays unconfined"
+    tty.expectInHistory "deny      /"
+    tty.expectInHistory "allow     ./"
     tty.expectNeverInHistory "sandbox not active"
     tty.drain(200)
+    # --- :sandbox off disarms the running session live; a bare :sandbox
+    # names the off state. ---
     tty.send ":sandbox off"
     tty.send "\n"
-    tty.expectInHistory "sandbox: off"
+    tty.expectInHistory "sandbox: off  (this session runs unconfined)"
     tty.drain(200)
     tty.send ":sandbox"
     tty.send "\n"
     tty.expectInHistory "sandbox: off  (run unconfined)"
+    tty.drain(200)
+    # --- Re-arm after a disarm: the session must fence again. ---
+    tty.send ":sandbox on"
+    tty.send "\n"
+    tty.expectInHistory "sandbox: on  (this session enforces"
+    tty.drain(300)
+    tty.send ":sandbox off"
+    tty.send "\n"
+    tty.expectInHistory "sandbox: off  (this session runs unconfined)"
     tty.expect "❯"
     tty.expectAlive()
 

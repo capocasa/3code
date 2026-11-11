@@ -101,6 +101,42 @@ proc sendAskKey(s: TtySession; key: char) =
   s.drain(30)
 
 var bashBackendCache = -1
+var restrictBaselineCache = -1
+
+proc restrictBaselineBites(): bool =
+  ## Whether the toggle leg's denial bites on this host: it comes from
+  ## the restrict baseline (the policy's one writable root is the only
+  ## writable path), not from the user-namespace mount masks that
+  ## bashSandboxWorks probes — so container hosts without unprivileged
+  ## userns still run it. The probe reproduces the leg's exact
+  ## dependency: a policy-driven restrict with an ask rule, a write
+  ## outside the writable root, and a denial in the output. Mirrors the
+  ## probe pattern of bashSandboxWorks.
+  if restrictBaselineCache >= 0: return restrictBaselineCache == 1
+  let tmp = getTempDir() / ("restrict_baseline_" & $getCurrentProcessId())
+  try: removeDir(tmp) except CatchableError: discard
+  createDir(tmp / "proj")
+  writeFile(tmp / ".sandbox", "deny /\nallow ./\nask ./proj/vault\n")
+  let probe = getTempDir() / ("restrict_out_" & $getCurrentProcessId())
+  try: removeFile(probe) except CatchableError: discard
+  when defined(windows):
+    let cmd = "cmd /c echo x > " & probe.quoteShell
+  else:
+    let cmd = "sh -c " & ("echo x > " & probe).quoteShell
+  let quoted = "\"" & ensureStubBinary() & "\" sandbox --policy " &
+    (tmp / ".sandbox").quoteShell & " restrict -- " & cmd
+  try:
+    let r = execCmdEx(quoted)
+    restrictBaselineCache =
+      if r.exitCode != 0 and not fileExists(probe) and
+          "denied" in r.output.toLowerAscii: 1 else: 0
+  except CatchableError:
+    restrictBaselineCache = 0
+  try:
+    removeDir(tmp)
+    removeFile(probe)
+  except CatchableError: discard
+  restrictBaselineCache == 1
 
 proc bashSandboxWorks(): bool =
   ## Whether the ask enforcement the bash legs depend on actually bites
@@ -229,6 +265,43 @@ suite "sandbox ask prompt":
       check not fileExists(root / "run" / "vault" / "out.txt")
       tty.expect "\u276f"
       echo "  PASS: timeout declines"
+
+    else:
+      skip()
+  test ":sandbox off lifts the fence live, :sandbox on restores it":
+    # The mid-session toggle is enforcement, not bookkeeping: a write the
+    # baseline denies lands cleanly while disarmed and denies again after
+    # the re-arm (same session, no restart). The denied target is outside
+    # the policy's only writable root, never the ask dir: a live ask gate
+    # would sit and wait for a key this test never sends.
+    if restrictBaselineBites():
+      let root = newFixture("toggle")
+      defer: removeDir(root)
+      writeConfiguredProvider(root)
+      createDir(root / "outside")
+      let tty = startAskSession(root, 20_000)
+      defer: tty.close()
+
+      tty.expect "\u276f"
+      runShellCmd(tty, "echo x > ../outside/armed.txt")
+      tty.expectInHistory "Permission denied", 10_000
+      tty.drain(300)
+      check not fileExists(root / "outside" / "armed.txt")
+
+      tty.send ":sandbox off\n"
+      tty.expectInHistory "sandbox: off  (this session runs unconfined)", 10_000
+      runShellCmd(tty, "echo lifted > ../outside/lifted.txt")
+      check waitForFileContent(root / "outside" / "lifted.txt", "lifted\n")
+      tty.expect "\u276f"
+
+      tty.send ":sandbox on\n"
+      tty.expectInHistory "sandbox: on  (this session enforces", 10_000
+      runShellCmd(tty, "echo x > ../outside/rearmed.txt")
+      tty.expectInHistory "Permission denied", 10_000
+      tty.drain(300)
+      check not fileExists(root / "outside" / "rearmed.txt")
+      tty.expect "\u276f"
+      echo "  PASS: mid-session off lifts, on re-arms"
 
     else:
       skip()
