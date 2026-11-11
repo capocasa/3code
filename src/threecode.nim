@@ -676,6 +676,13 @@ proc main() =
   # (run it once resumed), so only the id is checked here.
   var resolved = ""
   if resume:
+    # A running 3code wins over session availability: when another live
+    # process holds this directory, `-r` must report the holder even if
+    # the holder has not saved its first session yet (which would
+    # otherwise die "no saved sessions"). Advisory only: the real claim
+    # still happens in acquireDirLock below.
+    let held = probeDirLockHeld(safeCwd())
+    if held != "": die(held, ExitConfig)
     # Same lookup `:resume` runs: exact id, then unique id prefix, then a
     # `:rename` name (case-insensitive). Several matches at one stage die
     # listing the candidates.

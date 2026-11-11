@@ -827,6 +827,19 @@ suite "session: directory lock acquire/release":
     check readFile(lp).strip == $getCurrentProcessId()
     check activeDirLockPath == lp
 
+  test "probeDirLockHeld names a live holder without acquiring":
+    let cwd = "/home/carlo/p/test-dir-lock-probe"
+    # nothing held: no message, and no lock file created by the probe
+    check probeDirLockHeld(cwd) == ""
+    check not fileExists(dirLockPathFor(cwd))
+    acquireDirLock(cwd, sessionDir() / ("20260101T000000" & SessionExt))
+    let msg = probeDirLockHeld(cwd)
+    check "already open" in msg
+    check "session 20260101T000000" in msg
+    check dirLockPathFor(cwd) in msg
+    releaseActiveDirLock()
+    check probeDirLockHeld(cwd) == ""
+
   test "acquiring a held lock raises DirLocked with guidance":
     let cwd = "/home/carlo/p/test-dir-lock-live"
     let sess = sessionDir() / ("20260101T000000" & SessionExt)
