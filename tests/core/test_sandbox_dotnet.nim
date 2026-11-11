@@ -134,6 +134,24 @@ print('SOCKET-OK')
           writeFile(nugetCfg,
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" &
             "<configuration></configuration>\n")
+        # First-use configure still runs before every build and does real
+        # work (migrations mutex, notice, telemetry) even with everything
+        # above in place; under the fenced network that work crawls and
+        # tips the per-test watchdog. Skip it: this test pins the build
+        # under the recipe, not the first-run experience.
+        let savedHome = getEnv("DOTNET_CLI_HOME")
+        let savedSkip = getEnv("DOTNET_SKIP_FIRST_TIME_EXPERIENCE")
+        let savedLogo = getEnv("DOTNET_NOLOGO")
+        let savedTele = getEnv("DOTNET_CLI_TELEMETRY_OPTOUT")
+        putEnv("DOTNET_CLI_HOME", getHomeDir())
+        putEnv("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "true")
+        putEnv("DOTNET_NOLOGO", "1")
+        putEnv("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        defer:
+          putEnv("DOTNET_CLI_HOME", savedHome)
+          putEnv("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", savedSkip)
+          putEnv("DOTNET_NOLOGO", savedLogo)
+          putEnv("DOTNET_CLI_TELEMETRY_OPTOUT", savedTele)
         let r = runSandboxed(pol, dir, [dn, "build", "-nologo"])
         check r.exitCode == 0
         check "Build succeeded" in r.output
