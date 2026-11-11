@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **The sandbox arms and disarms live in the running session.** `:sandbox on`
+  no longer waits for the next launch: it arms the session with the same steps
+  launch uses (guard rules, policy load, bash-fence backend probe), so bash,
+  the file tools, and the ask gate fence immediately, and bare `:sandbox`
+  dumps the armed rules. `:sandbox off` disarms live: the fence lifts (ask
+  approvals included), the wall proxy stops, and the rules drop from memory;
+  a re-arm re-reads the policy file, so rules written while disarmed apply at
+  once. A bash command already running keeps its fence until it exits. The
+  persisted `[settings] sandbox` value and the launch-time behavior are
+  unchanged; a session launched with the sandbox off reports
+  `sandbox: off  (run unconfined)` until armed.
 - **Terminal resize no longer repaints the transcript tail upside
   down.** The rebreak window (committed rows re-wrapped at the new
   width above the prompt on a width change) walked its budget scan
