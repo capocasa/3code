@@ -104,6 +104,13 @@ print('SOCKET-OK')
   </PropertyGroup>
 </Project>
 """)
+        # A project-local config clearing every source: restore of the
+        # zero-package project then never dials out, and under the
+        # fenced network (DNS is dead inside the netns) the build is
+        # deterministic instead of hanging on connect timeouts.
+        writeFile(dir / "NuGet.Config", "<?xml version=\"1.0\" " &
+          "encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n" &
+          "    <clear />\n  </packageSources>\n</configuration>\n")
         writeFile(dir / "Program.cs", "System.Console.WriteLine(\"built\");\n")
         let pol = dir / "policy"
         # getTempDir, not a hardcoded /tmp: TMPDIR is where dotnet
