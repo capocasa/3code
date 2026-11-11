@@ -812,6 +812,20 @@ func clipMiddle*(s: string, head, tail: int): string =
   if s.len <= head + tail: s
   else: utf8ByteCut(s, head) & "\n... [truncated] ...\n" & utf8ByteCutEnd(s, tail)
 
+const MangledNameCap* = 200
+  ## Longest mangled-path component we hand to the filesystem: names
+  ## must stay under NAME_MAX (255) even with a suffix (.lock, .prompt,
+  ## .current, /config) behind them.
+
+func fnv1aHex*(s: string): string =
+  ## Stable-across-versions digest (FNV-1a, 64-bit) for on-disk names
+  ## derived from long paths. std `hash` is explicitly not stable across
+  ## compiler versions; these names must not drift under an upgrade.
+  var h = 0xcbf29ce484222325'u64
+  for c in s:
+    h = (h xor c.uint64) * 0x100000001b3'u64
+  toHex(h)
+
 func humanBytes*(n: int): string =
   if n < 1024: &"{n}B"
   elif n < 1024 * 1024: &"{n.float/1024:.1f}KB"
