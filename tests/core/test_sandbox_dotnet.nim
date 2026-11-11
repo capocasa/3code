@@ -121,6 +121,19 @@ print('SOCKET-OK')
         createDir(dir / "rt")
         putEnv("XDG_RUNTIME_DIR", dir / "rt")
         defer: putEnv("XDG_RUNTIME_DIR", savedRt)
+        # Landlock grants attach to paths that exist, and first-run
+        # dotnet also needs to CREATE its default NuGet.Config - which
+        # the recipe's readonly grant refuses. On a fresh runner the
+        # dots appear only inside the fence and die on the deny floor,
+        # so materialize them (plus an empty config) beforehand, the
+        # way any fresh machine must (see the manual's recipe).
+        createDir(getHomeDir() / ".nuget" / "NuGet")
+        createDir(getHomeDir() / ".nuget" / "packages")
+        let nugetCfg = getHomeDir() / ".nuget" / "NuGet" / "NuGet.Config"
+        if not fileExists(nugetCfg):
+          writeFile(nugetCfg,
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" &
+            "<configuration></configuration>\n")
         let r = runSandboxed(pol, dir, [dn, "build", "-nologo"])
         check r.exitCode == 0
         check "Build succeeded" in r.output

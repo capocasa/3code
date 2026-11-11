@@ -1702,7 +1702,12 @@ line is given when the paths move.
     fence, and the build dies with `EACCES` before the sentinel is
     ever consulted - run fenced builds with
     `XDG_RUNTIME_DIR=$TMPDIR` so the mutex lands in the granted temp
-    dir. Inside a fenced network, dotnet honors
+    dir. And landlock grants attach only to paths that exist, while
+    first-run dotnet also creates its default NuGet.Config - which
+    the readonly grant refuses: on a fresh machine run one unfenced
+    `dotnet --version` first so the dots exist (or materialize
+    `~/.nuget/NuGet/NuGet.Config` yourself) before the first fenced
+    build. Inside a fenced network, dotnet honors
     `http_proxy`/`https_proxy`.
 
 `ruby` (RubyGems + Bundler)::
