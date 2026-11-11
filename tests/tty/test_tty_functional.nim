@@ -2518,6 +2518,69 @@ max-tokens = "8192"
     tty.expectIdleCaret()
     tty.expectAlive()
 
+  test "caret cell never strands or vanishes crossing empty draft rows":
+    # Regression: the volatile painter's stored diff model claimed one more
+    # footer row than it actually kept (the footer band was counted from the
+    # block bottom instead of from the editor top), so the next paint sliced
+    # the editor's top row off prevEditorRows and compared every editor row
+    # against the row one band-height below it. A caret cell moving onto an
+    # empty row diffed "unchanged" against the old caret row and was never
+    # painted, while the row it left was rewritten caret-free: the drawn
+    # caret vanished (or stranded mid-buffer) on Up/Down across empty lines.
+    let root = newFixture("caret_empty_rows")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "caret reply",
+        "contentChunks": ["caret reply"],
+        "usage": {"promptTokens": 10, "completionTokens": 3,
+                  "totalTokens": 13, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "aaa"
+    tty.send "\x1b[13;2u"
+    tty.drain(80)
+    tty.send "\x1b[13;2u"
+    tty.drain(80)
+    tty.send "\x1b[13;2u"
+    tty.drain(80)
+    tty.send "bbb"
+    tty.expect "bbb"
+    tty.drain(200)
+
+    # The buffer is aaa/empty/empty/bbb: two adjacent same-shaped empty
+    # rows, and the caret must cross empty->empty twice. Any Up/Down
+    # across them must leave EXACTLY one drawn caret cell on the whole
+    # screen (the drawn caret is the app's only reverse-video usage),
+    # never two (stray) and never zero (lost).
+    proc totalCaretCells(tty: TtySession): int =
+      for i in 0 ..< tty.grid.rows.len:
+        inc result, tty.drawnCaretCount(i)
+
+    for i in 0 ..< 3:
+      tty.send "\x1b[A"
+      tty.drain(200)
+      check tty.totalCaretCells() == 1
+    for i in 0 ..< 3:
+      tty.send "\x1b[B"
+      tty.drain(200)
+      check tty.totalCaretCells() == 1
+    tty.send "\x1b[A"
+    tty.drain(200)
+    check tty.totalCaretCells() == 1
+    tty.send "\x1b[B"
+    tty.drain(200)
+    check tty.totalCaretCells() == 1
+    tty.expectIdleCaret()
+    tty.expectAlive()
+
   test "multiline prompt and queued multiline autosend":
     let root = newFixture("multiline_visual_test")
     writeConfiguredProvider(root)

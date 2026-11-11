@@ -782,10 +782,27 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # Store the model for the next diff: bar+ticker and editor rows only
   # (live/viewport rows are tracked by their own seqs).
   e.lastVolatileRows = @[]
-  let footerTop = blockH - footerRowsAboveEditor
-  let barEnd = if edTop >= 0: edTop else: blockH
-  for i in max(0, footerTop) ..< min(barEnd, cur.len):
+  # The sections are footer texts followed by the editor span, so the
+  # footer rows sit directly ABOVE the editor rows: their band starts at
+  # ``edTop - footerRowsAboveEditor``, not at ``blockH - footerRows...``.
+  # The editor grows upward from the block bottom, so counting the band
+  # from the bottom stored nothing once the editor passed the footer's
+  # height, while paintedFooterRows still claimed the rows: the next
+  # paint's prevEditorRows slice then ate the editor's top rows and the
+  # row diff compared every editor row against the row one band-height
+  # below it. A caret cell moving between same-shaped rows (empty lines)
+  # diffed "unchanged" against the old caret row and was never painted,
+  # while the row it left was rewritten caret-free: the drawn caret
+  # vanished or stranded mid-buffer on Up/Down in a multiline draft.
+  let ftStop = if edTop >= 0: edTop else: blockH
+  let ftStart = ftStop - footerRowsAboveEditor
+  var storedFt = 0
+  for i in max(0, ftStart) ..< max(max(0, ftStart), min(ftStop, cur.len)):
     e.lastVolatileRows.add (if cur[i].kind == vrkText: cur[i].text else: "")
+    inc storedFt
+  while storedFt < footerRowsAboveEditor:
+    e.lastVolatileRows.add ""
+    inc storedFt
   e.lastVolatileRows.add newEdModel
   e.liveContentRows = liveRows
   e.liveContentHasGap = newLiveGap
