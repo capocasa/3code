@@ -2,6 +2,20 @@ Changelog
 
 Unreleased
 
+- **Goal mode's check speaks with a solid rule and its tokens join the
+  bar's total.** The verifier quote block in scrollback indents its rows
+  with the solid box-drawing rule `│` instead of a punctuation `|`, so
+  the block reads as one continuous vertical line under the verdict
+  icon. The check's model call is also real spend, and it is now
+  accounted exactly like a main call's: its tokens are added into the
+  session ledger (`:tokens`, the `.3log` cost record, plugin turn
+  events) and onto the resting token bar on top of the turn's own
+  numbers - previously the side call repainted the bar with its own
+  small readout, so every goal-mode turn ended with the bar showing
+  only the check's tokens in place of the turn's. The check's prompt
+  size still never reaches the next call's context gauge (its
+  conversation is not the session's), and headless embedders no longer
+  receive the verifier's usage as if it were a turn's.
 - **The sandbox ask gate asks a question, not a menu.** A denied command
   or tool call on an ask-protected path now shows a card — `? <command>`,
   the failed run's error lines dropped, then `allow <read or write> access

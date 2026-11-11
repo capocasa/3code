@@ -273,11 +273,17 @@ proc hookAfterLiveContent(baseLabel: string; slurped: int) =
 
 proc hookFinalUsage(usage: Usage; window, elapsed: int;
                     assistantContent: string; streamedLive: bool) =
+  # A side call never paints the bar: its usage is the caller's to
+  # account (the turn boundary folds it into the session's totals), and
+  # painting it here would replace the turn's own numbers on the bar
+  # with the check's.
+  if sideCallMode: return
   if apiStreamHooks.finalUsage != nil:
     apiStreamHooks.finalUsage(usage, window, elapsed, assistantContent,
                               streamedLive)
 
 proc hookNoUsage(elapsed: int) =
+  if sideCallMode: return
   if apiStreamHooks.noUsage != nil: apiStreamHooks.noUsage(elapsed)
 
 proc hookRetryNotice(msg: string) =

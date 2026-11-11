@@ -1011,11 +1011,12 @@ proc goalStepBytes*(step: GoalStep): string =
   ## icon carries the verdict color; the rule and the prose sit in the
   ## dim tier, a quote of the verifier's words rather than a reply:
   ##
-  ##   ✓ | this is the
-  ##     | verdict text
+  ##   ✓ │ this is the
+  ##     │ verdict text
   ##
   ## Rows join under one continuous rule so the block reads as one
-  ## voice. The verdict line is already stripped from the prose; a bare
+  ## voice. The rule is a solid box-drawing line, never a punctuation
+  ## `|`. The verdict line is already stripped from the prose; a bare
   ## verdict paints its icon alone.
   let (glyph, color) = goalVerdictStyle(step.verdict)
   if step.prose.strip.len == 0:
@@ -1033,7 +1034,7 @@ proc goalStepBytes*(step: GoalStep): string =
         first = false
       else:
         result.add "  "
-      result.add GreyFg & "| " & chunk & Reset & "\r\n"
+      result.add GreyFg & "│ " & chunk & Reset & "\r\n"
 
 proc receiptBytes*(label: string): string =
   ## The single canonical styling for a token receipt row (two-space
