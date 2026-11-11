@@ -112,6 +112,15 @@ print('SOCKET-OK')
         writeFile(pol, &"deny /\nallow {getTempDir()}\nallow {dir}\n" &
           "allow ~/.nuget/packages\nreadonly ~/.nuget/NuGet\n" &
           "allow ~/.dotnet\nallow *\n")
+        # dotnet's first-run NuGet migrations take their named mutex via
+        # mkdtemp in $XDG_RUNTIME_DIR: on CI that is /run/user/<uid>,
+        # outside the fence, and the build dies with EACCES before the
+        # sentinel is ever consulted. Point it at the granted work dir,
+        # as the manual's recipe says.
+        let savedRt = getEnv("XDG_RUNTIME_DIR")
+        createDir(dir / "rt")
+        putEnv("XDG_RUNTIME_DIR", dir / "rt")
+        defer: putEnv("XDG_RUNTIME_DIR", savedRt)
         let r = runSandboxed(pol, dir, [dn, "build", "-nologo"])
         check r.exitCode == 0
         check "Build succeeded" in r.output
