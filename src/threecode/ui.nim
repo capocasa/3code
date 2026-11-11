@@ -22,7 +22,12 @@ when computerUseBuild:
   const ComputerCommandNames = @[":computer"]
 else:
   const ComputerCommandNames: seq[string] = @[]
-const CommandNames* = @[":help", ":tokens", ":clear", ":goal", ":cyber", ":model",
+when cyberneticBuild:
+  const CyberCommandNames = @[":cyber"]
+else:
+  const CyberCommandNames: seq[string] = @[]
+const CommandNames* = @[":help", ":tokens", ":clear", ":goal"] & CyberCommandNames &
+                      @[":model",
                       ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":verifier",
                       ":show", ":unshow", ":cmd", ":log", ":sessions", ":session", ":resume", ":rename", ":summarize", ":btw",
@@ -2375,7 +2380,17 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       # `startGoalTurn` so the controller kicks the mode's work off
       # immediately; the `⚑` kickoff item is the arm's whole announcement,
       # so an arm answers with no body at all.
-      let m = if name == ":cyber": cyberneticMode else: goalMode
+      let m =
+        when cyberneticBuild:
+          if name == ":cyber": cyberneticMode else: goalMode
+        else:
+          goalMode
+      when not cyberneticBuild:
+        # Compiled out of this build: the verb answers and nothing arms.
+        if name == ":cyber":
+          ok = false
+          respErr ":cyber is not compiled into this build"
+          break dispatch
       let r = modeVerbResult(m, parts, arg, forced)
       if not r.ok:
         ok = false

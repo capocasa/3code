@@ -3866,6 +3866,26 @@ const ConfigExample* = """  [settings]
 (values are Nim string literals — always wrap them in double quotes.)
 """
 
+when cyberneticBuild:
+  const CyberHelp* = """  :cyber              show the active plan (cybernetic.md in this directory)
+  :cyber TEXT         write a cybernetic.md plan skeleton and start on
+                      it at once: harness-directed checkboxes and
+                      next-step orientation in every check (retired to
+                      cybernetic-confirmed.md)
+  :cyber new TEXT     same, but bawks when a plan is already active
+  :cyber edit         revise cybernetic.md in $VISUAL/$EDITOR,
+                      creating it when missing
+  :cyber cancel       cancel the active plan (same as :cyber!; retires to
+                      cybernetic-cancelled.md)
+  :cyber! TEXT        replace an active plan and restart toward it
+  (goal and cybernetic modes are mutually exclusive: one mode, one
+  file, one verb)
+"""
+  const CyberAbbrev* = ":cy = :cyber, "
+else:
+  const CyberHelp* = ""
+  const CyberAbbrev* = ""
+
 const HelpText* = """
 3code the economical coding agent
 
@@ -3923,20 +3943,7 @@ commands:
   :goal! TEXT         replace an active goal and restart toward it
   :goal!              cancel the active goal (retires to goal-cancelled.md;
                       interrupt only skips one satisfaction check)
-  :cyber              show the active plan (cybernetic.md in this directory)
-  :cyber TEXT         write a cybernetic.md plan skeleton and start on
-                      it at once: harness-directed checkboxes and
-                      next-step orientation in every check (retired to
-                      cybernetic-confirmed.md)
-  :cyber new TEXT     same, but bawks when a plan is already active
-  :cyber edit         revise cybernetic.md in $VISUAL/$EDITOR,
-                      creating it when missing
-  :cyber cancel       cancel the active plan (same as :cyber!; retires to
-                      cybernetic-cancelled.md)
-  :cyber! TEXT        replace an active plan and restart toward it
-  (goal and cybernetic modes are mutually exclusive: one mode, one
-  file, one verb)
-  :prompt             show the active system prompt
+""" & CyberHelp & """  :prompt             show the active system prompt
   :show [N]           follow tool call N live while it runs (default: the
                       running call, else the last); dump full output when done
   :unshow             stop the live follow started by :show
@@ -3975,7 +3982,7 @@ commands:
                       per-call plugin trace (calls, verdicts, mutation diffs)
   :q :quit            exit (also Ctrl-D)
   (every command accepts its shortest unambiguous prefix: :g = :goal,
-  :cy = :cyber, :mo = :model; a trailing ! is the force marker where one
+  """ & CyberAbbrev & """:mo = :model; a trailing ! is the force marker where one
   exists)
 
 input:

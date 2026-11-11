@@ -118,50 +118,52 @@ suite "cybernetic skeleton (the :cyber writer)":
     check validatePlanBody(body) == ""
 
 suite "cybernetic mode entry":
-  test "registered as entry #2 with file, verb, retirement names":
-    check modeRegistry.len >= 2
-    let m = modeRegistry[1]
-    check m.name == "cybernetic"
-    check m.fileName == CyberFileName
-    check m.verb == ":cyber"
-    check m.confirmedName == CyberConfirmedName
-    check m.cancelledName == CyberCancelledName
+  when cyberneticBuild:
+    test "registered as entry #2 with file, verb, retirement names":
+      check modeRegistry.len >= 2
+      let m = modeRegistry[1]
+      check m.name == "cybernetic"
+      check m.fileName == CyberFileName
+      check m.verb == ":cyber"
+      check m.confirmedName == CyberConfirmedName
+      check m.cancelledName == CyberCancelledName
 
-  test "startMode arms through the skeleton and validates":
-    withModeDir proc (dir: string) =
-      check startMode(cyberneticMode, "wire the parser").ok
-      check fileExists(".3code" / "cybernetic")
-      check validatePlanBody(readFile(".3code" / "cybernetic")) == ""
-      let balk = startMode(cyberneticMode, "another")
-      check not balk.ok
-      check balk.err == ".3code/cybernetic" &
-        " is already active; use :cyber! to replace it"
-      check startMode(cyberneticMode, "replaced", force = true).ok
+    test "startMode arms through the skeleton and validates":
+      withModeDir proc (dir: string) =
+        check startMode(cyberneticMode, "wire the parser").ok
+        check fileExists(".3code" / "cybernetic")
+        check validatePlanBody(readFile(".3code" / "cybernetic")) == ""
+        let balk = startMode(cyberneticMode, "another")
+        check not balk.ok
+        check balk.err == ".3code/cybernetic" &
+          " is already active; use :cyber! to replace it"
+        check startMode(cyberneticMode, "replaced", force = true).ok
 
-  test "mutual exclusivity with the real registry entries":
-    withModeDir proc (dir: string) =
-      check startGoal("live goal").ok
-      let r = startMode(cyberneticMode, "my plan")
-      check not r.ok
-      check ".3code/goal (goal mode) is already active" in r.err
-      check ":goal!" in r.err
-      check not fileExists(CyberFileName)
-      check not fileExists(".3code" / "cybernetic")
-      check cancelGoal().ok
-      check startMode(cyberneticMode, "my plan").ok
-      let r2 = startGoal("back again")
-      check not r2.ok
-      check ".3code/cybernetic (cybernetic mode) is already active" in r2.err
+  when cyberneticBuild:
+    test "mutual exclusivity with the real registry entries":
+      withModeDir proc (dir: string) =
+        check startGoal("live goal").ok
+        let r = startMode(cyberneticMode, "my plan")
+        check not r.ok
+        check ".3code/goal (goal mode) is already active" in r.err
+        check ":goal!" in r.err
+        check not fileExists(CyberFileName)
+        check not fileExists(".3code" / "cybernetic")
+        check cancelGoal().ok
+        check startMode(cyberneticMode, "my plan").ok
+        let r2 = startGoal("back again")
+        check not r2.ok
+        check ".3code/cybernetic (cybernetic mode) is already active" in r2.err
 
-  test "retirement names are per-mode":
-    withModeDir proc (dir: string) =
-      writeFile(CyberFileName, "- [ ] x\n\n## Current state\n\ns")
-      check cancelMode(cyberneticMode).ok
-      check fileExists(CyberCancelledName)
-      writeFile(CyberFileName, "- [x] x\n\n## Current state\n\ns")
-      check completeMode(cyberneticMode)
-      check fileExists(CyberConfirmedName)
-      check not fileExists(CyberFileName)
+    test "retirement names are per-mode":
+      withModeDir proc (dir: string) =
+        writeFile(CyberFileName, "- [ ] x\n\n## Current state\n\ns")
+        check cancelMode(cyberneticMode).ok
+        check fileExists(CyberCancelledName)
+        writeFile(CyberFileName, "- [x] x\n\n## Current state\n\ns")
+        check completeMode(cyberneticMode)
+        check fileExists(CyberConfirmedName)
+        check not fileExists(CyberFileName)
 
   test "feedback message orients on the plan and states the duties":
     let body = "# P\n\n- [ ] a\n\n## Current state\n\ns"
@@ -173,20 +175,21 @@ suite "cybernetic mode entry":
     check "## Current state" in c
     check "when this turn ends" in c
 
-  test "counts hook on the descriptor":
-    let body = "# Parse plans\n\n- [x] a\n- [ ] b\n\n## Current state\n\ns"
-    check cyberneticMode.taskCounts(body) == "2 tasks, 1 done"
-    check goalMode.taskCounts("anything") == ""
+  when cyberneticBuild:
+    test "counts hook on the descriptor":
+      let body = "# Parse plans\n\n- [x] a\n- [ ] b\n\n## Current state\n\ns"
+      check cyberneticMode.taskCounts(body) == "2 tasks, 1 done"
+      check goalMode.taskCounts("anything") == ""
 
-  test "conflictingMode names a second file on disk":
-    withModeDir proc (dir: string) =
-      check noMode(conflictingMode(goalMode))
-      writeFile(CyberFileName, "- [ ] x\n\n## Current state\n\ns")
-      let other = conflictingMode(goalMode)
-      check other.name == "cybernetic"
-      let label = modeConflictLabel(goalMode, other)
-      check label.startsWith(CyberFileName & " is also on disk")
-      check ":goal!" in label and ":cyber" in label
+    test "conflictingMode names a second file on disk":
+      withModeDir proc (dir: string) =
+        check noMode(conflictingMode(goalMode))
+        writeFile(CyberFileName, "- [ ] x\n\n## Current state\n\ns")
+        let other = conflictingMode(goalMode)
+        check other.name == "cybernetic"
+        let label = modeConflictLabel(goalMode, other)
+        check label.startsWith(CyberFileName & " is also on disk")
+        check ":goal!" in label and ":cyber" in label
 
 suite "mode registry":
   test "goal mode is entry #1; activeMode walks the registry":
@@ -348,51 +351,53 @@ s
       {"role": "user", "content": "now"}]
     check not turnHadToolActions(stale)
 
-  test "structureGuard fires on a broken plan with restore instructions":
-    let ok = "- [ ] a\n\n## Current state\n\ns"
-    check cyberneticMode.structureGuard(ok) == ""
-    let lost = cyberneticMode.structureGuard("# all prose now")
-    check lost.startsWith("Plan structure lost:")
-    check "at least one task item" in lost
-    check "mode stays armed" in lost
-    # Current state gone, tasks still there: also guarded.
-    check "Current state section" in
-      cyberneticMode.structureGuard("- [ ] a\n")
-    # goal mode has no guard.
-    check goalMode.structureGuard("anything at all") == ""
+  when cyberneticBuild:
+    test "structureGuard fires on a broken plan with restore instructions":
+      let ok = "- [ ] a\n\n## Current state\n\ns"
+      check cyberneticMode.structureGuard(ok) == ""
+      let lost = cyberneticMode.structureGuard("# all prose now")
+      check lost.startsWith("Plan structure lost:")
+      check "at least one task item" in lost
+      check "mode stays armed" in lost
+      # Current state gone, tasks still there: also guarded.
+      check "Current state section" in
+        cyberneticMode.structureGuard("- [ ] a\n")
+      # goal mode has no guard.
+      check goalMode.structureGuard("anything at all") == ""
 
-  test "updateNote: only when work happened and the file is byte-identical":
-    const body = "- [ ] a\n\n## Current state\n\ns"
-    let note = cyberneticMode.updateNote(true, body, body)
-    check note.startsWith("Work happened this turn but cybernetic.md is unchanged")
-    check "## Current state" in note
-    check cyberneticMode.updateNote(false, body, body) == ""
-    check cyberneticMode.updateNote(true, body, body & "x") == ""
-    check cyberneticMode.updateNote(true, "", "") == ""
-    check goalMode.updateNote(true, body, body) == ""
+    test "updateNote: only when work happened and the file is byte-identical":
+      const body = "- [ ] a\n\n## Current state\n\ns"
+      let note = cyberneticMode.updateNote(true, body, body)
+      check note.startsWith("Work happened this turn but cybernetic.md is unchanged")
+      check "## Current state" in note
+      check cyberneticMode.updateNote(false, body, body) == ""
+      check cyberneticMode.updateNote(true, body, body & "x") == ""
+      check cyberneticMode.updateNote(true, "", "") == ""
+      check goalMode.updateNote(true, body, body) == ""
 
-  test "cybernetic runGoalCheck composes step-truth preamble and plan feed":
-    let prof = Profile(name: "stub", family: "glm", model: "stub-model")
-    goalCheckHook = proc (p: Profile, preamble, prompt: string):
-        tuple[ok: bool, text: string, err: string] =
-      check preamble == CyberVerifierPreamble
-      check "name the first box that lies" in preamble
-      # The verdict contract is still the preamble's final instruction.
-      check preamble.strip.endsWith("what to do\nnext>.")
-      check CyberFileName in prompt
-      check "Plan task list (harness-parsed" in prompt
-      check "newly checked: a" in prompt
-      check "evidence line" in prompt
-      (true, "VERDICT: SATISFIED", "")
-    defer: goalCheckHook = nil
-    # A hermetic cwd: buildGoalDiff captures the working tree, and this
-    # repo's own diff would leak into the content assertions.
-    withModeDir proc (dir: string) =
-      let pre = "- [ ] a\n\n## Current state\n\ns"
-      let post = "- [x] a\n\n## Current state\n\ns"
-      let r = runGoalCheck(prof, cyberneticMode, post, "evidence line", pre)
-      check r.ok
-      check r.verdict.kind == gvkSatisfied
+  when cyberneticBuild:
+    test "cybernetic runGoalCheck composes step-truth preamble and plan feed":
+      let prof = Profile(name: "stub", family: "glm", model: "stub-model")
+      goalCheckHook = proc (p: Profile, preamble, prompt: string):
+          tuple[ok: bool, text: string, err: string] =
+        check preamble == CyberVerifierPreamble
+        check "name the first box that lies" in preamble
+        # The verdict contract is still the preamble's final instruction.
+        check preamble.strip.endsWith("what to do\nnext>.")
+        check CyberFileName in prompt
+        check "Plan task list (harness-parsed" in prompt
+        check "newly checked: a" in prompt
+        check "evidence line" in prompt
+        (true, "VERDICT: SATISFIED", "")
+      defer: goalCheckHook = nil
+      # A hermetic cwd: buildGoalDiff captures the working tree, and this
+      # repo's own diff would leak into the content assertions.
+      withModeDir proc (dir: string) =
+        let pre = "- [ ] a\n\n## Current state\n\ns"
+        let post = "- [x] a\n\n## Current state\n\ns"
+        let r = runGoalCheck(prof, cyberneticMode, post, "evidence line", pre)
+        check r.ok
+        check r.verdict.kind == gvkSatisfied
 
   test "goal mode runGoalCheck keeps the plain preamble, no feed":
     let prof = Profile(name: "stub", family: "glm", model: "stub-model")
@@ -447,7 +452,8 @@ Phase 3 merged. Rollover next.
     check "keep ## Current state current" in c
 
   test "rollover wiring: cybernetic yes, goal nil":
-    check cyberneticMode.rolloverNote != nil
+    when cyberneticBuild:
+      check cyberneticMode.rolloverNote != nil
     check goalMode.rolloverNote == nil
 
 suite "verifier meets the session change log":
@@ -472,6 +478,9 @@ suite "verifier meets the session change log":
         body: "SESSION_LOG_LINE\n"), cache)
       # A git-tracked change too, so both sections are present.
       writeFile("base.txt", "changed\n")
-      let r = runGoalCheck(prof, cyberneticMode,
-        "- [ ] a\n\n## Current state\n\ns", "evidence", "", cache)
+      when cyberneticBuild:
+        let r = runGoalCheck(prof, cyberneticMode,
+          "- [ ] a\n\n## Current state\n\ns", "evidence", "", cache)
+      else:
+        let r = runGoalCheck(prof, goalMode, "the goal", "evidence", "", cache)
       check r.ok

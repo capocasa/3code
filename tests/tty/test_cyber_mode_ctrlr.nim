@@ -13,6 +13,11 @@ import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
 
+when not defined(cybernetic):
+  # The release kill-switch compiles cybernetic mode out: no verb, no
+  # registry entry, nothing for this drive to exercise.
+  quit(0)
+
 proc newFixture(name: string): string =
   result = getCurrentDir() / "tests/testdata/output/tty" / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)

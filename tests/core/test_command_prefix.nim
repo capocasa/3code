@@ -133,6 +133,19 @@ suite "goal command verbs":
     check not modeArmWrite(":tokens")
     check not modeArmWrite("plain text")
 
+  test ":cyber follows the build flag":
+    withCommandDir:
+      let r = handleCommandResult(":cyber ship the plan", messages, session,
+                                  prof, editor)
+      check r.recognized
+      when cyberneticBuild:
+        check r.ok and r.startGoalTurn
+        check readFile(".3code" / "cybernetic").startsWith("# ship the plan")
+      else:
+        check not r.ok
+        check "not compiled into this build" in r.body
+        check not fileExists(".3code" / "cybernetic")
+
   test ":goal TEXT arms silently; the kickoff item is the announcement":
     withCommandDir:
       let r = handleCommandResult(":goal make it so", messages, session,

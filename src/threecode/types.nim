@@ -35,6 +35,12 @@ const computerUseBuild* = defined(computerUse)
   ## Temporary release kill-switch: computer use only compiles in with
   ## `-d:computerUse`. Without it the config line and `:computer on` are
   ## inert (the var stays false), so packaged builds ship without it.
+const cyberneticBuild* = defined(cybernetic)
+  ## Temporary release kill-switch: cybernetic mode (the `cybernetic.md`
+  ## harness mode, verb `:cyber`) only compiles in with `-d:cybernetic`.
+  ## Without it the mode never enters the registry, the verb answers
+  ## "not compiled in", and a `cybernetic.md` on disk stays inert, so
+  ## packaged builds ship without it.
 var computerUseEnabled*: bool = false
   ## Session-scoped: `:computer on` or `[settings] computer = on`
   ## (tests/CLI). Never written back to the config by the toggle —

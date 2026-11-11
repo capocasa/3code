@@ -683,36 +683,40 @@ let goalMode* = ModeDesc(
 
 modeRegistry.add goalMode
 
-let cyberneticMode* = ModeDesc(
-  name: "cybernetic",
-  fileName: CyberFileName,
-  verb: ":cyber",
-  confirmedName: CyberConfirmedName,
-  cancelledName: CyberCancelledName,
-  givenUpName: CyberGivenUpName,
-  validate: validatePlanBody,
-  composeBody: cyberSkeleton,
-  kickoffMessage: cyberKickoffMessage,
-  feedbackMessage: cyberFeedbackMessage,
-  taskCounts: proc (body: string): string = planCountsLine(parsePlan(body)),
-  structureGuard: (proc (post: string): string =
-    let err = validatePlanBody(post)
-    if err.len == 0: return ""
-    result = "Plan structure lost: " & err & ". Restore the plan file now - " &
-      "the task list and the ## Current state section, keeping every " &
-      "box already earned. The mode stays armed; the next satisfaction " &
-      "check judges the restored plan."),
-  updateNote: (proc (worked: bool; pre, post: string): string =
-    if worked and post.len > 0 and pre == post:
-      result = "Work happened this turn but " & CyberFileName &
-        " is unchanged. Update the plan to match reality: check off the " &
-        "tasks this turn finished, and record what the step taught " &
-        "under ## Current state."),
-  verifierFeed: planFeedSection,
-  judgeStepTruth: true,
-  rolloverNote: cyberRolloverMessage)
+# Entry #2, behind the release kill-switch: without `-d:cybernetic` the
+# mode never enters the registry, so the trigger file is inert, the
+# conflicting-mode walk ignores it, and only `:goal` exists.
+when cyberneticBuild:
+  let cyberneticMode* = ModeDesc(
+    name: "cybernetic",
+    fileName: CyberFileName,
+    verb: ":cyber",
+    confirmedName: CyberConfirmedName,
+    cancelledName: CyberCancelledName,
+    givenUpName: CyberGivenUpName,
+    validate: validatePlanBody,
+    composeBody: cyberSkeleton,
+    kickoffMessage: cyberKickoffMessage,
+    feedbackMessage: cyberFeedbackMessage,
+    taskCounts: proc (body: string): string = planCountsLine(parsePlan(body)),
+    structureGuard: (proc (post: string): string =
+      let err = validatePlanBody(post)
+      if err.len == 0: return ""
+      result = "Plan structure lost: " & err & ". Restore the plan file now - " &
+        "the task list and the ## Current state section, keeping every " &
+        "box already earned. The mode stays armed; the next satisfaction " &
+        "check judges the restored plan."),
+    updateNote: (proc (worked: bool; pre, post: string): string =
+      if worked and post.len > 0 and pre == post:
+        result = "Work happened this turn but " & CyberFileName &
+          " is unchanged. Update the plan to match reality: check off the " &
+          "tasks this turn finished, and record what the step taught " &
+          "under ## Current state."),
+    verifierFeed: planFeedSection,
+    judgeStepTruth: true,
+    rolloverNote: cyberRolloverMessage)
 
-modeRegistry.add cyberneticMode
+  modeRegistry.add cyberneticMode
 
 proc harnessNote*(content: string): JsonNode =
   ## A harness-autosent continuation carrying fully-formed content (the
