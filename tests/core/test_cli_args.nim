@@ -29,9 +29,18 @@ suite "cli argument validation":
     # A positional arg is no longer a syntax error with --resume; it is the
     # prompt to run once the session is resumed. A bogus id still fails,
     # but as a config error (session not found), not a usage error.
-    let r = run(["--resume=does-not-exist", "ignored text"])
-    check r.code == 3  # ExitConfig
-    check "session not found" in r.o
+    # Hermetic cwd+XDG: the running-3code dir-lock check precedes session
+    # lookup, so a developer's live 3code in the repo root would win here.
+    var tmp = getTempDir() / ("3code-cli-r-pos-" & $getCurrentProcessId() & "deny" &
+                              $epochTime().int64)
+    createDir(tmp)
+    let env = newStringTable({"XDG_DATA_HOME": tmp, "XDG_CONFIG_HOME": tmp})
+    let (outp, code) = execCmdEx(
+      binPath().quoteShell & " --resume=does-not-exist ignored text",
+      {poStdErrToStdOut, poUsePath, poDaemon}, env, tmp)
+    removeDir(tmp)
+    check code == 3  # ExitConfig
+    check "session not found" in outp.strip()
 
   test "--interactive accepts a positional prompt":
     # --interactive <prompt> runs the prompt then drops into the REPL; it is
@@ -294,6 +303,39 @@ suite "cli resume value forms":
       let r = runIn(flags)
       check r.code == 3
       check "session not found: nope" in r.o
+
+  test "-r reports a running 3code before session availability":
+    # A live holder of the dir lock wins even when nothing is saved yet:
+    # with the seeded sessions hidden, -r must name the holder, not die
+    # "no saved sessions".
+    let sessionsDir = tmp / "d" / "3code" / "sessions"
+    moveFile(sessionsDir, sessionsDir & "-hidden")
+    let lp = dirLockPathFor(tmp)
+    createDir(parentDir(lp))
+    writeFile(lp, $getCurrentProcessId())
+    let r = runIn("-r")
+    moveFile(sessionsDir & "-hidden", sessionsDir)
+    try: removeFile(lp) except OSError: discard
+    check r.code == 3  # ExitConfig
+    check "already open" in r.o
+    check "no saved sessions" notin r.o
+
+  test "-r with a stale dir lock still reaches the session check":
+    # A dead owner pid does not count as running; the probe passes and
+    # session lookup runs (acquireDirLock reclaims the stale lock later).
+    let sleepCmd = when defined(windows): "cmd /c exit 0" else: "true"
+    var p = startProcess(sleepCmd, options = {poEvalCommand})
+    let deadPid = p.processID()
+    discard p.waitForExit()
+    p.close()
+    let lp = dirLockPathFor(tmp)
+    createDir(parentDir(lp))
+    writeFile(lp, $deadPid)
+    let r = runIn("-r nope")
+    try: removeFile(lp) except OSError: discard
+    check r.code == 3
+    check "session not found: nope" in r.o
+    check "already open" notin r.o
 
   test "-c attached/space/=/: forms are equivalent":
     # The same mechanism serves every value-taking option; -c has a

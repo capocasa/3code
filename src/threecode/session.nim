@@ -492,6 +492,23 @@ proc lockHeldDirError*(cwd, lockPath, owner, sessionId: string): ref DirLocked =
     " If no 3code is running, the lock is stale and the pid check failed —" &
     " delete it: " & lockPath)
 
+proc probeDirLockHeld*(cwd: string): string =
+  ## Advisory, non-acquiring check for a live holder of `cwd`'s dir lock:
+  ## returns the DirLocked message `acquireDirLock` would die with, or ""
+  ## when the directory is free. A stale lock (dead or unparseable owner
+  ## pid) never counts, exactly as in `acquireDirLock`. `-r` startup runs
+  ## this before session lookup so a running 3code is reported before
+  ## "no saved sessions"; enforcement itself stays in `acquireDirLock`.
+  if cwd == "": return
+  let lockPath = dirLockPathFor(cwd)
+  if not fileExists(lockPath): return
+  let owner = readOwnerPid(lockPath)
+  var ownerPid = -1
+  try: ownerPid = parseInt(owner) except ValueError: discard
+  if ownerPid > 0 and pidAlive(ownerPid):
+    result = lockHeldDirError(cwd, lockPath, owner,
+                              readOwnerSessionId(lockPath)).msg
+
 proc tryCreateDirLockFile(lockPath: string; pid: string): int =
   ## Atomically create `lockPath` and write `pid` into it. Returns 0 on
   ## success, -1 if the file already exists (collision). Any other failure
