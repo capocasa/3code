@@ -834,6 +834,47 @@ proc clearSubmittedReceiptState() =
   if restingLabel.len > 0:
     emitFatPromptEvent setBarEvent(restingLabel)
 
+proc accountVerifierUsage*(session: var Session; messages: JsonNode;
+                           usage: Usage; window: int) =
+  ## The verifier side call's tokens are the session's spend: account
+  ## for them exactly like a main call's — the same `+=` the turn loop
+  ## runs per model call, persisted with the session — then add them
+  ## onto the token bar's total on top of the turn's own last call, so
+  ## the bar the turn rests on includes the check instead of being
+  ## replaced by the check's own numbers (the side call paints no bar;
+  ## see hookFinalUsage's sideCallMode gate). A check that spent nothing
+  ## (failed call, test seam) changes nothing, and the check's prompt
+  ## size never reaches `lastPromptTokens`: its conversation is not the
+  ## session's, so the next main call's context gauge stays honest.
+  if usage.totalTokens <= 0: return
+  session.usage.promptTokens += usage.promptTokens
+  session.usage.completionTokens += usage.completionTokens
+  session.usage.totalTokens += usage.totalTokens
+  session.usage.cachedTokens += usage.cachedTokens
+  saveSession(session, messages)
+  let main = lastAssistantUsage(messages)
+  if main.totalTokens <= 0: return
+  let combined = Usage(
+    promptTokens: main.promptTokens + usage.promptTokens,
+    completionTokens: main.completionTokens + usage.completionTokens,
+    totalTokens: main.totalTokens + usage.totalTokens,
+    cachedTokens: main.cachedTokens + usage.cachedTokens)
+  let label = tokenLineLabel(combined, window)
+  if label.len == 0: return
+  emitFatPromptEvent setBarEvent(label)
+  emitFatPromptEvent setRestingLabelEvent(contextLabel(
+    combined.promptTokens, window))
+  # The turn's last paint (the verdict step's commit) still shows the
+  # pre-check bar, and the boundary's end path finalizes state without
+  # repainting chrome - paint the combined bar here so the resting row
+  # already carries the check's tokens instead of waiting for the next
+  # keystroke to redraw the footer.
+  if liveEditorFooterAnchored():
+    termengine.renderFooter(footerFrame(fatPromptState),
+                            inputThreadRunning, inputEditor)
+  else:
+    termengine.syncWrite(barFooterBytes(label))
+
 proc clearSubmittedTickerState() =
   emitFatPromptEvent clearTickerEvent()
 
@@ -1912,9 +1953,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # nothing before or after it.
       let check = runGoalCheck(p, mode, modeText, buildGoalEvidence(messages),
                                session.modeSnapshot, session.readCache)
-      # The side call ran the bar/spinner hooks again; its usage is not
-      # this turn's and must not leak into the next receipt.
-      emitFatPromptEvent clearPendingHintEvent()
+      # The check's tokens are real spend on the session's account:
+      # ledger them and add them onto the token bar's total — the bar
+      # must never end up holding the check's numbers in place of the
+      # turn's.
+      accountVerifierUsage(session, messages, check.usage,
+                           contextWindowFor(p))
       if isInterrupted():
         onTurnInterrupted()
         turnEnded = true

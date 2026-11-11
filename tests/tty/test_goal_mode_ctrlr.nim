@@ -294,6 +294,12 @@ suite ":retry and goal mode (interactive)":
     tty.expectInHistory "checked the tree."
     tty.expectNeverInHistory "VERDICT: SATISFIED"
     tty.expectInHistory "\u2713"
+    # The check's tokens are accounted like a main call's: the resting
+    # bar adds them onto the turn's own numbers (stub replies carry
+    # 5 up / 2 down each, so turn + check = 10/4) instead of being
+    # replaced by the check's 5/2.
+    tty.drain(200)
+    tty.expectInHistory "↑10  ↓4"
     check fileExists(root / "run" / ".3code" / "achieved")
     check not fileExists(root / "run" / ".3code" / "goal")
     # Submit the buffer that lived through the check: the echoed prompt

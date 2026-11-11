@@ -68,6 +68,10 @@ type
     ok*: bool      ## the side call itself succeeded
     err*: string   ## failure reason when not ok
     verdict*: GoalVerdict
+    usage*: Usage  ## the side call's token usage, for the caller to
+                   ## account exactly like a main call's (ledger, token
+                   ## bar) — zero when the call failed or ran through
+                   ## the test seam
 
   GoalStep* = object
     ## One visible verifier step. The toolless verifier produces exactly
@@ -997,8 +1001,8 @@ proc emitGoalStep*(text: string; verdict = gvkNone) =
   if goalStepHook != nil and (text.strip.len > 0 or verdict != gvkNone):
     goalStepHook(GoalStep(prose: text, verdict: verdict))
 
-proc runVerifierSideCall(p: Profile, preamble, prompt: string):
-    tuple[ok: bool, text: string, err: string] =
+proc runVerifierSideCall(p: Profile, preamble, prompt: string;
+    usage: var Usage): tuple[ok: bool, text: string, err: string] =
   ## Toolless verifier: a fresh conversation (its own message list, the
   ## judge preamble, an empty roster so the provider offers nothing),
   ## one model call, no session mutation. Orientation is the harness's
@@ -1011,7 +1015,6 @@ proc runVerifierSideCall(p: Profile, preamble, prompt: string):
   var convo = newJArray()
   convo.add %*{"role": "system", "content": preamble}
   convo.add %*{"role": "user", "content": prompt}
-  var usage: Usage
   var msg: JsonNode
   try:
     msg = callModel(p, convo, usage, 0, toolsOverride = newJArray())
@@ -1145,7 +1148,7 @@ proc runDecisionCheck(p: Profile; m: ModeDesc; modeText, evidence,
     if v.kind == gvkNone and line.len == 0:
       line = "no readable decision answers; retrying next turn"
     emitGoalStep(line, v.kind)
-    GoalCheckResult(ok: true, verdict: v)
+    GoalCheckResult(ok: true, verdict: v, usage: usage)
   except ApiError as e:
     GoalCheckResult(ok: false, err: e.msg)
 
@@ -1191,8 +1194,13 @@ proc runGoalCheck*(p: Profile; m: ModeDesc; modeText, evidence,
   let prompt = verifierPrompt(modeText, evidence, buildGoalDiff(),
                               m.fileName, m.verifierFeed(preSnapshot, modeText),
                               buildSessionDiff(cache))
-  let call = if goalCheckHook != nil: goalCheckHook else: runVerifierSideCall
-  let (ok, text, err) = call(vp, preamble, prompt)
+  # The hook is the providerless test seam (no wire, no usage); the real
+  # side call fills `usage` so the caller can account the check's tokens
+  # exactly like a main call's.
+  var usage: Usage
+  let (ok, text, err) =
+    if goalCheckHook != nil: goalCheckHook(vp, preamble, prompt)
+    else: runVerifierSideCall(vp, preamble, prompt, usage)
   if not ok:
     return GoalCheckResult(ok: false, err: err)
-  GoalCheckResult(ok: true, verdict: parseVerdict(text))
+  GoalCheckResult(ok: true, verdict: parseVerdict(text), usage: usage)

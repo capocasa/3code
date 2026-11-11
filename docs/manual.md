@@ -1324,11 +1324,12 @@ with the verifier's feedback. Satisfied, the harness renames the file to
 `achieved.md` (the record of the run) and idles. The check has no
 tools and no rounds: orientation is the harness's job, so the check is one
 model call. And it shows its work: the verifier's reply lands in scrollback
-as a dim quote block of its own — a vertical rule down the left, the
-verdict spoken by the leading icon alone — with the verdict line stripped:
+as a dim quote block of its own — a solid vertical rule down the left,
+the verdict spoken by the leading icon alone — with the verdict line
+stripped:
 
-    ✓ | this is the
-      | verdict text
+    ✓ │ this is the
+      │ verdict text
 
 A green `✓` when the goal is satisfied, a red `✗` when it is not. Nothing
 the harness runs is ever silent.

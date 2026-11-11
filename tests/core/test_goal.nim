@@ -11,6 +11,8 @@ import threecode/util except dumpIssue
 import threecode/api except callModel
 import threecode/session
 import threecode/types
+import threecode/turns
+import threecode/fatprompt
 
 proc sh(cmd: string): bool =
   execCmdEx(cmd).exitCode == 0
@@ -454,15 +456,17 @@ suite "verifier steps in scrollback":
   test "the check is a dim quote block led by the verdict icon":
     # Only the icon carries the verdict color; the rule and the prose
     # sit in the dim tier. The rule is continuous across wrapped rows,
-    # aligned under the icon:
-    #   ✓ | this is the
-    #     | verdict text
+    # aligned under the icon, and it is a solid box-drawing line, never
+    # a punctuation `|`:
+    #   ✓ │ this is the
+    #     │ verdict text
     let ok = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkSatisfied))
-    check ok == "\x1b[32m" & "✓" & Reset & " " & GreyFg & "| checked." &
+    check ok == "\x1b[32m" & "✓" & Reset & " " & GreyFg & "│ checked." &
       Reset & "\r\n"
     check "\x1b[31m" notin ok
+    check "|" notin ok
     let no = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkFeedback))
-    check no == "\x1b[31m" & "✗" & Reset & " " & GreyFg & "| checked." &
+    check no == "\x1b[31m" & "✗" & Reset & " " & GreyFg & "│ checked." &
       Reset & "\r\n"
     check "\x1b[32m" notin no
     for b in [ok, no]:
@@ -470,16 +474,17 @@ suite "verifier steps in scrollback":
 
   test "wrapped rows keep one continuous rule under the icon":
     # A long prose wraps; every row after the first indents two spaces
-    # so its `|` sits exactly under the first row's rule, and the dim
+    # so its `│` sits exactly under the first row's rule, and the dim
     # tier spans rule and text alike.
     let words = repeat("word ", 60)
     let b = goalStepBytes(GoalStep(prose: words, verdict: gvkSatisfied))
     let rows = b.split("\r\n").filterIt(it.len > 0)
     check rows.len > 1
-    check rows[0].startsWith("\x1b[32m" & "✓" & Reset & " " & GreyFg & "| ")
+    check rows[0].startsWith("\x1b[32m" & "✓" & Reset & " " & GreyFg & "│ ")
     for row in rows[1 ..^ 1]:
-      check row.startsWith("  " & GreyFg & "| ")
+      check row.startsWith("  " & GreyFg & "│ ")
       check "\x1b[32m" notin row
+      check "|" notin row
     # A note with no verdict reads as not-yet: red ✗, never a green ✓.
     let note = goalStepBytes(GoalStep(prose: "verifier off"))
     check "\x1b[31m✗" in note
@@ -498,3 +503,54 @@ suite "verifier steps in scrollback":
       "\x1b[32m" & "✓" & Reset
     check goalStepBytes(GoalStep(prose: "", verdict: gvkFeedback)) ==
       "\x1b[31m" & "✗" & Reset
+
+suite "verifier token accounting":
+  test "check tokens add to the ledger and the bar, never replace them":
+    var session: Session
+    session.savePath = ""
+    # The turn's own calls are already ledgered (100/20) and the last
+    # assistant message carries its inline usage; the check then spends
+    # 30 more in, 5 more out.
+    session.usage = Usage(promptTokens: 100, completionTokens: 20,
+      totalTokens: 120, cachedTokens: 0)
+    var messages = %*[
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "done",
+       "usage": {"promptTokens": 100, "completionTokens": 20,
+                  "totalTokens": 120, "cachedTokens": 0}}]
+    accountVerifierUsage(session, messages,
+      Usage(promptTokens: 30, completionTokens: 5, totalTokens: 35), 1_000)
+    # The ledger gets the same += a main call's usage gets.
+    check session.usage.promptTokens == 130
+    check session.usage.completionTokens == 25
+    check session.usage.totalTokens == 155
+    # The resting bar carries the turn's numbers with the check's added
+    # on - not the check's numbers in place of them.
+    check fatPromptState.footer.barLabel ==
+      contextLabel(130, 1_000) & "  ↑130  ↓25"
+    check fatPromptState.footer.restingLabel == contextLabel(130, 1_000)
+    # The check's prompt size never reaches the next call's gauge.
+    check session.lastPromptTokens == 0
+
+  test "a check that spent nothing changes nothing":
+    var session: Session
+    session.savePath = ""
+    session.usage = Usage(promptTokens: 100, completionTokens: 20,
+      totalTokens: 120)
+    var messages = %*[{"role": "assistant", "content": "done",
+      "usage": {"promptTokens": 100, "completionTokens": 20,
+                 "totalTokens": 120}}]
+    emitFatPromptEvent setBarEvent("○ 10%")
+    accountVerifierUsage(session, messages, Usage(), 1_000)
+    check session.usage.totalTokens == 120
+    check fatPromptState.footer.barLabel == "○ 10%"
+
+  test "no assistant usage on the wire means ledger-only accounting":
+    var session: Session
+    session.savePath = ""
+    var messages = %*[{"role": "user", "content": "go"}]
+    emitFatPromptEvent clearBarEvent()
+    accountVerifierUsage(session, messages,
+      Usage(promptTokens: 30, completionTokens: 5, totalTokens: 35), 1_000)
+    check session.usage.totalTokens == 35
+    check fatPromptState.footer.barLabel == ""
