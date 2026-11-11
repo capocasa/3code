@@ -46,16 +46,17 @@ suite "streamexec: basic streaming":
     # and multi-line tests above.
     if findExe("python3").len == 0:
       skip()
-    var lines: seq[string]
-    let act = Action(kind: akBash,
-      body: "python3 -c \"print('x' * 200000, end='')\"")
-    let (rawOut, code, _) = runStreamingBash(act, nil,
-      proc(line: string) = lines.add(line))
-    check code == 0
-    check rawOut.len == 200001
-    check rawOut == repeat('x', 200000) & "\n"
-    check lines.len == 1
-    check lines[0] == repeat('x', 200000)
+    else:
+      var lines: seq[string]
+      let act = Action(kind: akBash,
+        body: "python3 -c \"print('x' * 200000, end='')\"")
+      let (rawOut, code, _) = runStreamingBash(act, nil,
+        proc(line: string) = lines.add(line))
+      check code == 0
+      check rawOut.len == 200001
+      check rawOut == repeat('x', 200000) & "\n"
+      check lines.len == 1
+      check lines[0] == repeat('x', 200000)
 
   test "preserves exit code":
     let act = Action(kind: akBash, body: "exit 42")
