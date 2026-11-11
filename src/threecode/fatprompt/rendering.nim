@@ -141,6 +141,7 @@ type
     idx*: int
     maxLines*: int
     committed*: int   # lines already flowed to scrollback by live follow
+    icon*: string     # command-row override; empty = the rotating $ ticker
 
   FrameModel* = object
     ## Single source of truth for what the GUI animation thread paints.

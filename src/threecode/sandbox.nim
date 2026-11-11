@@ -834,11 +834,12 @@ proc askCoveredPath*(rawPath: string): bool =
 proc askRuleRoot*(rawPath: string): string =
   ## The ask rule root that denies `rawPath`: the last `ask` path rule
   ## covering the canonical path (last-match-wins, like checkPath).
-  ## Grants must target the root, not the denied file: on Linux an ask
-  ## DIRECTORY under an allowed root is enforced with a mount mask over
-  ## the whole subtree, and no subpath allow can pierce a mask, so the
-  ## narrowest grant that can actually take effect is the root itself.
-  ## Empty when nothing covers the path.
+  ## This is also the (f) folder offer's target when the rule names a
+  ## directory: on Linux an ask DIRECTORY under an allowed root is
+  ## enforced with a mount mask over the whole subtree, and no subpath
+  ## allow can pierce a mask, so a grant on the root itself is the
+  ## narrowest one that lifts the fence. Empty when nothing covers the
+  ## path.
   let resolved = resolveRawPath(rawPath)
   if resolved.len == 0: return ""
   for r in canonicalRules(current):
@@ -894,15 +895,23 @@ proc deniedAskPath*(cmd, rawOut: string): string =
 proc grantAskAllow*(target: string): bool =
   ## Persist `allow <target>` into the active policy file and reload, so
   ## the grant outlives the session and the retried bash child (which
-  ## re-reads the file at launch) enforces it. Unlike the `:sandbox`
-  ## verbs this appends at the end on purpose: the grant must win over
-  ## any rule, including a deny written after the ask rule it replaces,
-  ## or the approved command would just fail again. Ask rules only ever
-  ## come from a policy file, so a missing file here is the can't-happen
-  ## guard; false means "no grant, treat as denied".
+  ## re-reads the file at launch) enforces it. When the ask rule that
+  ## caused the denial names the granted target exactly (the denied
+  ## path for the (a) answer, the whole folder for the (f) answer),
+  ## that rule flips to `allow` in its own line position - rewriting
+  ## what the user wrote, not re-stacking it. Any other covering rule
+  ## keeps its meaning, so the allow appends at the end, where
+  ## last-match-wins puts it above the ask rule that denied the path.
+  ## Ask rules only ever come from a policy file, so a missing file
+  ## here is the can't-happen guard; false means "no grant, treat as
+  ## denied".
   let f = activePolicyPath(getCurrentDir())
   if not fileExists(f): return false
-  result = sandwall.appendRule(f, target, akWritable, getCurrentDir())
+  let resolved = resolveRawPath(target)
+  let exact = resolved.len > 0 and askRuleRoot(resolved) == resolved
+  result =
+    if exact: appendRule(f, target, akWritable)
+    else: sandwall.appendRule(f, target, akWritable, getCurrentDir())
   if result:
     current = loadPolicy(getCurrentDir())
     when defined(posix):
