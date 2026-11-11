@@ -3954,8 +3954,9 @@ commands:
   :btw QUESTION       ask the model a side question about this conversation;
                       the answer shows here and never enters the context
   :version            show the running 3code version
-  :sandbox (:sb)      show the active filesystem sandbox rules
-  :sandbox show       (same)
+  :sandbox (:sb)      show whether the sandbox is on (adds the active
+                      policy file when it enforces)
+  :sandbox show       that state line, then the active sandbox rules
   :sandbox on|off     toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T    add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)

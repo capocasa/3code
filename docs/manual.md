@@ -1902,9 +1902,11 @@ rule would silently change what falls under it (the last matching rule wins).
 live: the fence lifts (ask approvals included) and the wall proxy stops. The
 setting is stored as `sandbox = off` in `[settings]`. `:sandbox on` restores
 enforcement just as live: the running session arms with the same steps a
-launch uses, so bash and the file tools fence immediately and bare `:sandbox`
-dumps the armed rules. A command already running keeps its fence until it
-exits; there is no un-fencing a live process. The one-shot equivalent is the
+launch uses, so bash and the file tools fence immediately. Bare `:sandbox`
+names the state (off, armed with the governing policy file, or on but not
+yet armed); `:sandbox show` prints that line and then the rules. A command
+already running keeps its fence until it exits; there is no un-fencing a
+live process. The one-shot equivalent is the
 `--no-sandbox` flag, and `3code sandbox --policy FILE restrict -- CMD` runs a
 single command under a policy without starting the REPL.
 

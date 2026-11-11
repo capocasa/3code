@@ -1851,6 +1851,18 @@ proc cmdSandboxSettingSelect(target: string): string =
   sandbox.disarm()
   result = hintLnS("sandbox: off  (this session runs unconfined)")
 
+proc sandboxStatusLine(): string =
+  ## One-line enabled/disabled state for bare `:sandbox`: the setting,
+  ## whether the running session enforces, and the governing policy
+  ## file when it does. The rules themselves stay on `:sandbox show`.
+  if not sandboxEnabled:
+    "sandbox: off  (run unconfined)"
+  elif not sandbox.active:
+    "sandbox: on  (session not armed; :sandbox on arms it)"
+  else:
+    "sandbox: on  (this session enforces; policy: " &
+      sandbox.activePolicyPath(getCurrentDir()) & ")"
+
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
   for c in CommandNames:
@@ -2473,24 +2485,24 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         resp "usage: :plugin [list|debug on|off]  (also :plugins)"
     of ":sandbox", ":sb":
-      # `:sandbox show` (or bare) dumps the rules while the session
-      # enforces, else names the setting state; allow/readonly/deny
+      # Bare `:sandbox` names the enabled state; `:sandbox show` leads
+      # with that state and then dumps the rules; allow/readonly/deny
       # append a line and reload. The path arg is written verbatim so
       # relative paths stay portable in the file.
-      let verb = if parts.len == 0: "show" else: parts[0]
+      let verb = if parts.len == 0: "status" else: parts[0]
       case verb
+      of "status":
+        resp sandboxStatusLine()
       of "show":
         # `active` means this session enforces, `sandboxEnabled` is the
         # persisted setting, and a mid-session `:sandbox on` arms live.
         # Both on but the session unarmed only happens on a provider-stub
         # boot (the harness skips launch arming); name it instead of a
         # bare "not active" that reads like the setting did not take.
-        if not sandboxEnabled:
-          resp "sandbox: off  (run unconfined)"
-        elif not sandbox.active:
-          resp "sandbox: on  (session not armed; :sandbox on arms it)"
-        else:
-          resp sandbox.renderSandbox(sandbox.current)
+        var shown = sandboxStatusLine()
+        if sandboxEnabled and sandbox.active:
+          shown.add "\n" & sandbox.renderSandbox(sandbox.current)
+        resp shown
       of "on", "off":
         body.add cmdSandboxSettingSelect(verb)
       of "edit":

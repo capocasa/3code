@@ -4436,22 +4436,27 @@ max-tokens = "8192"
     tty.expectAlive()  # must not exit after :model
 
     # --- :sandbox on arms enforcement for the running session (no
-    # restart needed); a bare :sandbox then dumps the armed rules instead
-    # of the old bare "sandbox not active", which read like the setting
-    # did not take. The session boots with the setting off (fixture
+    # restart needed). The session boots with the setting off (fixture
     # config), matching a session launched before the sandbox was ever
-    # enabled. deny / and allow ./ are in every platform's default
-    # policy, so the armed dump asserts the same lines on all of them. ---
+    # enabled. Bare :sandbox names the enabled state; :sandbox show
+    # leads with the same line and then dumps the rules. The fixture
+    # policy pins deny / and allow ./, so the armed dump asserts the
+    # same lines on all platforms. ---
     tty.send ":sandbox on"
     tty.send "\n"
     tty.expectInHistory "sandbox: on  (this session enforces"
     tty.expectNeverInHistory "enforcement starts at the next launch"
     tty.drain(300)
+    let armedCount = tty.countInHistory("sandbox: on  (this session enforces")
     tty.send ":sandbox"
+    tty.send "\n"
+    tty.expectNewInHistory "sandbox: on  (this session enforces", armedCount
+    tty.expectNeverInHistory "sandbox not active"
+    tty.drain(200)
+    tty.send ":sandbox show"
     tty.send "\n"
     tty.expectInHistory "deny      /"
     tty.expectInHistory "allow     ./"
-    tty.expectNeverInHistory "sandbox not active"
     tty.drain(200)
     # --- :sandbox off disarms the running session live; a bare :sandbox
     # names the off state. ---
