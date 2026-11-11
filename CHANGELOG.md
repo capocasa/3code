@@ -2,12 +2,24 @@ Changelog
 
 Unreleased
 
+- **The sandbox ask gate asks a question, not a menu.** A denied command
+  or tool call on an ask-protected path now shows a card — `? <command>`,
+  the failed run's error lines dropped, then `allow <read or write> access
+  to <path>?` with the answers `(a) allow` (the path itself), `(f) allow
+  the entire folder`, and `(d) deny` (also what a timeout decides). The
+  old `[f] root [d] parent [n]o` line is gone. Answering allow only
+  rewrites the rule that caused the denial when that rule names the
+  granted target exactly (the path for `a`, the folder for `f`); the
+  rule flips to `allow` where it stands. Anything broader keeps its
+  meaning and the allow appends after every existing rule, so other
+  paths the rule covers keep asking. `:sandbox allow` keeps rewriting
+  an existing rule in its own line position, as before.
 - **The built-in default asks before it denies.** The floor rule is now
   `ask /` on every OS, not `deny /`: a path the default table does not
   name stays closed (the OS backends enforce ask exactly like deny), but
   a call that lands on one offers the user the ask gate's one-key grant
-  (`f` the path's ask root, `d` its directory, `n`/timeout keeps the
-  denial) instead of failing silent and forever. Headless sessions are
+  (`a` the path, `f` its folder, `d`/timeout keeps the denial) instead of
+  failing silent and forever. Headless sessions are
   unchanged - an ask that cannot be answered denies. The same default
   now grants `readonly /usr/bin` and `readonly /bin` by rule (the file
   tools' in-process gate sees only the policy table, not the kernel
