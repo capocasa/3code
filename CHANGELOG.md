@@ -2,6 +2,14 @@ Changelog
 
 Unreleased
 
+- **`-r` checks for a running 3code before session availability.**
+  Resuming in a directory another live 3code holds now reports the holder
+  (pid, session id, lock file) even when the holder has not saved its
+  first session yet - previously that race died with the misleading "no
+  saved sessions for" and the real collision surfaced only later, after
+  skill extraction and the update fork had already run. The probe is
+  advisory: a stale lock (dead or unparseable owner pid) still passes,
+  and the enforcing claim stays in `acquireDirLock`.
 - **Goal mode's check speaks with a solid rule and its tokens join the
   bar's total.** The verifier quote block in scrollback indents its rows
   with the solid box-drawing rule `│` instead of a punctuation `|`, so
