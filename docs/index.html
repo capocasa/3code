@@ -95,7 +95,10 @@
 <li><a href="#knownminusgood-models">Known-good models</a></li>
 <li><a href="#system-prompt-override">System prompt override</a></li>
 <li><a href="#images">Images</a></li>
-<li><a href="#sessions">Sessions</a></li>
+<li><a href="#sessions">Sessions</a><ul>
+<li><a href="#naming-a-session">Naming a session</a></li>
+</ul>
+</li>
 <li><a href="#notifications-and-autominusupdate">Notifications and auto-update</a></li>
 <li><a href="#context-management">Context management</a></li>
 <li><a href="#chunked-mode">Chunked mode</a></li>
@@ -126,6 +129,7 @@
 <li><a href="#scripting">Scripting</a></li>
 <li><a href="#library-api">Library API</a></li>
 <li><a href="#agent-client-protocol">Agent Client Protocol</a></li>
+<li><a href="#headless-and-native-gui-frontends">Headless and native GUI frontends</a></li>
 <li><a href="#build-from-source">Build from source</a></li>
 <li><a href="#contributing">Contributing</a></li>
 <li><a href="#prior-art">Prior art</a></li>
@@ -308,6 +312,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <tr><td>vercel</td><td>US company, upstreams worldwide</td><td>Vercel AI Gateway; no markup on list prices, DeepSeek routes below list (<tt class="docutils literal"><span class="pre">vck_...</span></tt> keys)</td></tr>
 <tr><td>aihubmix</td><td>China</td><td>aggregator speaking four wire protocols; a one-time $1 top-up unlocks permanent daily free GLM/Kimi/MiniMax coding quotas</td></tr>
 <tr><td>engy</td><td>varies (GPU fleet)</td><td>verified inference from a permissionless fleet; cheapest DS 4.1 flash around, GLM capped at 328K context</td></tr>
+<tr><td>jarvislabs</td><td>India</td><td>GPU cloud's per-token Token Factory API: GLM, DeepSeek, Qwen, Nemotron on their own H200s (fp8/fp4), one credit balance with their GPU rentals</td></tr>
 <tr><td>huggingface</td><td>varies</td><td>router to partner clouds</td></tr>
 <tr><td>cheaperinference</td><td>varies</td><td>discount aggregator</td></tr>
 </table><p>The known-good registry also covers a few providers that are not in the wizard catalog: TensorX (EU, Dublin and Helsinki), poolside, kilo, LongCat, and Xiaomi MiMo. Add those by hand as custom providers when wanted.</p>
@@ -531,6 +536,12 @@ brave-key = &quot;...&quot;</pre></p>
 3code -r abc123
 3code -rabc123
 3code -r:abc123</pre></p>
+<p>A unique prefix of an ID works too (<tt class="docutils literal"><span class="pre">3code -r 2026</span></tt> resumes the one session of this directory started in 2026), and so does a session name:</p>
+
+<h3 id="naming-a-session">Naming a session</h3><p>Timestamp IDs are hard to remember, so a session can carry a name. From inside the session:</p>
+<p><pre class="listing">:rename Feature xyz</pre></p>
+<p>names it; bare <tt class="docutils literal"><span class="pre">:rename</span></tt> shows the current name and <tt class="docutils literal"><span class="pre">:rename off</span></tt> clears it. Named sessions list with the name quoted next to the ID in <tt class="docutils literal"><span class="pre">:sessions</span></tt> and <tt class="docutils literal"><span class="pre">--list</span></tt>, and both <tt class="docutils literal"><span class="pre">:resume Feature xyz</span></tt> and <tt class="docutils literal"><span class="pre">3code -r &quot;Feature xyz&quot;</span></tt> find it by name (quote names containing spaces on the command line). Names are matched case-insensitively within the current directory's sessions, exactly before by prefix; several matches are an error that lists the candidates, never a silent pick. The name lives in the session's <tt class="docutils literal"><span class="pre">.3log</span></tt> (the session record's body), so it survives copy and move with the file and <tt class="docutils literal"><span class="pre">--find</span></tt> matches it like any other content.</p>
+<p>The name is session identity, not display chrome: the terminal tab title (<tt class="docutils literal"><span class="pre">:tab-title</span></tt>) is a separate feature and a rename does not touch it.</p>
 <p>Or, without restarting, from inside a running 3code: <tt class="docutils literal"><span class="pre">:resume</span></tt> lists this directory's sessions, <tt class="docutils literal"><span class="pre">:resume abc123</span></tt> swaps the running REPL onto that session (state, locks, and profile move with it; the scrollback is not replayed, scroll up or <tt class="docutils literal"><span class="pre">:show</span></tt> for old turns).</p>
 <p>Sessions are listed and searched per working directory by default, so unrelated projects stay out of each other's history; <tt class="docutils literal"><span class="pre">-a</span></tt> opts out of the scoping for both. Provider prompt caches may expire before a saved session does. The session will still resume, but its old context may no longer get the cache discount.</p>
 <p>A resumed session replays the full prior conversation into your scrollback (the same <tt class="docutils literal"><span class="pre">❯</span></tt>/<tt class="docutils literal"><span class="pre">●</span></tt>/tool banners, receipts included) so you land back in context, and the history is re-sent byte-identically to the provider, which keeps the prompt cache hot: a resume usually costs cached-input prices on everything before your new prompt.</p>
@@ -875,6 +886,10 @@ Arguments: --acp</pre></p>
 <p>Not advertised (because 3code does not do them over ACP yet): MCP servers, client-side filesystem and terminal execution, permission requests, elicitation, modes, and authentication.</p>
 <p>Diagnostics go to stderr; stdout is protocol records only, so the stream stays parseable.</p>
 
+<h2 id="headless-and-native-gui-frontends">Headless and native GUI frontends</h2><p><tt class="docutils literal"><span class="pre">3code --headless [flags] [prompt words...]</span></tt> runs the agent with ZERO output: no TUI, no banner, no tool lines, no stderr on failure. The exit code is the whole report (0 ok, 1 turn failed or interrupted, 2 usage, 3 config), the session is saved like any other, and the flags are the usual ones (<tt class="docutils literal"><span class="pre">-m</span></tt>, <tt class="docutils literal"><span class="pre">-c</span></tt>, <tt class="docutils literal"><span class="pre">-r[=id]</span></tt>, <tt class="docutils literal"><span class="pre">-s</span></tt>, <tt class="docutils literal"><span class="pre">-x</span></tt>, <tt class="docutils literal"><span class="pre">-p</span></tt>, <tt class="docutils literal"><span class="pre">--no-sandbox</span></tt>, <tt class="docutils literal"><span class="pre">-D</span></tt>). An empty prompt with <tt class="docutils literal"><span class="pre">-r</span></tt> continues the resumed conversation one turn — scriptable &quot;keep going&quot;. Everything else (provider, sandbox, plugins, sessions) is exactly the interactive setup.</p>
+<p><tt class="docutils literal"><span class="pre">3code --gui</span></tt> is the same headless process with a different owner: a plugin. Any plugin exporting <tt class="docutils literal"><span class="pre">tc_frontend</span></tt> gets its own thread to be the user interface — a native window, a webview — and drives the agent in-process through the plugin <tt class="docutils literal"><span class="pre">agent*</span></tt> services: open the session, start turns, poll streaming events, run colon commands, read scrollback. No sockets, no second binary; see the <a class="reference external" href="plugins.html">plugin manual</a> for the full contract and a worked frontend.</p>
+<p><tt class="docutils literal"><span class="pre">nimble gui</span></tt> builds <tt class="docutils literal"><span class="pre">bin/3code-gui</span></tt>: the same program as a native GUI-subsystem binary (<tt class="docutils literal"><span class="pre">--app:gui</span></tt>). On Windows that means WinMain with no console attached — double-clicking opens no terminal — and the runtime refuses anything but <tt class="docutils literal"><span class="pre">--headless</span></tt>/<tt class="docutils literal"><span class="pre">--gui</span></tt> (alerting with a MessageBox) because a terminal UI without a console would be blind. On macOS the same build links the GUI frameworks; on Linux it equals the console binary. Installed beside the console binary, <tt class="docutils literal"><span class="pre">3code-gui --gui</span></tt> with a frontend plugin IS the native app.</p>
+
 <h2 id="build-from-source">Build from source</h2><p><pre class="listing">nimble install https://github.com/capocasa/3code</pre></p>
 <p>Requires <a class="reference external" href="https://nim-lang.org">Nim</a> &gt;= 2.0 and <tt class="docutils literal"><span class="pre">curl</span></tt> on <tt class="docutils literal"><span class="pre">PATH</span></tt>.</p>
 
@@ -895,7 +910,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-10 12:45:23 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-11 09:42:33 UTC</small>
       </div>
     </div>
   </div>
