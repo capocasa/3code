@@ -2,10 +2,36 @@ Changelog
 
 Unreleased
 
+- **The built-in default asks before it denies.** The floor rule is now
+  `ask /` on every OS, not `deny /`: a path the default table does not
+  name stays closed (the OS backends enforce ask exactly like deny), but
+  a call that lands on one offers the user the ask gate's one-key grant
+  (`f` the path's ask root, `d` its directory, `n`/timeout keeps the
+  denial) instead of failing silent and forever. Headless sessions are
+  unchanged - an ask that cannot be answered denies. The same default
+  now grants `readonly /usr/bin` and `readonly /bin` by rule (the file
+  tools' in-process gate sees only the policy table, not the kernel
+  baseline the bash fence auto-grants), and `~/.ssh` turns read-only:
+  `ssh`, public keys, `known_hosts`, and `~/.ssh/config` keep working,
+  while every OpenSSH default private-identity name (`identity`,
+  `id_dsa`, `id_ecdsa`, `id_ecdsa_sk`, `id_ed25519`, `id_ed25519_sk`,
+  `id_rsa`, `id_xmss`) is denied on top - a `.pub` sibling is a
+  different path and stays readable. Existing `.sandbox` and user
+  policy files are untouched; the new rules only apply where no policy
+  file exists.
+- **Bare `:sandbox` reports the enabled state; `:sandbox show` keeps the
+  rules.** Bare `:sandbox` (and `:sb`) now prints one state line -
+  `sandbox: off  (run unconfined)`, `sandbox: on  (session not armed;
+  :sandbox on arms it)`, or `sandbox: on  (this session enforces;
+  policy: <file>)` - instead of dumping the rule table under a state
+  line you had to know was there. `:sandbox show` leads with the same
+  line and then dumps the rules, so the dump is still one command away
+  and the enabled state is always visible. The `:help` entries and the
+  `harness_commands` fixture match the new wording.
 - **The sandbox arms and disarms live in the running session.** `:sandbox on`
   no longer waits for the next launch: it arms the session with the same steps
   launch uses (guard rules, policy load, bash-fence backend probe), so bash,
-  the file tools, and the ask gate fence immediately, and bare `:sandbox`
+  the file tools, and the ask gate fence immediately, and `:sandbox show`
   dumps the armed rules. `:sandbox off` disarms live: the fence lifts (ask
   approvals included), the wall proxy stops, and the rules drop from memory;
   a re-arm re-reads the policy file, so rules written while disarmed apply at
