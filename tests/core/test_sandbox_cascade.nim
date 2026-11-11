@@ -49,9 +49,13 @@ proc newFixture(name: string): tuple[home, proj: string] =
   putEnv("XDG_CONFIG_HOME", result.home)
 
 suite "single active policy file":
-  test "default text denies root, keeps tmp and cwd writable":
+  test "default text asks root, keeps tmp and cwd writable":
     let s = parsePolicy(defaultPolicyText(), proj)
-    check s.checkPath("/") == akDeny
+    # The floor is ask, not deny: unmentioned paths close the same way
+    # (and the OS backends enforce ask like deny), but the file tools
+    # and bash offer the user a one-key grant instead of failing
+    # silent and forever.
+    check s.checkPath("/") == akAsk
     when defined(windows):
       check s.checkPath(getHomeDir() / "AppData" / "Local" / "Temp") == akWritable
       # No host rules: the AppContainer child gets its internet
@@ -86,9 +90,10 @@ suite "single active policy file":
       check s.checkPath(h / "AppData" / "Local" / "npm-cache") == akWritable
       check s.checkPath(h / "AppData" / "Local" / "zig") == akWritable
       # Not defaulted: ruby and java live in the manual's recipes.
-      check s.checkPath(h / ".gem" / "ruby") == akDeny
-      check s.checkPath(h / ".m2" / "repository") == akDeny
-      check s.checkPath(h / ".cargo" / "credentials") == akDeny
+      # The ask floor closes them, grantable on one key.
+      check s.checkPath(h / ".gem" / "ruby") == akAsk
+      check s.checkPath(h / ".m2" / "repository") == akAsk
+      check s.checkPath(h / ".cargo" / "credentials") == akAsk
     else:
       check s.checkPath(h / ".gitconfig") == akReadOnly
       check s.checkPath(h / ".config" / "git") == akReadOnly
@@ -103,15 +108,32 @@ suite "single active policy file":
       check s.checkPath(h / ".nimble" / "pkgs2") == akWritable
       check s.checkPath(h / ".choosenim" / "toolchains") == akReadOnly
       check s.checkPath(h / ".local" / "share" / "uv" / "python") == akReadOnly
+      # System binaries are readable to the file tools (the gate sees
+      # only this table, not the sandwall baseline the bash fence
+      # auto-grants).
+      check s.checkPath("/usr/bin/env") == akReadOnly
+      check s.checkPath("/bin/sh") == akReadOnly
       # Not defaulted: ruby and java live in the manual's recipes.
-      check s.checkPath(h / ".gem" / "ruby") == akDeny
-      check s.checkPath(h / ".bundle" / "cache") == akDeny
-      check s.checkPath(h / ".m2" / "repository") == akDeny
-      # Token-bearing dotfiles stay fenced.
-      check s.checkPath(h / ".ssh" / "id_ed25519") == akDeny
-      check s.checkPath(h / ".npmrc") == akDeny
-      check s.checkPath(h / ".cargo" / "credentials") == akDeny
-      check s.checkPath(h / ".git-credentials") == akDeny
+      # The ask floor closes them, grantable on one key.
+      check s.checkPath(h / ".gem" / "ruby") == akAsk
+      check s.checkPath(h / ".bundle" / "cache") == akAsk
+      check s.checkPath(h / ".m2" / "repository") == akAsk
+      # Token-bearing dotfiles stay fenced: ask, not silent deny.
+      check s.checkPath(h / ".npmrc") == akAsk
+      check s.checkPath(h / ".cargo" / "credentials") == akAsk
+      check s.checkPath(h / ".git-credentials") == akAsk
+    # ~/.ssh is read-only on every OS: pub keys and common config
+    # readable, every OpenSSH default private-identity name denied on
+    # top (a .pub sibling is a different path, never covered by the
+    # key's deny).
+    check s.checkPath(h / ".ssh") == akReadOnly
+    check s.checkPath(h / ".ssh" / "config") == akReadOnly
+    check s.checkPath(h / ".ssh" / "known_hosts") == akReadOnly
+    check s.checkPath(h / ".ssh" / "id_ed25519.pub") == akReadOnly
+    for key in ["identity", "id_dsa", "id_ecdsa", "id_ecdsa_sk",
+                "id_ed25519", "id_ed25519_sk", "id_rsa", "id_xmss"]:
+      check s.checkPath(h / ".ssh" / key) == akDeny
+      check s.checkPath(h / ".ssh" / (key & ".pub")) == akReadOnly
     # Project dir stays writable on every OS.
     check s.checkPath(proj) == akWritable
 

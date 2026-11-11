@@ -560,8 +560,12 @@ proc askGateDecide(deniedPath: string; renderLine: proc(line: string);
   # Narrow offer = the ask rule root (a file grant under an ask
   # DIRECTORY cannot pierce the Linux mount mask, so the root is
   # the narrowest grant that takes effect); broad offer = the
-  # root's parent directory, one level up.
-  let broadPath = parentDir(rootPath)
+  # root's parent directory, one level up. A root at / has no
+  # parent: the broad offer collapses onto the root instead of
+  # rendering an empty target (an empty grant target would parse
+  # as the project dir, which is not what the key sits next to).
+  var broadPath = parentDir(rootPath)
+  if broadPath.len == 0: broadPath = rootPath
   renderLine("sandbox ask: " & sandbox.askPathDisplay(deniedPath) &
     " is ask-protected.  [f] " & sandbox.askPathDisplay(rootPath) &
     "  [d] " & sandbox.askPathDisplay(broadPath) &

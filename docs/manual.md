@@ -1411,19 +1411,22 @@ The model is useful, but it does not need the run of your entire computer.
 3code applies a filesystem policy to every tool call. Bash commands also enter
 an OS sandbox, and host rules can fence their network access.
 
-The sandbox is questionless: it never interrupts the turn to ask whether a
-command may run. That is a deliberate trade. An agent that asks is an agent
-that costs a round trip and a context refresh every time it touches a new
-directory, which in practice means either an agent that nags or an agent
-whose guardrails get switched off. Instead the boundary is enforced by the
-kernel (Landlock, Seatbelt, Windows restricted tokens), decided by a policy
-you wrote before the turn started, and a denial is simply a failed command
-the model can read and route around. The tradeoff is that the policy needs
-setting up first: a couple of minutes once per project, and after that it
-does not stop on trivialities.
+For rules you wrote, the sandbox is questionless: it never interrupts the
+turn to ask whether a command may run. That is a deliberate trade. An agent
+that asks is an agent that costs a round trip and a context refresh every
+time it touches a new directory, which in practice means either an agent
+that nags or an agent whose guardrails get switched off. The boundary is
+enforced by the kernel (Landlock, Seatbelt, Windows restricted tokens),
+decided by a policy you wrote before the turn started, and a denial is
+simply a failed command the model can read and route around. The tradeoff
+is that the policy needs setting up first: a couple of minutes once per
+project, and after that it does not stop on trivialities.
 
-The one exception is the `ask` verb. An `ask` rule denies exactly like
-`deny`, but when a sandboxed bash command fails on an ask-protected path,
+The escape hatch is the `ask` verb, and the built-in default leans on it:
+its floor rule is `ask /`, so a path the default table does not name stays
+closed but grants one key away instead of failing silent and forever. An
+`ask` rule denies exactly like `deny`, but when a sandboxed bash command
+fails on an ask-protected path,
 or a `read`/`write`/`patch`/`apply_patch` call targets one, 3code puts one
 question on screen:
 
@@ -1457,10 +1460,13 @@ In practice:
 - The default covers command-line builds of the common languages. Git,
   Go, Nim, Python, Rust, Zig, and C build out of the box. On Windows,
   git gets a seeded copy of your global config, so it works there too.
-  Files that carry tokens stay fenced: `~/.ssh`, `~/.git-credentials`,
-  `~/.npmrc`, `~/.cargo/credentials`. Every rule is listed in [the
-  built-in default](#builtminusin-default) below, and stacks beyond it get
-  recipes in [sandbox settings](#sandbox-settings-collection).
+  Files that carry tokens stay fenced: `~/.git-credentials`,
+  `~/.npmrc`, `~/.cargo/credentials`, and the private keys in
+  `~/.ssh` (the directory itself is readable, so `ssh`, public keys,
+  `known_hosts`, and `~/.ssh/config` keep working). Every rule is
+  listed in [the built-in default](#builtminusin-default) below, and
+  stacks beyond it get recipes in [sandbox
+  settings](#sandbox-settings-collection).
 - Stacks not covered by the default add their home with one rule: maven
   wants `:sandbox allow ~/.m2/repository`, gradle `:sandbox allow
   ~/.gradle/caches`, an npm prefix like `~/.node_modules` becomes
@@ -1505,6 +1511,8 @@ Word            Meaning
 ``deny``        no read, write, or network connection
 ``readonly``    read and execute, for paths only
 ``allow``       read and write a path, or connect to a host
+``ask``         deny, plus a one-key approval offer when a call
+                lands on it (paths only)
 ==============  ==============================================
 
 The target type is determined by its first character:
@@ -1547,7 +1555,7 @@ It changes only through ordinary commits.
 On macOS, Linux, and other POSIX systems, the built-in policy is:
 
 ```
-deny /
+ask /
 allow /tmp
 allow /var/tmp
 allow ./
@@ -1566,21 +1574,38 @@ readonly ~/.gitconfig
 readonly ~/.config/git
 readonly ~/.hgrc
 readonly ~/.config/hg
+readonly /usr/bin
+readonly /bin
+readonly ~/.ssh
+deny ~/.ssh/identity
+deny ~/.ssh/id_dsa
+deny ~/.ssh/id_ecdsa
+deny ~/.ssh/id_ecdsa_sk
+deny ~/.ssh/id_ed25519
+deny ~/.ssh/id_ed25519_sk
+deny ~/.ssh/id_rsa
+deny ~/.ssh/id_xmss
 allow *
 ```
 
 On macOS the same policy plus `allow ~/Library/Caches` applies. This lets the
 model write in the project and temporary directories and the development
-caches, not wander through other user files. System programs, libraries,
-configuration, and device files get a read-only baseline so commands can still
-run, and the version-control config lines exist because git aborts every
-command when `~/.gitconfig` exists but is unreadable. `allow *` leaves the
-network open.
+caches, not wander through other user files. The floor is `ask /`: a path the
+table does not name stays closed, but a call that lands on one offers the
+one-key grant instead of failing silently (headless sessions treat `ask`
+exactly like `deny`). System binaries are read-only by rule because the
+file tools' in-process gate reads this table, not the kernel baseline the
+bash fence auto-grants. `~/.ssh` is read-only so `ssh`, public keys,
+`known_hosts`, and `~/.ssh/config` keep working; every OpenSSH default
+private-identity name is denied on top (a `.pub` sibling is a different
+path and stays readable). The version-control config lines exist because
+git aborts every command when `~/.gitconfig` exists but is unreadable.
+`allow *` leaves the network open.
 
 On Windows, the built-in policy is:
 
 ```
-deny /
+ask /
 allow ~/AppData/Local/Temp
 allow ~/AppData/Local/npm-cache
 allow ~/AppData/Local/pip/cache
@@ -1594,10 +1619,21 @@ readonly ~/.rustup
 allow ~/.nimble
 readonly ~/.choosenim
 allow ~/AppData/Local/zig
+readonly ~/.ssh
+deny ~/.ssh/identity
+deny ~/.ssh/id_dsa
+deny ~/.ssh/id_ecdsa
+deny ~/.ssh/id_ecdsa_sk
+deny ~/.ssh/id_ed25519
+deny ~/.ssh/id_ed25519_sk
+deny ~/.ssh/id_rsa
+deny ~/.ssh/id_xmss
 allow ./
 ```
 
-Windows grants network capability when no host rules are present.
+Windows grants network capability when no host rules are present. The same
+`ask /` floor and `~/.ssh` rules apply; Windows OpenSSH keeps its keys in
+`~/.ssh` too.
 
 When no policy file exists, the built-in default is materialized into a
 per-run temporary file for the Bash sandbox; nothing is written into the
@@ -1849,6 +1885,7 @@ Use an editor or the sandbox commands:
 :sandbox edit
 :sandbox allow /opt
 :sandbox readonly /var
+:sandbox ask ~/vault
 :sandbox deny ./secrets
 :sandbox on
 :sandbox off
