@@ -1340,6 +1340,10 @@ proc pluginOnFileWrite*(path: string; bytes: int; kind: int) =
 
 proc pluginConfigDefaultsAll*(): seq[tuple[section, key, value, owner: string]] =
   ## Locked copy for config.nim's apply-at-parse-start and `:plugins`.
+  ## Reachable before any discovery: config parse runs ahead of
+  ## pluginsDiscoverAndLoad, and an unheld lock must not be acquired
+  ## (zeroed CRITICAL_SECTION = UB on Windows).
+  initCondAndLocksOnce()
   pLock.acquire()
   for k, v in pCfgDefaults.pairs:
     let dot = k.find('.')
@@ -1349,6 +1353,7 @@ proc pluginConfigDefaultsAll*(): seq[tuple[section, key, value, owner: string]] 
 proc pluginConfigDefault*(section, key: string): tuple[value, owner: string] =
   ## The registered default for `section.key`, empty when no plugin
   ## claimed it.
+  initCondAndLocksOnce()
   pLock.acquire()
   if section & "." & key in pCfgDefaults:
     result = pCfgDefaults[section & "." & key]
