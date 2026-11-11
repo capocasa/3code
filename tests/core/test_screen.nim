@@ -141,41 +141,49 @@ suite "screen capture (seam)":
     ["import", "maim", "scrot"].anyIt(findExe(it).len > 0)
 
   test "backend probe succeeds on X11":
-    if not x11Ready: skip()
-    let (ok, err) = screen.ensureComputerUse("cap1")
-    check ok
-    check err == ""
-    check fileExists(screen.shotScriptPath("cap1"))
+    # unittest's skip() only marks the test; the body keeps running,
+    # so the checks must live under the guard (arm64 CI: no DISPLAY).
+    if not x11Ready:
+      skip()
+    else:
+      let (ok, err) = screen.ensureComputerUse("cap1")
+      check ok
+      check err == ""
+      check fileExists(screen.shotScriptPath("cap1"))
 
   test "capture via THREECODE_SCREENSHOT_SRC delivers and binds state":
-    if not x11Ready: skip()
-    require screen.ensureComputerUse("cap1").ok
-    putEnv("THREECODE_SCREENSHOT_SRC", "testdata/images/tiny.png")
-    defer: putEnv("THREECODE_SCREENSHOT_SRC", "")
-    let dest = work / "img"
-    let (info, err) = captureScreenshot(dest)
-    check err == ""
-    check info.screenshot
-    check info.name == "shot 1"
-    check info.width == 16 and info.height == 12
-    check fileExists(dest / "001.jpeg")
-    let st = readFile(screen.shotDir("cap1") / "state")
-    check st.contains("native=16x12")
-    check st.contains("delivered=16x12")
-    # Second capture gets the next index, never overwriting delivered bytes.
-    let (info2, _) = captureScreenshot(dest)
-    check info2.name == "shot 2"
-    check fileExists(dest / "002.jpeg")
+    if not x11Ready:
+      skip()
+    else:
+      require screen.ensureComputerUse("cap1").ok
+      putEnv("THREECODE_SCREENSHOT_SRC", "testdata/images/tiny.png")
+      defer: putEnv("THREECODE_SCREENSHOT_SRC", "")
+      let dest = work / "img"
+      let (info, err) = captureScreenshot(dest)
+      check err == ""
+      check info.screenshot
+      check info.name == "shot 1"
+      check info.width == 16 and info.height == 12
+      check fileExists(dest / "001.jpeg")
+      let st = readFile(screen.shotDir("cap1") / "state")
+      check st.contains("native=16x12")
+      check st.contains("delivered=16x12")
+      # Second capture gets the next index, never overwriting delivered bytes.
+      let (info2, _) = captureScreenshot(dest)
+      check info2.name == "shot 2"
+      check fileExists(dest / "002.jpeg")
 
   test "fidelity flag delivers PNG":
-    if not x11Ready: skip()
-    require screen.ensureComputerUse("cap1").ok
-    putEnv("THREECODE_SCREENSHOT_SRC", "testdata/images/tiny.png")
-    defer: putEnv("THREECODE_SCREENSHOT_SRC", "")
-    let (info, err) = captureScreenshot(work / "img2", fidelity = true)
-    check err == ""
-    check info.format == "png"
-    check fileExists(work / "img2" / "001.png")
+    if not x11Ready:
+      skip()
+    else:
+      require screen.ensureComputerUse("cap1").ok
+      putEnv("THREECODE_SCREENSHOT_SRC", "testdata/images/tiny.png")
+      defer: putEnv("THREECODE_SCREENSHOT_SRC", "")
+      let (info, err) = captureScreenshot(work / "img2", fidelity = true)
+      check err == ""
+      check info.format == "png"
+      check fileExists(work / "img2" / "001.png")
 
 suite "platform gate":
   test "X11/Linux probe is platform-clean; Wayland-only sessions refuse":
