@@ -15,8 +15,9 @@
   :session          show this session's id (for --resume <id>)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
-  :sandbox (:sb)    show the active filesystem sandbox rules
-  :sandbox show     (same)
+  :sandbox (:sb)    show whether the sandbox is on (adds the active
+                    policy file when it enforces)
+  :sandbox show     that state line, then the active sandbox rules
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
@@ -79,8 +80,9 @@ input:
   :session          show this session's id (for --resume <id>)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
-  :sandbox (:sb)    show the active filesystem sandbox rules
-  :sandbox show     (same)
+  :sandbox (:sb)    show whether the sandbox is on (adds the active
+                    policy file when it enforces)
+  :sandbox show     that state line, then the active sandbox rules
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
@@ -132,8 +134,9 @@ input:
   :session          show this session's id (for --resume <id>)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
-  :sandbox (:sb)    show the active filesystem sandbox rules
-  :sandbox show     (same)
+  :sandbox (:sb)    show whether the sandbox is on (adds the active
+                    policy file when it enforces)
+  :sandbox show     that state line, then the active sandbox rules
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
@@ -190,8 +193,9 @@ alt
   :session          show this session's id (for --resume <id>)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
-  :sandbox (:sb)    show the active filesystem sandbox rules
-  :sandbox show     (same)
+  :sandbox (:sb)    show whether the sandbox is on (adds the active
+                    policy file when it enforces)
+  :sandbox show     that state line, then the active sandbox rules
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
@@ -243,8 +247,9 @@ alt
 
 ❯ :model
 ===== 436 =====
-  :sandbox (:sb)    show the active filesystem sandbox rules
-  :sandbox show     (same)
+  :sandbox (:sb)    show whether the sandbox is on (adds the active
+                    policy file when it enforces)
+  :sandbox show     that state line, then the active sandbox rules
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
@@ -301,8 +306,9 @@ stub-large
 
 ❯
 ===== 468 =====
-  :sandbox (:sb)    show the active filesystem sandbox rules
-  :sandbox show     (same)
+  :sandbox (:sb)    show whether the sandbox is on (adds the active
+                    policy file when it enforces)
+  :sandbox show     that state line, then the active sandbox rules
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)

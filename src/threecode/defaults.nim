@@ -43,15 +43,27 @@
 ##   ruby, maven, gradle, scons, and friends - is a manual recipe, not
 ##   a default.
 ##
+## The floor is `ask /`: everything the table does not name stays
+## closed, but a closed path the agent bumps into offers the user a
+## one-key grant instead of a silent denial (sandwall's ask kind; a
+## headless session treats ask exactly like deny). System binaries
+## ride explicit readonly lines (/usr/bin, /bin) because the
+## in-process gate for the file tools sees only this table, not the
+## sandwall baseline the bash fence auto-grants.
+##
 ## What stays fenced, on purpose: token-bearing files (~/.npmrc,
-## ~/.git-credentials, ~/.cargo/credentials, ~/.netrc, ~/.ssh,
-## ~/.aws, ...). A missed allow fails loud (git dies, the user sees
-## it); a missed deny fails silent and forever. There is no published
-## "safe dotfiles" list to defer to, so the default opens exactly the
-## documented lookup paths of the tools it keeps alive, and no more.
-## The user extends it the way ripgrep extends its types: a project
-## file (`:sandbox allow`, like `--type-add`) or a user baseline file
-## (~/.config/3code/sandbox, like RIPGREP_CONFIG_PATH).
+## ~/.git-credentials, ~/.cargo/credentials, ~/.netrc, ~/.aws, ...)
+## and ~/.ssh private keys. ~/.ssh itself is read-only - public keys,
+## config, known_hosts - with every OpenSSH default private-identity
+## name re-denied on top, so ssh keeps working while the keys the
+## prompts answer for stay unread. A missed allow fails loud (git
+## dies, the user sees it); a missed deny fails silent and forever.
+## There is no published "safe dotfiles" list to defer to, so the
+## default opens exactly the documented lookup paths of the tools it
+## keeps alive, and no more. The user extends it the way ripgrep
+## extends its types: a project file (`:sandbox allow`, like
+## `--type-add`) or a user baseline file (~/.config/3code/sandbox,
+## like RIPGREP_CONFIG_PATH).
 ##
 ## Windows keeps the same shape with its cache locations; VCS config
 ## is handled by the caller (streamexec seeds the bash child's
@@ -61,7 +73,7 @@
 
 when defined(windows):
   const defaultPolicyText* = """
-deny /
+ask /
 allow ~/AppData/Local/Temp
 allow ~/AppData/Local/npm-cache
 allow ~/AppData/Local/pip/cache
@@ -75,11 +87,20 @@ readonly ~/.cargo/config.toml
 readonly ~/.rustup
 allow ~/.nimble
 readonly ~/.choosenim
+readonly ~/.ssh
+deny ~/.ssh/identity
+deny ~/.ssh/id_dsa
+deny ~/.ssh/id_ecdsa
+deny ~/.ssh/id_ecdsa_sk
+deny ~/.ssh/id_ed25519
+deny ~/.ssh/id_ed25519_sk
+deny ~/.ssh/id_rsa
+deny ~/.ssh/id_xmss
 allow ./
 """
 elif defined(macosx):
   const defaultPolicyText* = """
-deny /
+ask /
 allow /tmp
 allow /var/tmp
 allow ./
@@ -102,11 +123,22 @@ readonly ~/.gitconfig
 readonly ~/.config/git
 readonly ~/.hgrc
 readonly ~/.config/hg
+readonly /usr/bin
+readonly /bin
+readonly ~/.ssh
+deny ~/.ssh/identity
+deny ~/.ssh/id_dsa
+deny ~/.ssh/id_ecdsa
+deny ~/.ssh/id_ecdsa_sk
+deny ~/.ssh/id_ed25519
+deny ~/.ssh/id_ed25519_sk
+deny ~/.ssh/id_rsa
+deny ~/.ssh/id_xmss
 allow *
 """
 else:
   const defaultPolicyText* = """
-deny /
+ask /
 allow /tmp
 allow /var/tmp
 allow ./
@@ -125,5 +157,16 @@ readonly ~/.gitconfig
 readonly ~/.config/git
 readonly ~/.hgrc
 readonly ~/.config/hg
+readonly /usr/bin
+readonly /bin
+readonly ~/.ssh
+deny ~/.ssh/identity
+deny ~/.ssh/id_dsa
+deny ~/.ssh/id_ecdsa
+deny ~/.ssh/id_ecdsa_sk
+deny ~/.ssh/id_ed25519
+deny ~/.ssh/id_ed25519_sk
+deny ~/.ssh/id_rsa
+deny ~/.ssh/id_xmss
 allow *
 """

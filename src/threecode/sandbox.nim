@@ -71,9 +71,11 @@ proc defaultPolicyText*(): string =
   ## inspectable literal block per OS: temp dirs and the project dir
   ## writable, the dev caches and toolchain homes the covered builds
   ## need, VCS user config readable (git and cargo are *fatal* on an
-  ## unreadable config file), network open on POSIX. `deny /` fences
+  ## unreadable config file), network open on POSIX. `ask /` floors
   ## the rest of $HOME - token files (~/.npmrc, ~/.cargo/credentials,
-  ## ~/.git-credentials), ~/.ssh, everything else. Windows ships no
+  ## ~/.git-credentials) and the ~/.ssh private keys stay closed, but
+  ## a blocked path offers the ask gate's one-key grant instead of a
+  ## silent denial. Windows ships no
   ## VCS config rules: streamexec seeds the bash child's redirected
   ## HOME with a gitconfig copy instead, because the child runs as a
   ## separate user and git's ownership check would otherwise reject

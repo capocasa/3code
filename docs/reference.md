@@ -96,7 +96,8 @@ names, model names, and paths where supported.
 | `:summarize` | collapse old turns into a synthetic recap |
 | `:btw Q` | ask the model a side question about the conversation; answer shown in the terminal, never enters the context |
 | `:version` | show the running 3code version |
-| `:sandbox` / `:sb` | show the active filesystem sandbox rules |
+| `:sandbox` / `:sb` | show whether the sandbox is on (adds the active policy file when it enforces) |
+| `:sandbox show` | that state line, then the active sandbox rules |
 | `:sandbox on/off` | toggle sandbox enforcement |
 | `:sandbox allow T` | add a writable/connectable rule |
 | `:sandbox readonly P` | add a read-only rule |
