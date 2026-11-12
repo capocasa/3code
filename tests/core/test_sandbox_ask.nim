@@ -90,6 +90,23 @@ suite "denied path extraction":
         "touch: cannot touch '" & proj / "locked" / "x" &
         "': Permission denied\n") == ""
 
+  test "windows denial shape scrapes too":
+    let (base, proj) = newFixture("winshape")
+    defer: removeDir(base)
+    withPolicy(proj):
+      check sandbox.denialShaped("Access is denied.\n")
+      check sandbox.denialShaped("sh: vault/out.txt: Permission denied\n")
+      check sandbox.denialShaped("mv: Operation not permitted\n")
+      check not sandbox.denialShaped("denied\n")
+      # the cmd.exe / native-tool shape carries the Windows message; a
+      # path-shaped token still scrapes, and the parsed redirect target
+      # still wins (the line itself has no path)
+      check sandbox.deniedAskPath("copy a b",
+        "copy: cannot copy '" & proj / "vault" / "w" &
+        "': Access is denied.\n") == proj / "vault" / "w"
+      check sandbox.deniedAskPath("cmd /c echo x > vault/out.txt",
+        "Access is denied.\n") == "vault/out.txt"
+
   test "no path in the output, no ask":
     let (base, proj) = newFixture("nopath")
     defer: removeDir(base)

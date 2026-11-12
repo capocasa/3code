@@ -898,20 +898,30 @@ proc pathLike(s: string): bool =
   s.len > 1 and (s[0] == '/' or s[0] == '~' or s[0] == '.' or
     '/' in s)
 
+proc denialShaped*(s: string): bool =
+  ## Whether `s` contains a line shaped like a sandbox denial. The
+  ## fenced child prints three shapes across the backends: POSIX
+  ## EACCES/EPERM ("Permission denied", "Operation not permitted") and
+  ## the Windows ACL denial ("Access is denied", cmd.exe and native
+  ## tools; the msys bash maps the same error to "Permission denied").
+  ## Used by the bash ask gate, the ask-path scraper, and the deny-hint
+  ## appenders so they all agree on what a denial looks like.
+  "Permission denied" in s or "Operation not permitted" in s or
+    "Access is denied" in s
+
 proc deniedAskPath*(cmd, rawOut: string): string =
   ## The path whose sandbox denial failed a bash command, when that path
   ## is ask-covered. The parsed mutation target (shell.bashMutationPath)
   ## wins: it is static and quote-aware. Otherwise error lines are
   ## scraped for path-shaped tokens (`touch: cannot touch '/x':
   ## Permission denied`, `tee: /x: Permission denied`, `sh: 1: cannot
-  ## create /x: Permission denied`). "" when nothing ask-covered turns
+  ## create /x: Permission denied`, plus the Windows `Access is denied`
+  ## shape). "" when nothing ask-covered turns
   ## up, which includes every hard-deny denial.
   let mut = bashMutationPath(cmd)
   if mut.len > 0 and askCoveredPath(mut): return mut
   for line in rawOut.splitLines():
-    if "Permission denied" notin line and
-        "Operation not permitted" notin line:
-      continue
+    if not denialShaped(line): continue
     for tok in line.split(Whitespace):
       var t = tok
       if t.len > 1 and t[0] == '\'' and t[^1] == '\'': t = t[1 .. ^2]

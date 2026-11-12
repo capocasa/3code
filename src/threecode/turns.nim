@@ -800,9 +800,7 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
       block askGate:
         if result.code == 0: break askGate
         if not sandboxEnabled or not sandbox.active: break askGate
-        if "Permission denied" notin result.output and
-            "Operation not permitted" notin result.output:
-          break askGate
+        if not sandbox.denialShaped(result.output): break askGate
         if not askGateAvailable(): break askGate
         let deniedPath = sandbox.deniedAskPath(act.body, result.output)
         if deniedPath.len == 0: break askGate

@@ -98,7 +98,14 @@ suite "provider pre-wizard bailout commits as an ordinary command":
     check rows[echoIdx + 1].strip() == ""
     check rows[echoIdx + 2].strip() == "unknown provider: chatpgt"
     check rows[echoIdx + 3].strip() == ""
-    check rows[^1].strip() == "❯"
+    # The fresh prompt must be the bottom-most non-blank row. ConPTY
+    # materializes the whole screen buffer, so trailing blank rows sit
+    # below the content; the POSIX grid only grows to the painted rows,
+    # where the prompt IS rows[^1]. Assert the content bottom so both
+    # platforms pin the same layout.
+    var bottom = rows.len - 1
+    while bottom > 0 and rows[bottom].strip() == "": dec bottom
+    check rows[bottom].strip() == "❯"
     for i in echoIdx + 1 ..< rows.len:
       check rows[i].strip() != "❯ " & Command
 

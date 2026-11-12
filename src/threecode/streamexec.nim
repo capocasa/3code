@@ -993,8 +993,7 @@ export DEBIAN_FRONTEND=noninteractive
               rawIn.add "\n"
             return (rawIn, 124, cap)
           if inProcCode != 0 and sandboxEnabled and sandbox.active and
-              ("Permission denied" in rawIn or
-               "Operation not permitted" in rawIn):
+              sandbox.denialShaped(rawIn):
             if rawIn.len > 0 and not rawIn.endsWith("\n"):
               rawIn.add "\n"
             rawIn.add SandboxDenyHint
@@ -1052,14 +1051,15 @@ export DEBIAN_FRONTEND=noninteractive
   # Sandbox denial hint: a sandboxed command cannot tell EPERM from the
   # kernel sandbox apart from a plain filesystem permission problem, so
   # a bare "Permission denied" would send the agent retrying blindly.
-  # When the policy is enforced and the output smells like EACCES,
+  # When the policy is enforced and the output smells like a denial
+  # (denialShaped: POSIX EACCES/EPERM and the Windows ACL shape),
   # append the sandbox hint so the model does not read EPERM as a
   # broken command and retry blindly. The policy file is deliberately
   # not referenced: it exists only after an edit and may live outside
   # the cwd entirely, so a pointer sends the model hunting for a file
   # that is not there.
   if code != 0 and sandboxEnabled and sandbox.active and
-      ("Permission denied" in rawOut or "Operation not permitted" in rawOut):
+      sandbox.denialShaped(rawOut):
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
     rawOut.add SandboxDenyHint
