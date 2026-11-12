@@ -9,27 +9,44 @@
 ##
 ## Why no channels: the user explicitly forbade `Channel[T]`. We use a
 ## plain `seq[NetDelta]` under a `Lock`, matching the atomics + lock idiom
-## used across the codebase. The worker only ever appends; the main
-## thread drains and clears the consumed prefix under the same lock.
+## used across the codebase. The worker only ever appends; the main thread
+## drains and clears the consumed prefix under the same lock.
 ##
 ## ORC constraint (from threecode.nim:140): the worker must hold no
 ## closures and no refs that the main thread also mutates. The
-## `NetJobState` is a stack `var` in `callModelThreaded` (lifetime
-## encloses the worker's run), passed by `ptr`. Communication is plain
-## value types (`string`, `int`, `bool`) plus `JsonNode`, which is a ref
-## the worker builds and serializes to a string for the main thread
-## before setting `phase = npDone`. No concurrent mutation of the same
-## node.
+## `NetJobState` is a MAIN-ALLOCATED heap block owned by whichever thread
+## currently holds the job (the caller until it joins or retires, then
+## the main-thread reaper), passed by `ptr`. Its lifetime always encloses
+## the worker's run: a caller only frees the job after `workerDone`
+## (workerGone) says the worker has finished touching it, and a job whose
+## caller stopped waiting is handed to `reapRetiredNetJobs`, which joins
+## the worker before freeing anything. Communication is plain value types
+## (`string`, `int`, `bool`) plus `JsonNode`, which is a ref the worker
+## builds and serializes to a string for the main thread before setting
+## `phase = npDone`. No concurrent mutation of the same node.
 ##
 ## ORC constraint 2 (issue #35): freeing a block on a thread other than
 ## its allocating thread leaks the page (nim-lang/Nim#23361; still open
 ## on devel, yrc included). So string ownership NEVER crosses threads:
 ## the main thread takes byte-wise copies of payloads under the lock
 ## (`drainDeltas`, `copyOutcome`), and the worker frees its own strings
-## on its own thread before exiting (`workerRelease`, gated on `reap`).
+## on its own thread in `workerRelease`, gated on the reap handshake.
+##
+## Every field access from either thread goes through the locked
+## accessors below (`phaseOf`, `outcomeReady`, `isReaped`, `workerDone`,
+## `activityCount`) or a locked mutator. No direct unsynchronized reads;
+## no lock is held while a callback runs or a thread joins.
 
 import std/[locks, json, os]
 import types
+
+const NetReapWaitMs* {.intdefine.} = 5_000
+  ## How long the worker waits for the main thread's reap handshake in
+  ## `workerRelease` before freeing its own allocations anyway. A normal
+  ## caller reaps within one 50ms poll tick. The bound exists for the
+  ## retired-job path: a caller that raised or gave up may never reap, and
+  ## a worker parked here forever would strand its thread and its job.
+  ## An `intdefine` so tests can shrink it.
 
 type
   NetPhase* = enum
@@ -82,6 +99,10 @@ type
     outcome*: StreamOutcome
     outcomeWritten*: bool
     reaped*: bool
+    activity*: int  ## Monotonic count of deltas ever fired; the caller's
+                    ## liveness probe for a worker that may be wedged.
+    workerGone*: bool  ## Set by the worker as its LAST access to the job.
+                       ## Main may join and free the job only after this.
 
   NetJob* = ptr NetJobState
 
@@ -90,6 +111,7 @@ proc fire*(job: NetJob; delta: NetDelta) =
   {.cast(gcsafe).}:
     acquire(job.lock)
     job.deltas.add(delta)
+    inc job.activity
     release(job.lock)
 
 proc fireProgress*(job: NetJob; slurped: int) =
@@ -132,6 +154,45 @@ proc setPhase*(job: NetJob; phase: NetPhase) =
   {.cast(gcsafe).}:
     acquire(job.lock)
     job.phase = phase
+    release(job.lock)
+
+proc phaseOf*(job: NetJob): NetPhase =
+  ## Locked read. The caller polls this instead of touching `job.phase`.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.phase
+    release(job.lock)
+
+proc outcomeReady*(job: NetJob): bool =
+  ## Locked read of `outcomeWritten`.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.outcomeWritten
+    release(job.lock)
+
+proc isReaped*(job: NetJob): bool =
+  ## Locked read of `reaped`.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.reaped
+    release(job.lock)
+
+proc workerDone*(job: NetJob): bool =
+  ## Locked read of `workerGone`: the worker has made its final job access
+  ## and freed its own allocations. Main may join (and free) after this.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.workerGone
+    release(job.lock)
+
+proc activityCount*(job: NetJob): int =
+  ## Locked read of the monotonic delta counter. The caller uses the
+  ## delta between two polls as proof the worker is alive and producing;
+  ## silence across a whole join budget means the worker is wedged in an
+  ## operation no flag can interrupt.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.activity
     release(job.lock)
 
 proc rawCopy(src: string): string =
@@ -195,15 +256,22 @@ proc reap*(job: NetJob) =
     release(job.lock)
 
 proc workerRelease*(job: NetJob) =
-  ## Worker-side cleanup after `publishOutcome`: wait for `reap`, then
-  ## free the worker-owned strings here on this thread. The wait is
-  ## bounded by main's poll cadence plus one drain.
-  while not job.reaped:
+  ## Worker-side cleanup after `publishOutcome`: wait (bounded) for
+  ## `reap`, then free the worker-owned strings here on this thread and
+  ## set `workerGone` as the job's last touch. The normal caller reaps
+  ## within one poll tick; the bound covers a caller that raised or gave
+  ## up without reaping (a retired job), so the worker can still exit.
+  ## Replacements are allocation-free (`@[]` / `StreamOutcome()`), so the
+  ## main thread's later destruction of these fields frees nothing across
+  ## threads — that is what makes freeing the job on main after
+  ## `workerDone` ORC-safe.
+  var waited = 0
+  while not isReaped(job) and waited < NetReapWaitMs:
     sleep(1)
+    inc waited
   {.cast(gcsafe).}:
     acquire(job.lock)
-    # @[] / StreamOutcome() are allocation-free replacements, so main's
-    # later destruction of these fields frees nothing across threads.
     job.deltas = @[]
     job.outcome = StreamOutcome()
+    job.workerGone = true
     release(job.lock)
