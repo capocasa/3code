@@ -208,12 +208,7 @@ proc runPromptTurn(job: PromptJob) =
       stderr.writeLine "3code acp: " & ev.text
   try:
     discard fe.s.prompt(job.text)
-    # Persistence failure is an error response, never a false end_turn.
-    if sessionSaveError.len > 0:
-      fe.respondErr(job.reqId, JrAppError,
-        "session save failed: " & sessionSaveError)
-    else:
-      fe.respond(job.reqId, %*{"stopReason": "end_turn"})
+    fe.respond(job.reqId, %*{"stopReason": "end_turn"})
   except AgentError as e:
     if e.msg == InterruptedByUserMsg:
       fe.respond(job.reqId, %*{"stopReason": "cancelled"})
@@ -221,6 +216,8 @@ proc runPromptTurn(job: PromptJob) =
       fe.respondErr(job.reqId, JrAppError, e.msg)
   except CatchableError as e:
     fe.respondErr(job.reqId, JrAppError, e.msg)
+    # A SessionSaveError lands here: an application error response, so a
+    # persistence failure is never a false end_turn.
   finally:
     # Exception-safe reset: busy clears only after the stream surface is
     # detached, and never leaks on an unexpected raise above.

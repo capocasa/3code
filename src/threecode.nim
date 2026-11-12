@@ -1036,6 +1036,16 @@ proc main() =
       # as the command has yielded (now).
       discard runModeKickoff(activeMode(session.cwd))
 
+  proc saveSessionReporting(session: Session, messages: JsonNode) =
+    ## Submit-path checkpoint: a failed commit is painted into the
+    ## transcript once and the submit goes on — the conversation lives in
+    ## memory, later checkpoints retry the save, and nothing here loops
+    ## on the same failing write.
+    try:
+      saveSession(session, messages)
+    except SessionSaveError as e:
+      commitTranscriptBytes(errLnS(e.msg), true)
+
   proc handleBufferedAfterTurn(interrupted: bool): bool =
     ## Drain the queue in order once the turn yields: each queued prompt
     ## runs a full turn (anything queued during that turn drains after
@@ -1095,7 +1105,7 @@ proc main() =
                           vision = prof.vision,
                           imgDir = sessionImageDir(session.savePath))}
         refreshSystemPrompt(messages, prof, session.promptState)
-        saveSession(session, messages)
+        saveSessionReporting(session, messages)
         if ev.echoed:
           # Unpin this prompt's hourglass echo into its committed
           # prompt item (same rows where it sat, hourglass dropped now
@@ -1169,7 +1179,7 @@ proc main() =
       commitTranscriptBytes(conflictBytes, true)
     let kickoff = m.kickoffMessage(modeText)
     messages.add kickoff
-    saveSession(session, messages)
+    saveSessionReporting(session, messages)
     commitTranscriptBytes(
       formatItem(agentPromptItem(
         kickoffDisplayText(kickoff{"content"}.getStr),
@@ -1193,7 +1203,7 @@ proc main() =
     # (job teardown of a detached oneshot, power loss) otherwise loses the
     # prompt entirely - the .3log stays empty until the first response and
     # a CLI prompt never passes through the draft sidecar.
-    saveSession(session, messages)
+    saveSessionReporting(session, messages)
     emitUserSubmit(text & imageAttachEcho())
     resetEditorRowModel(addr editor)
     clearDraft(session)
@@ -1411,7 +1421,7 @@ proc main() =
       # Same mid-turn-kill window as runInitialPrompt: the draft sidecar
       # is cleared below, so without this save the typed prompt only
       # lands in the .3log after the first model response.
-      saveSession(session, messages)
+      saveSessionReporting(session, messages)
       # User-submit transition: walk back to the previous turn's bar
       # row, repaint it as the receipt (cyan, skipped on the first turn),
       # echo the user's input as scroll-history content. Cursor lands

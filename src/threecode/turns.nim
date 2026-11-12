@@ -2093,8 +2093,19 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     return false
   try:
     return runTurns(p, messages, session)
+  except SessionSaveError as e:
+    # A checkpoint save could not commit: the previous transcript on disk
+    # is intact, the turn's result lives on in memory, and the next save
+    # will retry. Report it and keep the session usable instead of letting
+    # the generic net below call an uncommitted turn an internal error.
+    stderr.writeLine "3code: " & e.msg
+    return false
   except ApiError as e:
-    saveSession(session, messages)
+    # This save sits in an error handler: a failing commit is reported
+    # here rather than re-raised, so it cannot masquerade as the generic
+    # net's internal error below.
+    try: saveSession(session, messages)
+    except SessionSaveError as se: stderr.writeLine "3code: " & se.msg
     if isInterruptedMsg(e.msg):
       # Safety net: `callModel`'s interrupt raises are normally caught inside
       # `runTurns` so `onTurnInterrupted` lands before the deferred
@@ -2137,7 +2148,10 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # user `rm -rf`'d it in another shell). There is nothing useful
     # to keep doing, so save what we have and exit cleanly. `quit`
     # runs the registered exit procs, which restore terminal state.
-    try: saveSession(session, messages) except CatchableError: discard
+    # Last save before quitting: best-effort, but never silent — a failed
+    # commit must be visible even as the process goes away.
+    try: saveSession(session, messages)
+    except SessionSaveError as e: stderr.writeLine "3code: " & e.msg
     commitTranscriptBytes(errLnS("working directory gone: " & e.msg), true)
     quit()
   except CatchableError as e:

@@ -377,11 +377,14 @@ proc close*(s: AgentSession) =
   ## Persist the session, release locks, and restore the terminal-facing
   ## hooks so the process can go back to CLI use (or init a new session).
   ## Refused with `AgentError` while a turn runs or a close is already in
-  ## progress — interrupt and join the worker first — and safe to repeat
-  ## after actual closure. Cleanup is mandatory and ordered: even when the
-  ## save fails (or raises), locks, hooks, plugin teardown, and the
-  ## per-process ownership claim all complete, the session is marked
-  ## closed, and only then is the save failure raised.
+  ## progress - interrupt and join the worker first - and safe to repeat
+  ## after actual closure. Cleanup is mandatory and ordered: the final
+  ## save is attempted, every lock this process owns is released, the
+  ## headless hooks are restored, plugin teardown completes, and the
+  ## per-process session slot is freed even when the save raised - the
+  ## terminal state is marked last. Only then is a persistence failure
+  ## reported on stderr: it never skips ownership release or keeps the
+  ## slot reserved.
   withLock s.lifeLock:
     case s.phase
     of spClosed: return
@@ -390,13 +393,9 @@ proc close*(s: AgentSession) =
     of spRunning:
       raise newException(AgentError, "close refused: " & busyTurnMsg)
     of spIdle: s.phase = spClosing
-  var failure = ""
-  try:
-    saveSession(s.state, s.messages)
-    if sessionSaveError.len > 0:
-      failure = "session save failed: " & sessionSaveError
-  except CatchableError as e:
-    if failure.len == 0: failure = "session save failed: " & e.msg
+  var saveErr: ref SessionSaveError = nil
+  try: saveSession(s.state, s.messages)
+  except SessionSaveError as e: saveErr = e
   try: releaseActiveSessionLock() except CatchableError: discard
   try: releaseActiveDirLock() except CatchableError: discard
   try:
@@ -408,8 +407,7 @@ proc close*(s: AgentSession) =
   # Last: a new init must not start while teardown is still running.
   agentSessionOwned.store(false)
   withLock s.lifeLock: s.phase = spClosed
-  if failure.len > 0:
-    raise newException(AgentError, failure)
+  if saveErr != nil: reportSaveFailure(saveErr)
 
 # ---------- prompts and commands ----------
 

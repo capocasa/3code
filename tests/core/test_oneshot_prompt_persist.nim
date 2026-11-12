@@ -86,3 +86,45 @@ suite "oneshot prompt persistence":
       check "build a castle and report back" in text
       # Still mid-turn: the stalled response must not be in the file yet.
       check "never arrives" notin text
+
+  test "a failed transcript save is reported, never swallowed":
+    # The -s target's parent is a regular file: the turn runs, every save
+    # fails, and the CLI must say so on stderr instead of exiting like a
+    # normal successful run. Nothing may appear at the target.
+    let root = newFixture("oneshot_savefail")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      {"role": "assistant", "content": "quiet reply",
+       "contentChunks": ["quiet reply"]}
+    ]))
+    let stub = ensureStubBinary()
+    writeFile(root / "blocker", "x")
+    let env = newStringTable()
+    env["XDG_DATA_HOME"] = root / "xdg"
+    env["XDG_CONFIG_HOME"] = root / "xdg"
+    env["XDG_CACHE_HOME"] = root / "xdg" / "cache"
+    env["TMPDIR"] = root / "tmp"
+    env["HOME"] = root
+    env["TERM"] = "dumb"
+    env["THREECODE_STUB_RESPONSES"] = root / "run" / "stub_responses.json"
+    let cmdline = "exec " & stub.quoteShell & " -x -s " &
+      (root / "blocker" / "x.3log").quoteShell & " " &
+      "a castle".quoteShell &
+      " > " & (root / "run" / "out.txt").quoteShell &
+      " 2> " & (root / "run" / "err.txt").quoteShell
+    let po = startProcess("/bin/sh", args = ["-c", cmdline], env = env,
+                          workingDir = root / "run", options = {})
+    var exited = false
+    for i in 1 .. 300:
+      sleep 100
+      if not po.running:
+        exited = true
+        break
+    if not exited: kill(po)
+    discard waitForExit(po)
+    check exited
+    check not fileExists(root / "blocker" / "x.3log")
+    let err = try: readFile(root / "run" / "err.txt")
+              except CatchableError: ""
+    check "could not save transcript" in err

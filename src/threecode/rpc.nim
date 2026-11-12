@@ -242,12 +242,7 @@ proc runRpcTurn(job: RpcJob) =
       st.push("error", ev.text)
   try:
     discard st.s.prompt(job.text)
-    # Persistence failure is an error end, never a false end_turn.
-    if sessionSaveError.len > 0:
-      st.push("error", "session save failed: " & sessionSaveError)
-      st.push("end", "error")
-    else:
-      st.push("end", "end_turn")
+    st.push("end", "end_turn")
   except AgentError as e:
     if e.msg == InterruptedByUserMsg:
       st.push("end", "cancelled")
@@ -257,6 +252,8 @@ proc runRpcTurn(job: RpcJob) =
   except CatchableError as e:
     st.push("error", e.msg)
     st.push("end", "error")
+    # A SessionSaveError lands here: an error event and an error end, so
+    # a persistence failure is never a successful end_turn.
   finally:
     # Exception-safe reset: busy clears only after the ring is closed out,
     # and never leaks on an unexpected raise above.
