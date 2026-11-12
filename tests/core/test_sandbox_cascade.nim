@@ -19,7 +19,7 @@ import std/[unittest, os, times, strutils, json]
 import threecode/sandbox
 import threecode/types
 import threecode/util
-import threecode/[minline, ui]
+import threecode/[minline, ui, dirsettings]
 
 # Use platform-appropriate absolute paths so the test is meaningful on
 # both Unix and Windows. On Windows a bare "/opt" is not absolute (no
@@ -540,6 +540,57 @@ suite "single active policy file":
     # The guards are enforced but never rendered.
     check ".sandbox" notin renderSandbox(p)
     check userFile notin renderSandbox(p)
+
+  test "the user config and its store configs are read-only guards":
+    # The security switches live in user-owned files; the model can
+    # neither flip them mid-session (project stores tighten only) nor
+    # edit the files so the NEXT launch disables the fence. A repo
+    # policy that explicitly allows the config root loses to the
+    # appended guards, exactly like the policy files themselves.
+    let (home, projDir) = newFixture("guardsettings")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let userCfg = userConfigRoot() / "config"
+    createDir(userCfg.parentDir)
+    writeFile(userCfg, "[settings]\nsandbox = \"off\"\n")
+    sandbox.hiddenRules = sandbox.guardRules(projDir)
+    defer: sandbox.hiddenRules = @[]
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "allow /\nallow " & userCfg & "\n")
+    var p = loadPolicy(projDir)
+    check p.checkPath(userCfg) == akReadOnly
+    # In project mode the project store config stays writable: goals,
+    # sticky currents and the store itself keep working.
+    let projStoreCfg = projDir / ".3code" / "config"
+    createDir(projStoreCfg.parentDir)
+    writeFile(projStoreCfg, "[settings]\nsandbox = \"on\"\n")
+    check p.checkPath(projStoreCfg) == akWritable
+
+  test "user-mode store configs in the cascade are guarded too":
+    let (home, projDir) = newFixture("guarduserstore")
+    let sub = projDir / "sub"
+    createDir(sub)
+    dirsettings.dirConfigLocation = "user"
+    defer:
+      dirsettings.dirConfigLocation = "project"
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let storeCfg = dirsettings.storeFileFor(projDir,
+      dirsettings.StoreConfigFile)
+    createDir(storeCfg.parentDir)
+    writeFile(storeCfg, "[settings]\nsandbox = \"off\"\n")
+    sandbox.hiddenRules = sandbox.guardRules(sub)
+    defer: sandbox.hiddenRules = @[]
+    let repoFile = repoPolicyPath(sub)
+    createDir(repoFile.parentDir)
+    writeFile(repoFile, "allow /\nallow " & (home / "3code") & "\n")
+    var p = loadPolicy(sub)
+    # The whole session cascade is covered: the sub store (absent, but
+    # the write target) and the ancestor's.
+    check p.checkPath(storeCfg) == akReadOnly
+    check p.checkPath(dirsettings.storeFileFor(sub,
+      dirsettings.StoreConfigFile)) == akReadOnly
 
   test "box policy resolution keeps the policy file read-only":
     # The bash subprocess re-loads the policy itself; the hidden guards

@@ -28,8 +28,12 @@
 ## the file says: they ride every load as hidden guard rules
 ## (`hiddenRules`), appended last so no file rule can weaken them,
 ## enforced by the in-process checks and carried through to the box
-## subprocess, but never shown in `:sandbox show`. The private-mode
-## transcript directory rides the same way as an absolute deny, so no
+## subprocess, but never shown in `:sandbox show`. The user-owned
+## settings files that carry the security switches (the user config
+## and, under `dirconfig = "user"`, the session's store config files)
+## ride the same way, so a project-controlled store cannot edit the
+## files that would disable the sandbox on the next launch. The
+## private-mode transcript directory rides as an absolute deny, so no
 ## policy can ever let a session read private transcripts off disk.
 ##
 ## `reloadIfChanged` re-reads the active file when its mtime changed
@@ -48,6 +52,7 @@ import defaults
 import types
 import util
 import dirsettings
+import config
 from shell import bashMutationPath
 
 export sandwall.AccessKind, sandwall.Rule,
@@ -559,6 +564,16 @@ proc guardRules*(projectDir: string): seq[Rule] =
   ## the policy out from under 3code, no matter what the file says.
   ## Appended last after every load; paths that collapse guard once.
   ##
+  ## The user-owned settings files that carry the security switches
+  ## ride along as read-only guards: the user config, and, when the
+  ## user config chose `dirconfig = "user"`, every store `config` file
+  ## this session's cascade consults. The same project-controlled files
+  ## that applyStoreBooleans refuses to let weaken the sandbox must not
+  ## be able to edit the user files that would weaken it on the next
+  ## launch instead. Only the cascade's config files are covered, not a
+  ## whole store tree: goal files and policy files keep their own
+  ## slots, and in project mode the project store stays fully writable.
+  ##
   ## The private-mode transcript directory rides as a hidden deny for
   ## the same reason it is separate from `sessions/`: any ordinary
   ## (non-private) session that could read it would hand private
@@ -566,22 +581,22 @@ proc guardRules*(projectDir: string): seq[Rule] =
   ## from. Stronger than the default `deny /`: no policy file can
   ## re-allow it, so `allow ~/` or a rubber-stamped ask never opens it.
   ## Only `[settings] sandbox = off` (guard rules never load) lifts it.
-  let user = systemPolicyPath()
-  result = @[Rule(access: akReadOnly, kind: rkPath, hidden: true,
-                  path: repoPolicyPath(projectDir))]
-  let legacy = projectDir / PolicyFile
-  if legacy != result[0].path:
-    result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
-                    path: legacy)
-  let active = activePolicyPath(projectDir)
-  if active != result[0].path and
-      (result.len < 2 or active != result[1].path):
-    result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
-                    path: active)
-  if user != result[^1].path and user != result[0].path and
-      (result.len < 3 or user != result[1].path):
-    result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
-                    path: user)
+  var guarded: seq[string]
+  var candidates = @[repoPolicyPath(projectDir),
+                     projectDir / PolicyFile,
+                     activePolicyPath(projectDir),
+                     systemPolicyPath()]
+  # The security-switch authority itself: never editable by the model.
+  candidates.add configPath()
+  if dirsettings.dirConfigLocation == "user":
+    for d in dirsettings.ancestorsNearestFirst(projectDir):
+      candidates.add dirsettings.storeFileFor(d, dirsettings.StoreConfigFile)
+  for path in candidates:
+    let p = path.normalizedPath
+    if p.len > 0 and p notin guarded:
+      guarded.add p
+      result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
+                      path: path)
   result.add Rule(access: akDeny, kind: rkPath, hidden: true,
                   path: privateSessionDir())
 

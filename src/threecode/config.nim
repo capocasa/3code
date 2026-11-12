@@ -1051,9 +1051,10 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "notify = \"off\"\n"
   if not tabTitleEnabled:
     buf.add "tab-title = \"off\"\n"
-  # A directory's `sandbox = off` must not edit the user config: while
-  # a directory override is in effect, persist the user config's own
-  # value instead of the effective one.
+  # A store's security switch must not edit the user config: while an
+  # override is in effect (a user-owned store weakened the value, or a
+  # project store tightened it), persist the user config's own value
+  # instead of the effective one.
   let effSandbox =
     if dirsettings.dirSandboxOverridden: dirsettings.globalSandboxEnabled
     else: sandboxEnabled

@@ -1,6 +1,7 @@
 ## Directory-specific settings: the `.3code` store, the parent cascade,
-## the sandbox policy selection, the sandbox-off overlay, and the
-## writeConfigFile no-leak guard.
+## the sandbox policy selection, the sandbox authority rule (project
+## stores tighten, user-owned stores decide), and the writeConfigFile
+## no-leak guard.
 
 import std/[os, strutils, unittest]
 import threecode/[dirsettings, sandbox, config, types]
@@ -60,32 +61,158 @@ suite "dirsettings: config cascade":
     check dirsettings.cascadeConfigValue(f.sub, "current") == "root.glm-5.2"
     check dirsettings.cascadeConfigValue(f.sub, "sandbox") == "off"
 
-suite "dirsettings: sandbox off as a directory setting":
-  test "a directory config turns the sandbox off":
+suite "dirsettings: sandbox authority":
+  # Project-local stores may tighten a security boolean (false -> true)
+  # but may never weaken one (true -> false): disabling the sandbox or
+  # silencing its warnings is a user-owned decision, made in the user
+  # config or, under `dirconfig = "user"`, in the stores the user config
+  # selected. Ordinary preferences keep nearest-wins.
+
+  test "a local store cannot disable an enabled sandbox":
     let f = newFixture("sboff")
     defer: dropFixture(f.base)
     sandboxEnabled = true
     writeStoreConfig(f.proj, "[settings]\nsandbox = \"off\"\n")
     dirsettings.applyDirConfig(f.sub)
-    check not sandboxEnabled
-    check dirsettings.dirSandboxOverridden
-    # Sibling directory without the override stays on.
-    sandboxEnabled = true
-    dirsettings.applyDirConfig(f.base / "other")
     check sandboxEnabled
     check not dirsettings.dirSandboxOverridden
     sandboxEnabled = true
 
-  test "the override applies on top of the parsed user config":
-    let f = newFixture("sbparse")
+  test "an ancestor store cannot disable an enabled sandbox":
+    let f = newFixture("sboffanc")
     defer: dropFixture(f.base)
     sandboxEnabled = true
-    writeStoreConfig(f.proj, "[settings]\nsandbox = \"off\"\n")
-    # The full parse re-applies the user config's switches; the overlay
-    # must run after it and win.
-    dirsettings.applyDirConfig(f.proj)
-    check not sandboxEnabled
+    writeStoreConfig(f.base, "[settings]\nsandbox_enabled = \"off\"\n")
+    dirsettings.applyDirConfig(f.sub)
+    check sandboxEnabled
+    check not dirsettings.dirSandboxOverridden
     sandboxEnabled = true
+
+  test "every false spelling is refused, on both alias spellings":
+    let f = newFixture("sbfalse")
+    defer: dropFixture(f.base)
+    for key in ["sandbox", "sandbox_enabled"]:
+      for word in ["off", "false", "no", "0"]:
+        sandboxEnabled = true
+        writeStoreConfig(f.proj,
+          "[settings]\n" & key & " = \"" & word & "\"\n")
+        dirsettings.applyDirConfig(f.sub)
+        check sandboxEnabled
+        check not dirsettings.dirSandboxOverridden
+    sandboxEnabled = true
+
+  test "a store cannot silence the sandbox warning":
+    let f = newFixture("sbwarn")
+    defer: dropFixture(f.base)
+    sandboxWallWarn = true
+    writeStoreConfig(f.proj, "[settings]\nsandbox_wall_warn = \"off\"\n")
+    dirsettings.applyDirConfig(f.sub)
+    check sandboxWallWarn
+    check not dirsettings.dirWallWarnOverridden
+    sandboxWallWarn = true
+
+  test "a nearer refusal does not undo a farther tightening":
+    let f = newFixture("sbmix")
+    defer: dropFixture(f.base)
+    sandboxEnabled = false  # the user config said off
+    writeStoreConfig(f.base, "[settings]\nsandbox = \"on\"\n")
+    writeStoreConfig(f.proj, "[settings]\nsandbox = \"off\"\n")
+    dirsettings.applyDirConfig(f.sub)
+    # The far store tightens; the near store's disable is refused.
+    check sandboxEnabled
+    check dirsettings.dirSandboxOverridden
+    check not dirsettings.globalSandboxEnabled
+    sandboxEnabled = true
+
+  test "a nearer tightening wins over a farther one":
+    let f = newFixture("sbtight")
+    defer: dropFixture(f.base)
+    sandboxEnabled = false
+    writeStoreConfig(f.base, "[settings]\nsandbox = \"off\"\n")
+    writeStoreConfig(f.proj, "[settings]\nsandbox = \"on\"\n")
+    dirsettings.applyDirConfig(f.sub)
+    check sandboxEnabled
+    check dirsettings.dirSandboxOverridden
+    sandboxEnabled = true
+
+  test "conflicting aliases resolve to the primary spelling":
+    let f = newFixture("sbalias")
+    defer: dropFixture(f.base)
+    sandboxEnabled = true
+    writeStoreConfig(f.proj,
+      "[settings]\nsandbox = \"on\"\nsandbox_enabled = \"off\"\n")
+    dirsettings.applyDirConfig(f.sub)
+    check sandboxEnabled
+    check not dirsettings.dirSandboxOverridden
+    # Even flipped, the refused spelling cannot win through the alias.
+    writeStoreConfig(f.proj,
+      "[settings]\nsandbox = \"off\"\nsandbox_enabled = \"on\"\n")
+    dirsettings.applyDirConfig(f.sub)
+    check sandboxEnabled
+    sandboxEnabled = true
+
+  test "missing and malformed store configs stay harmless":
+    # No store, no authority, no flags; a broken config reads as empty.
+    let f = newFixture("sbmiss")
+    defer: dropFixture(f.base)
+    sandboxEnabled = true
+    dirsettings.applyDirConfig(f.sub)
+    check sandboxEnabled
+    check not dirsettings.dirSandboxOverridden
+    createDir(f.proj / ".3code")
+    writeFile(f.proj / ".3code" / "config",
+      "[settings]\nsandbox = = garbage\n")
+    dirsettings.applyDirConfig(f.sub)
+    check sandboxEnabled
+    check not dirsettings.dirSandboxOverridden
+    sandboxEnabled = true
+
+  test "dirconfig = user makes the store's disable authoritative":
+    let f = newFixture("sbuser")
+    defer: dropFixture(f.base)
+    dirsettings.dirConfigLocation = "user"
+    sandboxEnabled = true
+    let store = dirsettings.storeDirFor(f.proj)
+    createDir(store)
+    writeFile(store / "config", "[settings]\nsandbox = \"off\"\n")
+    dirsettings.applyDirConfig(f.sub)
+    check not sandboxEnabled
+    check dirsettings.dirSandboxOverridden
+    # The warning switch obeys the same authority.
+    sandboxWallWarn = true
+    writeFile(store / "config",
+      "[settings]\nsandbox_wall_warn = \"off\"\n")
+    dirsettings.applyDirConfig(f.sub)
+    check not sandboxWallWarn
+    check dirsettings.dirWallWarnOverridden
+    # Back to project mode, the same file content has no authority.
+    dirsettings.dirConfigLocation = "project"
+    sandboxEnabled = true
+    sandboxWallWarn = true
+    dirsettings.applyDirConfig(f.sub)
+    check sandboxEnabled
+    check sandboxWallWarn
+    sandboxEnabled = true
+    sandboxWallWarn = true
+
+  test "the overlay survives a re-parse of the user config":
+    # Startup applies the overlay before and again after the full parse;
+    # the parse must not hand the refusal a second chance.
+    let f = newFixture("sbreparse")
+    defer: dropFixture(f.base)
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath, "[settings]\nsandbox = \"off\"\n")
+    writeStoreConfig(f.proj, "[settings]\nsandbox = \"on\"\n")
+    discard tryLoadStateOrEmpty(cfgPath)
+    check not sandboxEnabled
+    dirsettings.applyDirConfig(f.proj)
+    check sandboxEnabled  # tightened
+    discard tryLoadStateOrEmpty(cfgPath)  # the full parse re-applies off
+    dirsettings.applyDirConfig(f.proj)
+    check sandboxEnabled
+    sandboxEnabled = true
+    dirsettings.dirConfigLocation = "project"
 
   test "writeConfigFile does not leak the directory override":
     let f = newFixture("noleak")
@@ -100,6 +227,43 @@ suite "dirsettings: sandbox off as a directory setting":
     # Without the override, off persists as before.
     dirsettings.dirSandboxOverridden = false
     writeConfigFile(cfgPath, "", @[])
+    check "sandbox = \"off\"" in readFile(cfgPath)
+    sandboxEnabled = true
+
+  test "a refused disable is never hoisted into the user config":
+    # The full startup contract: user config on, project store off. The
+    # session runs confined, and every config write round-trip (other
+    # instances re-parse the file) stays confined too.
+    let f = newFixture("sbnohoist")
+    defer: dropFixture(f.base)
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath, "[settings]\ncurrent = \"x.y\"\n")
+    writeStoreConfig(f.proj, "[settings]\nsandbox = \"off\"\n")
+    discard tryLoadStateOrEmpty(cfgPath)
+    dirsettings.applyDirConfig(f.proj)
+    check sandboxEnabled
+    writeConfigFile(cfgPath, "x.y", @[])
+    check "sandbox" notin readFile(cfgPath)
+    # And the reload lands where the round started.
+    discard tryLoadStateOrEmpty(cfgPath)
+    dirsettings.applyDirConfig(f.proj)
+    check sandboxEnabled
+    sandboxEnabled = true
+
+  test "a tightening persists the user's off, not the store's on":
+    let f = newFixture("sbtightsave")
+    defer: dropFixture(f.base)
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath, "[settings]\ncurrent = \"x.y\"\n")
+    writeStoreConfig(f.proj, "[settings]\nsandbox = \"on\"\n")
+    discard tryLoadStateOrEmpty(cfgPath)  # no switch in the user config
+    sandboxEnabled = false  # as if an earlier parse had said off
+    dirsettings.applyDirConfig(f.proj)
+    check sandboxEnabled
+    check dirsettings.dirSandboxOverridden
+    writeConfigFile(cfgPath, "x.y", @[])
     check "sandbox = \"off\"" in readFile(cfgPath)
     sandboxEnabled = true
 

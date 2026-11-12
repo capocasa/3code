@@ -193,8 +193,9 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
   # Directory-specific overlay (`.3code/config` in the session dir or
   # any parent, nearest wins) — applied after the full parse so the
-  # user config's own switches cannot undo it. Sandbox-off here must
-  # land before the `if sandboxEnabled` arm below.
+  # user config's own switches land first. Project stores may only
+  # tighten the security switches, so whatever the arm below sees is
+  # the user's choice or stricter.
   dirsettings.applyDirConfig(cwd)
   # Per-directory sticky current, same resolution as the CLI main: this
   # directory's last `:provider` / `:model` wins when it still resolves.

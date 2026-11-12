@@ -749,9 +749,9 @@ proc main() =
   # print. The full parse re-applies them unchanged.
   applyEarlySandboxSettings(configPath())
   # Directory-specific settings overlay: a `.3code/config` in the
-  # session dir (or any parent, nearest wins) can switch the sandbox
-  # off before it arms, so it runs before initSandbox like the early
-  # global parse above.
+  # session dir (or any parent, nearest wins) may tighten the sandbox
+  # switches (an off sandbox can be turned on) but never weaken them,
+  # so it runs before initSandbox like the early global parse above.
   dirsettings.applyDirConfig(session.cwd)
   # Sandbox is mandatory: the single active policy (repo
   # `.sandbox`, user file, else the built-in default) is loaded.

@@ -19,10 +19,17 @@ var
   bin: string
   built = false
 
-proc runIn(rootDir: string; args: openArray[string]): tuple[o: string; code: int] =
+proc runIn(rootDir: string; args: openArray[string];
+           extraEnv: openArray[(string, string)] = @[]): tuple[o: string; code: int] =
   # execCmdEx defaults to poStdErrToStdOut, so `o` is EVERYTHING the
   # process printed on any stream — exactly what a silence contract
-  # wants to check.
+  # wants to check. `extraEnv` carries one-call settings on top of the
+  # fixture (the stub's sandbox opt-in and friends).
+  var extra = ""
+  when defined(windows):
+    for (k, v) in extraEnv: extra.add "&& set " & k & "=" & v
+  else:
+    for (k, v) in extraEnv: extra.add " " & k & "=" & v.quoteShell
   let quoted = args.toSeq.mapIt(it.quoteShell).join(" ")
   # The binary runs with cwd = <root>/run: a clean directory. The
   # project checkout itself carries a .3code goal store, and goal mode
@@ -35,7 +42,7 @@ proc runIn(rootDir: string; args: openArray[string]): tuple[o: string; code: int
       "XDG_CONFIG_HOME=" & (rootDir / "cfg") & "&& set TMPDIR=" & (rootDir / "tmp") &
       "&& set TC_FIXTURE_LOG=" & logPath & "&& set " &
       "THREECODE_STUB_RESPONSES=" & (root / "stub_responses.json") &
-      "&& " & quoteShell(bin) & " " & quoted
+      " " & extra & "&& " & quoteShell(bin) & " " & quoted
   else:
     let cmd = "cd " & (rootDir / "run").quoteShell & " && XDG_DATA_HOME=" &
       (rootDir / "share").quoteShell &
@@ -43,7 +50,7 @@ proc runIn(rootDir: string; args: openArray[string]): tuple[o: string; code: int
       " TMPDIR=" & (rootDir / "tmp").quoteShell &
       " TC_FIXTURE_LOG=" & logPath.quoteShell &
       " THREECODE_STUB_RESPONSES=" & (root / "stub_responses.json").quoteShell &
-      " " & quoteShell(bin) & " " & quoted
+      extra & " " & quoteShell(bin) & " " & quoted
   let (outp, code) = execCmdEx(cmd)
   (outp, code)
 
@@ -169,3 +176,38 @@ suite "headless cli (binary)":
     let r = runIn(bare, ["--gui"])
     check r.code == 3
     check r.o.len == 0
+
+  test "a project store's sandbox = off cannot disable the fence":
+    # Repository-controlled `.3code/config` may not turn an enabled
+    # sandbox off. The subprocess must run the turn confined for real:
+    # the write tool's hard deny fires, the file is not written, and
+    # the denial lands in the persisted transcript.
+    var arr = newJArray()
+    arr.add %*{"content": "", "tool_calls": [{
+      "id": "call_1", "type": "function",
+      "function": {"name": "write",
+                   "arguments": $(%*{"path": "locked/out.txt",
+                                      "body": "nope\n"})}}]}
+    arr.add %*{"content": "saved"}
+    writeFile(root / "stub_responses.json", $arr)
+    createDir(root / "run" / "locked")
+    # A repo policy with a hard deny under the writable project dir: the
+    # denial must come from enforcement being on, not from the path
+    # merely being unwritable.
+    writeFile(root / "run" / ".sandbox",
+      "deny /\nallow ./\ndeny ./locked\n")
+    createDir(root / "run" / ".3code")
+    writeFile(root / "run" / ".3code" / "config",
+      "[settings]\nsandbox = \"off\"\n")
+    let r = runIn(root, ["--headless", "save it"],
+                  [("THREECODE_STUB_SANDBOX", "1")])
+    check r.code == 0
+    check r.o.len == 0
+    check not fileExists(root / "run" / "locked" / "out.txt")
+    var denied = false
+    for f in walkFiles(root / "share" / "3code" / "sessions" / "*.3log"):
+      if "is denied by the policy" in readFile(f): denied = true
+    check denied
+    removeFile(root / "run" / ".3code" / "config")
+    removeFile(root / "run" / ".sandbox")
+    stubReplies()  # restore the file for any later run

@@ -187,9 +187,11 @@ Keys under `[settings]`:
 | `current` | `PROVIDER[.MODEL]` | the provider (and optional model) used at startup; `-m` overrides it, `:provider`/`:model` write it back |
 | `notify` | `on`/`off` (default on) | desktop notification when a turn ends; off on Termux |
 | `streaming` | `on`/`off` (default on) | SSE streaming; `off` uses plain request/response, the reliable fallback for providers with flaky SSE |
-| `sandbox` | `on`/`off` (default on) | filesystem sandbox enforcement; `off` also silences the Windows host-rules warning |
+| `sandbox` | `on`/`off` (default on) | filesystem sandbox enforcement; `off` also silences the Windows host-rules warning. This file is the only place that may disable the sandbox: a project's `.3code/config` can turn it on but never off (and never silence `sandbox_wall_warn`) |
+| `sandbox_enabled` | `on`/`off` | alias for `sandbox` in the user config; in a store, `sandbox` wins when both are set |
+| `dirconfig` | `project`/`user` (default project) | where directory-specific settings stores live: a `.3code/` directory in each project, or a per-directory directory under `~/.config/3code/dirs/`. Only in `user` mode may a store's `[settings]` carry a per-directory `sandbox = off`; project stores may tighten (on) but never weaken (off) the sandbox and its warning. Settings cascade nearest-wins for everything else (`current`, ...) |
 | `patient_retry` | `on`/`off` (default on) | long backoff for 429/5xx/network errors (see [patient retry](manual.html#patient-retry)); `patient-retry` spelling accepted |
-| `sandbox_wall_warn` | `on`/`off` (default on) | the Windows warning shown when host rules exist but `3code setup` has not run |
+| `sandbox_wall_warn` | `on`/`off` (default on) | the Windows warning shown when host rules exist but `3code setup` has not run. Project stores cannot turn it off |
 | `tone` | `auto`/`dark`/`light` (default auto) | color palette selection; `auto` detects the terminal background via OSC 11. The legacy key `mode` and value `bright` still work |
 | `bash_path` | full path | Windows only: force a specific bash; auto-detection order is `bash_path`, PortableGit, Git for Windows, MSYS2, legacy msys64 tree |
 | `bash` | `auto` or full path (default auto) | any OS: a full path overrides all detection; `auto` keeps the normal order |

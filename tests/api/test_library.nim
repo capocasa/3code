@@ -12,7 +12,7 @@ discard """
 ## per-test fixture so nothing touches the developer's real 3code state.
 
 import std/[json, os, strutils, unittest]
-import threecode/[api, library, types, util]
+import threecode/[api, library, types, util, sandbox, dirsettings]
 
 const stubbed = defined(providerStub)
 
@@ -245,6 +245,78 @@ suite "library: AgentSession":
         discard initAgentSession(AgentOptions(cwd: root / "run",
                                               model: "stub.nonexistent",
                                               experimental: true))
+
+    test "a refused store disable survives a session reopen":
+      # The authority rule is not startup-only: close the session and
+      # reopen in the same directory, the project store's `sandbox =
+      # off` is refused again and the session stays confined. A failed
+      # or previous session leaves no weakened global behind.
+      let root = newFixture("authority")
+      writeConfig(root)
+      writeFile(root / "xdg" / "3code" / "config", """
+[settings]
+sandbox = "on"
+current = "stub.stub-model"
+
+[provider]
+name = "stub"
+url = "stub://provider"
+key = "stub"
+family = "glm"
+models = "stub-model"
+""")
+      createDir(root / "run" / ".3code")
+      writeFile(root / "run" / ".3code" / "config",
+        "[settings]\nsandbox = \"off\"\n")
+      isolateEnv(root)
+      # isolateEnv re-points TMPDIR at the fixture; the suite's later
+      # fixtures must not nest under it, so hand the suite value back.
+      defer: putEnv("TMPDIR", stableTmp)
+      dirsettings.dirConfigLocation = "project"
+      let a = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      check sandboxEnabled
+      a.close()
+      let b = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      check sandboxEnabled
+      b.close()
+
+    test "a tightened sandbox never leaks into a later session":
+      # Session A runs where a project store tightens the sandbox on
+      # over a user-config off. After close, session B in a clean
+      # directory sees the user's off again: the tighten is A's
+      # overlay, not a global the next session inherits.
+      let root = newFixture("tighten")
+      writeConfig(root)
+      writeFile(root / "xdg" / "3code" / "config", """
+[settings]
+sandbox = "off"
+current = "stub.stub-model"
+
+[provider]
+name = "stub"
+url = "stub://provider"
+key = "stub"
+family = "glm"
+models = "stub-model"
+""")
+      createDir(root / "run" / ".3code")
+      writeFile(root / "run" / ".3code" / "config",
+        "[settings]\nsandbox = \"on\"\n")
+      isolateEnv(root)
+      defer: putEnv("TMPDIR", stableTmp)
+      dirsettings.dirConfigLocation = "project"
+      let a = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      check sandboxEnabled
+      a.close()
+      let clean = root / "clean"
+      createDir(clean)
+      let b = initAgentSession(AgentOptions(cwd: clean,
+                                            experimental: true))
+      check not sandboxEnabled
+      b.close()
 
     test "empty prompt continues the turn without adding a user message":
       let root = newFixture("emptycontinue")

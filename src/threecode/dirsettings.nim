@@ -12,6 +12,13 @@
 ## Resolution cascades: for a setting, the directory's own store wins,
 ## then each ancestor's store, nearest first; the user config is the
 ## floor. A store that does not set a key never blocks a farther one.
+## Security switches are the exception: a repository-controlled store
+## (`dirconfig = "project"`, the default) may turn an off sandbox on
+## but may never turn an on sandbox off, and may not silence the
+## sandbox warning. Disablement is a user-owned decision: the user
+## config, or a store under the user config root when the user config
+## says `dirconfig = "user"`. Authority follows that mode switch, never
+## the store path's shape.
 ## Legacy layouts stay readable: a root-level `.sandbox` policy file, a
 ## `goal.md` in the project root, and the old
 ## `~/.local/share/3code/dirs/<mangled>.current` sticky-current file are
@@ -132,9 +139,18 @@ proc cascadeConfigValue*(cwd, key: string): string =
       return t[key].strip
   ""
 
-proc applyStoreBooleans*(storeDir: string) =
+proc applyStoreBooleans*(storeDir: string; userOwned: bool) =
   ## Apply one store's `sandbox` / `sandbox_wall_warn` switches to the
   ## process globals. Called nearest-last so nearer stores win.
+  ##
+  ## `userOwned` is the authority: it mirrors `[settings] dirconfig` in
+  ## the user config, the only place that switch is read (a store can
+  ## never relocate the stores). A user-owned store decides freely;
+  ## a project-owned store may only tighten a security boolean from
+  ## false to true, never weaken true to false, so no repo-controlled
+  ## file can disable an enabled sandbox or its warnings. Provenance is
+  ## never inferred from the path: the same directory contents carry
+  ## authority or not depending solely on the user config's mode.
   let t = readStoreSettings(storeDir)
   template boolean(key: string): Option[bool] =
     let v = t.getOrDefault(key, "").strip.toLowerAscii
@@ -142,31 +158,41 @@ proc applyStoreBooleans*(storeDir: string) =
     of "on", "true", "yes", "1": some(true)
     of "off", "false", "no", "0": some(false)
     else: none(bool)
-  for key in ["sandbox", "sandbox_enabled"]:
-    let b = boolean(key)
-    if b.isSome:
-      sandboxEnabled = b.get
-      dirSandboxOverridden = true
-  let w = boolean("sandbox_wall_warn")
-  if w.isSome:
-    sandboxWallWarn = w.get
-    dirWallWarnOverridden = true
+  proc enforce(b: Option[bool]; cur: var bool; overridden: var bool) =
+    if b.isNone or (not b.get and not userOwned):
+      return
+    if b.get != cur:
+      cur = b.get
+      overridden = true
+  # Conflicting aliases resolve deterministically to the primary
+  # spelling: `sandbox` decides, `sandbox_enabled` only when absent.
+  let sb = boolean("sandbox")
+  enforce(if sb.isSome: sb else: boolean("sandbox_enabled"),
+          sandboxEnabled, dirSandboxOverridden)
+  enforce(boolean("sandbox_wall_warn"), sandboxWallWarn,
+          dirWallWarnOverridden)
 
 proc applyDirConfig*(cwd: string) =
   ## Overlay the store cascade's settings onto the globals, farthest
-  ## store first so the nearest directory wins per key. Idempotent; runs
-  ## at startup before the sandbox arms and again after the full config
-  ## parse (which re-applies the user config's own switches).
+  ## store first so the nearest directory wins per key (security
+  ## switches additionally clamp monotonically, see
+  ## `applyStoreBooleans`). Idempotent; runs at startup before the
+  ## sandbox arms and again after the full config parse (which
+  ## re-applies the user config's own switches).
   dirSandboxOverridden = false
   dirWallWarnOverridden = false
   globalSandboxEnabled = sandboxEnabled
   globalWallWarn = sandboxWallWarn
+  # Authority for every store in this cascade comes from the user
+  # config's mode switch, read once here: project mode (the default)
+  # stores tighten only, user mode stores decide.
+  let userOwned = dirConfigLocation == "user"
   var existing: seq[string]
   for d in ancestorsNearestFirst(cwd):
     let s = storeDirFor(d)
     if dirExists(s): existing.add s
   for s in existing.reversed:
-    applyStoreBooleans(s)
+    applyStoreBooleans(s, userOwned)
 
 # ---------------------------------------------------------------------------
 # Sticky current provider

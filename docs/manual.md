@@ -1937,11 +1937,55 @@ can write the policy file. Avoid `allow /` if policy-file protection matters.
 The same mechanism carries one hidden deny: the private-mode transcript
 directory (see [Private transcripts](#private-transcripts)). No policy rule
 can open it, even under `allow /` — any session able to read it would
-defeat private mode.
+defeat private mode. The user config file rides the same way as read-only
+(and, with `[settings] dirconfig = "user"`, so do the per-directory store
+configs the session reads), so a repo cannot edit the files that would
+disable the fence on the next launch.
 
 A denied Bash command usually reports `Permission denied`. 3code includes the
 active policy path in denial messages, saving you from debugging the wrong
 layer.
+
+### Who may turn the sandbox off
+
+Disabling the sandbox is a user decision, never a project one. A
+`.3code/config` in the project (or any parent) can switch settings per
+directory, but for the security switches it works one way only: it may turn
+an off sandbox **on** (a team that wants enforcement despite a global
+`off`), and it may never turn an on sandbox **off** or silence the sandbox
+warning. Everything else in the store (`current`, timeouts, ...) keeps its
+nearest-store-wins cascade.
+
+The explicit ways to run unconfined, none of which a repository can reach:
+
+```
+[settings]
+sandbox = "off"        # global, in the user config
+```
+
+```
+3code --no-sandbox     # one run
+```
+
+```
+:sandbox off           # this session, writes the line above
+```
+
+Per directory: set `[settings] dirconfig = "user"` in the user config. The
+stores then live under `~/.config/3code/dirs/<directory>/` instead of inside
+each project, and a store's own `sandbox = off` there is yours and is
+honored. In `project` mode the same line in a repo's `.3code/config` is
+ignored.
+
+Config writes respect the same boundary: a session that ran with a store's
+tightened sandbox persists your original setting, and an ignored local
+disable request is never written into the user config.
+
+This boundary does not make an arbitrary third-party repository safe to
+open. The repo still chooses the policy file that ships with it (within
+which `allow /` is possible), and a repo-controlled policy can broaden what
+the session may read or write inside that session. It only means a clone
+cannot switch the sandbox off for you, in this session or the next.
 
 ### What is sandboxed
 
