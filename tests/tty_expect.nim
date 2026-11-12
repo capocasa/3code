@@ -1137,6 +1137,30 @@ proc cleanRaw*(raw: string): string =
 proc cleanRaw*(s: TtySession): string =
   cleanRaw(s.raw)
 
+proc collapsedText*(raw: string): string =
+  ## cleanRaw with whitespace runs collapsed to single spaces, for the
+  ## fragmented-paint fallback in expectInHistory. Under ConPTY the
+  ## child's render pipeline is unpaced (the frame-ack hooks are
+  ## posix-gated in src/), so a multi-line paint - the ask card - can
+  ## interleave with the bar tick's cursor moves: every character is
+  ## written, but a logical line may arrive split across escape
+  ## sequences and blank repaints, at rows a real terminal shows
+  ## scrambled. The strict match stays first; this sees the
+  ## fragmented-but-complete paint so content assertions do not flap
+  ## on where the fragments landed.
+  let clean = cleanRaw(raw)
+  var prevSpace = false
+  for ch in clean:
+    if ch in {' ', '\t', '\v', '\r', '\n'}:
+      if not prevSpace: result.add ' '
+      prevSpace = true
+    else:
+      result.add ch
+      prevSpace = false
+
+proc collapsedText*(s: TtySession): string =
+  collapsedText(s.raw)
+
 proc countInHistory*(s: TtySession; text: string): int =
   ## Occurrences of `text` in the committed history. Pairs with
   ## `expectNewInHistory`: a recurring status line ("interrupted by
@@ -1662,6 +1686,13 @@ proc expectInHistory*(s: TtySession; text: string; timeoutMs = 5000): bool {.dis
   while epochTime() < deadline:
     s.drain(0, recordFrame = false)
     if text in s.historyText() or text in s.cleanRaw():
+      return true
+    # Fragmented-paint fallback (collapsedText): the exact-bytes match
+    # stays authoritative; the collapsed comparison only rescues a
+    # paint whose characters all arrived but split by interleaved
+    # cursor moves.
+    let want = collapsedText(text)
+    if want.len > 0 and want in s.collapsedText():
       return true
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
