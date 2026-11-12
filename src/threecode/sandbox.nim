@@ -944,11 +944,15 @@ proc grantAskAllow*(target: string): bool =
   ## what the user wrote, not re-stacking it. Any other covering rule
   ## keeps its meaning, so the allow appends at the end, where
   ## last-match-wins puts it above the ask rule that denied the path.
-  ## Ask rules only ever come from a policy file, so a missing file
-  ## here is the can't-happen guard; false means "no grant, treat as
-  ## denied".
-  let f = activePolicyPath(getCurrentDir())
-  if not fileExists(f): return false
+  ## With no policy file anywhere the active rules are the built-in
+  ## default text (readPolicyText), whose `ask /` floor is exactly what
+  ## fires the gate - so the grant first materializes the repo file
+  ## from that effective text, giving the allow a home the cascade
+  ## reads. False means "no grant, treat as denied".
+  var f = activePolicyPath(getCurrentDir())
+  if not fileExists(f):
+    if not ensureRepoPolicy(getCurrentDir()): return false
+    f = repoPolicyPath(getCurrentDir())
   let resolved = resolveRawPath(target)
   let exact = resolved.len > 0 and askRuleRoot(resolved) == resolved
   result =
