@@ -75,6 +75,21 @@ suite "session: mangleCwd":
   test "does not prefix a leading separator into the name":
     check not mangleCwd("/a/b").startsWith("_")
 
+  test "caps long paths at a filename-safe length without collisions":
+    # Deep tmpdir chains (macOS CI fixtures) once produced 260+ char lock
+    # names: ENAMETOOLONG on every dir-lock write. The cap keeps a
+    # readable head; the digest of the full name keeps distinct paths
+    # distinct, including when they differ only past the cut.
+    let deepA = "/tmp" & repeat("/3code_libtest_fixture_6997/tmp", 12)
+    let deepB = "/tmp" & repeat("/3code_libtest_fixture_6997/tmp", 11) &
+      "/3code_libtest_fixture_7000/tmp"
+    let a = mangleCwd(deepA)
+    let b = mangleCwd(deepB)
+    check a.len == util.MangledNameCap
+    check b.len == util.MangledNameCap
+    check a != b
+    check a == mangleCwd(deepA)   # deterministic across calls
+
 suite "session: cwd index":
   var indexDir: string
 

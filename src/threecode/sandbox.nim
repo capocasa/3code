@@ -563,7 +563,7 @@ proc guardRules*(projectDir: string): seq[Rule] =
   ## the same reason it is separate from `sessions/`: any ordinary
   ## (non-private) session that could read it would hand private
   ## conversations to exactly the providers private mode fences them
-  ## from. Stronger than the default `deny /`: no policy file can
+  ## from. Stronger than the default `ask /` floor: no policy file can
   ## re-allow it, so `allow ~/` or a rubber-stamped ask never opens it.
   ## Only `[settings] sandbox = off` (guard rules never load) lifts it.
   let user = systemPolicyPath()

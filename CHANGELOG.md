@@ -14,6 +14,27 @@ Unreleased
   cached share on its own), matching the manual's receipt math, the
   `:tokens` session total, and the `.3log` `tokens` record; the numbers
   round to "12.3k" only when painted.
+- **Windows startup no longer faults on a config with plugin
+  defaults.** The early config parse (the one that gates plugin
+  loading) asked the plugin registry for its registered defaults
+  before the registry's lock had ever been initialized; on Windows an
+  unheld CRITICAL_SECTION is undefined, and under ConPTY the
+  first run with a config file died with SIGSEGV before the first
+  frame. POSIX happens to tolerate a zeroed mutex, so only Windows
+  users saw it. The accessors now initialize the lock on first use.
+- **Very deep working directories no longer fail the directory
+  lock.** The per-cwd lock, session index and draft names embed the
+  full mangled path; past 200 characters that blew the filesystem's
+  255-byte name limit and every startup under such a cwd died with
+  "File name too long". Long names now keep a readable head and carry
+  an FNV-1a digest of the full path, so distinct directories stay
+  distinct.
+- **Fenced `dotnet build` on Linux needs `XDG_RUNTIME_DIR` inside the
+  fence.** dotnet's first-run NuGet migrations take their named mutex
+  via mkdtemp in `$XDG_RUNTIME_DIR` (`/run/user/<uid>`), which no
+  policy grants; the build died with EACCES before the first-use
+  sentinel was ever consulted. The manual's dotnet recipe now says to
+  run fenced builds with `XDG_RUNTIME_DIR=$TMPDIR`.
 - **`-r` checks for a running 3code before session availability.**
   Resuming in a directory another live 3code holds now reports the holder
   (pid, session id, lock file) even when the holder has not saved its

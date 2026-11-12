@@ -122,6 +122,16 @@ proc pwshExe(): string =
   else:
     result = if fileExists(tool): tool else: ""
 
+proc hostAsset(): string =
+  ## The asset install.sh requests on this platform (its uname map):
+  ## staging a linux name on a mac runner makes the fake server 404.
+  when defined(macosx):
+    "3code-macos-universal.tar.gz"
+  elif defined(arm64):
+    "3code-linux-arm64.tar.gz"
+  else:
+    "3code-linux-amd64.tar.gz"
+
 proc fakeZipAsset(): string =
   ## The Windows archive shape: a zip with 3code.exe at its root.
   result = getTempDir() / ("3code_inst_asset_" & $getCurrentProcessId() &
@@ -151,9 +161,10 @@ suite "installer checksum verification":
     let (base, srv) = startFakeReleases(root)
     defer: stopFakeReleases(srv)
     let asset = fakeAsset()
-    copyFile(asset, root / "3code-linux-amd64.tar.gz")
-    discard execCmdEx("sha256sum " & quoteShell(root / "3code-linux-amd64.tar.gz") &
-                      " | awk '{print $1 \"  3code-linux-amd64.tar.gz\"}' > " &
+    let name = hostAsset()
+    copyFile(asset, root / name)
+    discard execCmdEx("sha256sum " & quoteShell(root / name) &
+                      " | awk '{print $1 \"  " & name & "\"}' > " &
                       quoteShell(root / "SHASUMS256.txt"))
     let home = root / "home"
     createDir(home)
@@ -168,9 +179,9 @@ suite "installer checksum verification":
     removeDir(root)
     let (base, srv) = startFakeReleases(root)
     defer: stopFakeReleases(srv)
-    copyFile(fakeAsset(), root / "3code-linux-amd64.tar.gz")
+    copyFile(fakeAsset(), root / hostAsset())
     writeFile(root / "SHASUMS256.txt",
-              "deadbeef  3code-linux-amd64.tar.gz\n")
+              "deadbeef  " & hostAsset() & "\n")
     let home = root / "home"
     createDir(home)
     let (code, outp) = runInstaller(base, home)
@@ -184,7 +195,7 @@ suite "installer checksum verification":
     removeDir(root)
     let (base, srv) = startFakeReleases(root)
     defer: stopFakeReleases(srv)
-    copyFile(fakeAsset(), root / "3code-linux-amd64.tar.gz")
+    copyFile(fakeAsset(), root / hostAsset())
     let home = root / "home"
     createDir(home)
     let (code, outp) = runInstaller(base, home)

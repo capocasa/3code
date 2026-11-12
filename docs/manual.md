@@ -1696,8 +1696,19 @@ line is given when the paths move.
     fresh machine dies). MSBuild's
     worker nodes and the dotnet diagnostic server bind unix sockets
     in the temp dir, which is writable by default; the socket rights
-    ride the writable grant (sandwall 0.5.12). Inside a fenced
-    network, dotnet honors `http_proxy`/`https_proxy`.
+    ride the writable grant (sandwall 0.5.12). One more dot on
+    Linux: the first-run NuGet migrations take their named mutex via
+    mkdtemp in `$XDG_RUNTIME_DIR` (`/run/user/<uid>`), outside the
+    fence, and the build dies with `EACCES` before the sentinel is
+    ever consulted - run fenced builds with
+    `XDG_RUNTIME_DIR=$TMPDIR` so the mutex lands in the granted temp
+    dir. And landlock grants attach only to paths that exist, while
+    first-run dotnet also creates its default NuGet.Config - which
+    the readonly grant refuses: on a fresh machine run one unfenced
+    `dotnet --version` first so the dots exist (or materialize
+    `~/.nuget/NuGet/NuGet.Config` yourself) before the first fenced
+    build. Inside a fenced network, dotnet honors
+    `http_proxy`/`https_proxy`.
 
 `ruby` (RubyGems + Bundler)::
 

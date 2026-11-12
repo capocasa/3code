@@ -104,6 +104,13 @@ print('SOCKET-OK')
   </PropertyGroup>
 </Project>
 """)
+        # A project-local config clearing every source: restore of the
+        # zero-package project then never dials out, and under the
+        # fenced network (DNS is dead inside the netns) the build is
+        # deterministic instead of hanging on connect timeouts.
+        writeFile(dir / "NuGet.Config", "<?xml version=\"1.0\" " &
+          "encoding=\"utf-8\"?>\n<configuration>\n  <packageSources>\n" &
+          "    <clear />\n  </packageSources>\n</configuration>\n")
         writeFile(dir / "Program.cs", "System.Console.WriteLine(\"built\");\n")
         let pol = dir / "policy"
         # getTempDir, not a hardcoded /tmp: TMPDIR is where dotnet
@@ -112,6 +119,46 @@ print('SOCKET-OK')
         writeFile(pol, &"deny /\nallow {getTempDir()}\nallow {dir}\n" &
           "allow ~/.nuget/packages\nreadonly ~/.nuget/NuGet\n" &
           "allow ~/.dotnet\nallow *\n")
+        # dotnet's first-run NuGet migrations take their named mutex via
+        # mkdtemp in $XDG_RUNTIME_DIR: on CI that is /run/user/<uid>,
+        # outside the fence, and the build dies with EACCES before the
+        # sentinel is ever consulted. Point it at the granted work dir,
+        # as the manual's recipe says.
+        let savedRt = getEnv("XDG_RUNTIME_DIR")
+        createDir(dir / "rt")
+        putEnv("XDG_RUNTIME_DIR", dir / "rt")
+        defer: putEnv("XDG_RUNTIME_DIR", savedRt)
+        # Landlock grants attach to paths that exist, and first-run
+        # dotnet also needs to CREATE its default NuGet.Config - which
+        # the recipe's readonly grant refuses. On a fresh runner the
+        # dots appear only inside the fence and die on the deny floor,
+        # so materialize them (plus an empty config) beforehand, the
+        # way any fresh machine must (see the manual's recipe).
+        createDir(getHomeDir() / ".nuget" / "NuGet")
+        createDir(getHomeDir() / ".nuget" / "packages")
+        let nugetCfg = getHomeDir() / ".nuget" / "NuGet" / "NuGet.Config"
+        if not fileExists(nugetCfg):
+          writeFile(nugetCfg,
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" &
+            "<configuration></configuration>\n")
+        # First-use configure still runs before every build and does real
+        # work (migrations mutex, notice, telemetry) even with everything
+        # above in place; under the fenced network that work crawls and
+        # tips the per-test watchdog. Skip it: this test pins the build
+        # under the recipe, not the first-run experience.
+        let savedHome = getEnv("DOTNET_CLI_HOME")
+        let savedSkip = getEnv("DOTNET_SKIP_FIRST_TIME_EXPERIENCE")
+        let savedLogo = getEnv("DOTNET_NOLOGO")
+        let savedTele = getEnv("DOTNET_CLI_TELEMETRY_OPTOUT")
+        putEnv("DOTNET_CLI_HOME", getHomeDir())
+        putEnv("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "true")
+        putEnv("DOTNET_NOLOGO", "1")
+        putEnv("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        defer:
+          putEnv("DOTNET_CLI_HOME", savedHome)
+          putEnv("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", savedSkip)
+          putEnv("DOTNET_NOLOGO", savedLogo)
+          putEnv("DOTNET_CLI_TELEMETRY_OPTOUT", savedTele)
         let r = runSandboxed(pol, dir, [dn, "build", "-nologo"])
         check r.exitCode == 0
         check "Build succeeded" in r.output

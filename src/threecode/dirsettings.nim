@@ -54,8 +54,9 @@ var globalWallWarn* = true
 
 proc mangleDirPath*(dir: string): string =
   ## Collision-free flat name for `dir` (same scheme as session.nim's
-  ## `mangleCwd`: escape `_` to `__`, then separators to `_`), used as
-  ## the per-directory directory name under the user config root.
+  ## `mangleCwd`: escape `_` to `__`, then separators to `_`, cap + digest
+  ## past NAME_MAX), used as the per-directory directory name under the
+  ## user config root.
   var s = dir.replace('\\', '/')
   if s.startsWith("/"): s = s[1 ..< s.len]
   s = s.replace("_", "__")
@@ -63,6 +64,8 @@ proc mangleDirPath*(dir: string): string =
   when defined(windows):
     s = s.replace(":", "_")
   if s.len == 0: s = "root"
+  if s.len > util.MangledNameCap:
+    s = s[0 ..< util.MangledNameCap - 17] & "-" & fnv1aHex(s)
   s
 
 proc storeDirFor*(dir: string): string =
