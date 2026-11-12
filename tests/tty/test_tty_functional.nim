@@ -695,8 +695,10 @@ suite "terminal visual contract":
     tty.send ":resume " & targetId & "\n"
     tty.expectInHistory "resumed " & targetId
     # The token bar carries the seeded turn's usage in the typing-ready
-    # shape a startup resume paints (fresh 80 + cached 20 = prompt 100).
-    tty.expect "↑100"
+    # shape a startup resume paints: ↑80 is the raw fresh input
+    # (prompt 100 minus the 20 cached tokens riding ↻), ↓20 the output.
+    tty.expect "↑80"
+    tty.expect "↻20"
     tty.expect "↓20"
     # :session reports the swapped-in session.
     tty.send ":session\n"
