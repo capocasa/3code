@@ -28,7 +28,8 @@
 ## (`drainDeltas`, `copyOutcome`), and the worker frees its own strings
 ## on its own thread before exiting (`workerRelease`, gated on `reap`).
 
-import std/[locks, json, os]
+import std/[locks, json, nativesockets, os]
+import streamhttp
 import types
 
 type
@@ -82,14 +83,36 @@ type
     outcome*: StreamOutcome
     outcomeWritten*: bool
     reaped*: bool
+    retired*: bool
+      ## Main stopped waiting (interrupt budget expired or a callback
+      ## raised): the outcome will never be read again. While set, `fire`
+      ## drops deltas instead of appending them, so an abandoned worker
+      ## that recovers and streams on cannot grow this job's memory
+      ## without bound.
+    cache*: NetConnCache
+      ## Job-owned connection state for the streaming transports. Two
+      ## calls can overlap (a retired worker and its replacement), so the
+      ## cached conn can no longer live in module globals: an old worker
+      ## must never close, reuse, or publish into a newer call's conn.
 
   NetJob* = ptr NetJobState
 
+  NetConnCache* = object
+    ## Connection-reuse state for one streaming call. `fd` mirrors the
+    ## connected (or connect-in-progress) fd so retirement can
+    ## compare-and-clear the process-wide active-fd slot without touching
+    ## a newer call's fd.
+    conn*: StreamConn
+    hostKey*: string
+    fd*: SocketHandle = SocketHandle(-1)  # osInvalidSocket; a const default must compile
+
 proc fire*(job: NetJob; delta: NetDelta) =
-  ## Append a delta under the lock. Worker-only.
+  ## Append a delta under the lock. Worker-only. Deltas for a retired job
+  ## are dropped: the caller that retired it will never drain again.
   {.cast(gcsafe).}:
     acquire(job.lock)
-    job.deltas.add(delta)
+    if not job.retired:
+      job.deltas.add(delta)
     release(job.lock)
 
 proc fireProgress*(job: NetJob; slurped: int) =
@@ -133,6 +156,62 @@ proc setPhase*(job: NetJob; phase: NetPhase) =
     acquire(job.lock)
     job.phase = phase
     release(job.lock)
+
+proc phaseOf*(job: NetJob): NetPhase =
+  ## Locked read of `phase`; the caller's poll loop used to read the
+  ## field directly while the worker wrote it.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.phase
+    release(job.lock)
+
+proc hasOutcome*(job: NetJob): bool =
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.outcomeWritten
+    release(job.lock)
+
+proc isReaped*(job: NetJob): bool =
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.reaped
+    release(job.lock)
+
+proc isRetired*(job: NetJob): bool =
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    result = job.retired
+    release(job.lock)
+
+proc retireJob*(job: NetJob): SocketHandle =
+  ## Main abandons the job: its outcome will never be drained or copied,
+  ## `fire` stops accumulating deltas, and a worker parked in
+  ## `workerRelease` is released (so retirement can never strand it
+  ## waiting for a reap that no longer has a caller to perform it).
+  ## Returns the job's advertised fd (if any) and clears it from the
+  ## cache, so the caller can compare-and-clear the process-wide wake
+  ## slot: retirement can only ever remove this job's own fd.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    job.retired = true
+    job.reaped = true
+    result = job.cache.fd
+    job.cache.fd = osInvalidSocket
+    release(job.lock)
+
+proc publishConnectFd*(job: NetJob; fd: SocketHandle): bool =
+  ## Worker-side publish of a connect-in-progress fd into the job cache.
+  ## Returns false when the job is retired (caller must not advertise the
+  ## fd process-wide); true when `cache.fd` now holds `fd`. Locked so the
+  ## retirement decision and the cache write are one atomic step.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    if job.retired:
+      release(job.lock)
+      return false
+    job.cache.fd = fd
+    release(job.lock)
+    result = true
 
 proc rawCopy(src: string): string =
   ## Byte-wise copy that never touches `src`'s refcount, so the source
@@ -197,8 +276,9 @@ proc reap*(job: NetJob) =
 proc workerRelease*(job: NetJob) =
   ## Worker-side cleanup after `publishOutcome`: wait for `reap`, then
   ## free the worker-owned strings here on this thread. The wait is
-  ## bounded by main's poll cadence plus one drain.
-  while not job.reaped:
+  ## bounded: main either reaps after its final copies or retires the job
+  ## (which sets `reaped` under the same lock).
+  while not isReaped(job):
     sleep(1)
   {.cast(gcsafe).}:
     acquire(job.lock)
