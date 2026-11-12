@@ -151,3 +151,26 @@ suite "grant":
       check (proj / "vault") notin r.denied
       check sandbox.checkRawPath(proj / "vault" / "x",
         needsWrite = true).allowed
+
+  test "grant materializes a policy file when only the default text is active":
+    # No policy file anywhere up the tree and no user file: the
+    # effective rules are the built-in default text (readPolicyText),
+    # whose `ask /` floor is exactly what fires the gate. The grant
+    # must land in a materialized repo file, not refuse at the
+    # missing-file guard and turn the offered one-key grant into
+    # "policy update failed".
+    let base = getTempDir() / ("3code_asktest_default_" & $getCurrentProcessId())
+    if dirExists(base): removeDir(base)
+    let proj = base / "proj"
+    createDir(proj)
+    defer: removeDir(base)
+    let prevCfg = getEnv("XDG_CONFIG_HOME")
+    putEnv("XDG_CONFIG_HOME", base / "cfg")
+    defer: putEnv("XDG_CONFIG_HOME", prevCfg)
+    withPolicy(proj):
+      check sandbox.askCoveredPath("/etc/hosts")
+      check sandbox.grantAskAllow("/etc/hosts")
+      let text = readFile(sandbox.repoPolicyPath(proj))
+      check "allow ./" in text
+      check "allow /etc/hosts" in text
+      check sandbox.checkRawPath("/etc/hosts", needsWrite = false).allowed
