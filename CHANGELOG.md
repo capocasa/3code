@@ -2,6 +2,21 @@ Changelog
 
 Unreleased
 
+- **Windows asks before a per-file ask rule is pierced by a fresh
+  create.** A deny (and an `ask`, which denies until answered) naming a
+  file that did not exist yet was shadowed under the Windows ACL
+  backend: with no object to stamp the DENY ACE on, the child created
+  the file through the parent dir's inheritable ALLOW and `echo granted
+  > vault/out.txt` under `allow ./` + `ask ./vault/out.txt` succeeded
+  silently - no denial, no ask card, policy unchanged. The denied
+  target is now materialized (empty file, or directory when it carries
+  no extension) before the run so the ACE bites, and deleted again
+  after the run when nothing landed in it, so a declined ask leaves the
+  filesystem exactly as it was (sandwall's windows-user backend). The
+  bash ask gate,
+  the ask-path scraper, and the sandbox deny hint now also recognize
+  the Windows `Access is denied` shape (cmd.exe and native tools; msys
+  bash already prints `Permission denied`).
 - **A 400-recovery collapse can no longer keep a tail too big to send.**
   The collapse pins tool results to their owning assistant, so one
   batched run of ~1900 tool calls survived it intact: the rebuilt
