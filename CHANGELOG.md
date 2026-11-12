@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **The token bar and receipts count raw fresh input again; rounding
+  happens only at display.** Since the May rendering shake-down, the ↑
+  slot on the token bar and the per-turn receipts showed the whole
+  prompt (cached tokens included) instead of the fresh count — on
+  DS 4.1 Flash, whose first-party API reports large cache-hit numbers
+  every turn, a receipt read `↑12.5k ↻11.8k` as if the cached input was
+  counted twice, and summing receipt columns as the manual documents
+  over-counted by the cached share. The ↑ slot is back to the raw
+  fresh input (prompt minus cached, clamped at 0 — `↻` carries the
+  cached share on its own), matching the manual's receipt math, the
+  `:tokens` session total, and the `.3log` `tokens` record; the numbers
+  round to "12.3k" only when painted.
 - **Windows startup no longer faults on a config with plugin
   defaults.** The early config parse (the one that gates plugin
   loading) asked the plugin registry for its registered defaults
