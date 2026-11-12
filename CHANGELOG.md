@@ -17,6 +17,17 @@ Unreleased
   the ask-path scraper, and the sandbox deny hint now also recognize
   the Windows `Access is denied` shape (cmd.exe and native tools; msys
   bash already prints `Permission denied`).
+- **Ask card keys can no longer leak into the prompt draft.** The
+  sandbox ask gate armed only after the whole question card had painted,
+  so a decisive keypress sent (or typed) while the card was still
+  rendering landed in the editor draft instead of the gate - the ask
+  then timed out and denied. The gate now arms before the first card
+  line renders and every keypress while it is armed diverts to the
+  answer. The Windows tty harness rides the same fix: the test IPC
+  channels cross the ConPTY spawn as named pipes (handle inheritance
+  kills a pseudoconsole child outright on Win11), so the child's
+  renders are paced against the harness the way they are on POSIX.
+
 - **A 400-recovery collapse can no longer keep a tail too big to send.**
   The collapse pins tool results to their owning assistant, so one
   batched run of ~1900 tool calls survived it intact: the rebuilt
