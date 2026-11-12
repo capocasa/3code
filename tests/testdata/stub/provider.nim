@@ -44,13 +44,13 @@ proc emitTestFrameEvent() =
     let hText = getEnv("THREECODE_TEST_FRAME_FD")
     if hText.len > 0:
       try:
-        let h = Handle(parseInt(hText))
+        let h = openTestPipe(hText, childWrites = true)
         var ch = 'f'
         var written: int32 = 0
         discard writeFile(h, addr ch, 1, addr written, nil)
         let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
         if ackText.len > 0:
-          let ackH = Handle(parseInt(ackText))
+          let ackH = openTestPipe(ackText, childWrites = false)
           var ack: array[1, char]
           var got: int32 = 0
           discard readFile(ackH, addr ack[0], 1, addr got, nil)
@@ -84,7 +84,7 @@ proc waitForTestContinue() =
     let hText = getEnv("THREECODE_TEST_API_CONTINUE_FD")
     if hText.len == 0:
       return
-    let h = try: Handle(parseInt(hText)) except CatchableError: return
+    let h = openTestPipe(hText, childWrites = false)
     while true:
       if isInterrupted():
         raise newException(ApiError, "interrupted by user")

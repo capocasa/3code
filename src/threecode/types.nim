@@ -6,9 +6,48 @@
 
 import std/[json, options, strutils, tables, times]
 when defined(windows):
-  # os is needed only by the ConPTY relay window in `exitWith`
-  import std/os
+  # os is needed only by the ConPTY relay window in `exitWith`; locks by
+  # the shared test-pipe connection cache
+  import std/[os, locks, winlean]
 import images
+
+when defined(windows):
+  # One client connection per pipe NAME, shared by every thread that fires
+  # the hook (the harness creates exactly one server instance, so a second
+  # CreateFile would block forever). Byte-mode pipes serialize concurrent
+  # access at the kernel level - the same shared-fd semantics the POSIX
+  # hooks were designed around, where multiple threads share one fd.
+  var gTestPipes: seq[tuple[name: string; h: Handle]]
+  var gTestPipeLock: Lock
+  gTestPipeLock.initLock()
+
+  # gcsafe by hand: the globals are only touched under gTestPipeLock, the
+  # same discipline the POSIX hooks' shared fd relies on implicitly.
+  proc openTestPipe*(name: string; childWrites: bool): Handle {.gcsafe.} =
+    ## Connect to a tty-harness IPC pipe by name (Windows ConPTY path).
+    ## bInheritHandles=FALSE is the only spawn a pseudoconsole child
+    ## survives, so handle values cannot cross it; the harness instead
+    ## creates the five IPC pipes as named pipes and passes their names in
+    ## the THREECODE_TEST_* env vars. Runs on the frame, turn-state and
+    ## ticker threads concurrently; the shared handle and the lock mirror
+    ## the POSIX layout, where all threads share one fd.
+    gTestPipeLock.acquire()
+    try:
+      {.cast(gcsafe).}:
+        for cached in gTestPipes:
+          if cached.name == name:
+            return cached.h
+      let access = (if childWrites: GENERIC_WRITE.DWORD
+                    else: GENERIC_READ.DWORD)
+      let h = createFileW(newWideCString(name), access, 0, nil,
+          OPEN_EXISTING.DWORD, 0, 0)
+      if h == INVALID_HANDLE_VALUE:
+        return Handle(0)
+      {.cast(gcsafe).}:
+        gTestPipes.add((name: name, h: h))
+      h
+    finally:
+      gTestPipeLock.release()
 
 var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`.
