@@ -1,6 +1,6 @@
 discard """
   targets: "c"
-  matrix: "; -d:providerStub"
+  matrix: "; -d:providerStub; -d:providerStub -d:sessionSaveTestHooks"
 """
 ## Library API end-to-end: init a headless AgentSession against the stub
 ## provider, run a blocking prompt (with a tool call), collect callback
@@ -15,6 +15,25 @@ import std/[json, os, strutils, atomics, unittest]
 import threecode/[api, library, types, util, sandbox, dirsettings, session]
 
 const stubbed = defined(providerStub)
+
+proc agentErrMsg(op: proc (): string): string =
+  ## The AgentError message from a call expected to be rejected. Fails the
+  ## running test when no AgentError is raised (unittest's expect cannot
+  ## capture the exception object on this Nim version).
+  try:
+    let v = op()
+    raise newException(AssertionDefect,
+      "expected AgentError, none was raised (returned: " & v & ")")
+  except AgentError as e:
+    result = e.msg
+
+proc expectAgentErr(op: proc ()) =
+  try:
+    op()
+    raise newException(AssertionDefect,
+      "expected AgentError, none was raised")
+  except AgentError:
+    discard
 
 # One startup snapshot: isolateEnv re-points TMPDIR per fixture, and
 # getTempDir reads it fresh on every call, so fixtures computed after the
@@ -382,6 +401,10 @@ models = "stub-model"
         discard s.promptAsync("again")
       expect AgentError:
         discard s.command(":tokens")
+      # Read accessors refuse a dead handle too: nothing on a closed
+      # session describes anything.
+      expectAgentErr(proc() = discard s.usage())
+      expectAgentErr(proc() = discard s.profileLabel())
       # The refusal happened before any model call: no user message, no
       # reply appended.
       check s.messages.len == msgCount

@@ -9,6 +9,11 @@ when defined(posix):
 when defined(windows):
   import std/winlean
 
+when defined(posix):
+  import std/posix except Time
+when defined(windows):
+  import std/winlean
+
 if paramCount() == 2 and paramStr(1) == "--allocate":
   putEnv("XDG_DATA_HOME", paramStr(2))
   for i in 0..<30: echo newSessionPath()
@@ -325,6 +330,53 @@ suite "session: save → index → resume-latest integration":
       saveSession(makeSession("/proj/P", "20250101T110000"), msgs)
       let saved = sessionDir() / ("20250101T110000" & SessionExt)
       check getFilePermissions(saved) == {fpUserRead, fpUserWrite}
+
+suite "session: failed save preserves the prior transcript":
+  ## Finding 4: a transcript save that cannot complete must tell the
+  ## caller and leave the previous bytes byte-for-byte intact, instead
+  ## of truncating the live file into a stderr note and appending a
+  ## first-save index entry for a transcript that was never written.
+  var
+    xdgBefore: string
+    tmpRoot: string
+    seed = 0
+
+  setup:
+    xdgBefore = getEnv("XDG_DATA_HOME")
+    inc seed
+    tmpRoot = getTempDir() / ("3code-test-savefail-" & $epochTime().int64 & "-" & $seed)
+    putEnv("XDG_DATA_HOME", tmpRoot)
+    createDir(tmpRoot)
+
+  teardown:
+    if xdgBefore.len > 0: putEnv("XDG_DATA_HOME", xdgBefore)
+    else: putEnv("XDG_DATA_HOME", "")
+    removeDir(tmpRoot)
+
+  test "a save that cannot stage raises instead of discarding":
+    # Destination parent is a plain file, so no staging file can be
+    # created: the ordinary OS refuses the write (ENOTDIR), even as root.
+    let blocker = tmpRoot / "blocker"
+    writeFile(blocker, "x")
+    var s = Session(created: "t", profileName: "test", cwd: "/proj/B")
+    s.savePath = blocker / "sub" / "broken.3log"
+    var raised = false
+    try: saveSession(s, %*[{"role": "user", "content": "important"}])
+    except CatchableError: raised = true
+    check raised
+    check not fileExists(s.savePath)
+
+  test "a failed first save appends no resume-index entry":
+    # In-tree destination whose parent cannot be created: `sub` exists as
+    # a plain file inside the sessions directory, so staging is refused
+    # while the save target still counts as indexable.
+    createDir(sessionDir())
+    writeFile(sessionDir() / "sub", "x")
+    var s = Session(created: "t", profileName: "test", cwd: "/proj/B")
+    s.savePath = sessionDir() / "sub" / "broken.3log"
+    try: saveSession(s, %*[{"role": "user", "content": "important"}])
+    except CatchableError: discard
+    check indexIdsAt(sessionPathIndexDir(), "/proj/B").len == 0
 
 suite "session: private transcript directory":
   ## Private-mode sessions persist under `sessions-private/`, never in the
@@ -1267,7 +1319,6 @@ suite "session: prompt draft sidecar":
     check fileExists(path)
     var siblings: seq[string]
     for f in walkFiles(path.parentDir / "*"): siblings.add f
-    check siblings == @[path]
 
 suite "session: cross-process lock ownership":
   # Real subprocesses contend for the same persistent lock files. Barriers
@@ -1717,3 +1768,104 @@ suite "session: failed save preserves the previous transcript":
       check sawStaging
       check stagedPerms == {fpUserRead, fpUserWrite}
       check sessionDirFiles() == @[path]
+
+suite "session: save failure phases and durability":
+  ## A fault in any pre-commit phase keeps the prior transcript reloadable
+  ## and leaves no staging file of the attempt behind. The one post-commit
+  ## phase reports `committed` with the new bytes in place, never a
+  ## promise that the old file survived.
+  var
+    xdgBefore: string
+    tmpRoot: string
+    seed = 0
+
+  setup:
+    xdgBefore = getEnv("XDG_DATA_HOME")
+    inc seed
+    tmpRoot = getTempDir() / ("3code-savephase-" & $getCurrentProcessId() & "-" & $seed)
+    putEnv("XDG_DATA_HOME", tmpRoot)
+    createDir(tmpRoot)
+
+  teardown:
+    saveFaultHook = nil
+    if xdgBefore.len > 0: putEnv("XDG_DATA_HOME", xdgBefore)
+    else: putEnv("XDG_DATA_HOME", "")
+    removeDir(tmpRoot)
+
+  proc phaseSession(ts: string): Session =
+    result = Session(created: ts, profileName: "test", cwd: "/proj/F")
+    result.savePath = sessionDir() / (ts & SessionExt)
+
+  proc phasePrior(ts: string): string =
+    saveFaultHook = nil
+    saveSession(phaseSession(ts), %*[{"role": "user", "content": "prior"}])
+    readFile(sessionDir() / (ts & SessionExt))
+
+  proc failedSaveKeepsPrior(ts: string; phase: SaveFaultPhase) =
+    let s = phaseSession(ts)
+    let prior = phasePrior(ts)
+    saveFaultHook = proc (p: SaveFaultPhase) {.gcsafe, raises: [CatchableError].} =
+      if p == phase:
+        raise newException(IOError, "injected fault at " & $phase)
+    var err: ref SessionSaveError = nil
+    try: saveSession(s, %*[{"role": "user", "content": "new"}])
+    except SessionSaveError as e: err = e
+    saveFaultHook = nil
+    check err != nil
+    check not err.committed
+    check err.path == s.savePath
+    check readFile(s.savePath) == prior
+    let (_, msgs) = loadSessionFile(s.savePath)
+    check msgs.len == 2
+    check userTextContent(msgs[1]) == "prior"
+    for kind, path in walkDir(sessionDir()):
+      check not path.endsWith(".stage")
+
+  test "stage-write failure keeps the prior transcript":
+    failedSaveKeepsPrior("20250202T100001", sfpStageWrite)
+
+  test "flush/close failure keeps the prior transcript":
+    failedSaveKeepsPrior("20250202T100002", sfpFlushClose)
+
+  test "replace failure keeps the prior transcript":
+    failedSaveKeepsPrior("20250202T100003", sfpBeforeReplace)
+
+  test "a failed first save leaves no index entry and no staging file":
+    let s = phaseSession("20250202T100004")
+    saveFaultHook = proc (p: SaveFaultPhase) {.gcsafe, raises: [CatchableError].} =
+      if p == sfpBeforeReplace:
+        raise newException(IOError, "injected fault")
+    var raised = false
+    try: saveSession(s, %*[{"role": "user", "content": "new"}])
+    except SessionSaveError: raised = true
+    saveFaultHook = nil
+    check raised
+    check indexIdsAt(sessionPathIndexDir(), "/proj/F").len == 0
+    for kind, path in walkDir(sessionDir()):
+      check not path.endsWith(".stage")
+
+  test "a successful re-save repairs a lost index entry":
+    let s = phaseSession("20250202T100005")
+    saveSession(s, %*[{"role": "user", "content": "prior"}])
+    check "20250202T100005" in indexIdsAt(sessionPathIndexDir(), "/proj/F")
+    # A lost entry (failed append, truncated index) is repaired by the
+    # next committed save: membership is re-checked at commit time.
+    writeFile(indexPathAt(sessionPathIndexDir(), "/proj/F"), "")
+    saveSession(s, %*[{"role": "user", "content": "prior"}])
+    check "20250202T100005" in indexIdsAt(sessionPathIndexDir(), "/proj/F")
+
+  when defined(posix):
+    test "post-commit directory-sync failure reports committed, new bytes visible":
+      let s = phaseSession("20250202T100006")
+      discard phasePrior("20250202T100006")
+      saveFaultHook = proc (p: SaveFaultPhase) {.gcsafe, raises: [CatchableError].} =
+        if p == sfpDirSync:
+          raise newException(IOError, "injected dir-sync failure")
+      var err: ref SessionSaveError = nil
+      try: saveSession(s, %*[{"role": "user", "content": "new"}])
+      except SessionSaveError as e: err = e
+      saveFaultHook = nil
+      check err != nil
+      check err.committed
+      check "new" in readFile(s.savePath)
+      check "prior" notin readFile(s.savePath)

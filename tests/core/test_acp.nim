@@ -13,6 +13,7 @@ import stub_helpers
 type
   Shared = ref object
     lines: seq[string]
+    badLines: seq[string]  # stdout lines that were not JSON-RPC records
     atEof: bool
     gate: Lock
 
@@ -83,13 +84,19 @@ proc frame(id: int; meth: string; params: JsonNode): JsonNode =
   %*{"jsonrpc": "2.0", "id": id, "method": meth, "params": params}
 
 proc pump(s: Session) =
-  ## Move arrived lines from the reader thread into `history`.
+  ## Move arrived lines from the reader thread into `history`. Stdout is
+  ## protocol-clean by contract: a non-JSON line is a defect, recorded in
+  ## `badLines` instead of crashing the harness.
   var got: seq[string]
   withLock s.sh.gate:
     got = s.sh.lines
     s.sh.lines = @[]
   for line in got:
-    s.history.add parseJson(line)
+    try:
+      s.history.add parseJson(line)
+    except CatchableError:
+      withLock s.sh.gate:
+        s.sh.badLines.add line
 
 proc waitFor(s: Session; wantId: int; timeoutMs = 20000): JsonNode =
   ## First response with the given request id; notifications collected

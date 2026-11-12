@@ -71,6 +71,13 @@ suite "dirsettings: sandbox authority":
   test "a local store cannot disable an enabled sandbox":
     let f = newFixture("sboff")
     defer: dropFixture(f.base)
+    for spelling in ["off", "false", "no", "0", "OFF"]:
+      sandboxEnabled = true
+      dirsettings.dirSandboxOverridden = false
+      writeStoreConfig(f.proj, "[settings]\nsandbox = \"" & spelling & "\"\n")
+      dirsettings.applyDirConfig(f.sub)
+      check sandboxEnabled
+      check not dirsettings.dirSandboxOverridden
     sandboxEnabled = true
     writeStoreConfig(f.proj, "[settings]\nsandbox = \"off\"\n")
     dirsettings.applyDirConfig(f.sub)

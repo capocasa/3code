@@ -103,8 +103,9 @@ type
     ## `promptAsync` returns a `TurnHandle` that joins this slot.
 
   AgentError* = object of CatchableError
-    ## Initialization failures (no config, unknown model, locks held).
-    ## Turn-level failures are returned by `prompt` via aevError instead.
+    ## Initialization failures (no config, unknown model, locks held),
+    ## closed/busy session rejections, and turn-level failures raised to
+    ## the blocking caller.
 
   TurnJob = ref object
     ## createThread argument for `promptAsync`. The session and the prompt
@@ -220,11 +221,20 @@ proc resolveSessionProfile*(wanted, resumeProfile: string): Profile =
   ## how to surface that (CLI: provider wizard; library: AgentError).
   result = buildProfile(activeCurrent, activeProviders, wanted)
 
+proc requireLive(s: AgentSession) =
+  ## Guard for reads that describe a live session: safe mid-turn, refused
+  ## once the session is closing or closed.
+  withLock s.lifeLock:
+    if s.phase in {spClosing, spClosed}:
+      raise newException(AgentError, phaseFault(s))
+
 proc initAgentSession*(opts: AgentOptions): AgentSession =
   ## Create or resume a session and install the headless plumbing.
   ## Raises `AgentError` when no usable provider is configured, the model
   ## doesn't resolve, or the directory/session locks are held by a live
-  ## 3code process.
+  ## 3code process. Every resource acquired on the way (reservation
+  ## file, locks, headless hooks, the per-process slot) is rolled back
+  ## when a later step fails, so a failed init leaves nothing claimed.
   if agentSessionOwned.exchange(true):
     raise newException(AgentError, "only one AgentSession may be open per process")
   var initialized = false
@@ -326,7 +336,8 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   s.state.profileName = prof.name
 
   # Locks after profile resolution: a config error must fail fast without
-  # claiming the directory. Lock failures roll back in reverse order.
+  # claiming the directory. A failed acquisition (or any later failure)
+  # rolls back through the defer above.
   try:
     acquireDirLock(s.state.cwd, s.state.savePath)
   except DirLocked as e:
@@ -526,11 +537,15 @@ proc interrupt*(s: AgentSession) =
   requestTurnInterrupt("library-interrupt")
 
 proc profileLabel*(s: AgentSession): string =
-  ## Short "provider.model" label for display.
+  ## Short "provider.model" label for display. Raises `AgentError` on a
+  ## closed session: a dead handle does not describe anything.
+  requireLive(s)
   s.profile.name
 
 proc usage*(s: AgentSession): Usage =
-  ## Cumulative token usage for the session. Safe to read mid-turn: the
-  ## copy is taken under the lifecycle lock.
+  ## Cumulative token usage for the session. Raises `AgentError` on a
+  ## closed session; safe to read mid-turn, the copy is taken under the
+  ## lifecycle lock.
+  requireLive(s)
   withLock s.lifeLock:
     result = s.state.usage

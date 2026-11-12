@@ -164,8 +164,9 @@ proc swapInstall*(srcDir, destBin: string): bool =
   ##
   ## Windows: rename the in-use file to `<dest>.old` first — Windows
   ## allows rename of an open file (the lock permits DELETE), just not
-  ## overwrite — then write the new file to the target name. `.old`
-  ## cleanup happens at next launch via `cleanupStaleBinaries`.
+  ## overwrite — then write the new file to the target name; the `.old`
+  ## path derives from the actual destination. `.old` cleanup happens
+  ## at next launch via `cleanupStaleBinaries`.
   let destDir = parentDir(destBin)
   let destName = destBin.extractFilename
   var hasBin = false

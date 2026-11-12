@@ -1174,6 +1174,19 @@ proc emitTokens(s: var string, usage: JsonNode) =
   hdr.add " elapsed=" & $elapsed & "s"
   emitHeaderOnly s, hdr
 
+type SessionSaveError* = object of CatchableError
+  ## A transcript save failed. `path` names the save target; `committed`
+  ## locates the failure relative to the atomic replace:
+  ##
+  ## * `committed == false`: the new transcript never replaced the old
+  ##   one - the previous bytes at `path` are intact and reloadable, and
+  ##   no staging file of the attempt is left behind.
+  ## * `committed == true`: the new transcript is already in place at
+  ##   `path`; only post-commit synchronization failed, so durability is
+  ##   unconfirmed and the previous bytes are NOT preserved.
+  path*: string
+  committed*: bool
+
 proc renderSession*(session: Session, messages: JsonNode): string =
   var s = ""
   var hdr = "session"
@@ -1312,6 +1325,7 @@ proc renderSession*(session: Session, messages: JsonNode): string =
 
 # ---------- save / load ----------
 
+
 proc isInSessionDir(path: string): bool =
   ## True when `path` lives under a managed sessions directory (the plain
   ## one or the private one), i.e. when it should be (and can be) indexed
@@ -1319,18 +1333,13 @@ proc isInSessionDir(path: string): bool =
   ## deliberately left unindexed.
   pathUnderDir(path, sessionDir()) or isPrivateSessionPath(path)
 
-type SessionSaveError* = object of CatchableError
-  ## Raised by `saveSession` when the transcript could not be committed.
-  ## The previous transcript on disk is byte-for-byte intact, no first-save
-  ## index entry was appended, and no staging file is left behind. `msg`
-  ## names the save path and the underlying cause.
-
 type SaveFaultPhase* = enum
   ## Points inside `writeTranscriptAtomic` where a test build may inject
   ## a failure (`saveFaultHook`) that ordinary OS fixtures cannot
-  ## reproduce portably: a short staging write, a flush/close error, and
-  ## a failure of the final replacement itself.
-  sfpStageWrite, sfpFlushClose, sfpBeforeReplace
+  ## reproduce portably: a short staging write, a flush/close error, a
+  ## failure of the final replacement itself, and a parent-directory
+  ## sync failure after the commit (POSIX).
+  sfpStageWrite, sfpFlushClose, sfpBeforeReplace, sfpDirSync
 
 var saveFaultHook*: proc (phase: SaveFaultPhase) {.gcsafe, raises: [CatchableError].}
   ## Test-only fault injection point; nil in production, so every call is
@@ -1436,35 +1445,40 @@ proc writeTranscriptAtomic(dest, payload: string; durable = true) =
     replaceFileRenaming(staging, dest)
     committed = true
     saveFailureReported = false
-    if durable: syncParentDir(dest.parentDir)
-  finally:
+    if durable:
+      when defined(posix):
+        runSaveFault sfpDirSync
+      syncParentDir(dest.parentDir)
+  except CatchableError as e:
     if not closed:
       try: f.close() except CatchableError: discard
     if not committed:
       # Staging files are owned by this attempt alone; never sweep the
       # directory for other names.
       try: removeFile(staging) except OSError: discard
+    var err = newException(SessionSaveError,
+      (if committed:
+         "transcript saved but durability is unconfirmed " &
+         "(previous transcript not preserved): "
+       else:
+         "transcript save failed (previous transcript preserved): ") & e.msg)
+    err.path = dest
+    err.committed = committed
+    raise err
 
-var indexPending: HashSet[string]
-  ## Save paths whose resume-latest index append failed after a commit.
-  ## Each later save retries the append so a repaired index self-heals.
-
-proc indexTranscript(session: Session, firstSave: bool) =
+proc indexTranscript(session: Session) =
   ## Append the resume-latest index entry, only ever after the transcript
   ## committed: a failed append never fails the save (the transcript IS
-  ## written — reporting it as unwritten would lie). It reports on stderr
-  ## once and retries on the next save. Skipped on re-saves without a
-  ## pending retry (existing file → no duplicate line), for out-of-tree
-  ## `-s` targets, and when cwd is empty (always set in normal use,
-  ## `session.cwd = safeCwd()`).
+  ## written, reporting it as unwritten would lie). Membership is
+  ## re-checked at every commit, so a lost or truncated entry is repaired
+  ## by the next save. Skipped for out-of-tree `-s` targets and when cwd
+  ## is empty (always set in normal use, `session.cwd = safeCwd()`).
   if session.cwd == "" or not isInSessionDir(session.savePath): return
-  if not (firstSave or session.savePath in indexPending): return
-  if appendSessionIndex(session.cwd, sessionIdFromPath(session.savePath)):
-    indexPending.excl(session.savePath)
-  elif session.savePath notin indexPending:
-    indexPending.incl(session.savePath)
+  let id = sessionIdFromPath(session.savePath)
+  if id in indexIdsAt(sessionPathIndexDir(), session.cwd): return
+  if not appendSessionIndex(session.cwd, id):
     stderr.writeLine "3code: transcript saved, but the resume index could " &
-      "not be updated (will retry on the next save)"
+      "not be updated"
 
 proc saveSession*(session: Session, messages: JsonNode) =
   ## Render the transcript and atomically replace the `.3log`. Raises
@@ -1474,7 +1488,6 @@ proc saveSession*(session: Session, messages: JsonNode) =
   ## any new image files) before touching the destination, so a bad image
   ## never costs the old transcript.
   if session.savePath == "": return
-  let firstSave = not hasSavedSession(session.savePath)
   try:
     # Render (including any new image files) inside the guarded block, so
     # a render-time image write failure is a SessionSaveError like every
@@ -1482,10 +1495,15 @@ proc saveSession*(session: Session, messages: JsonNode) =
     let dest = resolveSaveTarget(session.savePath)
     createDir(dest.parentDir)
     writeTranscriptAtomic(dest, renderSession(session, messages))
+  except SessionSaveError:
+    raise
   except CatchableError as e:
-    raise newException(SessionSaveError,
-      "could not save transcript " & session.savePath & ": " & e.msg, e)
-  indexTranscript(session, firstSave)
+    var err = newException(SessionSaveError,
+      "could not save transcript " & session.savePath & ": " & e.msg)
+    err.path = session.savePath
+    err.committed = false
+    raise err
+  indexTranscript(session)
 
 proc reportSaveFailure*(e: ref SessionSaveError) =
   ## Report a save failure once per failing streak; the next committed

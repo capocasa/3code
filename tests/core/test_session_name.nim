@@ -98,7 +98,7 @@ suite "session names: resolution":
       renderSession(Session(created: ts, profileName: "test", cwd: cwd,
                             name: name),
         %*[{"role": "user", "content": "body of " & ts}]))
-    appendSessionIndex(cwd, ts)
+    discard appendSessionIndex(cwd, ts)
 
   const cwd = "/proj/R"
   const otherCwd = "/proj/S"

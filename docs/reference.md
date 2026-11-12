@@ -203,6 +203,7 @@ Keys under `[settings]`:
 | `verifier` | `on`/`off` | enable/disable the selected verifier without clearing it; absent means on while a model is selected |
 | `allow-empty-prompt` | `on`/`off` (default on) | submitting an empty prompt continues the ongoing session: a turn runs on the messages as they stand, appending no user message; `allow_empty_prompt` spelling accepted |
 | `user_agent` | template (default `3code $version`) | User-Agent header sent on every model request. Variables: `$version` (the full build version, e.g. `0.9.2-main-a1b2c3d4a`), `$branch` (`-main`), `$commit` / `$hash` (`-a1b2c3d4`), `$stage` (`-unstaged` when the build's sources differed from HEAD; each empty when not applicable), `$os`, `$arch`, and `$$` for a literal `$`. Unknown `$names` pass through verbatim; `user-agent` spelling accepted |
+| `dirconfig` | `project` (default) / `user` | where per-directory settings stores live: `<dir>/.3code` in the directory itself, or `~/.config/3code/dirs/<dir>` under your config root (stores there are user-owned, so their sandbox switches are authoritative; see [project settings](manual.html#project-settings-cannot-weaken-the-sandbox)) |
 
 ### provider
 

@@ -574,8 +574,53 @@ proc emptyReplyWait*(): bool =
 # `sendRequest`/`readResponseHead` raises; we close the cached conn,
 # reconnect once, and retry. Mid-body errors and Ctrl-C also drop the
 # cache so the next turn starts on a fresh socket.
-var cachedStreamConn: StreamConn
-var cachedStreamHostKey: string
+#
+# The cache is a THREADVAR, not a module global: a call whose worker
+# outlives its caller (a retired job, see callModelThreaded) can overlap
+# a subsequent call. With a shared cache the retiring worker's
+# closeCachedStreamConn would free the new call's StreamConn, or its
+# acquireStreamConn would reuse the new call's socket, mid-flight. Each
+# thread owns its cache end to end: the worker closes what it opened on
+# its own thread (an ORC requirement too), the main thread keeps its
+# reuse across turns for the non-threaded transports exactly as before.
+var cachedStreamConn {.threadvar.}: StreamConn
+var cachedStreamHostKey {.threadvar.}: string
+
+const MaxActiveNetFds = 4
+  ## Capacity of the lock-free fd wake registry below. Enough for every
+  ## fd a wedged-but-alive worker plus the current call can publish;
+  ## overlap beyond 2 is already refused by MaxRetiredNetJobs.
+var activeNetFds: array[MaxActiveNetFds, Atomic[int]]
+  ## Fds with a blocking network op in flight, stored as fd+1 (0 = empty;
+  ## the array zero-initializes, and fd 0 is stdin, so raw fds are never
+  ## stored). Published by the connect hook, cleared by the owning thread
+  ## when it closes its conn. `shutdownCachedStreamFd` walks the slots
+  ## from signal handlers, the quiet-watch thread, and the stdin watcher,
+  ## so every operation is an atomic or the `shutdown` syscall: the
+  ## async-signal-safety contract the single cached fd mirror used to
+  ## provide, extended to overlapping workers (a retiring worker's fd
+  ## must still be wakeable by an interrupt aimed at the next call).
+
+proc publishNetFd(fd: SocketHandle) =
+  ## Register fd (dedup; first empty slot; slot 0 as last resort).
+  let v = int(fd) + 1
+  for slot in activeNetFds.mitems:
+    if slot.load(moAcquire) == v: return
+  for slot in activeNetFds.mitems:
+    var empty = 0
+    if slot.compareExchange(empty, v, moRelease, moRelaxed): return
+  discard activeNetFds[0].exchange(v, moRelease)
+
+proc forgetNetFd(fd: SocketHandle) =
+  ## Clear every registry slot holding fd. Owner thread only.
+  let v = int(fd) + 1
+  for slot in activeNetFds.mitems:
+    var expected = v
+    while slot.load(moAcquire) == v:
+      if slot.compareExchange(expected, 0, moRelease, moRelaxed):
+        break
+      expected = v
+
 var lastRequestBodyBytes* = 0
   ## Byte length of the body the most recent real (non-stub) `callModel`
   ## serialized for the wire. Published for the turn loop's byte-envelope
@@ -583,19 +628,14 @@ var lastRequestBodyBytes* = 0
   ## opaque 400 well before the token context limit, and only the actual
   ## body size (tools + system + history, after provider-specific
   ## wrapping) predicts that — token counts cannot.
-# Mirror of the cached conn's fd, kept current so the SIGINT hook and
-# the stdin watcher thread can `posix.shutdown` it without touching
-# the GC'd `StreamConn` ref. Set/cleared alongside `cachedStreamConn`.
-var cachedStreamFd: SocketHandle = osInvalidSocket
-
 # A connect-in-progress fd, published by streamhttp's `onConnectingFd` hook
-# the instant the socket is created, before the blocking connect. Held in
-# `cachedStreamFd` so `shutdownCachedStreamFd` can interrupt a connect that
-# has not yet produced a `StreamConn` (the connect path only sets the cached
-# conn/fd after a successful connect). Cleared by `closeCachedStreamConn`.
-# See `installConnectingFdHook`.
+# the instant the socket is created, before the blocking connect, into the
+# `activeNetFds` registry so `shutdownCachedStreamFd` can interrupt a
+# connect that has not yet produced a `StreamConn` (the connect path only
+# sets the cached conn after a successful connect). Cleared by
+# `closeCachedStreamConn` on the owning thread. See `installConnectingFdHook`.
 proc onConnectingFdHook(fd: SocketHandle) {.gcsafe.} =
-  cachedStreamFd = fd
+  publishNetFd(fd)
 
 proc installConnectingFdHook*() =
   ## Wire streamhttp's connect-time hook so a Ctrl-C / quiet-watch shutdown
@@ -618,11 +658,16 @@ proc closeCachedStreamConn*() =
   ## forever against a black-holed peer (the wedge a leaked network worker
   ## hit, where Ctrl-C/ESC could not cancel a teardown close()). No need to
   ## branch on interrupted/quiet - one path for all cases.
+  #
+  # Only ever called on the thread that owns the cache (threadvar), so the
+  # close/free happens on the allocating thread. The fd leaves the wake
+  # registry first, so an interrupt arriving just after close cannot
+  # shutdown a number the kernel may have handed to another socket.
   if cachedStreamConn != nil:
+    forgetNetFd(cachedStreamConn.getFd)
     try: cachedStreamConn.close() except CatchableError: discard
     cachedStreamConn = nil
     cachedStreamHostKey = ""
-  cachedStreamFd = osInvalidSocket
 
 when defined(posix):
   var MSG_DONTWAIT {.importc: "MSG_DONTWAIT", header: "<sys/socket.h>".}: cint
@@ -635,8 +680,8 @@ proc cachedConnClosedByPeer(): bool =
   ## never surfaced as an exception, so the stale-cache recovery in
   ## callHttp/streamHttp never engaged.
   when defined(posix):
-    let fd = cachedStreamFd
-    if fd == osInvalidSocket: return true
+    if cachedStreamConn == nil: return true
+    let fd = cachedStreamConn.getFd
     var buf: array[1, char]
     let n = posix.recv(posix.SocketHandle(fd), addr buf[0], 1,
                        (posix.MSG_PEEK or MSG_DONTWAIT).cint)
@@ -663,26 +708,30 @@ proc acquireStreamConn(host: string; port: Port; plainHttp: bool): StreamConn =
     raise
   cachedStreamConn = result
   cachedStreamHostKey = identity
-  cachedStreamFd = result.getFd
 
 proc shutdownCachedStreamFd*() {.gcsafe.} =
-  ## Async-signal-safe: only the `shutdown` syscall, no allocation, no
-  ## Nim GC traffic. Forces a blocking `recv` on `cachedStreamConn` to
-  ## return so the streamHttp loop observes the interrupt/quiet flags and
-  ## bails. Safe to call from a SIGINT hook, the quiet-watch thread, or
-  ## the stdin watcher thread.
+  ## Async-signal-safe: only the `shutdown` syscall and atomics, no
+  ## allocation, no Nim GC traffic. Shuts down every registered network fd
+  ## so a blocking `recv`/`send`/connect returns and the streamHttp loop
+  ## observes the interrupt/quiet flags and bails. Safe to call from a
+  ## SIGINT hook, the quiet-watch thread, or the stdin watcher thread;
+  ## walks all slots so a wake aimed at the current call also reaches a
+  ## still-alive retired worker (the retired worker owns its own conn and
+  ## closes it on its own thread).
   when defined(posix):
-    let fd = cachedStreamFd
-    if fd != osInvalidSocket:
-      discard posix.shutdown(posix.SocketHandle(fd), SHUT_RDWR.cint)
+    for slot in activeNetFds.mitems:
+      let v = slot.load(moAcquire)
+      if v != 0:
+        discard posix.shutdown(posix.SocketHandle(v - 1), SHUT_RDWR.cint)
   else:
     # Winsock shutdown wakes a blocked recv/SSL_read on the socket from
     # any thread, same contract as the POSIX branch. Without it a Ctrl-C /
     # ESC during a wedged provider read sets the flag but nothing ever
     # observes it: the stream loop is parked in recv with no timeout.
-    let fd = cachedStreamFd
-    if fd != osInvalidSocket:
-      discard winlean.shutdown(fd, 2'i32)  # SD_BOTH
+    for slot in activeNetFds.mitems:
+      let v = slot.load(moAcquire)
+      if v != 0:
+        discard winlean.shutdown(SocketHandle(v - 1), 2'i32)  # SD_BOTH
 
 proc requestTurnInterrupt*(source = "unspecified") {.gcsafe.} =
   ## One cancellation path for signal hooks, buffered prompt keys, and
@@ -1164,7 +1213,8 @@ proc reasoningLoops*(text: string): bool =
     if c >= ReasoningLoopHits: return true
   false
 
-proc streamHttp(url, key, bodyStr: string, baseLabel: string,
+proc streamHttp(url: string, headers: seq[(string, string)],
+                bodyStr: string, baseLabel: string,
                 slurped: var int, suppressXml: bool,
                 job: NetJob, codeAssist = false,
                 anthropic = false): StreamOutcome =
@@ -1223,9 +1273,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     var headStall = StallClock(since: epochTime())
     try:
       conn.sendRequest("POST", pathQuery, host,
-                       headers = requestHeaders(
-                         extraHeadersProfile, key, "text/event-stream"),
-                       body = bodyStr)
+                       headers = headers, body = bodyStr)
       fireActivity(job)
       while true:
         try:
@@ -1784,7 +1832,8 @@ proc responsesAssistantMsg(r: JsonNode; wasInterrupted: bool): JsonNode =
   if wasInterrupted:
     result["interrupted"] = %true
 
-proc streamResponses(url, key, bodyStr: string, baseLabel: string,
+proc streamResponses(url: string, headers: seq[(string, string)],
+                     bodyStr: string, baseLabel: string,
                      slurped: var int,
                      job: NetJob): StreamOutcome =
   ## POST /responses with `"stream": true` and consume the semantic SSE
@@ -1836,9 +1885,7 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
     var headStall = StallClock(since: epochTime())
     try:
       conn.sendRequest("POST", pathQuery, host,
-                       headers = requestHeaders(
-                         extraHeadersProfile, key, "text/event-stream"),
-                       body = bodyStr)
+                       headers = headers, body = bodyStr)
       fireActivity(job)
       while true:
         try:
@@ -3240,18 +3287,65 @@ proc applyThinkBack*(p: Profile, body: JsonNode) =
 # through the (unchanged) hook layer on a ~50ms cadence, keeping the UI
 # responsive while the blocking recv loop runs off-thread.
 #
-# ORC constraint: the worker holds no closures and no refs the main thread
-# also mutates. The `NetJobState` is a stack var whose lifetime encloses the
-# worker's run; the only ref handed across is the final `assistantMsg`
-# `JsonNode`, built solely by the worker and read once by main after join.
+# Ownership. The job and the worker args are MAIN-ALLOCATED heap blocks
+# (`create`), never stack vars: a worker wedged in an unbounded system
+# resolver call can outlive its caller, and the old stack-backed design
+# let it write through expired pointers (SIGSEGV / ASAN
+# stack-use-after-return). A caller either joins the worker and frees the
+# blocks itself, or hands them to `retiredNetJobs` where a later main-
+# thread reaper pass joins the worker and frees them. Every block is
+# therefore freed exactly once, on main, only after `workerDone` says the
+# worker made its final access. The worker reads `args` (strings included)
+# without touching refcounts; `netthread`'s byte-copy + reap handshake
+# rules keep every allocation freed on its allocating thread.
+#
+# Worker-visible globals are single-owner too: the connection cache is a
+# threadvar (see the cache block above), so a retiring worker can neither
+# reuse nor free a later call's conn, and request headers are snapshotted
+# into `args` on the calling thread instead of being resolved from
+# `extraHeadersProfile`/`conversationId` at send time by a possibly-
+# abandoned worker.
 
 const NetWorkerPollMs = 50
+
+const NetJoinBudgetMs* {.intdefine.} = ConnectTimeoutMs + QuietTooLongMs + 5_000
+  ## Worst-case bounded wait for a worker outcome before the caller stops
+  ## owning the job. Every worker syscall is bounded (connect by
+  ## `ConnectTimeoutMs`, recv by `QuietRecvWakeMs`, TLS handshake
+  ## internally), so a live worker that has not published within this
+  ## budget is wedged in the one unbounded op: a first-time getAddrInfo
+  ## resolver call. Also the caller-side worker-silence watchdog: a
+  ## streaming worker that produces no deltas and no outcome for this
+  ## long is wedged the same way. An `intdefine` so tests can shrink it.
+
+const NetReapPassBudgetMs* {.intdefine.} = 250
+  ## Per reaper pass, how long to wait for the oldest retired job that has
+  ## not yet published. Retired workers whose syscalls eventually complete
+  ## publish within milliseconds and are joined on the spot; a resolver-
+  ## wedged worker stays retired and costs this one bounded wait per call
+  ## until its resolver (or a quiet/interrupt fd shutdown) lets it finish.
+
+const MaxRetiredNetJobs = 8
+  ## Refuse to start a new worker once this many retired jobs are still
+  ## unjoinable, so overlapping wedged retries cannot accumulate without
+  ## bound. Rides the retryable transport-error path (see callModel).
+
+when defined(netWorkerTestHooks):
+  ## Test-only worker gate, compiled out of production builds entirely.
+  ## A test parks the worker here to model the one uninterruptible op
+  ## (a blocking system resolver/connect with no fd published yet) and
+  ## releases it after the caller completed, exposing lifetime bugs in
+  ## the job/args handoff.
+  var netWorkerGate*: proc () {.gcsafe.}
 
 type
   NetWorkerArgs = object
     job: NetJob
     url: string
-    key: string
+    headers: seq[(string, string)]
+      ## Snapshotted on the calling thread (profile, bearer, conversation
+      ## routing). A retired worker must not read turn globals at send
+      ## time: they may already describe the NEXT call.
     bodyStr: string
     baseLabel: string
     suppressXml: bool
@@ -3259,35 +3353,151 @@ type
     codeAssist: bool  # Google Code Assist wire (translate Gemini SSE)
     anthropic: bool  # Anthropic Messages wire (translate /messages SSE)
 
+type
+  RetiredNetJob = object
+    job: NetJob
+    args: ptr NetWorkerArgs
+    thread: ptr Thread[ptr NetWorkerArgs]
+      ## Heap-allocated handle: a `Thread` cannot be copied, so the
+      ## retirement registry stores the single owner pointer instead.
+    retiredAt: float
+
+var retiredNetJobs: seq[RetiredNetJob]
+  ## Jobs whose caller could not (or chose not to) join their worker.
+  ## Main thread only: the worker never touches this, retirement and
+  ## reaping both run on the calling thread, so no lock guards it.
+var netJobsAlive = 0
+  ## Main-thread counter of allocated-but-not-freed jobs; the lifecycle
+  ## repeat checks assert it returns to zero.
+
+proc netRetiredJobs*(): int = retiredNetJobs.len
+  ## Narrow lifecycle introspection: retired-but-unjoined jobs.
+
+proc netJobsLive*(): int = netJobsAlive
+  ## Narrow lifecycle introspection: allocated-but-not-freed jobs. Zero
+  ## after every normal completion, cancellation, timeout, and raising
+  ## callback has converged on teardown.
+
+proc newNetJob(): NetJob =
+  ## Main thread only. The heap block's lifetime encloses the worker's
+  ## run whichever thread ends up joining it.
+  result = create(NetJobState)
+  result.lock.initLock()
+  inc netJobsAlive
+
+proc freeNetJob(job: NetJob) =
+  ## Main thread only, and only after `workerDone(job)`: the worker then
+  ## holds no GC'd content in the job, so the destructor calls here free
+  ## nothing on a foreign thread (netthread's ORC law). Runs exactly once
+  ## per job: every caller either joins and frees or retires, never both.
+  job.lock.deinitLock()
+  reset(job[])
+  dealloc(job)
+  dec netJobsAlive
+
+proc freeNetWorkerArgs(args: ptr NetWorkerArgs) =
+  ## Main thread only, after the worker exited. The strings were allocated
+  ## on main; the worker only ever read them.
+  reset(args[])
+  dealloc(args)
+
+proc joinNetWorker(job: NetJob; args: ptr NetWorkerArgs;
+                   t: ptr Thread[ptr NetWorkerArgs]) =
+  ## Caller-side finish: hand the worker its reap release, wait (bounded)
+  ## for it to make its final job access, join, and free the blocks and
+  ## the thread handle here on the allocating thread. Main thread only;
+  ## no lock held while joining.
+  reap(job)
+  if t[].running():
+    var waited = 0
+    while not workerDone(job) and waited < NetReapWaitMs:
+      sleep(1)
+      inc waited
+  joinThread(t[])
+  freeNetJob(job)
+  freeNetWorkerArgs(args)
+  dealloc(t)
+
+proc finishRetired(idx: int) =
+  ## Reaper-side finish for `retiredNetJobs[idx]`: protocol copies (the
+  ## worker frees its own allocations only after reap, so drain+copy must
+  ## precede it), then join and free. The copies are discarded: the job's
+  ## caller is gone. Indexes into the registry instead of copying the
+  ## entry: `Thread` handles cannot be copied out of a container.
+  let job = retiredNetJobs[idx].job
+  let args = retiredNetJobs[idx].args
+  var discardBatch: seq[NetDelta]
+  drainDeltas(job, discardBatch)
+  discard copyOutcome(job)
+  joinNetWorker(job, args, retiredNetJobs[idx].thread)
+
+proc reapRetiredNetJobs*(budgetMs = NetReapPassBudgetMs): int =
+  ## Join and free retired jobs whose workers have published. Main thread
+  ## only; called at the top of every threaded call and exported so tests
+  ## can drive the production reaper deterministically. Waits up to
+  ## `budgetMs` total for the oldest unpublished job; a worker still
+  ## wedged in an unbounded resolver call stays retired and is retried on
+  ## a later pass. Returns the number of jobs reaped.
+  let deadline = epochTime() + budgetMs.float / 1000.0
+  var i = 0
+  while i < retiredNetJobs.len:
+    if not outcomeReady(retiredNetJobs[i].job):
+      while not outcomeReady(retiredNetJobs[i].job) and epochTime() < deadline:
+        sleep(NetWorkerPollMs)
+      if not outcomeReady(retiredNetJobs[i].job):
+        break  # Still wedged: keep it retired, stop spending the budget.
+    finishRetired(i)
+    retiredNetJobs.delete(i)
+    inc result
+
+proc retireNetJob(job: NetJob; args: ptr NetWorkerArgs;
+                  t: ptr Thread[ptr NetWorkerArgs]) =
+  ## Transfer job/args/thread-handle ownership to the reaper. Main thread
+  ## only. Used when the caller must return without its worker: join
+  ## budget expired (resolver wedge) or a hook raised mid-drain. The
+  ## worker keeps running on state it still owns; the reaper joins and
+  ## frees it later.
+  retiredNetJobs.add(RetiredNetJob(job: job, args: args, thread: t,
+                                   retiredAt: epochTime()))
+
 proc networkWorker(a: ptr NetWorkerArgs) {.thread.} =
   ## Runs the full connect+send+SSE loop on a worker thread. Fires deltas
-  ## into `job`; publishes the outcome and sets phase=npDone on exit.
-  ## GC-safe cast is valid: only this worker touches the module-global
-  ## connection cache during a call (calls are serialized one at a time),
-  ## and both the NetJobState and the NetWorkerArgs are main-stack vars
-  ## whose lifetime encloses this run (main joins/detaches before they go
-  ## out of scope). The args are passed by POINTER, not by value: a
-  ## by-value `createThread(t, networkWorker, args)` copies the GC'd
-  ## strings (bodyStr is large) into the thread's arg slot, and the next
-  ## turn's createThread overwriting that slot frees the PREVIOUS turn's
-  ## strings ON THE WORKER THREAD. That is an ORC cross-thread free and
-  ## segfaults (SIGSEGV in netthread.nim publishOutcome -> dealloc). With a
-  ## pointer arg the worker only ever reads the strings; every free happens
-  ## on main, the allocating thread.
+  ## into `job`; publishes a terminal outcome on EVERY exit — the
+  ## transports return outcomes instead of raising, and the catch below
+  ## converts anything that escapes anyway — then waits (bounded) in
+  ## `workerRelease` for the owner's reap handshake and exits. The args
+  ## are passed by POINTER and never refcounted here: a by-value
+  ## `createThread(t, networkWorker, args)` copies the GC'd strings
+  ## (bodyStr is large) into the thread's arg slot, and the next turn's
+  ## createThread overwriting that slot frees the PREVIOUS turn's strings
+  ## ON THE WORKER THREAD. That is an ORC cross-thread free and segfaults.
+  ## The job/args blocks are main-allocated and outlive this run however
+  ## it ends: joined by the caller, or handed to the main-thread reaper.
   {.cast(gcsafe).}:
-    setPhase(a.job, npConnecting)
-    var slurped = 0
-    var outcome =
-      if a.responses:
-        streamResponses(a.url, a.key, a.bodyStr, a.baseLabel, slurped, a.job)
-      else:
-        streamHttp(a.url, a.key, a.bodyStr, a.baseLabel, slurped,
-                   a.suppressXml, a.job, a.codeAssist, a.anthropic)
+    var outcome: StreamOutcome
+    try:
+      when defined(netWorkerTestHooks):
+        if netWorkerGate != nil: netWorkerGate()
+      setPhase(a.job, npConnecting)
+      var slurped = 0
+      outcome =
+        if a.responses:
+          streamResponses(a.url, a.headers, a.bodyStr, a.baseLabel,
+                          slurped, a.job)
+        else:
+          streamHttp(a.url, a.headers, a.bodyStr, a.baseLabel, slurped,
+                     a.suppressXml, a.job, a.codeAssist, a.anthropic)
+    except CatchableError as e:
+      # The transports return outcomes instead of raising; an escape here
+      # is a bug. Surface it in the transport-error shape so callModel's
+      # retry classification still applies.
+      outcome = StreamOutcome(errMsg: "request failed: " & e.msg)
     # The StreamConn is a ref with internal cycles (Socket + SslContext).
     # Under ORC, freeing it from a different thread than the one that
     # allocated it segfaults the cycle collector. The worker owns the
-    # entire connection lifecycle: always close and clear here, on this
-    # thread, before returning. This sacrifices cross-turn connection
+    # entire connection lifecycle of its own (threadvar) cache: always
+    # close and clear here, on this thread, before returning — including
+    # on the exception path above. This sacrifices cross-turn connection
     # reuse on the threaded path (acceptable for Tier 2; the TLS handshake
     # cost is regained in responsiveness).
     closeCachedStreamConn()
@@ -3299,8 +3509,9 @@ proc networkWorker(a: ptr NetWorkerArgs) {.thread.} =
       outcome.assistantMsgJson = $outcome.assistantMsg
       outcome.assistantMsg = nil
     publishOutcome(a.job, outcome)
-    # Free the worker-owned strings on this thread; blocks freed on a
-    # foreign thread leak under ORC (nim-lang/Nim#23361).
+    # Free the worker-owned strings on this thread (bounded wait for the
+    # reap handshake); blocks freed on a foreign thread leak under ORC
+    # (nim-lang/Nim#23361).
     workerRelease(a.job)
     # Collect this thread's heap before it dies: cycle-registered refs
     # (StreamConn/Socket cycles) freed here otherwise strand their global
@@ -3333,82 +3544,128 @@ proc drainAndDispatch(job: NetJob; baseLabel: string) =
 proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
                         suppressXml: bool; responses = false;
                         anthropic = false): StreamOutcome =
-  ## The threaded streaming path. Spawns a worker to run `streamHttp`, polls
-  ## the shared state on a ~50ms cadence to replay deltas through the hooks,
-  ## and joins the worker once it signals done (or the user interrupts).
-  var job: NetJobState
-  job.lock.initLock()
-  defer: job.lock.deinitLock()
-  var t: Thread[ptr NetWorkerArgs]
-  # `args` is a stack var that outlives the worker: main joins the worker
-  # below before `args` (and `job`) go out of scope, and on the detach path
-  # the wedge is a getAddrInfo block, after which the worker only reads
-  # args. Passing its address means the worker never owns or frees the
-  # GC'd strings inside.
-  var args = NetWorkerArgs(
-    job: addr job,
-    url: endpointUrl(p, responses, streaming = true),
-    key: bearerFor(p),
-    bodyStr: bodyStr,
-    baseLabel: baseLabel,
-    suppressXml: suppressXml,
-    responses: responses,
-    codeAssist: geminicliProfile(p),
-    anthropic: anthropic)
-  createThread(t, networkWorker, addr args)
-  while job.phase != npDone and not isInterrupted() and not isNetworkQuiet():
-    drainAndDispatch(addr job, baseLabel)
-    sleep(NetWorkerPollMs)
-  if isInterrupted():
-    shutdownCachedStreamFd()
-  # Do NOT call closeCachedStreamConn() here on the quiet path (or on the
-  # interrupt path). The worker may still be inside SSL_write on the cached
-  # conn; StreamConn.close() frees the OpenSSL handle, and main freeing it
-  # out from under the worker segfaults. The fd shutdown above (quiet-watch
-  # already did it on the quiet path) wakes the worker's syscall; the worker
-  # observes the flag, unwinds, and closes the conn itself in networkWorker.
-  # Bounded wait for the worker's outcome: every worker syscall is bounded
-  # (connect by ConnectTimeoutMs, recv by QuietRecvWakeMs, TLS handshake
-  # internally), so the worker publishes within a known worst case. The one
-  # exception is a first-time getAddrInfo wedge (documented, accepted): if
-  # the poll times out we detach rather than block forever. The worker
-  # parks in workerRelease after publishing until reap() fires, so once
-  # outcomeWritten is seen the join below returns promptly.
-  var waited = 0
-  let joinBudget = ConnectTimeoutMs + QuietTooLongMs + 5_000
-  while not job.outcomeWritten and t.running() and waited < joinBudget:
-    drainAndDispatch(addr job, baseLabel)
-    sleep(NetWorkerPollMs)
-    waited += NetWorkerPollMs
-  # Final drain and main-owned copies: the last reads of worker memory;
-  # everything main keeps beyond this point was allocated on the main
-  # thread (drainDeltas/copyOutcome copy payloads byte-wise for exactly
-  # this reason).
-  drainAndDispatch(addr job, baseLabel)
-  result = copyOutcome(addr job)
-  if result.assistantMsgJson.len > 0:
-    result.assistantMsg = parseJson(result.assistantMsgJson)
-    result.assistantMsgJson = ""
-  # Now the worker may free its own strings and exit. A worker that
-  # published (outcomeWritten) is straight-line code away from thread
-  # exit, so joining it is prompt and mandatory: detaching here would
-  # return into this stack frame while the worker still writes `job`.
-  reap(addr job)
-  if job.outcomeWritten or not t.running():
-    joinThread(t)
-  else:
-    # Detached (getAddrInfo wedge): leave the cached conn alone. The worker
-    # owns it and closes it whenever it eventually wakes; main touching it
-    # here would race the worker's SSL handle use.
-    discard
-  if not job.outcomeWritten and isNetworkQuiet():
-    # Broke out of the poll loop on the quiet flag and the detached worker
-    # never published an outcome (it was wedged in an unbounded send/handshake
-    # the send-timeout could not reach, or was detached at the join budget).
-    # Surface a retryable transport error so callModel's retry loop reconnects
-    # on a fresh socket, exactly like a 503. Same message/shape the
-    # non-threaded streamHttp path uses for the same condition.
-    result.errMsg = "network quiet for " & $(QuietTooLongMs div 1000) & "s"
+  ## The threaded streaming path. Spawns a worker to run the transport,
+  ## polls the shared state on a ~50ms cadence to replay deltas through
+  ## the hooks, and either joins the worker (normal completion,
+  ## interrupt, quiet timeout, worker error) or hands its job to the
+  ## main-thread reaper (resolver wedge at the join budget, a hook
+  ## raising mid-drain). Either way this proc never returns while the
+  ## worker can still touch its state.
+  # Reap first: bounded, and anything the previous caller retired that
+  # has since published is joined and freed before this call starts.
+  discard reapRetiredNetJobs()
+  if retiredNetJobs.len >= MaxRetiredNetJobs:
+    # Still-unjoinable wedged workers are piling up (an outage where every
+    # retry wedges its resolver). Refuse a new one rather than accumulate:
+    # 200 + nil assistantMsg + errMsg rides callModel's NetworkHealthError
+    # retry path like any other transport anomaly.
+    return StreamOutcome(statusCode: 200,
+      errMsg: "network workers wedged: " & $retiredNetJobs.len &
+              " abandoned calls awaiting an unresponsive resolver")
+  # Heap thread handle: a `Thread` value cannot be copied, and the handle
+  # must outlive this frame on the retirement path anyway.
+  let t = create(Thread[ptr NetWorkerArgs])
+  # Heap args (headers snapshotted HERE, on this thread — a retired worker
+  # must not resolve profile/bearer/conversation globals at send time when
+  # they may already describe the next call) and a heap job, freed exactly
+  # once by whoever joins their worker.
+  let args = create(NetWorkerArgs)
+  args.job = newNetJob()
+  args.url = endpointUrl(p, responses, streaming = true)
+  args.headers = requestHeaders(extraHeadersProfile, bearerFor(p),
+                                "text/event-stream")
+  args.bodyStr = bodyStr
+  args.baseLabel = baseLabel
+  args.suppressXml = suppressXml
+  args.responses = responses
+  args.codeAssist = geminicliProfile(p)
+  args.anthropic = anthropic
+  let job = args.job
+  try:
+    createThread(t[], networkWorker, args)
+  except CatchableError:
+    freeNetJob(job)
+    freeNetWorkerArgs(args)
+    dealloc(t)
+    raise
+  var retired = false
+  try:
+    # Poll loop. Drains and dispatches; the activity counter proves the
+    # worker is alive and producing. No caller-side budget here would make
+    # a library consumer (no quiet-watch thread) wait forever on a worker
+    # wedged in an unbounded resolver call, so a worker silent for a whole
+    # join budget ends the loop too; any delta resets the clock, so a
+    # healthy stream — where every recv wake fires an activity or content
+    # delta and the transport's own stall clocks bound true silence — never
+    # trips it.
+    var activity = activityCount(job)
+    var lastActivity = epochTime()
+    while not outcomeReady(job) and not isInterrupted() and not isNetworkQuiet():
+      drainAndDispatch(job, baseLabel)
+      let now = activityCount(job)
+      if now != activity:
+        activity = now
+        lastActivity = epochTime()
+      elif epochTime() - lastActivity >= NetJoinBudgetMs / 1000.0:
+        break
+      sleep(NetWorkerPollMs)
+    if isInterrupted():
+      shutdownCachedStreamFd()
+    # Do NOT call closeCachedStreamConn() here on the quiet path (or on the
+    # interrupt path). Main's threadvar cache is empty on this path anyway;
+    # the worker owns its conn and closes it on its own thread. The fd
+    # shutdown above (quiet-watch already did it on the quiet path) wakes
+    # the worker's syscall; the worker observes the flag, unwinds, and
+    # closes the conn itself in networkWorker.
+    # Bounded wait for the worker's outcome: every worker syscall is bounded
+    # (connect by ConnectTimeoutMs, recv by QuietRecvWakeMs, TLS handshake
+    # internally), so a worker that got interrupted/quiet-flagged publishes
+    # within a known worst case. The exception is the resolver wedge: if
+    # the budget expires we RETIRE rather than block forever — the worker
+    # keeps its own job/args/conn and the reaper joins it when it finally
+    # publishes or a later fd shutdown unwedges it. The worker parks in
+    # workerRelease after publishing until reap() fires, so once
+    # outcomeWritten is seen the join below returns promptly.
+    var joinWaited = 0
+    while not outcomeReady(job) and t[].running() and joinWaited < NetJoinBudgetMs:
+      drainAndDispatch(job, baseLabel)
+      sleep(NetWorkerPollMs)
+      joinWaited += NetWorkerPollMs
+    # Final drain and main-owned copies: the last reads of worker memory;
+    # everything main keeps beyond this point was allocated on the main
+    # thread (drainDeltas/copyOutcome copy payloads byte-wise for exactly
+    # this reason).
+    drainAndDispatch(job, baseLabel)
+    result = copyOutcome(job)
+    if result.assistantMsgJson.len > 0:
+      result.assistantMsg = parseJson(result.assistantMsgJson)
+      result.assistantMsgJson = ""
+    # Either the worker published (straight-line code from thread exit: the
+    # join below is prompt and mandatory) or it is already dead. Anything
+    # else goes to the reaper — never an untracked return.
+    let published = outcomeReady(job)
+    if published or not t[].running():
+      joinNetWorker(job, args, t)
+    else:
+      retireNetJob(job, args, t)
+      retired = true
+    # No job access past this point: the joined path just freed it.
+    if not published and isNetworkQuiet():
+      # Broke out of the loops on the quiet flag and the worker never
+      # published an outcome (it was wedged in an unbounded send/handshake
+      # the send-timeout could not reach, or was retired at the join
+      # budget). Surface a retryable transport error so callModel's retry
+      # loop reconnects on a fresh socket, exactly like a 503. Same
+      # message/shape the non-threaded streamHttp path uses for the same
+      # condition.
+      result.errMsg = "network quiet for " & $(QuietTooLongMs div 1000) & "s"
+  except CatchableError:
+    # A hook raised inside drainAndDispatch (or any caller-side failure):
+    # give the worker to the reaper instead of destroying its state under
+    # it, then let the exception propagate unchanged.
+    if not retired:
+      retireNetJob(job, args, t)
+    raise
 
 when providerStub:
   ## Test-only stub provider. Lives in `tests/testdata/stub/provider.nim` and is
@@ -3575,12 +3832,16 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           var syncJob: NetJobState
           syncJob.lock.initLock()
           defer: syncJob.lock.deinitLock()
+          # Inline run: main thread owns job and conn; headers resolved
+          # here exactly like the threaded path snapshots them.
+          let hdrs = requestHeaders(extraHeadersProfile, bearer,
+                                    "text/event-stream")
           let o =
             if useResponses:
-              streamResponses(endpointUrl(p, true, true), bearer, bodyStr,
+              streamResponses(endpointUrl(p, true, true), hdrs, bodyStr,
                               baseLabel, slurped, addr syncJob)
             else:
-              streamHttp(endpointUrl(p, false, true), bearer, bodyStr,
+              streamHttp(endpointUrl(p, false, true), hdrs, bodyStr,
                          baseLabel, slurped, xmlToolCallsFallback(p),
                          addr syncJob, useCodeAssist, useAnthropic)
           drainAndDispatch(addr syncJob, baseLabel)

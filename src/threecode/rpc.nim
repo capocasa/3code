@@ -335,10 +335,13 @@ proc handle(st: RpcState; req: Request): Future[void] {.async, gcsafe.} =
       elif st.busy.load():
         await text(req, Http409, "busy\n")
       else:
-        if startTurn(st, body):
-          await text(req, Http200, "started\n")
-        else:
-          await text(req, Http409, "busy\n")
+        try:
+          if startTurn(st, body):
+            await text(req, Http200, "started\n")
+          else:
+            await text(req, Http409, "busy\n")
+        except CatchableError as e:
+          await text(req, Http500, "error: " & e.msg & "\n")
     of "/cancel":
       if st.s != nil and st.busy.load():
         st.s.interrupt()
@@ -349,8 +352,8 @@ proc handle(st: RpcState; req: Request): Future[void] {.async, gcsafe.} =
       if st.busy.load():
         await text(req, Http409, "busy\n")
       else:
+        let dir = unpercent(q.getOrDefault("dir", ""))
         try:
-          let dir = unpercent(q.getOrDefault("dir", ""))
           {.cast(gcsafe).}:
             openSession(st, dir)
           writeRegistry(boundPort, st.cwd)

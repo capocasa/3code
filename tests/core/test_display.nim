@@ -53,7 +53,7 @@ suite "display: printSessionList cap":
     writeFile(dir / (stamp & SessionExt), renderSession(sess, msgs))
     # Mirror saveSession: index the new file under its cwd so
     # listSessionPathsForCwd (which reads the index, not the dir) finds it.
-    appendSessionIndex(cwd, stamp)
+    discard appendSessionIndex(cwd, stamp)
 
   when not defined(windows):
     proc captureList(paths: seq[string]): string =
@@ -104,7 +104,7 @@ suite "display: printSessionList cap":
         cwd: cwd)
       writeFile(privDir / "20260302T120000.3log", renderSession(sess,
         %*[{"role": "user", "content": "private one"}]))
-      appendSessionIndex(cwd, "20260302T120000")
+      discard appendSessionIndex(cwd, "20260302T120000")
       let listing = captureList(listSessionPathsForCwd(cwd))
       var plainLine = ""
       var privLine = ""

@@ -105,6 +105,7 @@ proc openSession(fe: AcpFrontend; cwd, resumeId: string) =
   let old = fe.s
   fe.s = nil
   fe.sessionId = ""
+  if old != nil: old.close()
   var opts = AgentOptions(
     cwd: cwd,
     resumeId: resumeId,
@@ -215,6 +216,8 @@ proc runPromptTurn(job: PromptJob) =
     else:
       fe.respondErr(job.reqId, JrAppError, e.msg)
   except CatchableError as e:
+    # A SessionSaveError lands here: an application error response, so a
+    # persistence failure is never a successful end_turn.
     fe.respondErr(job.reqId, JrAppError, e.msg)
     # A SessionSaveError lands here: an application error response, so a
     # persistence failure is never a false end_turn.
