@@ -2,6 +2,26 @@ Changelog
 
 Unreleased
 
+- **Sessions have an enforced lifecycle, and switching is truthful when
+  it fails.** The library `AgentSession` moves through an explicit
+  idle → running → closing → closed state and every public call gates
+  on it: a turn submitted into a closed or closing session raises
+  `AgentError` before touching hooks, files, model state, or tools, a
+  second concurrent submission (a `prompt` while `promptAsync`'s turn
+  is in flight, or vice versa) is refused with the same error instead
+  of racing through the conversation, and `close` refuses mid-turn
+  (interrupt and join the turn first) and is safe to repeat. Failed
+  initialization now releases every lock and hook it had already
+  acquired instead of stranding them, and `promptAsync` returns a
+  `TurnHandle` to `joinTurn` on rather than a raw thread. A failed
+  transcript save is no longer swallowed: `close` reports the failure
+  only after locks, hooks, and plugins are fully released, and the RPC
+  and ACP frontends answer such a turn with an error instead of a
+  false `end_turn`. Session replacement in both frontends goes through
+  an explicit sessionless gap: the old session is closed and its
+  identity dropped before the new init runs, so a failed switch leaves
+  the frontend honestly sessionless (empty session id, `initError`
+  naming why) and a later valid open recovers.
 - **A `:provider` bail-out commits like an ordinary command.**
   Commands that never open a wizard field - `update`/`edit`/`rm` on an
   unknown name, usage errors, the read-only `new` report - now echo the
