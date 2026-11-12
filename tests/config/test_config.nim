@@ -629,9 +629,12 @@ suite "config: sticky model across provider switches":
     discard run(":model glm-5.3")
     discard run(":provider baseten")
     let cfg = readFile(configPath())
+    # The per-provider remembered model persists in the config...
     check cfg.contains("current_model = \"glm-5.3\"")
-    # writeConfigFile stores normalized ids; buildProfile maps back to wire.
-    check cfg.contains("current = \"baseten.glm-5.2\"")
+    # ...but the switch itself sticks in this directory's store: the
+    # floor stays where the first (fresh-config) write put it.
+    check cfg.contains("current = \"zai.glm-5.3\"")
+    check not cfg.contains("current = \"baseten")
 
   test ":model provider.model switches provider and model in one word":
     prof = buildProfile(activeCurrent, activeProviders, "")

@@ -184,7 +184,7 @@ Keys under `[settings]`:
 
 | key | values | meaning |
 | --- | --- | --- |
-| `current` | `PROVIDER[.MODEL]` | the provider (and optional model) used at startup; `-m` overrides it, `:provider`/`:model` write it back |
+| `current` | `PROVIDER[.MODEL]` | the default for directories without their own pick; `-m` overrides it. `:provider`/`:model` stick in the directory's `.3code` store instead: they cascade from the nearest store up the parent chain, and this value is the floor |
 | `notify` | `on`/`off` (default on) | desktop notification when a turn ends; off on Termux |
 | `streaming` | `on`/`off` (default on) | SSE streaming; `off` uses plain request/response, the reliable fallback for providers with flaky SSE |
 | `sandbox` | `on`/`off` (default on) | filesystem sandbox enforcement; `off` also silences the Windows host-rules warning. This file is the only place that may disable the sandbox: a project's `.3code/config` can turn it on but never off (and never silence `sandbox_wall_warn`) |

@@ -1026,10 +1026,13 @@ proc promptEditProvider*(editor: var minline.LineEditor,
                        currentModel: existing.currentModel)
 
 proc persistCurrent() =
-  ## Flush the global config and the per-directory sticky current, so a
+  ## Flush the config and the per-directory sticky current, so a
   ## `:provider` / `:model` switch lands back where this directory left it
-  ## on the next start. Skipped when current is empty (no providers left):
-  ## a stale dir file simply fails to resolve and falls back to global.
+  ## on the next start. The switch lives in this directory's store only:
+  ## the config write keeps the global floor `current` (see the merge in
+  ## writeConfigFile), so no other directory inherits it. Skipped when
+  ## current is empty (no providers left): a stale dir file simply fails
+  ## to resolve and falls back to global.
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   if activeCurrent != "":
     saveDirCurrent(safeCwd(), activeCurrent)

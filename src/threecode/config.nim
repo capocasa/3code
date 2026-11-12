@@ -104,14 +104,6 @@ var baselineProviders*: seq[ProviderRec]
   ## Same startup snapshot for the provider list. A provider that differs
   ## from BOTH this baseline and the in-memory list was edited by another
   ## 3code instance since startup; `writeConfigFile` keeps the disk version.
-var dirStickyCurrent*: string
-  ## The per-directory sticky current this instance applied at startup
-  ## ("" when none). A session that booted on a sticky holds a `current`
-  ## that differs from the baseline without an in-session switch; without
-  ## this marker the merge read that difference as this instance's own
-  ## switch, and every unrelated config write (`:reasoning`, `:streaming`,
-  ## ...) hoisted the directory's pick into the user config — the global
-  ## `current` kept moving to whichever directory wrote last.
 var activeParams*: seq[ParamsRec]
   ## Every `[params]` section from the active config, in file order. Kept
   ## so `writeConfigFile` can persist them and `buildProfile` can resolve
@@ -914,6 +906,11 @@ func sameProvider(a, b: ProviderRec): bool =
   a.reasoning == b.reasoning and a.reasonings == b.reasonings and
   a.currentModel == b.currentModel
 
+proc buildProfile*(current: string, providers: seq[ProviderRec],
+                   wanted: string): Profile
+  ## Forward decl: the floor-keep check below resolves the disk current
+  ## through the same path a startup boot would.
+
 proc mergeForeignEdits(path: string; current: var string,
                         providers: var seq[ProviderRec]): bool =
   ## Fold edits made by other 3code instances since this one started into
@@ -923,7 +920,7 @@ proc mergeForeignEdits(path: string; current: var string,
   ## edit another instance persisted in the meantime — the classic
   ## "I edited a provider and the next restart didn't see it" report.
   ##
-  ## Baseline-diff, `current` and each provider, keyed by name:
+  ## Baseline-diff for each provider, keyed by name:
   ## - unchanged since startup (matches baseline AND memory): keep memory;
   ##   if disk differs, another instance touched it — keep disk.
   ## - changed since startup (memory differs from baseline): this
@@ -932,6 +929,8 @@ proc mergeForeignEdits(path: string; current: var string,
   ##   keep it.
   ## - in baseline but neither in memory nor on disk: another instance
   ##   removed it; stay removed.
+  ## The `current` line keeps the disk floor while it resolves (see the
+  ## comment at the check below).
   ## Returns false (and the caller skips the write) when the file exists
   ## but cannot be read or parsed: better to leave a broken-but-recoverable
   ## disk copy alone than clobber it with a parse of nothing.
@@ -978,14 +977,6 @@ proc mergeForeignEdits(path: string; current: var string,
   dirsettings.dirConfigLocation = savedDirConfig
   activeParams = savedParams
   activeConfigWarnings = savedWarnings
-  # Same baseline-diff for the `current` line: an instance that never
-  # switched in-session still holds the startup value (or the directory
-  # sticky it booted on), so a different non-empty value on disk is
-  # another instance's switch and survives — and this instance's own
-  # write must not hoist its value over it.
-  if diskCurrent != "" and (current == baselineCurrent or
-      (dirStickyCurrent != "" and current == dirStickyCurrent)):
-    current = diskCurrent
   var diskByName: Table[string, ProviderRec]
   for pr in diskProviders: diskByName[pr.name] = pr
   var baselineByName: Table[string, ProviderRec]
@@ -1010,6 +1001,21 @@ proc mergeForeignEdits(path: string; current: var string,
         not providers.anyIt(it.name == pr.name):
       merged.add pr
   providers = merged
+  # The `current` line keeps the disk value while it still resolves
+  # against the providers about to be written. Every automatic write
+  # carries some directory's current (its sticky, a store switch, a
+  # provider-list flush), and none of them may author the global floor:
+  # a `:provider` switch sticks in that directory's store and the floor
+  # stays for directories without one — otherwise the global kept moving
+  # to whichever directory wrote last. A floor that no longer resolves
+  # (its provider was removed or edited past recognition) is repaired
+  # with the caller's value so store-less directories keep a usable
+  # default. The merged list is the right yardstick: the floor's
+  # provider may be one only another instance has (added since
+  # startup). Fresh configs (no disk file) never reach this point.
+  if diskCurrent != "" and
+     buildProfile(diskCurrent, providers, "").name.len > 0:
+    current = diskCurrent
   true
 
 func normalizedCurrent(current: string; providers: seq[ProviderRec]): string =
