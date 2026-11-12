@@ -308,21 +308,58 @@ proc currentDraftPath*(session: Session): string =
 # ---------------------------------------------------------------------------
 # Session locks.
 #
-# A live 3code process owns its session: resuming one that's already open in
-# another process would interleave two writers and corrupt the transcript.
-# Each process holds a lock file in TMPDIR/3code/lock/<id>.lock for the
-# session it's editing.
+# A live 3code process owns its session: resuming one that's already open
+# in another process would interleave two writers and corrupt the
+# transcript. Same for a working directory: two sessions in one cwd would
+# race on prompt drafts, the cwd session index, and the pending draft.
 #
-# Acquiring a lock is atomic on both platforms: POSIX uses open(O_CREAT|O_EXCL)
-# and Windows uses CreateFileW(CREATE_NEW), so two racers can't both grab one.
-# On collision we read the holding lock's pid; if that process is no longer
-# alive (the common case after a crash or killed 3code) the stale lock is
-# removed automatically and acquisition retries once. Only when the holder is
-# still genuinely running does acquire raise SessionLocked. The currently-held
-# lock path is tracked in a module global so an exit proc can release whatever
-# the process most recently held (it moves with :clear forks).
+# Ownership is an OS-enforced exclusive lock held open for as long as the
+# process owns the resource. The pid/session text in the lock file is
+# diagnostic metadata, published only after ownership is taken; it never
+# decides who owns the lock.
+#
+# POSIX: the persistent lock file is opened O_RDWR (owner-only, no
+# following symlinks) and flocked LOCK_EX|LOCK_NB on a descriptor the
+# process retains until release. The descriptor is close-on-exec, so tool
+# children and the update worker can never inherit ownership. The kernel
+# drops the flock when the owner dies, so a crash leaves an unlocked file
+# the next process claims by locking it and republishing its own owner
+# record - no unlink step, hence no read/unlink/recreate race and no
+# publication window: an empty or stale-text file under a held flock is
+# just as held as a fully published one. The file is never unlinked.
+# Unlinking a held (or just-released) path would let a second process
+# lock a fresh inode while the first still owns the old one, so files
+# persist after release with their owner text erased. Tests and docs
+# that assumed file disappearance were updated accordingly.
+#
+# Windows: the retained handle carries the exclusivity. The owner opens
+# GENERIC_READ|GENERIC_WRITE with FILE_SHARE_READ, so every other
+# exclusive open fails with a sharing violation for as long as the handle
+# is open - including reopens from the same process - while plain readers
+# can still open the file for diagnostics.
+#
+# Upgrade compatibility: older releases enforce ownership with
+# O_EXCL-create + pid liveness and honor no OS lock. A new binary
+# therefore refuses to take an unlocked file whose pid text names a live
+# process (conservatively a legacy holder, or a pid-reuse coincidence),
+# while never deriving ownership from pid text. A legacy binary looking
+# at a new binary's lock still reads the live pid line and refuses, and
+# one looking at a released (emptied) file reclaims it safely. Advisory
+# locking alone cannot make old and new releases fully mutually
+# exclusive: a legacy binary that ignores live-pid text can steal a held
+# lock. Mixed-version concurrent use of the same session or directory
+# remains unsupported.
+# ---------------------------------------------------------------------------
 
-var activeLockPath* = ""
+when defined(posix):
+  proc c_flock(fd: cint; operation: cint): cint {.importc: "flock",
+    header: "<sys/file.h>", sideEffect.}
+  var LOCK_EX {.importc: "LOCK_EX", header: "<sys/file.h>".}: cint
+  var LOCK_NB {.importc: "LOCK_NB", header: "<sys/file.h>".}: cint
+  when defined(linux) or defined(macosx) or defined(android) or
+      defined(freebsd) or defined(netbsd) or defined(openbsd) or
+      defined(solaris):
+    var O_NOFOLLOW {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
 
 proc sessionLockDir*(): string =
   tempDir() / "3code" / "lock"
@@ -344,57 +381,57 @@ type SessionAmbiguous* = object of CatchableError
   ## more than one session; `msg` names the lookup and lists the matching
   ## session ids so the caller can disambiguate.
 
-# Windows access rights/disposition constants used by the atomic lock create.
-# Guarded so they (and winlean) only participate in a Windows build; on POSIX
-# they'd otherwise show as unused and pull in the windows modules for nothing.
+# Windows constants for the ownership-grade lock open. GENERIC_READ and
+# GENERIC_WRITE together, shared only for reading: any other process's
+# (or this process's) exclusive open fails with ERROR_SHARING_VIOLATION
+# while the handle is retained, and read-only opens succeed for
+# diagnostics.
 when defined(windows):
   const
-    WingenGenericWrite = 0x40000000'i32
-    WinCreateNew = 1'i32
     WinFileAttributeNormal = 0x00000080'i32
+    WinGenericReadWrite = 0xC0000000'i32
+    WinShareRead = 1'i32
+    WinShareReadWrite = 3'i32
+    WinOpenAlways = 4'i32
+    WinOpenExisting = 3'i32
+    WinFileBegin = 0'i32
+    WinSharingViolation = 32'i32
 
-proc writeOwnerInfo(fd: int; data: string) =
-  ## Write the owner record into a freshly created lock file: the pid line,
-  ## plus (dir locks) a second line carrying the holder's session id so a
-  ## collision report can name the session, not just the process.
-  when defined(posix):
-    if data.len > 0:
-      discard write(cint(fd), data.cstring, data.len)
-  else:
-    var written: int32 = 0
-    if data.len > 0:
-      discard writeFile(fd, data.cstring, int32 data.len, addr written, nil)
+type
+  LockOwnership = object
+    ## One held lock: the persistent file's path plus the retained
+    ## descriptor/handle whose OS lock IS the ownership. Kept from
+    ## acquire until release; several can be held at once.
+    path: string
+    when defined(windows):
+      handle: winlean.Handle
+    else:
+      fd: cint
 
-proc tryCreateLockFile(lockPath: string; pid: string): int =
-  ## Atomically create `lockPath` and write `pid` into it.
-  ##
-  ## Returns a handle/fd that the caller closes on success, or -1 if the file
-  ## already exists (collision — caller decides whether the holder is live).
-  ## Any other failure raises SessionLocked.
-  when defined(posix):
-    let p = lockPath.cstring
-    let fd = open(p, O_WRONLY or O_CREAT or O_EXCL, 0o600.cint)
-    if fd < 0:
-      let errno = osLastError()
-      if errno.int32 == EEXIST.int32: return -1
-      raise newException(SessionLocked,
-        "could not create session lock " & lockPath & ": " & osErrorMsg(errno))
-    writeOwnerInfo(fd, pid)
-    discard close(fd)
-    0
-  else:
-    let h = winlean.createFileW(newWideCString(lockPath),
-                                WingenGenericWrite, 0'i32, nil,
-                                WinCreateNew, WinFileAttributeNormal, 0)
-    if h == INVALID_HANDLE_VALUE:
-      let errno = osLastError()
-      # ERROR_FILE_EXISTS (80) / ERROR_ALREADY_EXISTS (183) -> expected collision.
-      if errno.int32 == 80'i32 or errno.int32 == 183'i32: return -1
-      raise newException(SessionLocked,
-        "could not create session lock " & lockPath & ": " & osErrorMsg(errno))
-    writeOwnerInfo(h, pid)
-    discard winlean.closeHandle(h)
-    0
+  TryAcquireOutcome = enum
+    taOwned      # OS lock taken; `owned` carries the live record
+    taHeld       # another process holds the OS lock
+    taLegacyHeld # unlocked, but the pid text names a live process
+
+  LockAttempt = object
+    kind: TryAcquireOutcome
+    owned: LockOwnership
+    ownerPid: string      # holder diagnostics, best effort
+    ownerSession: string
+
+var
+  # The authoritative ownership records. `activeSessionLockPath` and
+  # `activeDirLockPath` report the most recent of each.
+  ownedSessionLocks: seq[LockOwnership]
+  ownedDirLocks: seq[LockOwnership]
+
+proc activeSessionLockPath*(): string =
+  ## Path of the session lock this process owns most recently, or "".
+  if ownedSessionLocks.len > 0: ownedSessionLocks[^1].path else: ""
+
+proc activeDirLockPath*(): string =
+  ## Path of the directory lock this process owns most recently, or "".
+  if ownedDirLocks.len > 0: ownedDirLocks[^1].path else: ""
 
 proc readOwnerPid(lockPath: string): string =
   ## First line of the lock file (the pid). Dir locks carry a second line
@@ -416,64 +453,179 @@ proc lockHeldError(path, lockPath, owner: string): ref SessionLocked =
     " If no 3code is running, the lock is stale and the pid check failed —" &
     " delete it: " & lockPath)
 
+proc ownerRecord(pid, sid: string): string =
+  ## The owner metadata written into a held lock file: the pid line, plus
+  ## (dir locks) a second line carrying the holder's session id so a
+  ## collision report can name the session, not just the process.
+  if sid.len > 0: pid & "\n" & sid else: pid
+
+proc publishOwnerInfo(own: LockOwnership; data: string) =
+  ## Replace the owner record through the retained descriptor, truncating
+  ## first so no stale bytes survive a shorter record. Only called while
+  ## the OS lock is held.
+  when defined(posix):
+    discard posix.ftruncate(own.fd, 0)
+    # ftruncate shrinks the file but leaves the descriptor offset where it
+    # was; a write from there would zero-pad the record.
+    discard posix.lseek(own.fd, 0, SEEK_SET)
+    if data.len > 0:
+      discard posix.write(own.fd, data.cstring, data.len)
+  else:
+    discard winlean.setFilePointer(own.handle, 0, nil, WinFileBegin)
+    discard winlean.setEndOfFile(own.handle)
+    var written: int32 = 0
+    if data.len > 0:
+      discard winlean.writeFile(own.handle, data.cstring, int32 data.len,
+                                addr written, nil)
+
+proc closeOwnership(own: LockOwnership) =
+  ## Erase the owner record, then drop the retained descriptor/handle:
+  ## the OS releases its exclusive lock and the persistent file stays
+  ## behind, empty of owner text so stale metadata can never read as a
+  ## live lock.
+  publishOwnerInfo(own, "")
+  when defined(posix):
+    discard posix.close(own.fd)
+  else:
+    discard winlean.closeHandle(own.handle)
+
+proc restrictLockDir(dir: string) =
+  ## Owner-only lock directories in the shared temporary root: nobody
+  ## else can create, replace, or read our lock files there. Best effort:
+  ## a chmod another user already owns fails and changes nothing.
+  when defined(posix):
+    try:
+      setFilePermissions(dir, {fpUserRead, fpUserWrite, fpUserExec})
+    except OSError: discard
+
+when defined(posix):
+  proc posixOpenFlags(): cint =
+    ## O_RDWR|O_CREAT plus O_NOFOLLOW where the platform has it, so a
+    ## symlink planted over a lock path fails instead of being followed
+    ## (and eventually truncated by our release).
+    result = O_RDWR or O_CREAT
+    when declared(O_NOFOLLOW):
+      result = result or O_NOFOLLOW
+
+proc livePidText(lockPath: string): string =
+  ## The pid line of `lockPath` when it names a live process, "" otherwise
+  ## (absent, unparseable, or dead). Dead or empty text in an unlocked
+  ## file is never a lock.
+  let owner = readOwnerPid(lockPath)
+  var pid = -1
+  try: pid = parseInt(owner) except ValueError: discard
+  if pid > 0 and pidAlive(pid): owner else: ""
+
+proc tryAcquireOsOwnership(lockPath, pid, sid, noun: string;
+                           Err: typedesc[CatchableError]): LockAttempt =
+  ## Take OS-level exclusive ownership of the persistent lock file at
+  ## `lockPath`, creating it owner-only when missing. Returns taOwned with
+  ## the ownership record the caller must keep until release. taHeld: the
+  ## OS lock is held by someone. taLegacyHeld: the file is unlocked but
+  ## its pid text names a live process - conservatively a legacy
+  ## (pre-OS-lock) holder. Unexpected failures raise `Err`.
+  when defined(posix):
+    let fd = posix.open(lockPath.cstring, posixOpenFlags(), 0o600)
+    if fd < 0:
+      raise newException(Err, "could not create " & noun & " lock " &
+        lockPath & ": " & osErrorMsg(osLastError()))
+    # Children (bash tool, update worker) must not retain our ownership:
+    # close the descriptor at exec even when the fork happens first.
+    discard fcntl(fd, F_SETFD, FD_CLOEXEC)
+    var err = OSErrorCode(0)
+    while true:
+      if c_flock(fd, LOCK_EX or LOCK_NB) == 0: break
+      err = osLastError()
+      if err.int32 == EINTR.int32: continue
+      discard posix.close(fd)
+      if err.int32 == EWOULDBLOCK.int32 or err.int32 == EAGAIN.int32:
+        return LockAttempt(kind: taHeld, ownerPid: readOwnerPid(lockPath),
+                           ownerSession: readOwnerSessionId(lockPath))
+      raise newException(Err, "could not lock " & noun & " lock " &
+        lockPath & ": " & osErrorMsg(err))
+    var own = LockOwnership(path: lockPath, fd: fd)
+  else:
+    let h = winlean.createFileW(newWideCString(lockPath),
+                                WinGenericReadWrite, WinShareRead, nil,
+                                WinOpenAlways, WinFileAttributeNormal, 0)
+    if h == winlean.INVALID_HANDLE_VALUE:
+      let err = osLastError()
+      if err.int32 == WinSharingViolation:
+        return LockAttempt(kind: taHeld, ownerPid: readOwnerPid(lockPath),
+                           ownerSession: readOwnerSessionId(lockPath))
+      raise newException(Err, "could not create " & noun & " lock " &
+        lockPath & ": " & osErrorMsg(err))
+    var own = LockOwnership(path: lockPath, handle: h)
+  # The OS lock is ours. An unlocked file that still names a live pid was
+  # written by a legacy binary that holds it create-style (or, rarely, a
+  # recycled pid): refuse instead of taking ownership. Only after that
+  # check is our own owner record published.
+  let legacy = livePidText(lockPath)
+  if legacy.len > 0:
+    closeOwnership(own)
+    return LockAttempt(kind: taLegacyHeld, ownerPid: legacy,
+                       ownerSession: readOwnerSessionId(lockPath))
+  publishOwnerInfo(own, ownerRecord(pid, sid))
+  LockAttempt(kind: taOwned, owned: own)
+
+proc findOwned(reg: seq[LockOwnership]; lockPath: string): int =
+  for i in 0 ..< reg.len:
+    if reg[i].path == lockPath: return i
+  -1
+
+proc releaseOwnedAt(reg: var seq[LockOwnership]; i: int) =
+  closeOwnership(reg[i])
+  reg.delete(i)
+
 proc acquireSessionLock*(path: string) =
-  ## Atomically claim the lock for `path`.
+  ## Claim the session lock for `path`, or raise SessionLocked.
   ##
-  ## If a lock exists but its owner process is no longer alive, it's treated
-  ## as stale (left behind by a crash) and removed automatically, then
-  ## acquisition retries once. Raises SessionLocked only when another live
-  ## 3code process genuinely holds the lock (or a second racer grabbed it in
-  ## the retry window).
+  ## The persistent lock file's OS lock decides ownership: a file whose
+  ## creator died is unlocked and acquires immediately (metadata republished
+  ## in place, file never deleted); a file whose OS lock is held by anyone -
+  ## including this process, including a holder that has not published its
+  ## owner record yet - refuses with the holder's diagnostics. Releasing
+  ## then reacquiring in one process works; acquiring a second session lock
+  ## while one is held adds to this process's ownership instead of leaking
+  ## the first handle.
   if path == "": return
   let dir = sessionLockDir()
   try: createDir(dir) except OSError: discard
+  restrictLockDir(dir)
   let lockPath = sessionLockPathFor(path)
-  let pid = $getCurrentProcessId()
-  for attempt in 0 .. 1:
-    if tryCreateLockFile(lockPath, pid) >= 0:
-      activeLockPath = lockPath
-      return
-    # Collision: an existing lock is in the way. Decide stale-vs-live.
-    let owner = readOwnerPid(lockPath)
-    var ownerPid = -1
-    try: ownerPid = parseInt(owner) except ValueError: discard
-    if ownerPid > 0 and pidAlive(ownerPid):
-      # The holder is genuinely running. Refuse rather than corrupt it.
-      raise lockHeldError(path, lockPath, owner)
-    # Stale (dead owner, or corrupt/unparseable pid): reclaim and retry once.
-    try: removeFile(lockPath) except OSError: discard
-  # Second attempt also collided — lost a race to another live 3code.
-  raise lockHeldError(path, lockPath, readOwnerPid(lockPath))
+  let att = tryAcquireOsOwnership(lockPath, $getCurrentProcessId(), "",
+                                  "session", SessionLocked)
+  case att.kind
+  of taOwned:
+    ownedSessionLocks.add att.owned
+  of taHeld, taLegacyHeld:
+    raise lockHeldError(path, lockPath, att.ownerPid)
 
 proc releaseSessionLock*(path: string) =
+  ## Release the session lock for `path` if - and only if - this process
+  ## owns it. A mismatched or repeated release does nothing: no other
+  ## owner's lock is unlocked or deleted.
   if path == "": return
-  let lockPath = sessionLockPathFor(path)
-  try: removeFile(lockPath) except OSError: discard
-  if activeLockPath == lockPath: activeLockPath = ""
+  let i = findOwned(ownedSessionLocks, sessionLockPathFor(path))
+  if i >= 0: releaseOwnedAt(ownedSessionLocks, i)
 
 proc releaseActiveSessionLock*() =
-  if activeLockPath != "":
-    try: removeFile(activeLockPath) except OSError: discard
-    activeLockPath = ""
+  ## Release every session lock this process owns. Idempotent.
+  while ownedSessionLocks.len > 0:
+    releaseOwnedAt(ownedSessionLocks, ownedSessionLocks.len - 1)
 
 # ---------------------------------------------------------------------------
 # Directory locks.
 #
-# Only one 3code process may hold a given working directory at a time: two
-# sessions editing the same cwd would race on prompt drafts, the cwd session
-# index, and the per-cwd pending draft file. The lock is keyed by the
-# collision-free mangled cwd (same scheme as the cwd session index and the
-# pending draft path) so distinct directories never share a lock.
-#
-# Same atomic-create + stale-reclaim pattern as the session lock: POSIX uses
-# open(O_CREAT|O_EXCL), Windows uses CreateFileW(CREATE_NEW). On collision
-# we read the holding pid; if that process is no longer alive the stale lock
-# is removed and acquisition retries once. Only a genuinely-live holder raises
-# DirLocked. The currently-held dir-lock path is tracked in a module global
-# so an exit proc can release whatever the process most recently held.
+# Only one 3code process may hold a given working directory at a time. The
+# lock is keyed by the collision-free mangled cwd (same scheme as the cwd
+# session index and the pending draft path) so distinct directories never
+# share a lock, and uses the same retained-OS-lock ownership as the
+# session lock above. Dir locks carry a session-id line in their owner
+# record so a collision report can name the holder's session. Directory
+# and session locks are independent records: one process holds both for
+# its live session.
 # ---------------------------------------------------------------------------
-
-var activeDirLockPath* = ""
 
 proc dirLockDir*(): string =
   tempDir() / "3code" / "dirlock"
@@ -498,100 +650,94 @@ proc lockHeldDirError*(cwd, lockPath, owner, sessionId: string): ref DirLocked =
     " If no 3code is running, the lock is stale and the pid check failed —" &
     " delete it: " & lockPath)
 
+proc probeOsLockHeld(lockPath: string): bool =
+  ## True when someone holds the OS-level exclusive lock on `lockPath`.
+  ## Probing ownership without stealing it: the file is never created,
+  ## written, truncated, or deleted, and the probe never blocks.
+  if not fileExists(lockPath): return false
+  when defined(posix):
+    let fd = posix.open(lockPath.cstring, O_RDWR, 0)
+    if fd < 0: return false   # unreadable to us; not ours to claim
+    var held = false
+    while true:
+      if c_flock(fd, LOCK_EX or LOCK_NB) == 0:
+        discard posix.close(fd)   # drop the probe's own lock at once
+        break
+      let err = osLastError()
+      if err.int32 == EINTR.int32: continue
+      held = err.int32 == EWOULDBLOCK.int32 or err.int32 == EAGAIN.int32
+      discard posix.close(fd)
+      break
+    held
+  else:
+    # An exclusive open is refused with a sharing violation exactly while
+    # the owner's handle exists.
+    let h = winlean.createFileW(newWideCString(lockPath),
+                                WinGenericReadWrite, WinShareReadWrite, nil,
+                                WinOpenExisting, WinFileAttributeNormal, 0)
+    if h == winlean.INVALID_HANDLE_VALUE:
+      osLastError().int32 == WinSharingViolation
+    else:
+      discard winlean.closeHandle(h)
+      false
+
 proc probeDirLockHeld*(cwd: string): string =
   ## Advisory, non-acquiring check for a live holder of `cwd`'s dir lock:
   ## returns the DirLocked message `acquireDirLock` would die with, or ""
-  ## when the directory is free. A stale lock (dead or unparseable owner
-  ## pid) never counts, exactly as in `acquireDirLock`. `-r` startup runs
+  ## when the directory is free. The OS lock is the authority: stale text
+  ## in an unlocked persistent file never counts as a live lock (a live
+  ## pid there still does, as a possible legacy holder). `-r` startup runs
   ## this before session lookup so a running 3code is reported before
   ## "no saved sessions"; enforcement itself stays in `acquireDirLock`.
   if cwd == "": return
   let lockPath = dirLockPathFor(cwd)
-  if not fileExists(lockPath): return
-  let owner = readOwnerPid(lockPath)
-  var ownerPid = -1
-  try: ownerPid = parseInt(owner) except ValueError: discard
-  if ownerPid > 0 and pidAlive(ownerPid):
-    result = lockHeldDirError(cwd, lockPath, owner,
+  if probeOsLockHeld(lockPath) or livePidText(lockPath).len > 0:
+    result = lockHeldDirError(cwd, lockPath, readOwnerPid(lockPath),
                               readOwnerSessionId(lockPath)).msg
 
-proc tryCreateDirLockFile(lockPath: string; pid: string): int =
-  ## Atomically create `lockPath` and write `pid` into it. Returns 0 on
-  ## success, -1 if the file already exists (collision). Any other failure
-  ## raises DirLocked.
-  when defined(posix):
-    let p = lockPath.cstring
-    let fd = open(p, O_WRONLY or O_CREAT or O_EXCL, 0o600.cint)
-    if fd < 0:
-      let errno = osLastError()
-      if errno.int32 == EEXIST.int32: return -1
-      raise newException(DirLocked,
-        "could not create directory lock " & lockPath & ": " & osErrorMsg(errno))
-    writeOwnerInfo(fd, pid)
-    discard close(fd)
-    0
-  else:
-    let h = winlean.createFileW(newWideCString(lockPath),
-                                WingenGenericWrite, 0'i32, nil,
-                                WinCreateNew, WinFileAttributeNormal, 0)
-    if h == INVALID_HANDLE_VALUE:
-      let errno = osLastError()
-      if errno.int32 == 80'i32 or errno.int32 == 183'i32: return -1
-      raise newException(DirLocked,
-        "could not create directory lock " & lockPath & ": " & osErrorMsg(errno))
-    writeOwnerInfo(h, pid)
-    discard winlean.closeHandle(h)
-    0
-
 proc acquireDirLock*(cwd: string; sessionPath = "") =
-  ## Atomically claim the directory lock for `cwd`. If a lock exists but its
-  ## owner process is no longer alive, it's treated as stale and removed
-  ## automatically, then acquisition retries once. Raises DirLocked only when
-  ## another live 3code process genuinely holds the lock. `sessionPath`, when
-  ## known, is recorded as a second line so the collision error can name the
-  ## holder's session instead of a bare pid.
+  ## Claim the directory lock for `cwd`, or raise DirLocked. Same
+  ## retained-OS-lock ownership as `acquireSessionLock`: an owner that
+  ## died unlocks the file for the next claimant in place, and a held
+  ## lock refuses regardless of what text the file carries.
+  ## `sessionPath`, when known, is recorded in the owner record so the
+  ## collision error can name the holder's session instead of a bare pid.
   if cwd == "": return
   let dir = dirLockDir()
   try: createDir(dir) except OSError: discard
+  restrictLockDir(dir)
   let lockPath = dirLockPathFor(cwd)
-  let pid = $getCurrentProcessId()
   let sid = sessionIdFromPath(sessionPath)
-  let ownerData = if sid.len > 0: pid & "\n" & sid else: pid
-  for attempt in 0 .. 1:
-    if tryCreateDirLockFile(lockPath, ownerData) >= 0:
-      activeDirLockPath = lockPath
-      return
-    let owner = readOwnerPid(lockPath)
-    var ownerPid = -1
-    try: ownerPid = parseInt(owner) except ValueError: discard
-    if ownerPid > 0 and pidAlive(ownerPid):
-      raise lockHeldDirError(cwd, lockPath, owner, readOwnerSessionId(lockPath))
-    try: removeFile(lockPath) except OSError: discard
-  raise lockHeldDirError(cwd, lockPath, readOwnerPid(lockPath),
-                         readOwnerSessionId(lockPath))
+  let att = tryAcquireOsOwnership(lockPath, $getCurrentProcessId(), sid,
+                                  "directory", DirLocked)
+  case att.kind
+  of taOwned:
+    ownedDirLocks.add att.owned
+  of taHeld, taLegacyHeld:
+    raise lockHeldDirError(cwd, lockPath, att.ownerPid, att.ownerSession)
 
 proc releaseDirLock*(cwd: string) =
+  ## Release the directory lock for `cwd` if - and only if - this process
+  ## owns it. Mismatched and repeated releases are no-ops.
   if cwd == "": return
-  let lockPath = dirLockPathFor(cwd)
-  try: removeFile(lockPath) except OSError: discard
-  if activeDirLockPath == lockPath: activeDirLockPath = ""
+  let i = findOwned(ownedDirLocks, dirLockPathFor(cwd))
+  if i >= 0: releaseOwnedAt(ownedDirLocks, i)
 
 proc releaseActiveDirLock*() =
-  if activeDirLockPath != "":
-    try: removeFile(activeDirLockPath) except OSError: discard
-    activeDirLockPath = ""
+  ## Release every directory lock this process owns. Idempotent.
+  while ownedDirLocks.len > 0:
+    releaseOwnedAt(ownedDirLocks, ownedDirLocks.len - 1)
 
 proc updateActiveDirLockSession*(sessionPath: string) =
-  ## Rewrite the session-id line of the dir lock this process holds, for when
-  ## the live session id moves (:clear forks a fresh one). Keeping it current
-  ## means a collision report from another process never names a session this
-  ## process has already abandoned. Best-effort: a failed rewrite only means
-  ## the report falls back to the previous id.
-  if activeDirLockPath == "": return
-  let sid = sessionIdFromPath(sessionPath)
+  ## Rewrite the owner record of the dir lock this process holds, for when
+  ## the live session id moves (:clear forks a fresh one). Keeping it
+  ## current means a collision report from another process never names a
+  ## session this process has already abandoned. Best-effort: a failed
+  ## rewrite only means the report falls back to the previous id.
+  if ownedDirLocks.len == 0: return
   try:
-    writeFile(activeDirLockPath,
-              $getCurrentProcessId() & (if sid.len > 0: "\n" & sid else: ""))
+    publishOwnerInfo(ownedDirLocks[^1],
+      ownerRecord($getCurrentProcessId(), sessionIdFromPath(sessionPath)))
   except CatchableError: discard
 
 proc listSessionPaths*(): seq[string] =
