@@ -142,9 +142,20 @@ proc extractArchive*(archive, workDir: string): string =
   ""
 
 proc swapInstall*(srcDir, destBin: string): bool =
-  ## Replace `destBin` and any sibling library files with the new versions
-  ## from `srcDir`. README/LICENSE/VERSION are skipped — those are
-  ## zip-bundle documentation, not part of the running install.
+  ## Replace the executable at exactly `destBin` — whatever it is named —
+  ## and any sibling library files with the new versions from `srcDir`.
+  ## Mapping: the archive's canonical binary member (`BinName`) goes to
+  ## `destBin` itself; every other member goes beside it under its own
+  ## name. Executable permissions attach to the canonical member, not
+  ## the destination filename. README/LICENSE/VERSION are skipped —
+  ## those are zip-bundle documentation, not part of the running
+  ## install.
+  ##
+  ## Refusals, all before any file changes: a bundle without the
+  ## canonical binary member, and a non-canonical `destBin` name that
+  ## would also be shipped by the bundle (the two would overwrite each
+  ## other in directory iteration order). `true` therefore means the
+  ## expected executable now exists at `destBin`.
   ##
   ## POSIX: stage each file as `<dest>.new` and atomic-rename. The running
   ## process keeps the old inode for any file it has open (the .exe / any
@@ -152,25 +163,34 @@ proc swapInstall*(srcDir, destBin: string): bool =
   ##
   ## Windows: rename the in-use file to `<dest>.old` first — Windows
   ## allows rename of an open file (the lock permits DELETE), just not
-  ## overwrite — then write the new file to the target name. `.old`
-  ## cleanup happens at next launch via `cleanupStaleBinaries`.
+  ## overwrite — then write the new file to the target name; the `.old`
+  ## path derives from the actual destination. `.old` cleanup happens
+  ## at next launch via `cleanupStaleBinaries`.
   let destDir = parentDir(destBin)
+  var members: seq[string] = @[]
   for entry in walkDir(srcDir):
     if entry.kind notin {pcFile, pcLinkToFile}: continue
     let name = entry.path.extractFilename
     if name in ["README.md", "LICENSE", "VERSION"]: continue
-    let dest = destDir / name
+    members.add entry.path
+  if (srcDir / BinName) notin members: return false
+  let destName = destBin.extractFilename
+  if destName != BinName and (srcDir / destName) in members:
+    return false
+  for src in members:
+    let name = src.extractFilename
+    let dest = if name == BinName: destBin else: destDir / name
     when defined(windows):
       if fileExists(dest):
         let stale = dest & ".old"
         try: removeFile(stale) except CatchableError: discard
         try: moveFile(dest, stale) except CatchableError: discard
-      try: copyFile(entry.path, dest)
+      try: copyFile(src, dest)
       except CatchableError: return false
     else:
       let stage = dest & ".new"
       try:
-        copyFile(entry.path, stage)
+        copyFile(src, stage)
         if name == BinName:
           let perm = {fpUserRead, fpUserWrite, fpUserExec,
                       fpGroupRead, fpGroupExec,
@@ -180,7 +200,7 @@ proc swapInstall*(srcDir, destBin: string): bool =
       except CatchableError:
         try: removeFile(stage) except CatchableError: discard
         return false
-  true
+  fileExists(destBin)
 
 proc cleanupStaleBinaries*() =
   ## Windows-only: delete `<name>.old` files left behind by `swapInstall`
