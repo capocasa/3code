@@ -2,6 +2,23 @@ Changelog
 
 Unreleased
 
+- **Transcripts save atomically, and a failed save is never a silent
+  success.** `saveSession` used to overwrite the live `.3log` in place
+  and swallow errors into a stderr line: a truncated or half-written
+  transcript silently replaced a valid one, and a failed first save was
+  still indexed for resume. Saves now stage into a unique sibling file
+  that is owner-only from creation (no world-readable window for prompt
+  contents), fully written, flushed and synced before the atomic
+  rename commits, so a failure leaves the previous transcript
+  byte-for-byte intact and reloadable. The failure raises
+  `SessionSaveError` instead of vanishing: a blocking library `prompt`
+  surfaces it to its caller, headless runs exit non-zero, the RPC and
+  ACP frontends answer with an error instead of a false `end_turn`, and
+  interactive checkpoints report once per failing streak (the next
+  committed save clears the latch) while the conversation stays in
+  memory. The resume index is appended only after a real commit and
+  self-heals on a later save. Prompt drafts stage through the same
+  owner-only mechanism.
 - **Session and directory locks are kernel-owned, not pid-file
   guesses.** Locking was an O_CREAT|O_EXCL race on a file holding the
   owner's pid, with liveness probing and a remove-and-retry dance to
