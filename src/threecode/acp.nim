@@ -96,8 +96,15 @@ proc notifyUpdate(fe: AcpFrontend; update: JsonNode) =
 proc openSession(fe: AcpFrontend; cwd, resumeId: string) =
   ## Swap the live session (saved and unlocked) for a fresh or resumed one.
   ## Raises `AgentError` (no provider, unknown session, locks held).
-  if fe.s != nil: fe.s.close()
+  ## Sessionless replacement: the old reference and the session identity
+  ## are cleared before the new initialization is attempted, so a failed
+  ## switch leaves `fe.s == nil` and an empty sessionId - subsequent
+  ## prompts are rejected ("no session") instead of served by a closed
+  ## object, and notifications stop until a valid open succeeds.
+  let old = fe.s
+  fe.s = nil
   fe.sessionId = ""
+  if old != nil: old.close()
   var opts = AgentOptions(
     cwd: cwd,
     resumeId: resumeId,
@@ -202,9 +209,12 @@ proc runPromptTurn(job: PromptJob) =
     else:
       fe.respondErr(job.reqId, JrAppError, e.msg)
   except CatchableError as e:
+    # A SessionSaveError lands here: an application error response, so a
+    # persistence failure is never a successful end_turn.
     fe.respondErr(job.reqId, JrAppError, e.msg)
-  fe.s.onEvent = nil
-  fe.busy.store(false)
+  finally:
+    fe.s.onEvent = nil
+    fe.busy.store(false)
 
 proc acpPromptThread(job: PromptJob) {.thread.} =
   {.cast(gcsafe).}:
@@ -244,8 +254,12 @@ proc handlePrompt(fe: AcpFrontend; id: JsonNode; params: JsonNode) =
     return
   if fe.workerStarted: joinThread(fe.worker)
   fe.workerStarted = true
-  createThread(fe.worker, acpPromptThread,
-               PromptJob(fe: fe, reqId: id, text: text))
+  try:
+    createThread(fe.worker, acpPromptThread,
+                 PromptJob(fe: fe, reqId: id, text: text))
+  except CatchableError as e:
+    fe.busy.store(false)
+    fe.respondErr(id, JrAppError, e.msg)
 
 # ---------- dispatch ----------
 

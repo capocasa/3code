@@ -13,6 +13,7 @@ import stub_helpers
 type
   Shared = ref object
     lines: seq[string]
+    badLines: seq[string]  # stdout lines that were not JSON-RPC records
     atEof: bool
     gate: Lock
 
@@ -83,13 +84,19 @@ proc frame(id: int; meth: string; params: JsonNode): JsonNode =
   %*{"jsonrpc": "2.0", "id": id, "method": meth, "params": params}
 
 proc pump(s: Session) =
-  ## Move arrived lines from the reader thread into `history`.
+  ## Move arrived lines from the reader thread into `history`. Stdout is
+  ## protocol-clean by contract: a non-JSON line is a defect, recorded in
+  ## `badLines` instead of crashing the harness.
   var got: seq[string]
   withLock s.sh.gate:
     got = s.sh.lines
     s.sh.lines = @[]
   for line in got:
-    s.history.add parseJson(line)
+    try:
+      s.history.add parseJson(line)
+    except CatchableError:
+      withLock s.sh.gate:
+        s.sh.badLines.add line
 
 proc waitFor(s: Session; wantId: int; timeoutMs = 20000): JsonNode =
   ## First response with the given request id; notifications collected
@@ -353,3 +360,70 @@ suite "acp frontend":
       check userText == "begin"
       check "first reply." in agentText
       check "continued without a prompt." in agentText
+
+  test "failed session switch leaves no usable session and allows a later valid open":
+    let root = newFixture("acp_switch")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    # Padding: a pre-fix build would wrongly run turns on the closed
+    # object after the failed switch; the stub must not quit(1) there.
+    writeResponses(root, "switch.json", %*[
+      {"role": "assistant", "content": "before switch"},
+      {"role": "assistant", "content": "pad"}, {"content": "pad"},
+      {"content": "pad"}])
+    let s = spawnAcp(stub, root, root / "run" / "switch.json")
+    defer: discard closeAcp(s)
+    s.send(frame(1, "initialize", %*{"protocolVersion": 1}))
+    discard s.waitFor(1)
+    s.send(frame(2, "session/new", %*{"cwd": root / "proj"}))
+    let sid = s.waitFor(2){"result"}{"sessionId"}.getStr
+    check sid.len > 0
+    s.send(frame(3, "session/prompt", %*{
+      "sessionId": sid, "prompt": [{"type": "text", "text": "go"}]}))
+    check s.waitFor(3){"result"}{"stopReason"}.getStr == "end_turn"
+
+    # Replacement initialization fails: an unknown sessionId cannot load.
+    # The old session must already be gone - the frontend must not keep
+    # serving a closed object under the old identity.
+    s.send(frame(4, "session/load", %*{"cwd": root / "proj",
+                                       "sessionId": "does-not-exist"}))
+    let err = s.waitFor(4)
+    check err{"error"}{"code"}.getInt == -32000
+    check err{"error"}{"message"}.getStr.len > 0
+
+    # Prompts are rejected - both for the old id and for the empty session
+    # id a failed switch leaves behind (pre-fix this started a turn on the
+    # closed object and answered end_turn).
+    s.send(frame(5, "session/prompt", %*{"sessionId": sid,
+        "prompt": [{"type": "text", "text": "x"}]}))
+    check s.waitFor(5){"error"}{"message"}.getStr.len > 0
+    s.send(frame(6, "session/prompt", %*{"sessionId": "",
+        "prompt": [{"type": "text", "text": "x"}]}))
+    let ghost = s.waitFor(6)
+    check ghost{"error"}{"message"}.getStr ==
+      "no session: call session/new first"
+    # Pre-fix, the wrongful turn on the closed object re-enabled the
+    # terminal engine and painted TUI frames into the protocol stream.
+    # An unknown method answers after everything before it, draining the
+    # pipe as a synchronization point.
+    s.send(frame(9, "protocol/drain", %*{}))
+    discard s.waitFor(9)
+    check s.sh.badLines.len == 0
+
+    # A later valid open succeeds, with a fresh identity, and turns work.
+    # The stub index is process-global: the first turn consumed entry 0,
+    # so the reopened session reads entry 1 (pre-fix builds also ran the
+    # wrongful ghost turn, so entry 3 is a real reply there too).
+    writeResponses(root, "switch.json", %*[
+      {"content": "pad"}, {"content": "after switch"},
+      {"content": "pad"}, {"content": "after switch"}])
+    s.send(frame(7, "session/new", %*{"cwd": root / "proj2"}))
+    let sid2 = s.waitFor(7){"result"}{"sessionId"}.getStr
+    check sid2.len > 0
+    check sid2 != sid
+    s.send(frame(8, "session/prompt", %*{
+      "sessionId": sid2, "prompt": [{"type": "text", "text": "again"}]}))
+    let done = s.waitFor(8)
+    if done{"result"} == nil:
+      checkpoint("frame 8 record: " & $done)
+    check done{"result"}{"stopReason"}.getStr == "end_turn"

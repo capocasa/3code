@@ -141,12 +141,20 @@ proc sweepStaleRpcEntries() =
 proc openSession(st: RpcState; dir: string) =
   ## Swap the live session (saved and unlocked) for a fresh one in `dir`
   ## ("" = process cwd). Raises `AgentError` (no provider, locks held).
-  if st.s != nil: st.s.close()
+  ## Sessionless replacement: the old reference and its identity are
+  ## cleared before the new initialization is attempted, so a failure
+  ## leaves the server explicitly sessionless (`initError` set, /id and
+  ## the registry describe the attempted directory) instead of serving
+  ## a closed object under the old identity.
+  let old = st.s
+  st.s = nil
+  st.sessionId = ""
+  st.initError = ""
+  st.cwd = if dir.len > 0: dir else: getCurrentDir()
+  if old != nil: old.close()
   st.s = initAgentSession(AgentOptions(
     cwd: dir, model: st.model, debug: st.debug))
   st.sessionId = sessionIdFromPath(st.s.state.savePath)
-  st.initError = ""
-  st.cwd = if dir.len > 0: dir else: getCurrentDir()
 
 proc removeBlock(text, openTag, closeTag: string): string =
   ## Same normalization as acp.replayUserText: drop open..close pairs; a
@@ -229,8 +237,11 @@ proc runRpcTurn(job: RpcJob) =
   except CatchableError as e:
     st.push("error", e.msg)
     st.push("end", "error")
-  st.s.onEvent = nil
-  st.busy.store(false)
+    # A SessionSaveError lands here: an error event and an error end, so
+    # a persistence failure is never a successful end_turn.
+  finally:
+    st.s.onEvent = nil
+    st.busy.store(false)
 
 proc rpcTurnThread(job: RpcJob) {.thread.} =
   {.cast(gcsafe).}:
@@ -238,11 +249,16 @@ proc rpcTurnThread(job: RpcJob) {.thread.} =
 
 proc startTurn(st: RpcState; text: string): bool =
   ## Atomically claim the busy flag; false means a turn already runs and
-  ## the caller answers `busy`.
+  ## the caller answers `busy`. A failed worker creation releases the
+  ## flag before re-raising, so one bad spawn cannot wedge the server.
   if st.busy.exchange(true): return false
   if st.workerStarted: joinThread(st.worker)
   st.workerStarted = true
-  createThread(st.worker, rpcTurnThread, RpcJob(st: st, text: text))
+  try:
+    createThread(st.worker, rpcTurnThread, RpcJob(st: st, text: text))
+  except CatchableError as e:
+    st.busy.store(false)
+    raise e
   true
 
 # ---------- HTTP ----------
@@ -302,10 +318,13 @@ proc handle(st: RpcState; req: Request): Future[void] {.async, gcsafe.} =
       elif st.busy.load():
         await text(req, Http409, "busy\n")
       else:
-        if startTurn(st, body):
-          await text(req, Http200, "started\n")
-        else:
-          await text(req, Http409, "busy\n")
+        try:
+          if startTurn(st, body):
+            await text(req, Http200, "started\n")
+          else:
+            await text(req, Http409, "busy\n")
+        except CatchableError as e:
+          await text(req, Http500, "error: " & e.msg & "\n")
     of "/cancel":
       if st.s != nil and st.busy.load():
         st.s.interrupt()
@@ -316,14 +335,17 @@ proc handle(st: RpcState; req: Request): Future[void] {.async, gcsafe.} =
       if st.busy.load():
         await text(req, Http409, "busy\n")
       else:
+        let dir = unpercent(q.getOrDefault("dir", ""))
         try:
-          let dir = unpercent(q.getOrDefault("dir", ""))
           {.cast(gcsafe).}:
             openSession(st, dir)
           writeRegistry(boundPort, st.cwd)
           await text(req, Http200, st.sessionId & "\n")
         except AgentError as e:
+          # The registry must describe the failed state too: same cwd as
+          # /id reports, so clients pinging discovery see the error.
           st.initError = e.msg
+          writeRegistry(boundPort, st.cwd)
           await text(req, Http500, "error: " & e.msg & "\n")
     else:
       await text(req, Http404, "no such endpoint\n")

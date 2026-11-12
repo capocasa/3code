@@ -1,6 +1,6 @@
 discard """
   targets: "c"
-  matrix: "; -d:providerStub"
+  matrix: "; -d:providerStub; -d:providerStub -d:sessionSaveTestHooks"
 """
 ## Library API end-to-end: init a headless AgentSession against the stub
 ## provider, run a blocking prompt (with a tool call), collect callback
@@ -12,9 +12,28 @@ discard """
 ## per-test fixture so nothing touches the developer's real 3code state.
 
 import std/[json, os, strutils, unittest]
-import threecode/[api, library, types, util]
+import threecode/[api, library, session, types, util]
 
 const stubbed = defined(providerStub)
+
+proc agentErrMsg(op: proc (): string): string =
+  ## The AgentError message from a call expected to be rejected. Fails the
+  ## running test when no AgentError is raised (unittest's expect cannot
+  ## capture the exception object on this Nim version).
+  try:
+    let v = op()
+    raise newException(AssertionDefect,
+      "expected AgentError, none was raised (returned: " & v & ")")
+  except AgentError as e:
+    result = e.msg
+
+proc expectAgentErr(op: proc ()) =
+  try:
+    op()
+    raise newException(AssertionDefect,
+      "expected AgentError, none was raised")
+  except AgentError:
+    discard
 
 proc newFixture(name: string): string =
   result = getTempDir() / ("3code_libtest_" & name & "_" & $getCurrentProcessId())
@@ -280,3 +299,98 @@ suite "library: AgentSession":
       expect AgentError:
         discard s2.prompt("")
       s2.close()
+
+    test "closed session rejects turns, commands, and accessors; close is idempotent":
+      # Fresh TMPDIR roots: nesting under the earlier fixtures' isolateEnv
+      # chains would push the mangled dir-lock name past NAME_MAX.
+      putEnv("TMPDIR", stableTmp / ("a4t_closed_" & $getCurrentProcessId()))
+      let root = newFixture("closed")
+      writeConfig(root)
+      isolateEnv(root)
+      # Padding keeps a pre-fix run from stub-quitting (index out of
+      # range) while it wrongly runs turns on the closed session.
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "reply"}, {"content": "pad"}, {"content": "pad"},
+        {"content": "pad"}]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                           experimental: true))
+      s.close()
+      # Same stable rejection every time, not a fresh crash per attempt.
+      check agentErrMsg(proc(): string = s.prompt("one")) ==
+            agentErrMsg(proc(): string = s.prompt("two"))
+      expectAgentErr(proc() = discard s.command(":tokens"))
+      expectAgentErr(proc() = discard s.usage())
+      expectAgentErr(proc() = discard s.profileLabel())
+      # Repeated close after actual closure is a no-op: it must not touch
+      # locks, hooks, or plugin teardown again.
+      s.close()
+      s.close()
+
+    test "a busy session admits exactly one turn; close during a turn is rejected":
+      putEnv("TMPDIR", stableTmp / ("a4t_busy_" & $getCurrentProcessId()))
+      let root = newFixture("busy")
+      writeConfig(root)
+      isolateEnv(root)
+      # Padding keeps a pre-fix run from stub-quitting while it wrongly
+      # admits the second and third submission.
+      # Non-empty content: an empty model reply triggers the length-retry
+      # escalation, not a clean turn that parks in the stub delay.
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "working", "preStreamDelayMs": 900},
+        {"content": "turn finished"}, {"content": "pad"},
+        {"content": "pad"}, {"content": "pad"}]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                           experimental: true))
+      # A close arriving from inside an event callback lands on a running
+      # session: refused with the same stable error, no deadlock (the
+      # lifecycle gate is never held while callbacks fire).
+      var callbackErr = ""
+      s.onEvent = proc(ev: AgentEvent) =
+        if callbackErr.len == 0 and ev.kind == aevDelta:
+          try:
+            s.close()
+          except AgentError as e:
+            callbackErr = e.msg
+      s.promptAsync("go")
+      # The turn reservation is taken before the worker spawns, so a
+      # second submission - async or blocking - is rejected without
+      # touching hooks, files, model state, or tools.
+      expect AgentError:
+        s.promptAsync("second")
+      check agentErrMsg(proc(): string = s.prompt("blocking")) ==
+            agentErrMsg(proc(): string = s.prompt("blocking again"))
+      expectAgentErr(proc() = s.close())
+      s.joinTurn()
+      check callbackErr.len > 0
+      check s.prompt("") == "turn finished"
+      s.close()
+
+    when defined(sessionSaveTestHooks):
+      test "save failure on close still releases ownership and allows reopen":
+        putEnv("TMPDIR", stableTmp / ("a4t_savefail_" & $getCurrentProcessId()))
+        let root = newFixture("closesavefail")
+        writeConfig(root)
+        isolateEnv(root)
+        writeFile(root / "run" / "stub_responses.json", $(%*[
+          {"content": "saved"}, {"content": "saved again"}]))
+        putEnv("THREECODE_STUB_RESPONSES",
+               root / "run" / "stub_responses.json")
+        resetStubResponses()
+        let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                             experimental: true))
+        discard s.prompt("hello")
+        let savePath = s.state.savePath
+        let before = readFile(savePath)
+        saveFaultHook = proc(phase: SavePhase): bool {.gcsafe.} =
+          phase == spWrite
+        s.close()  # reports on stderr; must not raise, must not leak
+        saveFaultHook = nil
+        check readFile(savePath) == before
+        let s2 = initAgentSession(AgentOptions(cwd: root / "run",
+                                               experimental: true))
+        check s2.prompt("again") == "saved again"
+        s2.close()

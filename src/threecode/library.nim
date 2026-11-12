@@ -27,12 +27,16 @@
 ## Everything is blocking; the library manages its own threads internally.
 ## One live `AgentSession` per process: stream hooks, the interrupt flag,
 ## and the config/sandbox globals are process-wide, and `close` restores
-## them. `prompt`/`command` on one session are not thread-safe; serialize
-## calls (one worker thread per session is the intended shape), and join
-## workers before close. Initialization rejects a second open session before
-## changing globals.
+## them. The lifecycle is enforced: a closed session refuses
+## `prompt`/`promptAsync`/`command` with a stable `AgentError`, a session
+## with a turn in flight refuses a second turn and `command` alike (one
+## reservation covers blocking and async submissions), and `close` is
+## idempotent but refuses while a turn runs — `interrupt`, join the
+## worker, then close. Still serialize `prompt`/`command` from one worker
+## thread per session; initialization rejects a second open session
+## before changing globals.
 
-import std/[json, os, strutils, tables, times, atomics]
+import std/[json, locks, os, strutils, tables, times, atomics]
 import types, util, prompts, session, config, actions, api, display, ui, plugins,
        auth_xai, auth_openai, auth_google, sandbox, minline, transcript, turns
 import dirsettings
@@ -76,17 +80,38 @@ type
     state*: Session
     onEvent*: proc(ev: AgentEvent) {.closure.}
     editor: minline.LineEditor  # dummy; only fills handleCommandResult's sig
-    closed: bool
+    life: SessionLife
+    gate: Lock
+    worker: Thread[TurnJob]
+    workerStarted: bool
 
-  AgentError* = object of CatchableError
-    ## Initialization failures (no config, unknown model, locks held).
-    ## Turn-level failures are returned by `prompt` via aevError instead.
+  SessionLife = enum
+    ## Explicit lifecycle behind every public entry point: closed/closing
+    ## sessions refuse work, a running session refuses competing work.
+    slIdle      ## open and idle: turns and commands are admitted
+    slRunning   ## a turn is in flight
+    slClosing   ## terminal: close cleanup is running
+    slClosed    ## terminal: unusable; every entry point refuses
 
   TurnJob = ref object
     ## createThread argument for `promptAsync`. The session and the prompt
     ## text travel in one heap box because thread procs can't capture.
     s: AgentSession
     text: string
+
+  AgentError* = object of CatchableError
+    ## Initialization failures (no config, unknown model, locks held),
+    ## closed/busy session rejections, and turn-level failures when the
+    ## call is blocking (async turns return them via aevError instead).
+
+const
+  # Stable rejection messages: closed/busy sessions fail with the same
+  # text every time, so embedders can branch on them.
+  busyTurnMsg = "a turn is already running"
+  closedSessionMsg = "session is closed"
+  closeBusyMsg =
+    "cannot close: a turn is in flight (interrupt and join the worker first)"
+  closeClosingMsg = "close already in progress"
 
 var agentSessionOwned: Atomic[bool]
 
@@ -152,20 +177,51 @@ proc resolveSessionProfile*(wanted, resumeProfile: string): Profile =
   ## how to surface that (CLI: provider wizard; library: AgentError).
   result = buildProfile(activeCurrent, activeProviders, wanted)
 
+proc beginTurn(s: AgentSession) =
+  ## Claim the turn slot (idle -> running). Raises `AgentError` when the
+  ## session is closed or a turn is already in flight. The gate is never
+  ## held while the turn itself runs, so user callbacks fire unlocked.
+  withLock s.gate:
+    case s.life
+    of slIdle: s.life = slRunning
+    of slRunning: raise newException(AgentError, busyTurnMsg)
+    of slClosing, slClosed: raise newException(AgentError, closedSessionMsg)
+
+proc endTurn(s: AgentSession) =
+  withLock s.gate:
+    if s.life == slRunning: s.life = slIdle
+
+proc requireOpen(s: AgentSession) =
+  ## Guard for entry points and reads that must describe a live session.
+  withLock s.gate:
+    if s.life in {slClosing, slClosed}:
+      raise newException(AgentError, closedSessionMsg)
+
 proc initAgentSession*(opts: AgentOptions): AgentSession =
   ## Create or resume a session and install the headless plumbing.
   ## Raises `AgentError` when no usable provider is configured, the model
   ## doesn't resolve, or the directory/session locks are held by a live
-  ## 3code process.
+  ## 3code process. Every resource acquired on the way (reservation
+  ## file, locks, headless hooks, the per-process slot) is rolled back
+  ## when a later step fails, so a failed init leaves nothing claimed.
   if agentSessionOwned.exchange(true):
     raise newException(AgentError, "only one AgentSession may be open per process")
   var initialized = false
   var reservation = ""
+  var dirLockHeld = false
+  var sessionLockHeld = false
+  var headlessInstalled = false
   defer:
     if not initialized:
       if reservation.len > 0:
         try: removeFile(reservation)
         except OSError: discard
+      if sessionLockHeld: releaseActiveSessionLock()
+      if dirLockHeld: releaseActiveDirLock()
+      if headlessInstalled:
+        termengine.headlessTranscriptHook = nil
+        termengine.engineOutputEnabled = true
+        fatruntime.installApiStreamHooks()
       agentSessionOwned.store(false)
   experimentalEnabled = opts.experimental
   debugEnabled = opts.debug
@@ -211,6 +267,7 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
     sandbox.arm(cwd)
 
   var s = AgentSession()
+  initLock(s.gate)
   s.editor = minline.initEditor(historyFile = "")
 
   if opts.resume or opts.resumeId.len > 0:
@@ -241,15 +298,17 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   s.state.profileName = prof.name
 
   # Locks after profile resolution: a config error must fail fast without
-  # claiming the directory. Lock failures roll back in reverse order.
+  # claiming the directory. A failed acquisition (or any later failure)
+  # rolls back through the defer above.
   try:
     acquireDirLock(s.state.cwd, s.state.savePath)
+    dirLockHeld = true
   except DirLocked as e:
     raise newException(AgentError, e.msg)
   try:
     acquireSessionLock(s.state.savePath)
+    sessionLockHeld = true
   except SessionLocked as e:
-    releaseDirLock(s.state.cwd)
     raise newException(AgentError, e.msg)
 
   # An embedding that turned on private mode continues the resumed
@@ -265,6 +324,7 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
     let text = normalizeItem(bytes)
     if text.len == 0: return
     s.emit(AgentEvent(kind: aevTool, text: text, toolCode: -1))
+  headlessInstalled = true
   fatruntime.installApiHeadlessHooks(fatruntime.HeadlessStreamHooks(
     contentDelta: proc(chunk: string) =
       s.emit(AgentEvent(kind: aevDelta, text: chunk)),
@@ -288,35 +348,50 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
 proc close*(s: AgentSession) =
   ## Persist the session, release locks, and restore the terminal-facing
   ## hooks so the process can go back to CLI use (or init a new session).
-  ## The final save is best-effort but never silent: a persistence failure
-  ## is reported on stderr, and the lock releases below run regardless
-  ## (a persistence exception must never skip ownership release).
-  if s.closed: return
-  s.closed = true
+  ##
+  ## Lifecycle: an idle session closes; a session with a turn in flight
+  ## refuses with `AgentError` - close never blocks on, or self-joins, a
+  ## running turn. The embedder's shutdown order is `interrupt`, join the
+  ## `promptAsync` worker, then `close`; a close called from an event or
+  ## plugin callback therefore always lands on a running/closing session
+  ## and raises the same stable error. Repeated close after the terminal
+  ## state is a no-op: an old handle's second close cannot clear a newer
+  ## session's hooks or locks.
+  ##
+  ## Cleanup is mandatory even when parts of it fail: the final save is
+  ## attempted, every lock this process owns is released, the headless
+  ## hooks are restored, plugin teardown completes, and the per-process
+  ## session slot is freed even when the save or shutdown raised - the
+  ## terminal state is marked last. Only then is a persistence failure
+  ## reported on stderr: it never skips ownership release or keeps the
+  ## slot reserved.
+  block:
+    withLock s.gate:
+      case s.life
+      of slClosed: return
+      of slIdle: s.life = slClosing
+      of slRunning: raise newException(AgentError, closeBusyMsg)
+      of slClosing: raise newException(AgentError, closeClosingMsg)
+  var saveErr: ref SessionSaveError = nil
   try: saveSession(s.state, s.messages)
-  except SessionSaveError as e: reportSaveFailure(e)
+  except SessionSaveError as e: saveErr = e
   releaseActiveSessionLock()
   releaseActiveDirLock()
   termengine.headlessTranscriptHook = nil
   termengine.engineOutputEnabled = true
   fatruntime.installApiStreamHooks()
-  agentSessionOwned.store(false)
   pluginsShutdown()
+  agentSessionOwned.store(false)
+  withLock s.gate:
+    s.life = slClosed
+  if saveErr != nil: reportSaveFailure(saveErr)
 
 # ---------- prompts and commands ----------
 
-proc prompt*(s: AgentSession; text: string): string =
-  ## Blocking interface: submit a user prompt, run the full turn loop
-  ## (model calls + tool calls until the model stops calling tools), and
-  ## return the final assistant text. An empty (or whitespace-only) text
-  ## continues the session instead: a turn runs on the messages exactly
-  ## as they stand, appending no user message, the embedder's way to say
-  ## "keep going" (e.g. after a cancelled turn). Events stream to `onEvent`
-  ## as they happen. Raises `AgentError` on turn failure, or on an empty
-  ## prompt with no conversation to continue yet; the session stays valid
-  ## and saved. Raises `SessionSaveError` when persisting the turn fails:
-  ## the in-memory conversation is intact, and the on-disk transcript
-  ## keeps its previous content unless the error reports `committed`.
+proc runTurnBlocking(s: AgentSession; text: string): string =
+  ## One admitted turn, without the lifecycle reservation: the shared
+  ## body of `prompt` and the `promptAsync` worker (which reserves
+  ## before spawning, so the body must not reserve again).
   if text.strip.len == 0:
     if s.messages.len <= 1:
       raise newException(AgentError,
@@ -346,26 +421,83 @@ proc prompt*(s: AgentSession; text: string): string =
       return cutPartialTrailingMarker(stripCheckpointMarkers(m{"content"}.getStr("")))
   ""
 
+proc prompt*(s: AgentSession; text: string): string =
+  ## Blocking interface: submit a user prompt, run the full turn loop
+  ## (model calls + tool calls until the model stops calling tools), and
+  ## return the final assistant text. An empty (or whitespace-only) text
+  ## continues the session instead: a turn runs on the messages exactly
+  ## as they stand, appending no user message, the embedder's way to say
+  ## "keep going" (e.g. after a cancelled turn). Events stream to `onEvent`
+  ## as they happen. Raises `AgentError` on turn failure, on a closed
+  ## session, or when a turn is already running (async vs blocking alike:
+  ## the reservation is taken before any model/tool/file work), or on an
+  ## empty prompt with no conversation to continue yet; a rejected call
+  ## touches no hooks, files, model state, or tools, and the session
+  ## stays valid and saved after a failed turn. Raises
+  ## `SessionSaveError` when persisting the turn fails: the in-memory
+  ## conversation is intact, and the on-disk transcript keeps its
+  ## previous content unless the error reports `committed`.
+  beginTurn(s)
+  try:
+    result = runTurnBlocking(s, text)
+  finally:
+    endTurn(s)
+
 proc promptThread(job: TurnJob) {.thread.} =
   {.cast(gcsafe).}:
     try:
-      discard job.s.prompt(job.text)
+      discard runTurnBlocking(job.s, job.text)
     except CatchableError as e:
       job.s.emit(AgentEvent(kind: aevError, text: e.msg))
+    finally:
+      endTurn(job.s)
 
-proc promptAsync*(s: AgentSession; text: string): Thread[TurnJob] =
-  ## Threaded interface: run `prompt` on a library-managed worker thread
-  ## and return it; events (including aevDone/aevError) arrive on
-  ## `onEvent` from that thread. `joinThread(result)` to wait for the
-  ## turn. Only one turn per session at a time.
-  createThread(result, promptThread, TurnJob(s: s, text: text))
+proc promptAsync*(s: AgentSession; text: string) =
+  ## Threaded interface: run the turn on a library-managed worker thread;
+  ## events (including aevDone/aevError) arrive on `onEvent` from that
+  ## thread. `joinTurn(s)` waits for the worker. Only one turn per
+  ## session at a time: the reservation is taken here, before the worker
+  ## spawns, so two concurrent `promptAsync` calls cannot both enter,
+  ## and a failed thread creation releases it. Raises `AgentError` on a
+  ## closed or busy session.
+  ##
+  ## The thread record lives in the session: `createThread` hands the
+  ## worker a pointer to its argument slot, so a handle in the caller's
+  ## frame would be read after that frame is gone (the old
+  ## return-a-Thread API was exactly that race). The slot lives as long
+  ## as the session; a later `promptAsync` joins the previous worker
+  ## before reusing it.
+  beginTurn(s)
+  try:
+    if s.workerStarted: joinThread(s.worker)
+    s.workerStarted = true
+    createThread(s.worker, promptThread, TurnJob(s: s, text: text))
+  except CatchableError as e:
+    endTurn(s)
+    raise e
+
+proc joinTurn*(s: AgentSession) =
+  ## Wait for a `promptAsync` worker to finish (instant when none ever
+  ## started or it already ran). Part of the shutdown order:
+  ## `interrupt`, `joinTurn`, then `close`. The driving thread's call:
+  ## serialize with `promptAsync` like every other session call.
+  if s.workerStarted:
+    joinThread(s.worker)
+    s.workerStarted = false
 
 proc command*(s: AgentSession; cmd: string): string =
   ## Run a colon command (`:tokens`, `:model ...`, `:sandbox show`, ...)
   ## exactly as the REPL would and return its plain-text body. Modal
   ## commands that need an interactive terminal (`:provider add/edit`)
   ## return an error string. `:quit` raises `AgentError` — quitting is
-  ## the embedder's `close`.
+  ## the embedder's `close`. Raises `AgentError` on a closed session or
+  ## while a turn is running (commands mutate the conversation, so they
+  ## are never admitted mid-turn).
+  withLock s.gate:
+    case s.life
+    of slIdle: discard
+    of slRunning: raise newException(AgentError, busyTurnMsg)
+    of slClosing, slClosed: raise newException(AgentError, closedSessionMsg)
   case classifyCommand(cmd)
   of ckModal:
     return "command requires an interactive terminal: " & cmd.strip
@@ -384,9 +516,13 @@ proc interrupt*(s: AgentSession) =
   requestTurnInterrupt("library-interrupt")
 
 proc profileLabel*(s: AgentSession): string =
-  ## Short "provider.model" label for display.
+  ## Short "provider.model" label for display. Raises `AgentError` on a
+  ## closed session: a dead handle does not describe anything.
+  requireOpen(s)
   s.profile.name
 
 proc usage*(s: AgentSession): Usage =
-  ## Cumulative token usage for the session.
+  ## Cumulative token usage for the session. Raises `AgentError` on a
+  ## closed session.
+  requireOpen(s)
   s.state.usage
