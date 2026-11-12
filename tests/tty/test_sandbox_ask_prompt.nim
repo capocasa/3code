@@ -371,6 +371,28 @@ suite "sandbox ask prompt":
     tty.expect "\u276f"
     echo "  PASS: scripted denial shows the card"
 
+  test "scripted Windows-shape denial shows the card":
+    # cmd.exe and native Windows tools print "Access is denied"; the
+    # gate must scrape that shape exactly like the POSIX one. Runs on
+    # every host: bash echoes the line verbatim, no backend needed.
+    let root = newFixture("card_win")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    let tty = startAskSession(root, 20_000)
+    defer: tty.close()
+
+    tty.expect "\u276f"
+    runShellCmd(tty,
+      "sh -c \"echo ./vault/out.txt: Access is denied.; exit 5\"")
+
+    tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
+    tty.sendAskKey 'd'
+    tty.expectInHistory "declined by user; not retried"
+    check policyLines(root) ==
+      @["deny /", "allow ./", "ask ./vault", "deny ./locked"]
+    tty.expect "\u276f"
+    echo "  PASS: scripted Windows-shape denial shows the card"
+
   test "scripted denial a flips an exact file ask rule in place":
     let root = newFixture("card_exact")
     defer: removeDir(root)
