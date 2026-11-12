@@ -10,6 +10,8 @@ import std/[algorithm, json, os, sequtils, sets, strformat, strutils, tables,
   terminal, times]
 when defined(posix):
   import std/posix except Time
+when defined(windows):
+  import std/winlean
 import types, util, prompts, session, compact, config, actions, api, plugins,
   display, fatprompt, streamexec, toolstream, transcript, images, screen
 from shell import bashMutationPath
@@ -494,6 +496,25 @@ proc emitTestFrameEvent() =
           let ackFd = cint(parseInt(ackText))
           var ack: array[1, char]
           discard posix.read(ackFd, addr ack[0], 1)
+      except CatchableError:
+        discard
+  elif defined(windows):
+    # Same handshake on inherited pipe HANDLEs (the harness hands them to
+    # the child via PROC_THREAD_ATTRIBUTE_HANDLE_LIST; an inherited handle
+    # keeps its numeric value, so the env numbers are live here).
+    let hText = getEnv("THREECODE_TEST_FRAME_FD")
+    if hText.len > 0:
+      try:
+        let h = Handle(parseInt(hText))
+        var ch = 'f'
+        var written: int32 = 0
+        discard writeFile(h, addr ch, 1, addr written, nil)
+        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        if ackText.len > 0:
+          let ackH = Handle(parseInt(ackText))
+          var ack: array[1, char]
+          var got: int32 = 0
+          discard readFile(ackH, addr ack[0], 1, addr got, nil)
       except CatchableError:
         discard
 

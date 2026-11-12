@@ -688,6 +688,32 @@ proc testTickerControlLoop() {.thread.} =
       if ackFd >= 0:
         var ack = 'a'
         discard posix.write(ackFd, addr ack, 1)
+  elif defined(windows):
+    # Same command loop on inherited pipe HANDLEs; see turns.nim's frame
+    # hook. A blocking readFile breaks out when the harness closes the
+    # command pipe (ERROR_BROKEN_PIPE), like the POSIX EOF break.
+    let hText = getEnv("THREECODE_TEST_TICKER_FD")
+    let ackText = getEnv("THREECODE_TEST_TICKER_ACK_FD")
+    if hText.len == 0:
+      return
+    let h = try: Handle(parseInt(hText)) except CatchableError: return
+    let ackH =
+      if ackText.len > 0:
+        try: Handle(parseInt(ackText)) except CatchableError: Handle(0)
+      else:
+        Handle(0)
+    while true:
+      var ch: array[1, char]
+      var got: int32 = 0
+      let ok = readFile(h, addr ch[0], 1, addr got, nil)
+      if ok == 0 or got <= 0:
+        break
+      if ch[0] == 't':
+        requestTestSpinnerFrame()
+      if ackH.int != 0:
+        var ack = 'a'
+        var written: int32 = 0
+        discard writeFile(ackH, addr ack, 1, addr written, nil)
 
 proc ensureTestTickerControlStarted() =
   if not testFrameMode():
@@ -3457,6 +3483,23 @@ proc emitTestTurnStateEvent*(idle: bool) =
           let ackFd = cint(parseInt(ackText))
           var ack: array[1, char]
           discard posix.read(ackFd, addr ack[0], 1)
+      except CatchableError:
+        discard
+  elif defined(windows):
+    # Same handshake on inherited pipe HANDLEs; see turns.nim's twin.
+    let hText = getEnv("THREECODE_TEST_FRAME_FD")
+    if hText.len > 0:
+      try:
+        let h = Handle(parseInt(hText))
+        var ch = if idle: 'i' else: 'b'
+        var written: int32 = 0
+        discard writeFile(h, addr ch, 1, addr written, nil)
+        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        if ackText.len > 0:
+          let ackH = Handle(parseInt(ackText))
+          var ack: array[1, char]
+          var got: int32 = 0
+          discard readFile(ackH, addr ack[0], 1, addr got, nil)
       except CatchableError:
         discard
 

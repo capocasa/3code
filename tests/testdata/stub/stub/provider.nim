@@ -21,6 +21,23 @@ proc emitTestFrameEvent() =
           discard posix.read(ackFd, addr ack[0], 1)
       except CatchableError:
         discard
+  elif defined(windows):
+    # Same handshake on inherited pipe HANDLEs; see turns.nim's twin.
+    let hText = getEnv("THREECODE_TEST_FRAME_FD")
+    if hText.len > 0:
+      try:
+        let h = Handle(parseInt(hText))
+        var ch = 'f'
+        var written: int32 = 0
+        discard writeFile(h, addr ch, 1, addr written, nil)
+        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        if ackText.len > 0:
+          let ackH = Handle(parseInt(ackText))
+          var ack: array[1, char]
+          var got: int32 = 0
+          discard readFile(ackH, addr ack[0], 1, addr got, nil)
+      except CatchableError:
+        discard
 
 proc testFrameMode(): bool =
   getEnv("THREECODE_TEST_FRAME_FD").len > 0
@@ -42,6 +59,23 @@ proc waitForTestContinue() =
         var ch: array[1, char]
         if posix.read(fd, addr ch[0], 1) > 0:
           break
+  elif defined(windows):
+    # Same bounded wait on an inherited pipe HANDLE; see the twin stub's
+    # waitForTestContinue.
+    let hText = getEnv("THREECODE_TEST_API_CONTINUE_FD")
+    if hText.len == 0:
+      return
+    let h = try: Handle(parseInt(hText)) except CatchableError: return
+    while true:
+      if isInterrupted():
+        raise newException(ApiError, "interrupted by user")
+      var avail: int32 = 0
+      if peekNamedPipe(h, nil, 0, nil, nil, addr avail) and avail > 0:
+        var ch: array[1, char]
+        var got: int32 = 0
+        if readFile(h, addr ch[0], 1, addr got, nil) != 0 and got > 0:
+          break
+      sleep(100)
 
 type StubFailure* = enum
   sfNone, sfDns, sfNetworkUnreachable, sfConnectionRefused,

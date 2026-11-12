@@ -31,6 +31,7 @@ when defined(windows):
     SIZE_T* = uint
   const
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE* = 0x00020016'u32
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST* = 0x00020002'u32
     EXTENDED_STARTUPINFO_PRESENT* = 0x00080000'i32
     STILL_ACTIVE_DW* = 0x00000103'i32
   proc createPseudoConsole(size: COORD; hInput, hOutput: Handle;
@@ -468,14 +469,31 @@ proc pollOnce*(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
       var buf: array[256, char]
       var got: int32 = 0
       discard readFile(s.frameEventFd, addr buf[0], buf.len.int32, addr got, nil)
+      # Child exited: frame event pipe is closed, fall through to the exit
+      # check below rather than returning early.
       if got > 0:
+        # One event byte per child emit (the child blocks on the ack
+        # between writes). 'f' is a render boundary (flush a frame);
+        # 'b'/'i' are turn-state only and must NOT add a frame, or every
+        # golden frame sequence gains spurious frames.
+        var sawFrameByte = false
+        for i in 0 ..< got:
+          case buf[i]
+          of 'i': s.turnIdle = true
+          of 'b': s.turnIdle = false
+          else: sawFrameByte = true
         while s.readPtyChunk(5):
           discard
-        s.flushFrame(force = true)
+        if sawFrameByte:
+          s.flushFrame(force = true)
+        # Ack every received byte: the child blocks on one ack per emit,
+        # and the 'f' (main thread) and 'b'/'i' (turn boundaries) writers
+        # are concurrent, so more than one byte can be pending.
         if s.frameAckFd.int != 0 and s.frameAckFd.int != -1:
-          var ch = 'a'
-          var written: int32 = 0
-          discard writeFile(s.frameAckFd, addr ch, 1, addr written, nil)
+          for i in 0 ..< got:
+            var ch = 'a'
+            var written: int32 = 0
+            discard writeFile(s.frameAckFd, addr ch, 1, addr written, nil)
         result = true
     if not result and recordIdleFrame:
       s.flushFrame()
@@ -665,17 +683,20 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     #   tickerPipe       : parent drives one spinner frame
     #   tickerAckPipe    : child acks a spinner frame
     #   apiContinuePipe  : parent releases a blocked stub response
-    # On Windows the child-side handlers for these are currently POSIX-gated
-    # in src/ (see docs/windows-testing.md), so the frame-event/ticker waits
-    # in the harness timeout (bounded) and tests settle via drain() polling.
-    # The pipes are wired now so enabling the child side later needs no
-    # harness change.
+    # The child-side handlers in src/ (emitTestFrameEvent and friends) read
+    # these ends by the handle values in the env vars below: the child end of
+    # each pipe is inherited through PROC_THREAD_ATTRIBUTE_HANDLE_LIST, and
+    # an inherited handle keeps its numeric value, so the env numbers are
+    # valid in the child exactly the way fds are on POSIX. Both sides block
+    # on the handshake, pacing the child's renders the same way the POSIX
+    # path does.
     proc makePipe(readEnd, writeEnd: var Handle) =
-      # The child is spawned with bInheritHandles=FALSE, so these IPC pipes
-      # are never inherited regardless; create them non-inheritable (the
-      # child-side hooks that would use them are POSIX-gated in src/ anyway).
+      # Inheritable: the child ends below are handed to the child through
+      # PROC_THREAD_ATTRIBUTE_HANDLE_LIST, and the list only honors handles
+      # marked inheritable (a non-inheritable handle in the list makes
+      # CreateProcess fail outright).
       var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
-                                   bInheritHandle: 0)
+                                   bInheritHandle: 1)
       doAssert createPipe(readEnd, writeEnd, sa, 0) != 0
 
     # Create the ConPTY pipes non-inheritable (bInheritHandle=0): the child is
@@ -738,12 +759,23 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # Build the STARTUPINFOEX with a PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
     # attribute so CreateProcess attaches the child to this pseudoconsole.
     var attrSize: SIZE_T = 0
-    discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
+    discard initializeProcThreadAttributeList(nil, 2, 0, addr attrSize)
     var attrList = cast[pointer](alloc0(attrSize))
-    doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
+    doAssert initializeProcThreadAttributeList(attrList, 2, 0, addr attrSize) != 0
     doAssert updateProcThreadAttribute(attrList, 0,
         PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, cast[pointer](hpc.Handle),
         sizeof(HPCON).SIZE_T, nil, nil) != 0
+    # Hand the child exactly the five IPC pipe ends (and nothing else):
+    # without a handle list, bInheritHandles=TRUE inherits every inheritable
+    # handle in this process, which conflicts with the pseudoconsole
+    # attachment and fails child init with STATUS_DLL_INIT_FAILED
+    # (0xC0000142) - even cmd.exe. The list itself is only honored when
+    # bInheritHandles=TRUE; with FALSE nothing is inherited at all.
+    var inheritHandles = [frameWrite, ackRead, tickerRead, tickerAckWrite,
+                          apiRead]
+    doAssert updateProcThreadAttribute(attrList, 0,
+        PROC_THREAD_ATTRIBUTE_HANDLE_LIST, addr inheritHandles[0],
+        sizeof(inheritHandles).SIZE_T, nil, nil) != 0
 
     # STARTF_USESTDHANDLES with all three std handles set to INVALID_HANDLE_VALUE
     # is REQUIRED for a ConPTY child. Without it the child inherits the parent's
@@ -843,15 +875,13 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     if cwd.len > 0:
       cwdW = newWideCString(cwd)
       cwdPtr = cwdW
-    # bInheritHandles MUST be FALSE for a ConPTY child. The canonical
-    # CreatePseudoConsole sample passes FALSE; passing TRUE causes the child
-    # to inherit handles that conflict with the pseudoconsole attachment,
-    # and the child's console/DLL init fails with STATUS_DLL_INIT_FAILED
-    # (0xC0000142) — even cmd.exe, even with a fully inherited env.
-    # This is safe because the child-side IPC hooks (emitTestFrameEvent etc.)
-    # are POSIX-gated in src/, so the Windows child does not use the IPC
-    # pipes set in its env; it settles via drain() polling instead.
-    let ok = createProcessW(appW, cmdW, nil, nil, 0,
+    # bInheritHandles=TRUE + the handle list above: the child inherits
+    # exactly the five IPC ends, so the env handle numbers are live and the
+    # child-side IPC hooks (emitTestFrameEvent etc.) pace its renders. Plain
+    # TRUE without a list is what fails child init with
+    # STATUS_DLL_INIT_FAILED (0xC0000142) - the list keeps everything else
+    # (conhost pipes, library handles) out of the child.
+    let ok = createProcessW(appW, cmdW, nil, nil, 1,
         createFlags, envPtr, cwdPtr, si.startupInfo, pi)
     deleteProcThreadAttributeList(attrList)
     dealloc(attrList)
@@ -1751,17 +1781,16 @@ proc expectIdleCaret*(s: TtySession; timeoutMs = 5000) =
   ## A following Ctrl-D is then swallowed as inert (`inputTurnActive`), and
   ## the child never quits (the OSX `test_resume_replay_bytes` "still
   ## running" flake). The app's own `'i'`/`'b'` turn-state events over the
-  ## frame channel are the authoritative signal; under ConPTY (no frame
-  ## channel) fall back to the drawn caret alone. The physical cursor stays
-  ## hidden for the whole session, so cursor visibility is no longer an
-  ## idle signal at all.
+  ## frame channel are the authoritative signal on every host now that the
+  ## ConPTY child inherits the channel's handles; a session started without
+  ## the IPC env (channel absent) keeps `turnIdle` at its initial true, so
+  ## this degrades to the drawn-caret check exactly as before. The physical
+  ## cursor stays hidden for the whole session, so cursor visibility is no
+  ## longer an idle signal at all.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline and not s.exited:
     s.drain(0)
-    when defined(posix):
-      let idle = s.turnIdle
-    else:
-      let idle = true
+    let idle = s.turnIdle
     # Exactly one drawn caret cell somewhere in the editor block: on a
     # multiline draft it sits on a continuation row, not the `❯` row.
     if idle:
