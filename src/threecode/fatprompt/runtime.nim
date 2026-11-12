@@ -326,16 +326,26 @@ proc askGateAvailable*(): bool =
   else:
     false
 
-proc requestAskKey*(timeoutMs = -1): char =
-  ## Arm the ask gate and block for one decisive keypress. Returns
-  ## 'a', 'f', 'd', or 'n'; '\0' when the gate is unavailable (headless)
-  ## or the wait timed out. 'd'/'n'/'\0' all map to "deny, do not retry"
-  ## at the call site, so callers may treat '\0' as n.
-  if not askGateAvailable(): return '\0'
-  let cap = if timeoutMs > 0: timeoutMs else: askTimeoutMs()
+proc armAskGate*(): bool =
+  ## Arm the ask gate: stdin bytes now divert to `askGateConsume` and none
+  ## reach the editor. Split from the blocking wait so a caller can arm
+  ## BEFORE rendering its question: under the paced tty harness the card
+  ## lines become visible several ack rounds before the blocking wait
+  ## starts, and a key sent as soon as the question shows must divert,
+  ## never leak into the editor draft. False when the gate is unavailable
+  ## (headless); the caller still renders its question and treats the
+  ## wait as a timeout, like the unavailable path always did.
+  if not askGateAvailable(): return false
   askGateAnswered.store(false, moRelease)
   askGateAnswer.store(0, moRelaxed)
   askGatePending.store(true, moRelease)
+  true
+
+proc waitAskKey*(timeoutMs = -1): char =
+  ## Block for one decisive keypress of an armed gate. Returns 'a', 'f',
+  ## 'd', or 'n'; '\0' when the wait timed out. 'd'/'n'/'\0' all map to
+  ## "deny, do not retry" at the call site, so callers may treat '\0' as n.
+  let cap = if timeoutMs > 0: timeoutMs else: askTimeoutMs()
   let deadline = epochTime() + cap.float / 1000.0
   while epochTime() < deadline:
     if askGateAnswered.load(moAcquire): break
@@ -344,6 +354,13 @@ proc requestAskKey*(timeoutMs = -1): char =
   askGatePending.store(false, moRelease)
   if not askGateAnswered.load(moAcquire): return '\0'
   char(askGateAnswer.load(moRelaxed))
+
+proc requestAskKey*(timeoutMs = -1): char =
+  ## Arm the ask gate and block for one decisive keypress. Returns
+  ## 'a', 'f', 'd', or 'n'; '\0' when the gate is unavailable (headless)
+  ## or the wait timed out.
+  if not armAskGate(): return '\0'
+  waitAskKey(timeoutMs)
 
 proc askGateConsume(b: int): bool =
   ## Input-thread side: called for each stdin byte while the gate is
@@ -696,10 +713,10 @@ proc testTickerControlLoop() {.thread.} =
     let ackText = getEnv("THREECODE_TEST_TICKER_ACK_FD")
     if hText.len == 0:
       return
-    let h = try: Handle(parseInt(hText)) except CatchableError: return
+    let h = openTestPipe(hText, childWrites = false)
     let ackH =
       if ackText.len > 0:
-        try: Handle(parseInt(ackText)) except CatchableError: Handle(0)
+        try: openTestPipe(ackText, childWrites = true) except CatchableError: Handle(0)
       else:
         Handle(0)
     while true:
@@ -3490,13 +3507,13 @@ proc emitTestTurnStateEvent*(idle: bool) =
     let hText = getEnv("THREECODE_TEST_FRAME_FD")
     if hText.len > 0:
       try:
-        let h = Handle(parseInt(hText))
+        let h = openTestPipe(hText, childWrites = true)
         var ch = if idle: 'i' else: 'b'
         var written: int32 = 0
         discard writeFile(h, addr ch, 1, addr written, nil)
         let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
         if ackText.len > 0:
-          let ackH = Handle(parseInt(ackText))
+          let ackH = openTestPipe(ackText, childWrites = false)
           var ack: array[1, char]
           var got: int32 = 0
           discard readFile(ackH, addr ack[0], 1, addr got, nil)

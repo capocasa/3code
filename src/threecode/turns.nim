@@ -505,13 +505,13 @@ proc emitTestFrameEvent() =
     let hText = getEnv("THREECODE_TEST_FRAME_FD")
     if hText.len > 0:
       try:
-        let h = Handle(parseInt(hText))
+        let h = openTestPipe(hText, childWrites = true)
         var ch = 'f'
         var written: int32 = 0
         discard writeFile(h, addr ch, 1, addr written, nil)
         let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
         if ackText.len > 0:
-          let ackH = Handle(parseInt(ackText))
+          let ackH = openTestPipe(ackText, childWrites = false)
           var ack: array[1, char]
           var got: int32 = 0
           discard readFile(ackH, addr ack[0], 1, addr got, nil)
@@ -586,6 +586,12 @@ proc askGateDecide(deniedPath: string; cmd: string; writeAccess: bool;
   # root's parent when the rule names a single file ("the entire
   # folder" of an ask-protected file is the directory holding it).
   let folderPath = if dirExists(rootPath): rootPath else: parentDir(rootPath)
+  # Arm before painting: the paced tty harness makes the first card line
+  # visible several ack rounds before a paint-then-arm order would block
+  # for the key, and a decisive key sent in that window must divert, not
+  # leak into the editor draft. Unavailable gate: paint as before, the
+  # wait degrades to an immediate timeout like it always did.
+  let armed = armAskGate()
   if cmd.len > 0:
     renderLine("? " & cmd)
     renderLine("")
@@ -594,7 +600,7 @@ proc askGateDecide(deniedPath: string; cmd: string; writeAccess: bool;
   renderLine("  (a) allow")
   renderLine("  (f) allow the entire folder")
   renderLine("  (d) deny in " & $(askTimeoutMs() div 1000) & "s")
-  let key = requestAskKey()
+  let key = if armed: waitAskKey() else: '\0'
   var marker = ""
   # The model-visible record of the decision, appended to the tool
   # output after any retry (each side sees what was decided and
@@ -697,6 +703,7 @@ proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
   ## user can answer.
   let renderLine = proc(line: string) =
     commitTranscriptBytes(noteLnS(line), true)
+    emitTestFrameEvent()
   var markers: seq[string]
   if act.kind == akApplyPatch:
     var ops: seq[V4AOp]
