@@ -1281,3 +1281,25 @@ suite "session: failed save preserves the previous transcript":
     when defined(posix):
       check getFilePermissions(path) == {fpUserRead, fpUserWrite}
     check sessionDirFiles() == @[path]
+
+  when defined(posix):
+    test "the staging file is owner-only while it exists":
+      # Inspected from inside the save, at the last point before the
+      # replacement: a transcript (or draft) staging file must never be
+      # world-readable, not even for the instant it exists.
+      let path = savedTranscript("first turn")
+      var stagedPerms: set[FilePermission] = {}
+      var sawStaging = false
+      saveFaultHook = proc (p: SaveFaultPhase) {.gcsafe, raises: [CatchableError].} =
+        if p == sfpBeforeReplace:
+          for f in walkFiles(sessionDir() / "3code-*.stage"):
+            sawStaging = true
+            stagedPerms = getFilePermissions(f)
+      let s = Session(savePath: path, cwd: root / "proj")
+      try:
+        saveSession(s, %*[{"role": "user", "content": "second turn"}])
+      finally:
+        saveFaultHook = nil
+      check sawStaging
+      check stagedPerms == {fpUserRead, fpUserWrite}
+      check sessionDirFiles() == @[path]
