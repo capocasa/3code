@@ -997,7 +997,7 @@ suite "session: directory lock acquire/release":
     if dirExists(dld):
       for kind, path in walkDir(dld):
         if kind == pcFile and
-            extractFilename(path).startsWith("test-dir-lock"):
+            extractFilename(path).contains("test-dir-lock"):
           try: removeFile(path) except OSError: discard
 
   test "acquire creates the lock file holding our pid":
