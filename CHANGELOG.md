@@ -2,6 +2,22 @@ Changelog
 
 Unreleased
 
+- **Session and directory locks are kernel-owned, not pid-file
+  guesses.** Locking was an O_CREAT|O_EXCL race on a file holding the
+  owner's pid, with liveness probing and a remove-and-retry dance to
+  recover from crashes; a `kill -9`ed 3code left a stale file behind and
+  a spawned tool process that inherited the fd could keep the lock alive
+  after its parent died. The claim is now a kernel-level exclusive lock
+  held open for the life of the process: a crashed or killed owner's
+  session and directory are back the instant the process is gone, with
+  nothing to delete, a non-owner's release cannot disturb someone
+  else's hold, and a collision report names the live holder (pid and
+  session id, plus the lock file). The lock files under
+  `$TMPDIR/3code/lock` and `$TMPDIR/3code/dirlock` stay on disk as
+  stable lock targets, emptied of owner text; a lock held by an old
+  pre-kernel-lock release is still refused via its pid line, but mixed
+  old/new versions are not fully mutually exclusive, so don't run them
+  against the same session or directory.
 - **`update` replaces a renamed executable in place.** The updater
   mapped the archive's canonical binary member to its own name (`3code`),
   so an install the user had renamed (a `3code-mine` on `PATH`, the
