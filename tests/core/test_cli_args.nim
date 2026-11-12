@@ -279,6 +279,11 @@ suite "cli resume value forms":
   proc runIn(flags: string): tuple[o: string, code: int] =
     let env = newStringTable({"XDG_DATA_HOME": tmp / "d",
                               "XDG_CONFIG_HOME": tmp / "c"})
+    # execCmdEx(env=...) REPLACES the environment; the dir lock the child
+    # probes lives under getTempDir(), so TMPDIR must ride along or the
+    # child watches /tmp while this side wrote the fixture into $TMPDIR
+    # (same reason the heldSessionId helper above passes it).
+    if getEnv("TMPDIR").len > 0: env["TMPDIR"] = getEnv("TMPDIR")
     let (outp, code) = execCmdEx(binPath().quoteShell & " " & flags,
                                  {poStdErrToStdOut, poUsePath, poDaemon},
                                  env, tmp)

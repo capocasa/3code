@@ -1208,6 +1208,26 @@ created readable only by your user (mode 0600 on POSIX). Also note that
 proposes, and root blast radius is unacceptable. Run it as your normal
 user (`THREECODE_ALLOW_ROOT=1` overrides, for containers).
 
+### Session and directory locks
+
+Only one 3code process may edit a given session or work in a given
+directory at a time; a second one dies with an "already open in another
+running 3code process" message naming the holder's pid (and session).
+The claim is a kernel-level exclusive lock held open for as long as the
+process runs, so a crash or kill -9 releases it instantly: the next
+start takes the session or directory back, with nothing to delete.
+
+The small lock files under `$TMPDIR/3code/lock` and
+`$TMPDIR/3code/dirlock` are kept after use so the kernel lock always
+refers to a stable file; they carry no secrets (owner-only permissions)
+and need no manual cleanup.
+
+Version mixing: a lock held by an old (pre-kernel-lock) 3code release is
+still refused by a new one via the pid line it wrote, and the reverse —
+but two releases cannot be made fully mutually exclusive through
+advisory locking alone. Don't run mixed old/new 3code versions against
+the same session or directory.
+
 ## Notifications and auto-update
 
 When a turn ends, 3code can fire a desktop notification, useful when you
