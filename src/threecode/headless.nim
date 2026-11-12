@@ -20,7 +20,7 @@
 ]##
 
 import std/[json, os, parseopt, strutils]
-import types, util, config, api, library, plugins, pluginagent, minline
+import types, util, config, api, library, plugins, pluginagent, minline, session
 import dirsettings
 
 type HeadlessOpts = object
@@ -130,7 +130,10 @@ proc headlessMain*(args: seq[string]): int =
     return ExitConfig
   try:
     discard s.prompt(o.prompt)
-  except AgentError:
+  except AgentError, SessionSaveError:
+    # A failed final checkpoint is a failed turn here: the exit code is
+    # the report (headless prints nothing), never a normal completion.
+    # close() still releases the session lock and reports its own save.
     s.close()
     return 1
   s.close()

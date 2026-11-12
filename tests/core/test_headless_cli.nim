@@ -102,6 +102,16 @@ suite "headless cli (binary)":
     check logs.len == 1
     check "headless reply" in readFile(logs[0])
 
+  test "--headless reports a failed transcript save as a failed turn":
+    # The turn itself succeeds, but the -s target's parent is a regular
+    # file so no transcript can commit: the exit code is 1, never a
+    # normal successful completion, and nothing is written to the target.
+    writeFile(root / "blocker", "x")
+    let r = run(["--headless", "-s", root / "blocker" / "x.3log",
+                 "say something"])
+    check r.code == 1
+    check not fileExists(root / "blocker" / "x.3log")
+
   test "--headless with no prompt is a silent usage error":
     let r = run(["--headless"])
     check r.code == 2

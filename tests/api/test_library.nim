@@ -12,7 +12,7 @@ discard """
 ## per-test fixture so nothing touches the developer's real 3code state.
 
 import std/[json, os, strutils, unittest]
-import threecode/[api, library, types, util]
+import threecode/[api, library, session, types, util]
 
 const stubbed = defined(providerStub)
 
@@ -280,3 +280,34 @@ suite "library: AgentSession":
       expect AgentError:
         discard s2.prompt("")
       s2.close()
+
+    test "a failed transcript save surfaces from prompt; close still releases":
+      # Blocking library calls must observe persistence failure, not a
+      # normal reply. The save target's parent is a regular file, so no
+      # transcript can ever commit there.
+      # Re-anchor TMPDIR first: newFixture picks up the current TMPDIR,
+      # and one isolateEnv per test deepens the lock path until it
+      # overflows NAME_MAX.
+      putEnv("TMPDIR", stableTmp)
+      let root = newFixture("savefail")
+      writeConfig(root)
+      isolateEnv(root)
+      writeFile(root / "blocker", "x")
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "lost reply"}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(
+        cwd: root / "run",
+        sessionPath: root / "blocker" / "lost.3log",
+        experimental: true))
+      expect SessionSaveError:
+        discard s.prompt("go")
+      check not fileExists(root / "blocker" / "lost.3log")
+      # close()'s shutdown save is best-effort but never raises, and the
+      # ownership release happens either way: a fresh session can open.
+      s.close()
+      let again = initAgentSession(AgentOptions(cwd: root / "run",
+                                                experimental: true))
+      again.close()

@@ -290,7 +290,11 @@ proc close*(s: AgentSession) =
   ## hooks so the process can go back to CLI use (or init a new session).
   if s.closed: return
   s.closed = true
-  try: saveSession(s.state, s.messages) except CatchableError: discard
+  # Shutdown save is best-effort but never silent, and the ownership
+  # release below always runs: a persistence exception must not leave the
+  # session lock held.
+  try: saveSession(s.state, s.messages)
+  except SessionSaveError as e: stderr.writeLine "3code: " & e.msg
   releaseActiveSessionLock()
   releaseActiveDirLock()
   termengine.headlessTranscriptHook = nil
