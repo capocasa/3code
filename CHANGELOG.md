@@ -2,6 +2,15 @@ Changelog
 
 Unreleased
 
+- **`update` replaces a renamed executable in place.** The updater
+  mapped the archive's canonical binary member to its own name (`3code`),
+  so an install the user had renamed (a `3code-mine` on `PATH`, the
+  `updatehandler` copy) gained a fresh `3code` sibling while the
+  renamed binary they actually run went stale. The archive's binary now
+  lands at the destination's real name and only the runtime library
+  files are installed beside it; a bundle without the canonical binary
+  member is rejected before any file is touched, as is a destination
+  whose name would collide with a non-documentation bundle member.
 - **Sessions have an enforced lifecycle, and switching is truthful when
   it fails.** The library `AgentSession` moves through an explicit
   idle → running → closing → closed state and every public call gates
