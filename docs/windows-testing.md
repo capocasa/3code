@@ -32,14 +32,31 @@ INFINITE), mirroring the OSX hardening discipline. The `TtySession` record
 and the public `expect*`/`send`/`resize`/`close` API are identical across
 both platforms, so the 18 test bodies needed no changes.
 
-**Caveat (initial enablement):** the child-side test synchronization hooks
-(`emitTestFrameEvent`, `waitForTestContinue`, `testTickerControlLoop` in
-`src/`) are currently `when defined(posix):`-gated, so on Windows the
-harness's frame-event waits and ticker-advance calls timeout (bounded — no
-hang) and tests settle via `drain()`/`waitForOutput` wall-clock polling
-instead. Some timing-sensitive assertions may need small tolerance
-adjustments surfaced by CI; the IPC pipes are wired end-to-end so enabling
-the child side later needs no harness change.
+**Child-side hooks (enabled):** the synchronization hooks
+(`emitTestFrameEvent`, `emitTestTurnStateEvent`, `waitForTestContinue`,
+`testTickerControlLoop` in `src/`) run on Windows too. The IPC channels
+cross the spawn as **named pipes**: `bInheritHandles=FALSE` is the only
+spawn a pseudoconsole child survives (on Win11 26100, `TRUE` kills the
+child outright right after terminal init — exit 3, handle list or not,
+probed on beck; `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` requires `TRUE` and
+cannot rescue it), so handle values cannot be inherited the way fds are
+on POSIX. The harness instead creates the five IPC pipes as named pipes
+(`\\.\pipe\threecode-tty-<pid>-<seq>-*`), passes their **names** in the
+`THREECODE_TEST_*` env vars, and the child connects by name
+(`types.openTestPipe`, one shared client connection per pipe). Both sides
+block on the handshake, so the child's renders are paced and serialized
+the same way the POSIX path paces them.
+
+Two ConPTY-specific residuals live in the harness (tests/tty_expect.nim):
+a zero-wait `pollOnce(0)` services already-ready pipes (the pump helpers
+rely on it), and each frame commit waits out one conhost render cycle of
+quiet (~40ms) before flushing, because conhost splits a child write
+across its render cycles and a frame flushed between the halves would
+record a broken row. Residual flake: a line can still split in a way
+that lands its halves on different grid rows (a concurrent footer
+repaint moving the cursor between the halves); when that happens the
+text never matches in any frame and the leg fails. This is the remaining
+source of the 1-3 roving leg failures per beck suite run.
 
 The following were previously disabled and are now **enabled and adapted**
 (not skipped) to run meaningfully on Windows:
