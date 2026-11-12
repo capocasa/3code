@@ -75,6 +75,15 @@ const
     ## that same envelope even when the conversation it summarizes does
     ## not, so oversized message text is clipped to a per-message budget
     ## derived from this cap.
+  SummarizeTailCapBytes* = 512 * 1024
+    ## Ceiling on the serialized size of what a collapse RETAINS. A reply
+    ## that batches thousands of tool calls (a degenerate loop burning the
+    ## whole output budget on near-identical calls) leaves a tool-result
+    ## run that pairing keeps intact, and keepRecent alone cannot shrink
+    ## it: the collapse then saves megabytes, the retry 400s exactly like
+    ## the call it recovers from, and the session is bricked. The tail is
+    ## shed head-first until the rebuild fits, comfortably under the
+    ## tightest request envelope observed on any route.
   SummarizeByteGuardBytes* = 1_000_000
     ## Proactive request-size ceiling for the Zen-family gateways
     ## (opencode/opencodego). Their byte envelope is undocumented and
@@ -149,13 +158,31 @@ proc applySummary*(messages: JsonNode, summary: string,
   var tail = newSeq[JsonNode]()
   for i in tailStart ..< messages.len:
     tail.add messages[i]
-  let collapsed = tailStart - 1  # messages dropped from the middle
   let synthetic = %*{"role": "user",
                      "content": SummaryPrefix & summary.strip}
+  # Shed the oldest tail entries until the rebuild fits SummarizeTailCapBytes.
+  # The pairing snap-back above keeps a whole tool-result run with its
+  # owning assistant; when that run is the oversized part, shedding from
+  # the tail head is the only way down. repairToolCallPairing below makes
+  # the survivor legal again: orphan results drop, unanswered calls get
+  # synthetic results.
+  var dropped = tailStart - 1  # messages dropped from the middle
+  let fixedBytes = len($system) + len($synthetic)
+  var sizes = newSeq[int](tail.len)
+  var tailBytes = 0
+  for i, m in tail:
+    sizes[i] = len($m)
+    tailBytes += sizes[i]
+  var head = 0
+  while tail.len - head > 1 and tailBytes + fixedBytes > SummarizeTailCapBytes:
+    tailBytes -= sizes[head]
+    inc head
+    inc dropped
   let rebuilt = newJArray()
   rebuilt.add system
   rebuilt.add synthetic
-  for m in tail: rebuilt.add m
+  for i in head ..< tail.len: rebuilt.add tail[i]
+  let collapsed = dropped
   # Drop any leftover leading tool results and pair unanswered tool_calls.
   let paired = repairToolCallPairing(rebuilt)
   rebuilt.elems.setLen 0
