@@ -184,16 +184,21 @@ proc runShellCmd(s: TtySession; cmd: string) =
   s.send "\n"
   s.drain(200)
 
-proc waitForSessionText(root, want: string; timeoutMs = 10_000): bool =
+proc waitForSessionText(tty: TtySession; root, want: string;
+    timeoutMs = 10_000): bool =
   ## Wait until the saved session records `want`. Write tool items paint
   ## only the diff on screen, so the model-visible ask marker and denial
   ## must be asserted where they actually land: the tool message content.
+  ## `tty` pumps the frame-ack handshake while waiting: the grant path
+  ## emits a render boundary between the policy write and the retry, and
+  ## a wait that never drained would stall the child until the timeout.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
     for f in walkFiles(root / "data" / "3code" / "sessions" / "*.3log"):
       try:
         if want in readFile(f): return true
       except CatchableError: discard
+    if tty != nil: tty.drain(0)
     sleep(50)
   false
 
@@ -208,13 +213,17 @@ proc scriptedDenial(): string =
   ## scrapes the error line the same way it scrapes a real EACCES.
   "sh -c \"echo ./vault/out.txt: Permission denied; exit 13\""
 
-proc waitForFileContent(path, want: string; timeoutMs = 10_000): bool =
+proc waitForFileContent(tty: TtySession; path, want: string;
+    timeoutMs = 10_000): bool =
+  ## Same frame-ack pumping as waitForSessionText: the retry runs after
+  ## the grant's render boundary is acknowledged.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
     if fileExists(path):
       try:
         if readFile(path) == want: return true
       except CatchableError: discard
+    if tty != nil: tty.drain(0)
     sleep(50)
   false
 
@@ -240,7 +249,7 @@ suite "sandbox ask prompt":
 
       tty.sendAskKey 'f'
       tty.expectInHistory "allowed ./vault - retrying", 30_000
-      check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
+      check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
       tty.expectInHistory "[sandbox ask: user allowed ./vault; command retried]", 30_000
       # The folder offer flips the ask rule itself: same line position,
       # same neighbors, no stacked duplicate.
@@ -289,7 +298,7 @@ suite "sandbox ask prompt":
       tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
       tty.sendAskKey 'a'
       tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
-      check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
+      check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
       check policyLines(root) ==
         @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
       tty.expect "\u276f"
@@ -455,7 +464,7 @@ suite "sandbox ask prompt":
       tty.send ":sandbox off\n"
       tty.expectInHistory "sandbox: off  (this session runs unconfined)", 10_000
       runShellCmd(tty, "echo lifted > ../outside/lifted.txt")
-      check waitForFileContent(root / "outside" / "lifted.txt", "lifted\n")
+      check waitForFileContent(tty, root / "outside" / "lifted.txt", "lifted\n")
       tty.expect "\u276f"
 
       tty.send ":sandbox on\n"
@@ -496,7 +505,7 @@ suite "sandbox ask prompt":
         tty.expectInHistory "allow write access to ./vault/fenced.txt?", 30_000
         tty.sendAskKey 'f'
         tty.expectInHistory "allowed ./vault - retrying", 30_000
-        check waitForFileContent(root / "run" / "vault" / "fenced.txt", "granted\n")
+        check waitForFileContent(tty, root / "run" / "vault" / "fenced.txt", "granted\n")
         tty.expect "\u276f"
         echo "  PASS: f grant under the network wall"
       else:
@@ -519,8 +528,8 @@ suite "sandbox ask prompt":
 
     tty.sendAskKey 'f'
     tty.expectInHistory "allowed ./vault - retrying", 30_000
-    check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
-    check waitForSessionText(root,
+    check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
+    check waitForSessionText(tty, root,
       "[sandbox ask: user allowed ./vault; tool retried]")
     check policyLines(root) ==
       @["deny /", "allow ./", "allow ./vault", "deny ./locked"]
@@ -543,7 +552,7 @@ suite "sandbox ask prompt":
     tty.send "save it\n"
     tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
     tty.sendAskKey 'a'
-    check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
+    check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
     check policyLines(root) ==
       @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
     tty.expectInHistory "saved"
@@ -563,7 +572,7 @@ suite "sandbox ask prompt":
     tty.send "save it\n"
     tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
     tty.sendAskKey 'a'
-    check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
+    check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked",
         "allow ./vault/out.txt"]
@@ -592,7 +601,7 @@ suite "sandbox ask prompt":
     tty.expectInHistory "? read vault/ro.txt", 30_000
     tty.expectInHistory "allow read access to ./vault/ro.txt?", 30_000
     tty.sendAskKey 'a'
-    check waitForSessionText(root, "readable")
+    check waitForSessionText(tty, root, "readable")
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked",
         "allow ./vault/ro.txt"]
@@ -614,8 +623,8 @@ suite "sandbox ask prompt":
     tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
     tty.sendAskKey 'n'
     tty.expectInHistory "declined by user; not retried", 30_000
-    check waitForSessionText(root, "is denied by the policy")
-    check waitForSessionText(root,
+    check waitForSessionText(tty, root, "is denied by the policy")
+    check waitForSessionText(tty, root,
       "[sandbox ask: declined by user; not retried]")
     tty.drain(300)
     check not fileExists(root / "run" / "vault" / "out.txt")
@@ -640,8 +649,8 @@ suite "sandbox ask prompt":
 
     tty.sendAskKey 'f'
     tty.expectInHistory "allowed ./vault - retrying", 30_000
-    check waitForFileContent(root / "run" / "vault" / "ap.txt", "granted\n")
-    check waitForSessionText(root,
+    check waitForFileContent(tty, root / "run" / "vault" / "ap.txt", "granted\n")
+    check waitForSessionText(tty, root,
       "[sandbox ask: user allowed ./vault; tool retried]")
     tty.expectInHistory "saved"
     tty.expect "\u276f"
@@ -663,12 +672,12 @@ suite "sandbox ask prompt":
     tty.expectInHistory "allow write access to ./vault/ap_a.txt?", 30_000
     tty.sendAskKey 'n'
     tty.expectInHistory "declined by user; not retried", 10_000
-    check waitForFileContent(root / "run" / "open_b.txt", "yes\n")
+    check waitForFileContent(tty, root / "run" / "open_b.txt", "yes\n")
     tty.drain(300)
     check not fileExists(root / "run" / "vault" / "ap_a.txt")
-    check waitForSessionText(root, "vault/ap_a.txt")
-    check waitForSessionText(root, "is denied by the policy")
-    check waitForSessionText(root,
+    check waitForSessionText(tty, root, "vault/ap_a.txt")
+    check waitForSessionText(tty, root, "is denied by the policy")
+    check waitForSessionText(tty, root,
       "[sandbox ask: declined by user; not retried]")
     tty.expect "\u276f"
     echo "  PASS: apply_patch n denies only the ask root"
@@ -695,12 +704,12 @@ suite "sandbox ask prompt":
     tty.expectInHistory "allow write access to ./vault2/ap2.txt?", 30_000
     tty.sendAskKey 'n'
     tty.expectInHistory "declined by user; not retried", 30_000
-    check waitForFileContent(root / "run" / "vault" / "ap1.txt", "one\n")
+    check waitForFileContent(tty, root / "run" / "vault" / "ap1.txt", "one\n")
     tty.drain(300)
     check not fileExists(root / "run" / "vault2" / "ap2.txt")
-    check waitForSessionText(root,
+    check waitForSessionText(tty, root,
       "[sandbox ask: user allowed ./vault; tool retried]")
-    check waitForSessionText(root,
+    check waitForSessionText(tty, root,
       "[sandbox ask: declined by user; not retried]")
     tty.expect "\u276f"
     echo "  PASS: apply_patch two roots ask sequentially"

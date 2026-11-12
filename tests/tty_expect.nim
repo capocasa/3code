@@ -31,7 +31,6 @@ when defined(windows):
     SIZE_T* = uint
   const
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE* = 0x00020016'u32
-    PROC_THREAD_ATTRIBUTE_HANDLE_LIST* = 0x00020002'u32
     EXTENDED_STARTUPINFO_PRESENT* = 0x00080000'i32
     STILL_ACTIVE_DW* = 0x00000103'i32
   proc createPseudoConsole(size: COORD; hInput, hOutput: Handle;
@@ -55,6 +54,10 @@ when defined(windows):
     STARTUPINFOEX* = object
       startupInfo*: STARTUPINFO
       lpAttributeList*: pointer
+  const
+    PIPE_UNLIMITED_INSTANCES* = 255'i32
+  var gIpcSessionSeq = 0
+    ## Session ordinal for the per-session unique IPC pipe names.
 else:
   import posix
   import posix/termios
@@ -455,16 +458,30 @@ proc pollOnce*(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
     let deadline = epochTime() + max(0, waitMs).float / 1000.0
     var sawMaster = false
     var sawFrame = false
-    while epochTime() < deadline and not (sawMaster or sawFrame):
+    # At least one availability check even when waitMs=0: POSIX poll(0)
+    # reports already-ready fds and so must this path — waitForFileContent
+    # style pumps drain(0) exactly to service a pending frame ack.
+    while not (sawMaster or sawFrame):
       if pipeBytesAvail(s.masterFd) > 0:
         sawMaster = true
       elif s.frameEventFd.int != 0 and s.frameEventFd.int != -1 and
           pipeBytesAvail(s.frameEventFd) > 0:
         sawFrame = true
+      elif epochTime() >= deadline:
+        break
       else:
         sleep(1)
     if sawMaster:
       result = s.readPtyChunk(0) or result
+      # Same conhost-cycle quiet window as the frame-event branch below,
+      # for commits that carry no frame event (tool folds, transcript
+      # appends): merge a split child write into the chunk that flushes
+      # it. Bounded so a continuous byte stream cannot stretch a drain.
+      var masterQuiet = epochTime() + 0.040
+      let masterStop = epochTime() + 0.060
+      while epochTime() < masterQuiet and epochTime() < masterStop:
+        if s.readPtyChunk(5):
+          masterQuiet = epochTime() + 0.040
     if sawFrame:
       var buf: array[256, char]
       var got: int32 = 0
@@ -482,8 +499,17 @@ proc pollOnce*(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
           of 'i': s.turnIdle = true
           of 'b': s.turnIdle = false
           else: sawFrameByte = true
-        while s.readPtyChunk(5):
-          discard
+        # Let the pseudoconsole host finish relaying the burst before the
+        # frame commits: its render cycle splits a child write across
+        # deliveries, and a frame flushed between the halves records a
+        # broken row (half a card line, the rest delivered after a tick
+        # repaint moved the cursor) that no later frame can repair. One
+        # conhost render cycle of quiet is the divider; bytes arriving
+        # inside the window extend it.
+        var quietUntil = epochTime() + 0.040
+        while epochTime() < quietUntil:
+          if s.readPtyChunk(5):
+            quietUntil = epochTime() + 0.040
         if sawFrameByte:
           s.flushFrame(force = true)
         # Ack every received byte: the child blocks on one ack per emit,
@@ -677,27 +703,43 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
   ## xterm-256color when not provided. Pass an absolute `bin` path unless the
   ## supplied env intentionally includes PATH for execv callers.
   when defined(windows):
-    # Five inheritable anonymous IPC pipes (mirroring the POSIX pipe pairs):
-    #   framePipe        : child writes 'f' to signal a render boundary
-    #   ackPipe          : parent acks each frame event
-    #   tickerPipe       : parent drives one spinner frame
-    #   tickerAckPipe    : child acks a spinner frame
-    #   apiContinuePipe  : parent releases a blocked stub response
-    # The child-side handlers in src/ (emitTestFrameEvent and friends) read
-    # these ends by the handle values in the env vars below: the child end of
-    # each pipe is inherited through PROC_THREAD_ATTRIBUTE_HANDLE_LIST, and
-    # an inherited handle keeps its numeric value, so the env numbers are
-    # valid in the child exactly the way fds are on POSIX. Both sides block
+    # Five IPC pipes mirroring the POSIX pipe pairs, as NAMED pipes:
+    #   frame            : child writes 'f' to signal a render boundary
+    #   ack              : parent acks each frame event
+    #   tick             : parent drives one spinner frame
+    #   tickack          : child acks a spinner frame
+    #   apic             : parent releases a blocked stub response
+    # The child-side handlers in src/ (emitTestFrameEvent and friends)
+    # connect to these by the pipe NAMES in the env vars below. Anonymous
+    # pipes cannot bridge the spawn: bInheritHandles=TRUE kills a
+    # pseudoconsole child outright on Win11 26100 (exit 3, handle list or
+    # not - reproduced on beck), and FALSE inherits nothing, so there is no
+    # way to hand over anonymous ends. A named pipe server end stays in this
+    # process, the child opens \\.\pipe\... by name, and both sides block
     # on the handshake, pacing the child's renders the same way the POSIX
     # path does.
-    proc makePipe(readEnd, writeEnd: var Handle) =
-      # Inheritable: the child ends below are handed to the child through
-      # PROC_THREAD_ATTRIBUTE_HANDLE_LIST, and the list only honors handles
-      # marked inheritable (a non-inheritable handle in the list makes
-      # CreateProcess fail outright).
-      var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
-                                   bInheritHandle: 1)
-      doAssert createPipe(readEnd, writeEnd, sa, 0) != 0
+    inc gIpcSessionSeq
+    proc makeIpcPipe(name: string; childWrites: bool): Handle =
+      ## Server end held here: inbound (child writes) for child->parent
+      ## channels, outbound for parent->child channels. One server instance;
+      ## the child's CreateFile connects to the listening instance as soon
+      ## as it runs. Before that, PeekNamedPipe fails (PIPE_LISTENING) and
+      ## the harness's existing availability checks read that as no bytes.
+      let access = (if childWrites: PIPE_ACCESS_INBOUND
+                    else: PIPE_ACCESS_OUTBOUND)
+      # dwPipeMode 0 = byte-type/byte-read/wait, the pipe equivalent of the
+      # POSIX anonymous pipes the handshake was designed around.
+      result = createNamedPipe(newWideCString(name), access,
+          0'i32, PIPE_UNLIMITED_INSTANCES, 0, 0, 0, nil)
+      doAssert result != INVALID_HANDLE_VALUE,
+        "CreateNamedPipe failed: " & $getLastError()
+    let pfx = "\\\\.\\pipe\\threecode-tty-" & $getCurrentProcessId() & "-" &
+      $gIpcSessionSeq & "-"
+    let frameName = pfx & "frame"
+    let ackName = pfx & "ack"
+    let tickName = pfx & "tick"
+    let tickackName = pfx & "tickack"
+    let apicName = pfx & "apic"
 
     # Create the ConPTY pipes non-inheritable (bInheritHandle=0): the child is
     # spawned with bInheritHandles=FALSE, and CreatePseudoConsole duplicates
@@ -724,14 +766,11 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     discard closeHandle(pttyInRead)
     discard closeHandle(pttyOutWrite)
 
-    var frameRead, frameWrite, ackRead, ackWrite: Handle
-    var tickerRead, tickerWrite, tickerAckRead, tickerAckWrite: Handle
-    var apiRead, apiWrite: Handle
-    makePipe(frameRead, frameWrite)
-    makePipe(ackRead, ackWrite)
-    makePipe(tickerRead, tickerWrite)
-    makePipe(tickerAckRead, tickerAckWrite)
-    makePipe(apiRead, apiWrite)
+    let frameEventFd = makeIpcPipe(frameName, childWrites = true)
+    let frameAckFd = makeIpcPipe(ackName, childWrites = false)
+    let tickerCommandFd = makeIpcPipe(tickName, childWrites = false)
+    let tickerAckFd = makeIpcPipe(tickackName, childWrites = true)
+    let apiContinueFd = makeIpcPipe(apicName, childWrites = false)
 
     result = TtySession(
       masterFd: pttyOutRead,
@@ -743,11 +782,11 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       cursorShown: true,
       turnIdle: true,
       exitCode: -1,
-      frameEventFd: frameRead,
-      frameAckFd: ackWrite,
-      tickerCommandFd: tickerWrite,
-      tickerAckFd: tickerAckRead,
-      apiContinueFd: apiWrite)
+      frameEventFd: frameEventFd,
+      frameAckFd: frameAckFd,
+      tickerCommandFd: tickerCommandFd,
+      tickerAckFd: tickerAckFd,
+      apiContinueFd: apiContinueFd)
 
     # The ConPTY is created at cols x rows above, but the grid still has
     # newGrid()'s default size; without this the model parses 120-col
@@ -759,23 +798,12 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # Build the STARTUPINFOEX with a PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
     # attribute so CreateProcess attaches the child to this pseudoconsole.
     var attrSize: SIZE_T = 0
-    discard initializeProcThreadAttributeList(nil, 2, 0, addr attrSize)
+    discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
     var attrList = cast[pointer](alloc0(attrSize))
-    doAssert initializeProcThreadAttributeList(attrList, 2, 0, addr attrSize) != 0
+    doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
     doAssert updateProcThreadAttribute(attrList, 0,
         PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, cast[pointer](hpc.Handle),
         sizeof(HPCON).SIZE_T, nil, nil) != 0
-    # Hand the child exactly the five IPC pipe ends (and nothing else):
-    # without a handle list, bInheritHandles=TRUE inherits every inheritable
-    # handle in this process, which conflicts with the pseudoconsole
-    # attachment and fails child init with STATUS_DLL_INIT_FAILED
-    # (0xC0000142) - even cmd.exe. The list itself is only honored when
-    # bInheritHandles=TRUE; with FALSE nothing is inherited at all.
-    var inheritHandles = [frameWrite, ackRead, tickerRead, tickerAckWrite,
-                          apiRead]
-    doAssert updateProcThreadAttribute(attrList, 0,
-        PROC_THREAD_ATTRIBUTE_HANDLE_LIST, addr inheritHandles[0],
-        sizeof(inheritHandles).SIZE_T, nil, nil) != 0
 
     # STARTF_USESTDHANDLES with all three std handles set to INVALID_HANDLE_VALUE
     # is REQUIRED for a ConPTY child. Without it the child inherits the parent's
@@ -836,11 +864,13 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
           break
       if not hasPath and getEnv("PATH").len > 0:
         envBlock.add "PATH=" & getEnv("PATH") & "\0"
-      envBlock.add "THREECODE_TEST_FRAME_FD=" & $frameWrite.int & "\0"
-      envBlock.add "THREECODE_TEST_FRAME_ACK_FD=" & $ackRead.int & "\0"
-      envBlock.add "THREECODE_TEST_TICKER_FD=" & $tickerRead.int & "\0"
-      envBlock.add "THREECODE_TEST_TICKER_ACK_FD=" & $tickerAckWrite.int & "\0"
-      envBlock.add "THREECODE_TEST_API_CONTINUE_FD=" & $apiRead.int & "\0\0"
+      # Windows IPC values are pipe NAMES (the child connects by name); the
+      # POSIX fork path puts fd numbers in the same vars.
+      envBlock.add "THREECODE_TEST_FRAME_FD=" & frameName & "\0"
+      envBlock.add "THREECODE_TEST_FRAME_ACK_FD=" & ackName & "\0"
+      envBlock.add "THREECODE_TEST_TICKER_FD=" & tickName & "\0"
+      envBlock.add "THREECODE_TEST_TICKER_ACK_FD=" & tickackName & "\0"
+      envBlock.add "THREECODE_TEST_API_CONTINUE_FD=" & apicName & "\0\0"
 
     var pi: PROCESS_INFORMATION
     # Pass lpApplicationName=NULL and put the full program path as the first
@@ -875,13 +905,13 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     if cwd.len > 0:
       cwdW = newWideCString(cwd)
       cwdPtr = cwdW
-    # bInheritHandles=TRUE + the handle list above: the child inherits
-    # exactly the five IPC ends, so the env handle numbers are live and the
-    # child-side IPC hooks (emitTestFrameEvent etc.) pace its renders. Plain
-    # TRUE without a list is what fails child init with
-    # STATUS_DLL_INIT_FAILED (0xC0000142) - the list keeps everything else
-    # (conhost pipes, library handles) out of the child.
-    let ok = createProcessW(appW, cmdW, nil, nil, 1,
+    # bInheritHandles MUST be FALSE for a ConPTY child. The canonical
+    # CreatePseudoConsole sample passes FALSE; on Win11 26100 TRUE kills the
+    # child outright (exit 3 right after terminal init, handle list or not -
+    # probed on beck; the console-handle import that comes with inheritance
+    # conflicts with the pseudoconsole attachment). The IPC channel crosses
+    # the spawn through named pipe names in the env instead.
+    let ok = createProcessW(appW, cmdW, nil, nil, 0,
         createFlags, envPtr, cwdPtr, si.startupInfo, pi)
     deleteProcThreadAttributeList(attrList)
     dealloc(attrList)
@@ -894,11 +924,10 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # on the master returns EOF when the child exits (no lingering write
     # end). The PTY-slave ends (pttyInRead/pttyOutWrite) were already closed
     # right after CreatePseudoConsole above.
-    discard closeHandle(frameWrite)
-    discard closeHandle(ackRead)
-    discard closeHandle(tickerRead)
-    discard closeHandle(tickerAckWrite)
-    discard closeHandle(apiRead)
+    # The IPC pipe ends in the TtySession record are this process's server
+    # ends (not child duplicates like the anonymous-pipe layout had) - they
+    # stay open for the whole session and are closed by closeTtySession,
+    # like the POSIX fds.
     result.rememberFrame()
   else:
     var masterFd, slaveFd: cint
