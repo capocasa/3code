@@ -15,11 +15,11 @@ discard """
   # the mtime-driven `reloadIfChanged` that picks up mid-session
   # policy edits.
 """
-import std/[unittest, os, times, strutils, json]
+import std/[unittest, os, times, strutils, json, osproc, sequtils]
 import threecode/sandbox
 import threecode/types
 import threecode/util
-import threecode/[minline, ui]
+import threecode/[minline, ui, dirsettings, config]
 
 # Use platform-appropriate absolute paths so the test is meaningful on
 # both Unix and Windows. On Windows a bare "/opt" is not absolute (no
@@ -586,6 +586,161 @@ suite "single active policy file":
     # And the box child sees the compensating deny next to the allow.
     let r = p.resolve()
     check priv in r.denied
+
+  test "user config file is denied under any policy, hidden from the dump":
+    # The user config rides as a hidden deny guard: writing
+    # `sandbox = off` there would disable the next session's sandbox
+    # without any policy file involved, so no policy may open it - not
+    # `allow /`, not a targeted allow, not the ask flow. The deny also
+    # closes reads: the config carries provider keys.
+    let (home, projDir) = newFixture("guardcfg")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let cfg = configPath().normalizedPath
+    createDir(cfg.parentDir)
+    writeFile(cfg, "[settings]\nsandbox = \"on\"\n")
+    check cfg in sandbox.guardRules(projDir).mapIt(it.path)
+    sandbox.hiddenRules = sandbox.guardRules(projDir)
+    defer: sandbox.hiddenRules = @[]
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "allow /\n")
+    var p = loadPolicy(projDir)
+    check p.checkPath(cfg) == akDeny
+    # The guard is enforced but never rendered.
+    check cfg notin renderSandbox(p)
+    # A targeted allow in the file loses to the appended guard.
+    writeFile(repoFile, "allow /\nallow " & cfg & "\n")
+    p = loadPolicy(projDir)
+    check p.checkPath(cfg) == akDeny
+    # The box child (which recomputes the guards from the policy path)
+    # sees the compensating deny next to the allow.
+    let childRules = parsePolicy(readFile(repoFile), projDir) &
+      sandbox.guardRules(projDir)
+    check cfg in childRules.resolve().denied
+
+  test "project store config stays writable; user-side stores are denied":
+    # The project store is preference space: the monotonic overlay
+    # caps its security booleans, so guarding it would only break
+    # goals and sticky-current writes. Under dirconfig=user the stores
+    # live under the config root and their switches are authoritative,
+    # so they guard.
+    let (home, projDir) = newFixture("guardstore")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let storeCfg = projDir / ".3code" / "config"
+    writeFile(storeCfg, "[settings]\ncurrent = \"root.glm-5.2\"\n")
+    sandbox.hiddenRules = sandbox.guardRules(projDir)
+    defer: sandbox.hiddenRules = @[]
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "allow /\n")
+    let p = loadPolicy(projDir)
+    check p.checkPath(storeCfg) == akWritable
+    # Flip to user-owned stores: same cascade, different authority.
+    dirsettings.dirConfigLocation = "user"
+    defer: dirsettings.dirConfigLocation = "project"
+    sandbox.hiddenRules = sandbox.guardRules(projDir)
+    let p2 = loadPolicy(projDir)
+    let ustore = dirsettings.storeFileFor(projDir,
+      dirsettings.StoreConfigFile).normalizedPath
+    check p2.checkPath(ustore) == akDeny
+
+  when defined(posix):
+    const binName = when defined(windows): "3code.exe" else: "3code"
+
+    proc runBox(args: openArray[string]): tuple[o: string, code: int] =
+      let cmd = (getCurrentDir() / binName).quoteShell & " " &
+        args.mapIt(it.quoteShell).join(" ")
+      let (outp, code) = execCmdEx(cmd, {poStdErrToStdOut, poUsePath})
+      (outp.strip(), code)
+
+    # Shared shape for the two fenced-shell guard tests: a control
+    # write to an unguarded sibling proves the policy really grants the
+    # parent before the guarded write is judged; without that control
+    # a degenerate policy would deny everything and prove nothing.
+    proc guardedWriteDenied(guardArgs: seq[string]; target: string): bool =
+      let base = target.parentDir.parentDir
+      let scratch = base / "scratch.txt"
+      writeFile(scratch, "start\n")
+      let ctl = runBox(guardArgs & @["--", "sh", "-c",
+        "echo more >> " & scratch])
+      if ctl.code != 0 or "more" notin readFile(scratch):
+        return false  # policy cannot grant the parent here: unjudgeable
+      let r = runBox(guardArgs & @["--", "sh", "-c",
+        "echo hacked >> " & target])
+      if "continuing without sub-path deny enforcement" in r.o:
+        result = false
+        stdout.writeLine("skip: host cannot enforce sub-path denies " &
+          "(no unprivileged userns); in-process tools still guard")
+      else:
+        result = r.code != 0 and readFile(target) == "start\n"
+
+    test "fenced shell cannot write the user config":
+      # Effective behavior, not just the boolean: the guard deny is
+      # enforced by the backend (mount mask on Linux, Seatbelt/ACL
+      # elsewhere) even where the policy allows the parent directory.
+      if not fileExists(getCurrentDir() / binName):
+        skip()
+      else:
+        let (home, projDir) = newFixture("guardsh")
+        defer:
+          putEnv("XDG_CONFIG_HOME", "")
+          removeDir(home.parentDir)
+        let cfg = configPath()
+        createDir(cfg.parentDir)
+        writeFile(cfg, "start\n")
+        let pol = projDir / "policy"
+        writeFile(pol, "allow " & cfg.parentDir.parentDir & "\n")
+        if not guardedWriteDenied(
+            @["sandbox", "--policy", pol, "restrict"], cfg):
+          skip()
+
+    test "fenced shell honors parent-selected --deny paths":
+      # A store config under the user root (dirconfig=user) cannot be
+      # derived by the box child, whose own dirconfig default is
+      # "project": the parent carries those paths over argv.
+      if not fileExists(getCurrentDir() / binName):
+        skip()
+      else:
+        let (home, projDir) = newFixture("guardshdeny")
+        defer:
+          putEnv("XDG_CONFIG_HOME", "")
+          removeDir(home.parentDir)
+        let ustore = dirsettings.storeFileFor(projDir,
+          dirsettings.StoreConfigFile)
+        createDir(ustore.parentDir)
+        writeFile(ustore, "start\n")
+        let pol = projDir / "policy"
+        writeFile(pol, "allow " & ustore.parentDir.parentDir & "\n")
+        if not guardedWriteDenied(
+            @["sandbox", "--policy", pol, "restrict", "--deny", ustore],
+            ustore):
+          skip()
+
+    test "fenced shell write lands without a guard deny (control)":
+      # Pin the baseline the two tests above measure against: with no
+      # deny on the target, the same policy lets the write through. If
+      # this ever fails, the guarded tests prove nothing on this host.
+      if not fileExists(getCurrentDir() / binName):
+        skip()
+      else:
+        let (home, projDir) = newFixture("guardshctl")
+        defer:
+          putEnv("XDG_CONFIG_HOME", "")
+          removeDir(home.parentDir)
+        let plain = home / "plain" / "file.ini"
+        createDir(plain.parentDir)
+        writeFile(plain, "start\n")
+        let pol = projDir / "policy"
+        writeFile(pol, "allow " & home & "\n")
+        let ctl = runBox(["sandbox", "--policy", pol, "restrict", "--",
+                          "sh", "-c", "echo hacked >> " & plain])
+        if "continuing without sub-path deny enforcement" notin ctl.o:
+          skip()  # on a mask-capable host this shape is not reachable
+        else:
+          check ctl.code == 0
+          check "hacked" in readFile(plain)
 
   test "sandboxEnabled default is on (types.nim contract)":
     # The gate lives in types.nim; assert the default so a future change

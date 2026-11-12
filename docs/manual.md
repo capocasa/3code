@@ -1942,6 +1942,40 @@ To allow the full filesystem, replace the policy with `allow /`. Without host
 rules, the network is unrestricted too. This is yolo mode. 3code makes you ask
 for it explicitly and will not have the bright idea on its own.
 
+### Project settings cannot weaken the sandbox
+
+A project directory can carry its own settings store, `.3code/config`, and it
+cascades: your own directory wins, then each ancestor's, nearest first. That is
+handy for preferences — which provider a monorepo root uses, which model a
+subdirectory sticks to — but those files are controlled by whoever controls the
+repository, so they never get the last word on security. The three sandbox
+switches (`sandbox`, its `sandbox_enabled` alias, and `sandbox_wall_warn`) read
+from the cascade with a one-way rule: a project store may turn a setting **on**
+(it can tighten a sandbox you disabled globally for that tree), but a request
+to turn an enabled sandbox off — or to suppress the Windows wall warning — is
+ignored, whichever directory level writes the line, and a missing or malformed
+store file changes nothing. Non-security preferences keep normal nearest-wins
+behavior.
+
+When you want per-directory sandbox choices that the project cannot override,
+say where the stores live: set `dirconfig = "user"` in your config and each
+directory's store moves under `~/.config/3code/dirs/`. Stores there are yours,
+so their switches are authoritative — `sandbox = off` in one directory's store
+disables the sandbox for that directory only. The user-owned alternatives,
+all of which work exactly as written:
+
+- globally: `sandbox = off` in `[settings]` of `~/.config/3code/config`
+  (`:sandbox off` writes this), or the one-shot `--no-sandbox` flag;
+- per directory: `dirconfig = "user"` plus `sandbox = off` in that
+  directory's store under the config root.
+
+Your own files are also the ones the model must not reach for: the user config
+and, under `dirconfig = "user"`, the store configs are denied to the tools and
+the fenced shell exactly like the policy files — a model that could write
+`sandbox = off` into your config would otherwise disarm the next session
+without any policy file involved. The deny closes reads too, since the config
+carries provider keys.
+
 ### Policy file protection
 
 A policy is not much use if the model can edit it. The file tools therefore
@@ -1949,10 +1983,13 @@ cannot change `.sandbox` or `~/.config/3code/sandbox`. After loading the policy,
 3code adds hidden read-only guards for both files. They do not appear in
 `:sandbox show`, and later rules cannot override them.
 
-macOS and Windows enforce these guards for Bash and in-process tools. Landlock
-cannot subtract a read-only file from an already writable root. On Linux, the
-in-process tools still enforce the guard, but a Bash command under `allow /`
-can write the policy file. Avoid `allow /` if policy-file protection matters.
+macOS and Windows enforce these guards for Bash and in-process tools. On Linux
+the Bash side needs unprivileged user namespaces: a bind-mask over the guarded
+file is what makes a deny bite under an already writable root. Where that is
+unavailable (namespaces disabled by sysctl or seccomp), the in-process tools
+still enforce the guard, but a Bash command under a policy that allows the
+file's parent can write it. Avoid handing out that parent if policy-file
+protection matters; the same applies to the config deny described above.
 
 The same mechanism carries one hidden deny: the private-mode transcript
 directory (see [Private transcripts](#private-transcripts)). No policy rule

@@ -187,9 +187,9 @@ Keys under `[settings]`:
 | `current` | `PROVIDER[.MODEL]` | the provider (and optional model) used at startup; `-m` overrides it, `:provider`/`:model` write it back |
 | `notify` | `on`/`off` (default on) | desktop notification when a turn ends; off on Termux |
 | `streaming` | `on`/`off` (default on) | SSE streaming; `off` uses plain request/response, the reliable fallback for providers with flaky SSE |
-| `sandbox` | `on`/`off` (default on) | filesystem sandbox enforcement; `off` also silences the Windows host-rules warning |
+| `sandbox` | `on`/`off` (default on) | filesystem sandbox enforcement; `off` also silences the Windows host-rules warning; `sandbox_enabled` spelling accepted. Project `.3code/config` stores may only set it on (see [project settings](manual.html#project-settings-cannot-weaken-the-sandbox)) |
 | `patient_retry` | `on`/`off` (default on) | long backoff for 429/5xx/network errors (see [patient retry](manual.html#patient-retry)); `patient-retry` spelling accepted |
-| `sandbox_wall_warn` | `on`/`off` (default on) | the Windows warning shown when host rules exist but `3code setup` has not run |
+| `sandbox_wall_warn` | `on`/`off` (default on) | the Windows warning shown when host rules exist but `3code setup` has not run; project stores may not suppress an enabled warning either |
 | `tone` | `auto`/`dark`/`light` (default auto) | color palette selection; `auto` detects the terminal background via OSC 11. The legacy key `mode` and value `bright` still work |
 | `bash_path` | full path | Windows only: force a specific bash; auto-detection order is `bash_path`, PortableGit, Git for Windows, MSYS2, legacy msys64 tree |
 | `bash` | `auto` or full path (default auto) | any OS: a full path overrides all detection; `auto` keeps the normal order |
@@ -201,6 +201,7 @@ Keys under `[settings]`:
 | `verifier` | `on`/`off` | enable/disable the selected verifier without clearing it; absent means on while a model is selected |
 | `allow-empty-prompt` | `on`/`off` (default on) | submitting an empty prompt continues the ongoing session: a turn runs on the messages as they stand, appending no user message; `allow_empty_prompt` spelling accepted |
 | `user_agent` | template (default `3code $version`) | User-Agent header sent on every model request. Variables: `$version` (the full build version, e.g. `0.9.2-main-a1b2c3d4a`), `$branch` (`-main`), `$commit` / `$hash` (`-a1b2c3d4`), `$stage` (`-unstaged` when the build's sources differed from HEAD; each empty when not applicable), `$os`, `$arch`, and `$$` for a literal `$`. Unknown `$names` pass through verbatim; `user-agent` spelling accepted |
+| `dirconfig` | `project` (default) / `user` | where per-directory settings stores live: `<dir>/.3code` in the directory itself, or `~/.config/3code/dirs/<dir>` under your config root (stores there are user-owned, so their sandbox switches are authoritative; see [project settings](manual.html#project-settings-cannot-weaken-the-sandbox)) |
 
 ### provider
 

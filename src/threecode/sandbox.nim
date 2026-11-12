@@ -44,6 +44,7 @@ when defined(posix):
   from std/posix import kill, Pid
 import sandwall
 import sandwall/wall as sandwallWall
+import config
 import defaults
 import types
 import util
@@ -549,6 +550,20 @@ proc mtimeOf(path: string): Time =
   try: getLastModificationTime(path)
   except OSError: fromUnix(0)
 
+proc authorityGuardPaths*(projectDir: string): seq[string] =
+  ## The user-owned files whose sandbox switches are authoritative for
+  ## this session: the user config, and — when the user config put the
+  ## stores under the config root (`dirconfig = "user"`) — the store
+  ## configs of the directory cascade. A project-local `.3code/config`
+  ## is deliberately absent: its security booleans are capped by the
+  ## monotonic overlay, and guarding the whole project store would
+  ## break legitimate goals and sticky-current writes. Paths are
+  ## guarded even when they do not exist yet, like the policy slots.
+  result = @[configPath()]
+  if dirsettings.dirConfigLocation == "user":
+    for d in dirsettings.ancestorsNearestFirst(projectDir):
+      result.add dirsettings.storeFileFor(d, dirsettings.StoreConfigFile)
+
 proc guardRules*(projectDir: string): seq[Rule] =
   ## Hidden read-only rules covering the policy file paths 3code can
   ## make active (the repo slot `<dir>/.3code/sandbox` — the write
@@ -558,6 +573,13 @@ proc guardRules*(projectDir: string): seq[Rule] =
   ## neither the in-process tools nor the sandboxed command can change
   ## the policy out from under 3code, no matter what the file says.
   ## Appended last after every load; paths that collapse guard once.
+  ##
+  ## The user-owned files that grant disablement (`authorityGuardPaths`)
+  ## ride as hidden denies: a model that could write `sandbox = off`
+  ## into the user config would disable the next session's sandbox
+  ## without any policy file involved. The deny also closes reads —
+  ## the config carries provider keys. The project store stays
+  ## writable (see above); the monotonic overlay is the boundary there.
   ##
   ## The private-mode transcript directory rides as a hidden deny for
   ## the same reason it is separate from `sessions/`: any ordinary
@@ -582,6 +604,8 @@ proc guardRules*(projectDir: string): seq[Rule] =
       (result.len < 3 or user != result[1].path):
     result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
                     path: user)
+  for p in authorityGuardPaths(projectDir):
+    result.add Rule(access: akDeny, kind: rkPath, hidden: true, path: p)
   result.add Rule(access: akDeny, kind: rkPath, hidden: true,
                   path: privateSessionDir())
 

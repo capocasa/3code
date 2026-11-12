@@ -132,9 +132,19 @@ proc cascadeConfigValue*(cwd, key: string): string =
       return t[key].strip
   ""
 
-proc applyStoreBooleans*(storeDir: string) =
+proc applyStoreBooleans*(storeDir: string; userOwned = false) =
   ## Apply one store's `sandbox` / `sandbox_wall_warn` switches to the
   ## process globals. Called nearest-last so nearer stores win.
+  ##
+  ## `userOwned` says the store was selected by the user config
+  ## (`dirconfig = "user"` puts the stores under the user config root);
+  ## `storeDirFor` alone returns a path, which proves nothing about who
+  ## controls it. A project-local store may tighten a security boolean
+  ## from off to on, but a request to weaken on to off is ignored: the
+  ## repository controls those files and must never be able to disable
+  ## an enabled sandbox or suppress its warnings. When both spellings
+  ## of the sandbox switch appear in one store, the canonical `sandbox`
+  ## wins and the alias only fills in.
   let t = readStoreSettings(storeDir)
   template boolean(key: string): Option[bool] =
     let v = t.getOrDefault(key, "").strip.toLowerAscii
@@ -142,13 +152,17 @@ proc applyStoreBooleans*(storeDir: string) =
     of "on", "true", "yes", "1": some(true)
     of "off", "false", "no", "0": some(false)
     else: none(bool)
+  var sb = none(bool)
   for key in ["sandbox", "sandbox_enabled"]:
     let b = boolean(key)
     if b.isSome:
-      sandboxEnabled = b.get
-      dirSandboxOverridden = true
+      sb = some(b.get)
+      break
+  if sb.isSome and (userOwned or sb.get or not sandboxEnabled):
+    sandboxEnabled = sb.get
+    dirSandboxOverridden = true
   let w = boolean("sandbox_wall_warn")
-  if w.isSome:
+  if w.isSome and (userOwned or w.get or not sandboxWallWarn):
     sandboxWallWarn = w.get
     dirWallWarnOverridden = true
 
@@ -157,16 +171,27 @@ proc applyDirConfig*(cwd: string) =
   ## store first so the nearest directory wins per key. Idempotent; runs
   ## at startup before the sandbox arms and again after the full config
   ## parse (which re-applies the user config's own switches).
+  ##
+  ## The overlay runs after every place the user config applies its own
+  ## switches (CLI early parse and full parse, library/RPC/ACP/headless
+  ## session init), so each session re-derives the security booleans
+  ## from the user config and no earlier session or store can leave
+  ## them weakened.
   dirSandboxOverridden = false
   dirWallWarnOverridden = false
   globalSandboxEnabled = sandboxEnabled
   globalWallWarn = sandboxWallWarn
+  # Provenance comes from the switch that selected the stores, not from
+  # sniffing the paths: "project" means the cascade reads
+  # `<dir>/.3code`, "user" means every store it reads lives under the
+  # user config root and may carry explicit security choices.
+  let userOwned = dirConfigLocation == "user"
   var existing: seq[string]
   for d in ancestorsNearestFirst(cwd):
     let s = storeDirFor(d)
     if dirExists(s): existing.add s
   for s in existing.reversed:
-    applyStoreBooleans(s)
+    applyStoreBooleans(s, userOwned)
 
 # ---------------------------------------------------------------------------
 # Sticky current provider
