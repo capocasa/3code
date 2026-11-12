@@ -88,6 +88,92 @@ when not defined(windows):
       check not fileExists(outDir / "VERSION")
       removeDir(tmp)
 
+suite "update: renamed destination":
+  ## `swapInstall` must replace the exact destination file, whatever its
+  ## name: a renamed install (`custom-code`, `/usr/local/bin/cc`) gets
+  ## the new bytes in place and no canonical `3code` sibling appears.
+  ## Sibling runtime libs still land beside the target; README/LICENSE/
+  ## VERSION stay skipped.
+  test "renamed target is replaced in place, no canonical sibling":
+    let src = getTempDir() / "3code-update-rename-src"
+    let dst = getTempDir() / "3code-update-rename-dst"
+    removeDir(src); removeDir(dst)
+    createDir(src); createDir(dst)
+    # fake bundle: canonical binary + sibling runtime lib + the three
+    # doc/metadata files
+    writeFile(src / "3code", "new-bin-bytes")
+    writeFile(src / "libruntime.so", "new-lib-bytes")
+    writeFile(src / "README.md", "readme")
+    writeFile(src / "LICENSE", "license")
+    writeFile(src / "VERSION", "9.9.9")
+    let target = dst / "custom-code"
+    writeFile(target, "old-bin-bytes")
+    check swapInstall(src, target)
+    check readFile(target) == "new-bin-bytes"
+    when not defined(windows):
+      check fpUserExec in getFilePermissions(target)
+    check not fileExists(dst / "3code")
+    check readFile(dst / "libruntime.so") == "new-lib-bytes"
+    check not fileExists(dst / "README.md")
+    check not fileExists(dst / "LICENSE")
+    check not fileExists(dst / "VERSION")
+    removeDir(src); removeDir(dst)
+
+  test "bundle missing the canonical binary fails before mutation":
+    let src = getTempDir() / "3code-update-nobin-src"
+    let dst = getTempDir() / "3code-update-nobin-dst"
+    removeDir(src); removeDir(dst)
+    createDir(src); createDir(dst)
+    writeFile(src / "libruntime.so", "new-lib-bytes")
+    writeFile(src / "README.md", "readme")
+    let target = dst / "custom-code"
+    writeFile(target, "old-bin-bytes")
+    check not swapInstall(src, target)
+    check readFile(target) == "old-bin-bytes"
+    check not fileExists(dst / "libruntime.so")
+    check not fileExists(dst / "README.md")
+    removeDir(src); removeDir(dst)
+
+  test "target colliding with a bundle member is rejected before mutation":
+    # directory iteration order must not decide the outcome: a bundle
+    # member named like the destination could overwrite the installed
+    # binary, so the combination is rejected up front.
+    let src = getTempDir() / "3code-update-collide-src"
+    let dst = getTempDir() / "3code-update-collide-dst"
+    removeDir(src); removeDir(dst)
+    createDir(src); createDir(dst)
+    writeFile(src / "3code", "new-bin-bytes")
+    writeFile(src / "custom-code", "member-bytes")
+    let target = dst / "custom-code"
+    writeFile(target, "old-bin-bytes")
+    check not swapInstall(src, target)
+    check readFile(target) == "old-bin-bytes"
+    check not fileExists(dst / "3code")
+    removeDir(src); removeDir(dst)
+
+when defined(windows):
+  suite "update: renamed .exe on windows":
+    test "stale backup path follows the renamed destination":
+      let src = getTempDir() / "3code-update-rename-src"
+      let dst = getTempDir() / "3code-update-rename-dst"
+      removeDir(src); removeDir(dst)
+      createDir(src); createDir(dst)
+      writeFile(src / "3code.exe", "new-bin-bytes")
+      writeFile(src / "libruntime.dll", "new-lib-bytes")
+      writeFile(src / "README.md", "readme")
+      let target = dst / "custom-code.exe"
+      writeFile(target, "old-bin-bytes")
+      check swapInstall(src, target)
+      check readFile(target) == "new-bin-bytes"
+      # the in-use exe moves to `<renamed>.old`, cleaned up at next
+      # launch by cleanupStaleBinaries — never under the canonical name
+      check readFile(target & ".old") == "old-bin-bytes"
+      check not fileExists(dst / "3code.exe")
+      check not fileExists(dst / "3code.exe.old")
+      check readFile(dst / "libruntime.dll") == "new-lib-bytes"
+      check not fileExists(dst / "README.md")
+      removeDir(src); removeDir(dst)
+
 suite "update: config gate":
   ## Exercise `autoUpdateEnabled` against a temp HOME so we don't
   ## clobber the developer's real config.
