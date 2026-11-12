@@ -45,6 +45,7 @@ type
     debug: bool
     s: AgentSession
     sessionId: string
+    initError: string   # why the frontend is sessionless ("": live session)
     gate: Lock          # one JSON-RPC record at a time across threads
     busy: Atomic[bool]  # a prompt turn is in flight
     worker: Thread[PromptJob]
@@ -96,14 +97,26 @@ proc notifyUpdate(fe: AcpFrontend; update: JsonNode) =
 proc openSession(fe: AcpFrontend; cwd, resumeId: string) =
   ## Swap the live session (saved and unlocked) for a fresh or resumed one.
   ## Raises `AgentError` (no provider, unknown session, locks held).
-  if fe.s != nil: fe.s.close()
+  ## One AgentSession per process means the old session must be fully
+  ## closed before the new init is attempted, so replacement goes through
+  ## an explicit sessionless gap: the old object and its identity are
+  ## dropped first, and on failure the frontend stays sessionless with
+  ## `initError` naming why. A later valid open recovers.
+  let old = fe.s
+  fe.s = nil
   fe.sessionId = ""
   var opts = AgentOptions(
     cwd: cwd,
     resumeId: resumeId,
     model: fe.model,
     debug: fe.debug)
-  fe.s = initAgentSession(opts)
+  try:
+    if old != nil: old.close()
+    fe.s = initAgentSession(opts)
+  except CatchableError as e:
+    fe.initError = e.msg
+    raise
+  fe.initError = ""
   fe.sessionId = sessionIdFromPath(fe.s.state.savePath)
 
 proc removeBlock(text, openTag, closeTag: string): string =
@@ -195,7 +208,12 @@ proc runPromptTurn(job: PromptJob) =
       stderr.writeLine "3code acp: " & ev.text
   try:
     discard fe.s.prompt(job.text)
-    fe.respond(job.reqId, %*{"stopReason": "end_turn"})
+    # Persistence failure is an error response, never a false end_turn.
+    if sessionSaveError.len > 0:
+      fe.respondErr(job.reqId, JrAppError,
+        "session save failed: " & sessionSaveError)
+    else:
+      fe.respond(job.reqId, %*{"stopReason": "end_turn"})
   except AgentError as e:
     if e.msg == InterruptedByUserMsg:
       fe.respond(job.reqId, %*{"stopReason": "cancelled"})
@@ -203,8 +221,11 @@ proc runPromptTurn(job: PromptJob) =
       fe.respondErr(job.reqId, JrAppError, e.msg)
   except CatchableError as e:
     fe.respondErr(job.reqId, JrAppError, e.msg)
-  fe.s.onEvent = nil
-  fe.busy.store(false)
+  finally:
+    # Exception-safe reset: busy clears only after the stream surface is
+    # detached, and never leaks on an unexpected raise above.
+    fe.s.onEvent = nil
+    fe.busy.store(false)
 
 proc acpPromptThread(job: PromptJob) {.thread.} =
   {.cast(gcsafe).}:
@@ -212,7 +233,11 @@ proc acpPromptThread(job: PromptJob) {.thread.} =
 
 proc handlePrompt(fe: AcpFrontend; id: JsonNode; params: JsonNode) =
   if fe.s == nil:
-    fe.respondErr(id, JrAppError, "no session: call session/new first")
+    fe.respondErr(id, JrAppError,
+      if fe.initError.len > 0:
+        "no session: " & fe.initError
+      else:
+        "no session: call session/new first")
     return
   if jget(params, "sessionId").getStr != fe.sessionId:
     fe.respondErr(id, JrAppError,
@@ -243,9 +268,14 @@ proc handlePrompt(fe: AcpFrontend; id: JsonNode; params: JsonNode) =
     fe.respondErr(id, JrAppError, "a prompt turn is already in progress")
     return
   if fe.workerStarted: joinThread(fe.worker)
+  try:
+    createThread(fe.worker, acpPromptThread,
+                 PromptJob(fe: fe, reqId: id, text: text))
+  except CatchableError as e:
+    fe.busy.store(false)
+    fe.respondErr(id, JrAppError, "cannot start turn thread: " & e.msg)
+    return
   fe.workerStarted = true
-  createThread(fe.worker, acpPromptThread,
-               PromptJob(fe: fe, reqId: id, text: text))
 
 # ---------- dispatch ----------
 

@@ -1167,9 +1167,16 @@ proc isInSessionDir(path: string): bool =
   ## deliberately left unindexed.
   pathUnderDir(path, sessionDir()) or isPrivateSessionPath(path)
 
+var sessionSaveError*: string
+  ## The last `saveSession` failure ("" = the last save succeeded or none
+  ## ran). saveSession reports to stderr for the interactive paths and
+  ## records the failure here so lifecycle callers (library `close`, the
+  ## RPC/ACP frontends) can surface it instead of reporting false success.
+
 proc saveSession*(session: Session, messages: JsonNode) =
   if session.savePath == "": return
   let firstSave = not hasSavedSession(session.savePath)
+  sessionSaveError = ""
   try:
     createDir(session.savePath.parentDir)
     writeFile(session.savePath, renderSession(session, messages))
@@ -1177,6 +1184,7 @@ proc saveSession*(session: Session, messages: JsonNode) =
       # chmod 0600 — the transcript holds anything pasted into a prompt.
       discard posix.chmod(session.savePath.cstring, 0o600)
   except CatchableError as e:
+    sessionSaveError = e.msg
     stderr.writeLine "3code: session save failed: " & e.msg
   # Index a brand-new session under its cwd so resume-latest finds it
   # without parsing. Skipped on re-saves (existing file → no duplicate line)

@@ -11,13 +11,19 @@ discard """
 ## variant runs the full suite. XDG roots redirect config/data into a
 ## per-test fixture so nothing touches the developer's real 3code state.
 
-import std/[json, os, strutils, unittest]
-import threecode/[api, library, types, util, sandbox, dirsettings]
+import std/[json, os, strutils, atomics, unittest]
+import threecode/[api, library, types, util, sandbox, dirsettings, session]
 
 const stubbed = defined(providerStub)
 
+# One startup snapshot: isolateEnv re-points TMPDIR per fixture, and
+# getTempDir reads it fresh on every call, so fixtures computed after the
+# first isolateEnv would nest inside the previous fixture's tmp dir until
+# the mangled dir-lock name blows past the filesystem limit.
+let baseTmp = getTempDir()
+
 proc newFixture(name: string): string =
-  result = getTempDir() / ("3code_libtest_" & name & "_" & $getCurrentProcessId())
+  result = baseTmp / ("3code_libtest_" & name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result)
   createDir(result / "xdg" / "3code")
@@ -352,3 +358,169 @@ models = "stub-model"
       expect AgentError:
         discard s2.prompt("")
       s2.close()
+
+    test "closed session refuses turns and commands; close is idempotent":
+      let root = newFixture("closed")
+      writeConfig(root)
+      isolateEnv(root)
+      # The second response exists so a pre-fix regression (a turn running
+      # against the closed session) completes instead of killing the test
+      # process on an exhausted stub queue.
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "before close"}, {"content": "after close"}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      check s.prompt("go") == "before close"
+      let msgCount = s.messages.len
+      s.close()
+      expect AgentError:
+        discard s.prompt("again")
+      expect AgentError:
+        discard s.promptAsync("again")
+      expect AgentError:
+        discard s.command(":tokens")
+      # The refusal happened before any model call: no user message, no
+      # reply appended.
+      check s.messages.len == msgCount
+      s.close()
+      s.close()
+
+    test "a second submission is refused while a turn runs":
+      let root = newFixture("busy")
+      writeConfig(root)
+      isolateEnv(root)
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "first", "preStreamDelayMs": 300},
+        {"content": "second"}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      var probed = false
+      s.onEvent = proc(ev: AgentEvent) =
+        # Fires on the turn's own thread mid-stream: the turn slot is held,
+        # and the lifecycle lock is not, so a nested admission attempt is
+        # safe and must be refused.
+        if ev.kind == aevDelta and not probed:
+          probed = true
+          expect AgentError:
+            discard s.prompt("mid-turn")
+          expect AgentError:
+            discard s.command(":tokens")
+      check s.prompt("go") == "first"
+      check probed
+      # The slot was released: the next turn admits normally.
+      check s.prompt("go") == "second"
+      s.close()
+
+    test "promptAsync reserves the slot against blocking and async calls":
+      let root = newFixture("asyncbusy")
+      writeConfig(root)
+      isolateEnv(root)
+      # Chunks with inter-chunk delays: the first delta fires while the
+      # turn still has ~500ms of stream left, so the main thread probes a
+      # genuinely in-flight turn, not its corpse.
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "slow still streaming",
+         "contentChunks": ["slow ", "still ", "streaming"],
+         "contentChunkDelayMs": 250},
+        {"content": "after async"}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      var deltaSeen: Atomic[bool]
+      s.onEvent = proc(ev: AgentEvent) =
+        if ev.kind == aevDelta: deltaSeen.store(true)
+      let t = s.promptAsync("slow")
+      var waited = 0
+      while not deltaSeen.load and waited < 5000:
+        sleep 20
+        inc waited, 20
+      check deltaSeen.load  # the worker's turn is genuinely in flight
+      expect AgentError:
+        discard s.prompt("blocking second")
+      expect AgentError:
+        discard s.promptAsync("async second")
+      joinTurn(t)
+      check s.prompt("after") == "after async"
+      s.close()
+
+    test "close during a running turn is refused and the session survives":
+      let root = newFixture("closebusy")
+      writeConfig(root)
+      isolateEnv(root)
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "still running", "preStreamDelayMs": 300}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      var probed = false
+      s.onEvent = proc(ev: AgentEvent) =
+        # The close refusal surfaces right here in the callback: no
+        # teardown mid-turn, no deadlock, and the turn carries on to its
+        # normal end.
+        if ev.kind == aevDelta and not probed:
+          probed = true
+          expect AgentError:
+            s.close()
+      check s.prompt("go") == "still running"
+      check probed
+      s.close()
+      # the refused close left a healthy session: reopen the directory
+      let s2 = initAgentSession(AgentOptions(cwd: root / "run",
+                                             experimental: true))
+      s2.close()
+
+    test "save failure on close reports failure and still releases ownership":
+      let root = newFixture("savefail")
+      writeConfig(root)
+      isolateEnv(root)
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "kept"}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let target = root / "run" / "blocked.3log"
+      createDir(target)  # a directory at the save path: every write fails
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            sessionPath: target,
+                                            experimental: true))
+      check s.prompt("go") == "kept"
+      var closeMsg = ""
+      try: s.close()
+      except AgentError as e: closeMsg = e.msg
+      check "save" in closeMsg
+      # The raise came after cleanup: the directory and session locks are
+      # gone, so the same directory opens again right away.
+      let s2 = initAgentSession(AgentOptions(cwd: root / "run",
+                                             experimental: true))
+      try: s2.close()
+      except AgentError: discard
+
+    test "failed init releases the locks it had acquired":
+      let root = newFixture("rollback")
+      writeConfig(root)
+      isolateEnv(root)
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "x"}
+      ]))
+      let target = root / "run" / "held.3log"
+      acquireSessionLock(target)
+      # The init takes the directory lock, then dies on the session lock:
+      # rollback must give the directory back.
+      expect AgentError:
+        discard initAgentSession(AgentOptions(cwd: root / "run",
+                                              sessionPath: target,
+                                              experimental: true))
+      releaseSessionLock(target)
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      s.close()

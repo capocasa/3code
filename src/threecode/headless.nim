@@ -131,7 +131,11 @@ proc headlessMain*(args: seq[string]): int =
   try:
     discard s.prompt(o.prompt)
   except AgentError:
-    s.close()
+    try: s.close() except AgentError: discard
     return 1
-  s.close()
+  try:
+    s.close()
+  except AgentError:
+    # Cleanup completed; the save failure is the exit signal.
+    return 1
   0
