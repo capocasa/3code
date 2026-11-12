@@ -288,9 +288,13 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
 proc close*(s: AgentSession) =
   ## Persist the session, release locks, and restore the terminal-facing
   ## hooks so the process can go back to CLI use (or init a new session).
+  ## The final save is best-effort but never silent: a persistence failure
+  ## is reported on stderr, and the lock releases below run regardless
+  ## (a persistence exception must never skip ownership release).
   if s.closed: return
   s.closed = true
-  try: saveSession(s.state, s.messages) except CatchableError: discard
+  try: saveSession(s.state, s.messages)
+  except SessionSaveError as e: reportSaveFailure(e)
   releaseActiveSessionLock()
   releaseActiveDirLock()
   termengine.headlessTranscriptHook = nil
@@ -310,7 +314,9 @@ proc prompt*(s: AgentSession; text: string): string =
   ## "keep going" (e.g. after a cancelled turn). Events stream to `onEvent`
   ## as they happen. Raises `AgentError` on turn failure, or on an empty
   ## prompt with no conversation to continue yet; the session stays valid
-  ## and saved.
+  ## and saved. Raises `SessionSaveError` when persisting the turn fails:
+  ## the in-memory conversation is intact, and the on-disk transcript
+  ## keeps its previous content unless the error reports `committed`.
   if text.strip.len == 0:
     if s.messages.len <= 1:
       raise newException(AgentError,

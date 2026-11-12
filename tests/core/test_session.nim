@@ -308,6 +308,53 @@ suite "session: save → index → resume-latest integration":
       let saved = sessionDir() / ("20250101T110000" & SessionExt)
       check getFilePermissions(saved) == {fpUserRead, fpUserWrite}
 
+suite "session: failed save preserves the prior transcript":
+  ## Finding 4: a transcript save that cannot complete must tell the
+  ## caller and leave the previous bytes byte-for-byte intact, instead
+  ## of truncating the live file into a stderr note and appending a
+  ## first-save index entry for a transcript that was never written.
+  var
+    xdgBefore: string
+    tmpRoot: string
+    seed = 0
+
+  setup:
+    xdgBefore = getEnv("XDG_DATA_HOME")
+    inc seed
+    tmpRoot = getTempDir() / ("3code-test-savefail-" & $epochTime().int64 & "-" & $seed)
+    putEnv("XDG_DATA_HOME", tmpRoot)
+    createDir(tmpRoot)
+
+  teardown:
+    if xdgBefore.len > 0: putEnv("XDG_DATA_HOME", xdgBefore)
+    else: putEnv("XDG_DATA_HOME", "")
+    removeDir(tmpRoot)
+
+  test "a save that cannot stage raises instead of discarding":
+    # Destination parent is a plain file, so no staging file can be
+    # created: the ordinary OS refuses the write (ENOTDIR), even as root.
+    let blocker = tmpRoot / "blocker"
+    writeFile(blocker, "x")
+    var s = Session(created: "t", profileName: "test", cwd: "/proj/B")
+    s.savePath = blocker / "sub" / "broken.3log"
+    var raised = false
+    try: saveSession(s, %*[{"role": "user", "content": "important"}])
+    except CatchableError: raised = true
+    check raised
+    check not fileExists(s.savePath)
+
+  test "a failed first save appends no resume-index entry":
+    # In-tree destination whose parent cannot be created: `sub` exists as
+    # a plain file inside the sessions directory, so staging is refused
+    # while the save target still counts as indexable.
+    createDir(sessionDir())
+    writeFile(sessionDir() / "sub", "x")
+    var s = Session(created: "t", profileName: "test", cwd: "/proj/B")
+    s.savePath = sessionDir() / "sub" / "broken.3log"
+    try: saveSession(s, %*[{"role": "user", "content": "important"}])
+    except CatchableError: discard
+    check indexIdsAt(sessionPathIndexDir(), "/proj/B").len == 0
+
 suite "session: private transcript directory":
   ## Private-mode sessions persist under `sessions-private/`, never in the
   ## plain directory, and the move into it is one-way. Same XDG isolation
@@ -1479,3 +1526,199 @@ suite "session: cross-process lock ownership":
     holder.close()
     releaseSessionLock(s1)
     releaseActiveDirLock()
+
+suite "session: atomic transcript save contract":
+  ## A save is staged in a unique sibling temp file (owner-only from
+  ## creation) and committed by the platform's atomic replace. A custom
+  ## `-s` symlink target resolves: the link survives, the file it names
+  ## is replaced. Same XDG isolation as the save-fail suite above.
+  var
+    xdgBefore: string
+    tmpRoot: string
+    seed = 0
+
+  setup:
+    xdgBefore = getEnv("XDG_DATA_HOME")
+    inc seed
+    tmpRoot = getTempDir() / ("3code-test-saveok-" & $epochTime().int64 & "-" & $seed)
+    putEnv("XDG_DATA_HOME", tmpRoot)
+    createDir(tmpRoot)
+
+  teardown:
+    if xdgBefore.len > 0: putEnv("XDG_DATA_HOME", xdgBefore)
+    else: putEnv("XDG_DATA_HOME", "")
+    removeDir(tmpRoot)
+
+  proc sessionAt(ts: string): Session =
+    result = Session(created: ts, profileName: "test", cwd: "/proj/S")
+    result.savePath = sessionDir() / (ts & SessionExt)
+
+  proc savedText(ts: string): string =
+    readFile(sessionDir() / (ts & SessionExt))
+
+  proc noStagingLeftovers() =
+    for kind, path in walkDir(sessionDir()):
+      check not path.endsWith(".tmp")
+
+  test "re-save replaces the transcript owner-only, with no staging leftovers":
+    let s = sessionAt("20250201T100000")
+    saveSession(s, %*[{"role": "user", "content": "one"}])
+    check "one" in savedText("20250201T100000")
+    saveSession(s, %*[{"role": "user", "content": "two"}])
+    let text = savedText("20250201T100000")
+    check "two" in text
+    check "one" notin text
+    when defined(posix):
+      check getFilePermissions(sessionDir() / ("20250201T100000" & SessionExt)) ==
+        {fpUserRead, fpUserWrite}
+    noStagingLeftovers()
+
+  when defined(posix):
+    test "a symlinked -s target resolves: the link survives, the file it names is replaced":
+      let dir = tmpRoot / "custom"
+      createDir(dir)
+      writeFile(dir / "real.3log", "session 20250201T100000\n\nuser\n  old\n")
+      createSymlink(dir / "real.3log", dir / "link.3log")
+      var s = Session(created: "t", profileName: "test")
+      s.savePath = dir / "link.3log"
+      saveSession(s, %*[{"role": "user", "content": "new"}])
+      check symlinkExists(dir / "link.3log")
+      let text = readFile(dir / "real.3log")
+      check "new" in text
+      check "old" notin text
+
+    test "a dangling -s symlink saves at its target, like writeFile did":
+      let dir = tmpRoot / "dangle"
+      createDir(dir)
+      createSymlink(dir / "real.3log", dir / "link.3log")
+      var s = Session(created: "t", profileName: "test")
+      s.savePath = dir / "link.3log"
+      saveSession(s, %*[{"role": "user", "content": "fresh"}])
+      check symlinkExists(dir / "link.3log")
+      check "fresh" in readFile(dir / "real.3log")
+
+when defined(sessionSaveTestHooks):
+  suite "session: save fault phases keep the prior transcript":
+    ## Hook builds only (`-d:sessionSaveTestHooks`): every phase before the
+    ## atomic replace keeps the previous transcript byte-for-byte intact,
+    ## reloadable, and leaves no staging file of the attempt behind. The
+    ## one post-commit phase reports `committed` with the new bytes in
+    ## place, never a promise that the old file survived.
+    var
+      xdgBefore: string
+      tmpRoot: string
+      seed = 0
+
+    setup:
+      xdgBefore = getEnv("XDG_DATA_HOME")
+      inc seed
+      tmpRoot = getTempDir() / ("3code-test-phase-" & $epochTime().int64 & "-" & $seed)
+      putEnv("XDG_DATA_HOME", tmpRoot)
+      createDir(tmpRoot)
+
+    teardown:
+      saveFaultHook = nil
+      if xdgBefore.len > 0: putEnv("XDG_DATA_HOME", xdgBefore)
+      else: putEnv("XDG_DATA_HOME", "")
+      removeDir(tmpRoot)
+
+    var faultPhase: SavePhase
+
+    proc failAt(phase: SavePhase) =
+      faultPhase = phase
+      saveFaultHook = proc(p: SavePhase): bool {.gcsafe.} = p == faultPhase
+
+    proc sessionAt(ts: string): Session =
+      result = Session(created: ts, profileName: "test", cwd: "/proj/F")
+      result.savePath = sessionDir() / (ts & SessionExt)
+
+    proc priorTranscript(ts: string): string =
+      # The prior transcript is created with the fault gate disarmed; the
+      # armed phase applies only to the save under test.
+      saveFaultHook = nil
+      saveSession(sessionAt(ts), %*[{"role": "user", "content": "prior"}])
+      readFile(sessionDir() / (ts & SessionExt))
+
+    proc failedSaveKeepsPrior(ts: string; phase: SavePhase) =
+      let s = sessionAt(ts)
+      let prior = priorTranscript(ts)
+      failAt(phase)
+      var err: ref SessionSaveError = nil
+      try: saveSession(s, %*[{"role": "user", "content": "new"}])
+      except SessionSaveError as e: err = e
+      check err != nil
+      check not err.committed
+      check err.path == s.savePath
+      check readFile(s.savePath) == prior
+      let (_, lm) = loadSessionFile(s.savePath)
+      check lm[1]{"content"}.getStr == "prior"
+      for kind, path in walkDir(sessionDir()):
+        check not path.endsWith(".tmp")
+
+    test "stage-create failure keeps the prior transcript":
+      failedSaveKeepsPrior("20250202T100000", spStage)
+
+    test "staging-write failure keeps the prior transcript":
+      failedSaveKeepsPrior("20250202T100001", spWrite)
+
+    test "staging-flush failure keeps the prior transcript":
+      failedSaveKeepsPrior("20250202T100002", spFlush)
+
+    test "staging-close failure keeps the prior transcript":
+      failedSaveKeepsPrior("20250202T100003", spClose)
+
+    test "replace failure keeps the prior transcript":
+      failedSaveKeepsPrior("20250202T100004", spCommit)
+
+    test "a failed first save leaves no index entry and no staging file":
+      failAt(spStage)
+      let s = sessionAt("20250202T100005")
+      var raised = false
+      try: saveSession(s, %*[{"role": "user", "content": "new"}])
+      except SessionSaveError: raised = true
+      check raised
+      check indexIdsAt(sessionPathIndexDir(), "/proj/F").len == 0
+      for kind, path in walkDir(sessionDir()):
+        check not path.endsWith(".tmp")
+
+    test "a successful re-save repairs a lost index entry":
+      let s = sessionAt("20250202T100006")
+      saveSession(s, %*[{"role": "user", "content": "prior"}])
+      check "20250202T100006" in indexIdsAt(sessionPathIndexDir(), "/proj/F")
+      # A lost entry (failed index append, truncated index) is repaired by
+      # the next committed save: membership is re-checked at commit time.
+      writeFile(indexPathAt(sessionPathIndexDir(), "/proj/F"), "")
+      saveSession(s, %*[{"role": "user", "content": "prior"}])
+      check "20250202T100006" in indexIdsAt(sessionPathIndexDir(), "/proj/F")
+
+    test "post-commit directory-sync failure reports committed, new bytes visible":
+      let s = sessionAt("20250202T100007")
+      discard priorTranscript("20250202T100007")
+      failAt(spDirSync)
+      var err: ref SessionSaveError = nil
+      try: saveSession(s, %*[{"role": "user", "content": "new"}])
+      except SessionSaveError as e: err = e
+      check err != nil
+      check err.committed
+      check "new" in readFile(s.savePath)
+      check "prior" notin readFile(s.savePath)
+
+    test "a failed private save leaves no plain-dir or staging traces":
+      let savedMode = privateMode
+      privateMode = true
+      defer: privateMode = savedMode
+      var s = sessionAt("20250202T100008")
+      s.savePath = privateSessionDir() / ("20250202T100008" & SessionExt)
+      check isPrivateSessionPath(s.savePath)
+      saveFaultHook = nil
+      saveSession(s, %*[{"role": "user", "content": "prior"}])
+      let prior = readFile(s.savePath)
+      failAt(spCommit)
+      var raised = false
+      try: saveSession(s, %*[{"role": "user", "content": "new"}])
+      except SessionSaveError: raised = true
+      check raised
+      check readFile(s.savePath) == prior
+      check listSessionPathsForCwd("/proj/F").len == 1   # private dir, indexed
+      for kind, path in walkDir(privateSessionDir()):
+        check not path.endsWith(".tmp")

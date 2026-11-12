@@ -2619,12 +2619,18 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           resp "this session has no name; name it with :rename <name>"
       elif arg.strip.toLowerAscii == "off":
         session.name = ""
-        saveSession(session, messages)
-        resp "session name cleared"
+        try:
+          saveSession(session, messages)
+          resp "session name cleared"
+        except SessionSaveError as e:
+          resp "name cleared in memory, but saving failed: " & e.msg
       else:
         session.name = arg.strip
-        saveSession(session, messages)
-        resp "session named: " & session.name
+        try:
+          saveSession(session, messages)
+          resp "session named: " & session.name
+        except SessionSaveError as e:
+          resp "session named in memory, but saving failed: " & e.msg
     of ":sessions":
       # Directory-scoped by default, like `-l`; `:sessions all` widens to
       # every directory and shows each session's cwd, like `-la`.
@@ -2733,10 +2739,14 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           ok = false
           resp "failed or not worth it"
         else:
-          resp &"collapsed {n} message" &
-            (if n == 1: "" else: "s") &
-            " into a synthetic recap"
-          saveSession(session, messages)
+          try:
+            saveSession(session, messages)
+            resp &"collapsed {n} message" &
+              (if n == 1: "" else: "s") &
+              " into a synthetic recap"
+          except SessionSaveError as e:
+            ok = false
+            resp "collapsed in memory, but saving failed: " & e.msg
     of ":btw":
       # Side question about the conversation: one meta-call over the live
       # history, answer shown here. Neither the question nor the answer

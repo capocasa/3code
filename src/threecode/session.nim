@@ -218,17 +218,21 @@ proc sessionPathIndexDir*(): string =
 func indexPathAt*(indexDir, cwd: string): string =
   indexDir / mangleCwd(cwd)
 
-proc appendIndexAt*(indexDir, cwd, id: string) =
-  ## Append `id` to the cwd's index file. Silent on failure: a missing index
-  ## entry only means the session won't show in resume-latest, never a crash.
-  if indexDir == "" or id == "": return
+proc appendIndexAt*(indexDir, cwd, id: string): bool {.discardable.} =
+  ## Append `id` to the cwd's index file. Returns false when the index
+  ## could not be updated - a missing entry only means the session won't
+  ## show in resume-latest, never a crash. Transcript saves treat false
+  ## as saved-but-unindexed and retry on a later save (membership is
+  ## re-checked at commit time).
+  if indexDir == "" or id == "": return false
   let path = indexPathAt(indexDir, cwd)
   try:
     createDir(path.parentDir)
     let f = open(path, fmAppend)
     f.writeLine(id)
     defer: f.close()
-  except CatchableError: discard
+  except CatchableError: return false
+  true
 
 proc indexIdsAt*(indexDir, cwd: string): seq[string] =
   ## Session ids for `cwd`, latest-first. Reads the single small index file
@@ -241,7 +245,7 @@ proc indexIdsAt*(indexDir, cwd: string): seq[string] =
     if id.len > 0: result.add id
   result.reverse()   # append order is oldest-first → flip to latest-first
 
-proc appendSessionIndex*(cwd, id: string) =
+proc appendSessionIndex*(cwd, id: string): bool =
   appendIndexAt(sessionPathIndexDir(), cwd, id)
 
 # ---------------------------------------------------------------------------
@@ -1166,6 +1170,19 @@ proc emitTokens(s: var string, usage: JsonNode) =
   hdr.add " elapsed=" & $elapsed & "s"
   emitHeaderOnly s, hdr
 
+type SessionSaveError* = object of CatchableError
+  ## A transcript save failed. `path` names the save target; `committed`
+  ## locates the failure relative to the atomic replace:
+  ##
+  ## * `committed == false`: the new transcript never replaced the old
+  ##   one - the previous bytes at `path` are intact and reloadable, and
+  ##   no staging file of the attempt is left behind.
+  ## * `committed == true`: the new transcript is already in place at
+  ##   `path`; only post-commit synchronization failed, so durability is
+  ##   unconfirmed and the previous bytes are NOT preserved.
+  path*: string
+  committed*: bool
+
 proc renderSession*(session: Session, messages: JsonNode): string =
   var s = ""
   var hdr = "session"
@@ -1244,8 +1261,16 @@ proc renderSession*(session: Session, messages: JsonNode): string =
               writeFile(p, r.data)
             emitHeaderOnly s, &"image path={p} sha1={sha} fmt={r.fmt} " &
               &"size={r.w}x{r.h}"
-          except CatchableError:
-            discard
+          except CatchableError as e:
+            # Fail the whole save rather than commit a transcript whose
+            # resumed form would silently drop the image: saveSession
+            # renders before touching the destination, so nothing has
+            # been replaced yet.
+            var se = newException(SessionSaveError,
+              "transcript save failed (nothing written): image " & p &
+              ": " & e.msg)
+            se.path = p
+            raise se
       else:
         let raw = m{"content"}.getStr("")
         let (ctx, notes, body) = splitPreamble(raw)
@@ -1300,6 +1325,7 @@ proc renderSession*(session: Session, messages: JsonNode): string =
 
 # ---------- save / load ----------
 
+
 proc isInSessionDir(path: string): bool =
   ## True when `path` lives under a managed sessions directory (the plain
   ## one or the private one), i.e. when it should be (and can be) indexed
@@ -1307,23 +1333,176 @@ proc isInSessionDir(path: string): bool =
   ## deliberately left unindexed.
   pathUnderDir(path, sessionDir()) or isPrivateSessionPath(path)
 
+when defined(sessionSaveTestHooks):
+  ## Test-only fault gate, compiled out of production builds entirely
+  ## (same pattern as `netWorkerTestHooks`): a test returns true for a
+  ## phase to make saveSession fail at exactly that point.
+  type SavePhase* = enum
+    spStage    # before the staging file is created
+    spWrite    # after the payload reached the staging file
+    spFlush    # after the staging flush
+    spClose    # after the staging data is synced, before close
+    spCommit   # staging complete, before the atomic replace
+    spDirSync  # after the replace committed, at the directory sync
+  var saveFaultHook*: proc(phase: SavePhase): bool {.gcsafe.}
+
+  proc saveFaultAt(phase: SavePhase): bool =
+    saveFaultHook != nil and saveFaultHook(phase)
+
+when defined(posix):
+  proc resolveSaveTarget(path: string): string =
+    ## Follow symlinks on a save target so the atomic replace lands on the
+    ## regular file the link names - where the old writeFile semantics
+    ## wrote through - and never on the link inode (a rename over a
+    ## symlink silently replaces the user's link with a plain file).
+    ## Dangling links resolve to the target they name; the replace then
+    ## creates it there. Bounded against link loops; an unreadable link
+    ## leaves the path as given (the failure then surfaces at staging).
+    result = path
+    for i in 0 ..< 16:
+      if not symlinkExists(result): return
+      let target =
+        try: expandSymlink(result)
+        except OSError: return
+      result = if target.isAbsolute: target
+               else: result.parentDir / target
+
+proc saveError(path, what: string; committed: bool) =
+  var e = newException(SessionSaveError, what & ": " & path)
+  e.path = path
+  e.committed = committed
+  raise e
+
+var saveFailureReported = false
+  ## One stderr line per broken save target: checkpoint saves report the
+  ## first failure and defer to the next save's outcome, instead of
+  ## flooding every turn step with the same error. Any committed save
+  ## resets it.
+
 proc saveSession*(session: Session, messages: JsonNode) =
+  ## Render the whole transcript, then replace the save target atomically:
+  ## the payload is staged in a unique sibling temporary file (owner-only
+  ## from creation on POSIX), fully written, flushed, synced and closed
+  ## before the platform's atomic replace commits it. A failed save can
+  ## never truncate or interleave with the live transcript.
+  ##
+  ## Raises `SessionSaveError` (`committed == false`) when anything fails
+  ## before the replace: the previous transcript stays byte-for-byte
+  ## intact. After a successful replace the save is committed; a
+  ## parent-directory sync failure on POSIX still raises, but with
+  ## `committed == true` - the new transcript may be visible even though
+  ## durability is unconfirmed, so the old bytes are not promised. On
+  ## Windows the commit is the MoveFileEx replace itself; the staging
+  ## buffers are flushed before it, and there is no directory-sync step.
+  ##
+  ## A custom `-s` target that is a symlink is resolved first: the save
+  ## lands on the linked file and the link itself survives.
+  ##
+  ## The resume index is appended only after a commit, and only when the
+  ## id is not already listed, so a retry repairs a lost entry. Index
+  ## trouble never fails the save (a committed transcript must not be
+  ## described as unwritten); it is reported on stderr.
   if session.savePath == "": return
-  let firstSave = not hasSavedSession(session.savePath)
+  let dest =
+    when defined(posix): resolveSaveTarget(session.savePath)
+    else: session.savePath
+  # Render first: a render failure (including image staging) leaves the
+  # destination untouched.
+  let payload = renderSession(session, messages)
+  var f: File = nil
+  var staging = ""
+  var committed = false
   try:
-    createDir(session.savePath.parentDir)
-    writeFile(session.savePath, renderSession(session, messages))
+    createDir(dest.parentDir)
+    when defined(sessionSaveTestHooks):
+      if saveFaultAt(spStage):
+        raise newException(IOError, "injected stage-create failure")
+    (f, staging) = createTempFile("3code-save", ".tmp", dest.parentDir)
+    f.write(payload)
+    when defined(sessionSaveTestHooks):
+      if saveFaultAt(spWrite):
+        raise newException(IOError, "injected staging-write failure")
+    flushFile(f)
+    when defined(sessionSaveTestHooks):
+      if saveFaultAt(spFlush):
+        raise newException(IOError, "injected staging-flush failure")
     when defined(posix):
-      # chmod 0600 — the transcript holds anything pasted into a prompt.
-      discard posix.chmod(session.savePath.cstring, 0o600)
+      # Buffered write errors surface here (e.g. ENOSPC): the commit
+      # point is still ahead, the old transcript is intact.
+      if posix.fsync(getFileHandle(f)) != 0:
+        raiseOSError(osLastError(), staging)
+    when defined(sessionSaveTestHooks):
+      if saveFaultAt(spClose):
+        raise newException(IOError, "injected staging-close failure")
+    when defined(windows):
+      # The commit is a rename the C runtime cannot check, so push the
+      # staging bytes to the disk here; failures stay pre-commit.
+      if winlean.flushFileBuffers(winlean.Handle(f.getOsFileHandle())) == 0:
+        raiseOSError(osLastError(), staging)
+    close(f)
+    f = nil
+    when defined(sessionSaveTestHooks):
+      if saveFaultAt(spCommit):
+        raise newException(IOError, "injected replace failure")
+    # The commit point: atomic same-directory replace (POSIX rename;
+    # Windows MoveFileEx with REPLACE_EXISTING), never delete-then-rename
+    # and never a copy fallback - both would destroy the preservation
+    # guarantee. The staging file is a sibling, so the rename is atomic.
+    moveFile(staging, dest)
+    committed = true
+    saveFailureReported = false
+    when defined(posix):
+      when defined(sessionSaveTestHooks):
+        if saveFaultAt(spDirSync):
+          raise newException(IOError, "injected directory-sync failure")
+      # Sync the parent directory so the committed name survives power
+      # loss. Failure here cannot undo the commit: report committed-true.
+      let dfd = posix.open(dest.parentDir.cstring, O_RDONLY)
+      if dfd >= 0:
+        try:
+          if posix.fsync(cint(dfd)) != 0:
+            raiseOSError(osLastError(), dest.parentDir)
+        finally:
+          discard posix.close(dfd)
   except CatchableError as e:
-    stderr.writeLine "3code: session save failed: " & e.msg
-  # Index a brand-new session under its cwd so resume-latest finds it
-  # without parsing. Skipped on re-saves (existing file → no duplicate line)
-  # and for out-of-tree `-s` targets. cwd is always set in normal use
-  # (`session.cwd = safeCwd()`), and an empty cwd is silently dropped.
-  if firstSave and session.cwd != "" and isInSessionDir(session.savePath):
-    appendSessionIndex(session.cwd, sessionIdFromPath(session.savePath))
+    if f != nil:
+      try: close(f) except CatchableError: discard
+    if staging.len > 0 and not committed:
+      # Only this attempt's staging file; never the destination. A
+      # cleanup failure must not mask the save failure.
+      try: removeFile(staging) except CatchableError: discard
+    saveError(session.savePath,
+      if committed: "transcript saved but durability is unconfirmed " &
+        "(previous transcript not preserved): " & e.msg
+      else: "transcript save failed (previous transcript preserved): " & e.msg,
+      committed)
+  # Committed. Index maintenance never fails the save.
+  if session.cwd != "" and isInSessionDir(session.savePath):
+    let id = sessionIdFromPath(session.savePath)
+    if id notin indexIdsAt(sessionPathIndexDir(), session.cwd):
+      if not appendSessionIndex(session.cwd, id):
+        stderr.writeLine "3code: session saved to " & session.savePath &
+          " but the resume index could not be updated"
+
+proc reportSaveFailure*(e: ref SessionSaveError) =
+  ## Report a save failure once per failing streak; the next committed
+  ## save clears the suppression (see `saveSessionReported`).
+  if not saveFailureReported:
+    saveFailureReported = true
+    stderr.writeLine "3code: " & e.msg
+
+proc saveSessionReported*(session: Session, messages: JsonNode) =
+  ## Checkpoint save for turn loops and prompt submission: like
+  ## `saveSession`, but a SessionSaveError is reported on stderr (once
+  ## per failing streak) instead of raised - the conversation stays in
+  ## memory and the next checkpoint retries. Not for shutdown paths,
+  ## which report and release ownership regardless, nor for blocking
+  ## library calls, which must expose the failure to their caller.
+  try:
+    saveSession(session, messages)
+  except SessionSaveError as e:
+    e.msg.add " - the transcript stays in memory and the next save retries"
+    reportSaveFailure(e)
 
 proc writeDraftAtomic(path, text: string) =
   ## Create parent dirs and atomically write `text` to `path` (temp + rename),

@@ -71,6 +71,26 @@ suite "session: image persistence":
     check msgs2.len == 3
     check msgs2[2]{"content"}.getStr == "it is tiny"
 
+  test "image staging failure fails the save; the prior transcript is preserved":
+    # A committed transcript must never reference image data that could
+    # not be written: a render-time image write failure fails the whole
+    # save before the destination is touched.
+    let (_, msgs) = imageMessages()
+    var sess = Session(savePath: root / "s.3log", cwd: root)
+    saveSession(sess, msgs)
+    let good = readFile(root / "s.3log")
+    check "image path=" in good
+    # Block the image store: the id-named `.img` entry becomes a plain
+    # file, so creating the image dir fails on the next save.
+    let imgDir = sessionImageDir(sess.savePath)
+    removeDir(imgDir)
+    writeFile(imgDir, "blocker")
+    var raised = false
+    try: saveSession(sess, msgs)
+    except SessionSaveError: raised = true
+    check raised
+    check readFile(root / "s.3log") == good
+
   test "missing or changed file folds a stale note":
     let (_, msgs) = imageMessages()
     var sess = Session(savePath: root / "s.3log", cwd: root)
