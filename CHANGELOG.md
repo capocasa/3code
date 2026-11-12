@@ -2,6 +2,16 @@ Changelog
 
 Unreleased
 
+- **A `:provider` bail-out commits like an ordinary command.**
+  Commands that never open a wizard field - `update`/`edit`/`rm` on an
+  unknown name, usage errors, the read-only `new` report - now echo the
+  typed line as scrollback, print their body under it, clear the editor
+  to a fresh `❯`, and land the line in history for recall with the
+  normal keys. Previously the modal path swallowed the echo, erased the
+  typed row to blank, and left the text live in the editor: one Enter
+  away from an accidental resubmit and unreachable from history. A
+  wizard that actually runs (or a cancel inside one) keeps its old
+  screen-owning behavior.
 - **`-r` checks for a running 3code before session availability.**
   Resuming in a directory another live 3code holds now reports the holder
   (pid, session id, lock file) even when the holder has not saved its
