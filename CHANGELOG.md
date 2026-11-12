@@ -27,6 +27,25 @@ Unreleased
   channels cross the ConPTY spawn as named pipes (handle inheritance
   kills a pseudoconsole child outright on Win11), so the child's
   renders are paced against the harness the way they are on POSIX.
+- **A grant now materializes the repo policy when only the default
+  text is active.** The sandbox ask gate fires from the built-in default
+  policy when no policy file exists anywhere, but a grant written in
+  answer to it looked for the file, found none, and treated the ask as
+  denied - the yes silently did nothing. The grant now writes the repo
+  policy file from the effective text first, so the appended allow has
+  a home the cascade reads.
+
+- **A `:provider` switch sticks per-directory and stops hoisting into
+  the config floor.** A directory's sticky `current` held a provider
+  that differed from the startup baseline without an in-session
+  switch, and the config merge read that difference as this instance's
+  own switch: every unrelated write (`:reasoning`, `:streaming`, ...)
+  hoisted the directory's pick into the user config, so the global
+  `current` kept moving to whichever directory wrote last. The merge
+  now keeps the disk's floor whenever it still resolves and repairs it
+  with the caller's value only when its provider is gone; the
+  `dirStickyCurrent` marker hack that tried to spot sticky boots is
+  gone with the failure mode.
 
 - **A 400-recovery collapse can no longer keep a tail too big to send.**
   The collapse pins tool results to their owning assistant, so one
