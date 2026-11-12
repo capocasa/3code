@@ -1980,12 +1980,11 @@ all of which work exactly as written:
 - per directory: `dirconfig = "user"` plus `sandbox = off` in that
   directory's store under the config root.
 
-Your own files are also the ones the model must not reach for: the user config
-and, under `dirconfig = "user"`, the store configs are denied to the tools and
-the fenced shell exactly like the policy files — a model that could write
-`sandbox = off` into your config would otherwise disarm the next session
-without any policy file involved. The deny closes reads too, since the config
-carries provider keys.
+Your own files are also the ones the model must not edit: the user config
+and, under `dirconfig = "user"`, the store configs the session reads are
+hidden read-only for the tools and the fenced shell, exactly like the policy
+files. A model that could write `sandbox = off` into your config would
+otherwise disarm the next session without any policy file involved.
 
 ### Policy file protection
 
@@ -1995,12 +1994,11 @@ cannot change `.sandbox` or `~/.config/3code/sandbox`. After loading the policy,
 `:sandbox show`, and later rules cannot override them.
 
 macOS and Windows enforce these guards for Bash and in-process tools. On Linux
-the Bash side needs unprivileged user namespaces: a bind-mask over the guarded
-file is what makes a deny bite under an already writable root. Where that is
-unavailable (namespaces disabled by sysctl or seccomp), the in-process tools
-still enforce the guard, but a Bash command under a policy that allows the
-file's parent can write it. Avoid handing out that parent if policy-file
-protection matters; the same applies to the config deny described above.
+the Bash side needs unprivileged user namespaces to enforce a read-only guard
+under an already writable root. Where that is unavailable (namespaces disabled
+by sysctl or seccomp), the in-process tools still enforce the guard, but a
+Bash command under a policy that allows the file's parent can write it. Avoid
+handing out that parent if policy-file protection matters.
 
 The same mechanism carries one hidden deny: the private-mode transcript
 directory (see [Private transcripts](#private-transcripts)). No policy rule
