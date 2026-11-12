@@ -1,0 +1,63 @@
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+[Suite] sandbox ask prompt
+/home/carlo/p/3code/tests/tty/test_sandbox_ask_prompt.nim(253) test_sandbox_ask_prompt
+/home/carlo/p/3code/tests/tty_expect.nim(1758) expectInHistory
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/std/assertions.nim(45) failedAssertImpl
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/std/assertions.nim(40) raiseAssert
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/system/fatal.nim(62) sysFatal
+
+    Unhandled exception: /home/carlo/p/3code/tests/tty_expect.nim(1758, 3) `false` expected history text not found: [sandbox ask: user allowed ./vault; command retried]
+ [AssertionDefect]
+  [FAILED] f allows the ask root and the retry lands
+  PASS: n declines
+  [OK] n keeps the denial, no retry
+  PASS: a flips an exact file ask in place
+  [OK] a flips an exact file ask rule in place and the retry lands
+  PASS: a appends a non-exact allow
+  [OK] a on a folder ask appends the file allow at the end
+  PASS: timeout declines
+  [OK] timeout keeps the denial
+  PASS: scripted denial shows the card
+  [OK] scripted denial shows the card
+  PASS: scripted Windows-shape denial shows the card
+  [OK] scripted Windows-shape denial shows the card
+  PASS: scripted a flips an exact file ask
+  [OK] scripted denial a flips an exact file ask rule in place
+  PASS: scripted a appends under a folder ask
+  [OK] scripted denial a on a folder ask appends at the end
+  PASS: mid-session off lifts, on re-arms
+  [OK] :sandbox off lifts the fence live, :sandbox on restores it
+/home/carlo/p/3code/tests/tty/test_sandbox_ask_prompt.nim(526) test_sandbox_ask_prompt
+/home/carlo/p/3code/tests/tty_expect.nim(1758) expectInHistory
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/std/assertions.nim(45) failedAssertImpl
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/std/assertions.nim(40) raiseAssert
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/system/fatal.nim(62) sysFatal
+
+    Unhandled exception: /home/carlo/p/3code/tests/tty_expect.nim(1758, 3) `false` expected history text not found: allow write access to ./vault/out.txt?
+ [AssertionDefect]
+  [FAILED] model write tool asks; f grants and the write lands
+  PASS: write tool a flips an exact file ask
+  [OK] model write tool a flips an exact file ask rule in place
+  PASS: write tool a appends under a folder ask
+  [OK] model write tool a under a folder ask appends at the end
+  PASS: read tool a grants the read
+  [OK] model read tool asks; a grants the read
+  PASS: write tool n declines
+  [OK] model write tool asks; n keeps the denial
+  PASS: apply_patch f grants and the add lands
+  [OK] model apply_patch asks; f grants and the add lands
+  PASS: apply_patch n denies only the ask root
+  [OK] model apply_patch mixed ops; n denies only the ask root
+/home/carlo/p/3code/tests/tty/test_sandbox_ask_prompt.nim(704) test_sandbox_ask_prompt
+/home/carlo/p/3code/tests/tty_expect.nim(1758) expectInHistory
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/std/assertions.nim(45) failedAssertImpl
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/std/assertions.nim(40) raiseAssert
+/home/carlo/.choosenim/toolchains/nim-2.4.0/lib/system/fatal.nim(62) sysFatal
+
+    Unhandled exception: /home/carlo/p/3code/tests/tty_expect.nim(1758, 3) `false` expected history text not found: allow write access to ./vault2/ap2.txt?
+ [AssertionDefect]
+  [FAILED] model apply_patch two ask roots ask sequentially
+  PASS: hard deny asks nothing
+  [OK] hard deny never asks
+SUITE-EXIT=1

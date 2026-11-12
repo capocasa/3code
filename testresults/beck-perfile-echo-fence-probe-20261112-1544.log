@@ -1,0 +1,69 @@
+** The server may need to be upgraded. See https://openssh.com/pq.html
+[2 q
+  ╭─╮
+   ─┤  3code v0.8.4-main-da12abd2[38;5;244m   the economical coding agent[0m
+  ╰─╯
+
+[36m[1m  provider  [0m[97mstub[0m
+[36m[1m  model     [0m[97mstub-model[0m
+
+  type a prompt. [38;5;244m:help for commands. :q or Ctrl-D to exit.[0m
+
+[2K❯ [?25l[1A[J
+❯ save it
+
+[2K[96m[1m  ○0%  ↑100  ↓1  0[0m
+[2K❯ [1A
+
+
+
+[4A[K
+€ [K
+[K
+[96m[1m  ○0%  ↑100  ↓1  0  0[0m[K
+❯ [38;5;252m[7m [27m[39m[K[2C[4A[J
+[38;5;252m$ [0m
+[38;5;244m  exit 0 (no output)[0m
+[96m  ○0%  ↑100  ↓1  0[0m
+[2K
+[2K[96m[1m  ○0%  ↑100  ↓1  0[0m
+[J❯ [38;5;252m[7m [27m[39m[2C
+[2A[J[2B
+
+[4A[K
+[97m● [0m[97md[0m[K
+[K
+[96m[1m⠋[0m[96m[1m ○0% 0[0m[K
+❯ [38;5;252m[7m [27m[39m[K[2C[4A
+[97m● [0m[97mdo[0m[K
+
+
+[2C[4A
+[97m● [0m[97mdon[0m[K
+
+
+[2C[4A
+[97m● [0m[97mdone[0m[K
+
+[96m[1m⠋[0m[96m[1m ○0% ↓1 0[0m[K
+[2C[4A
+
+
+[96m[1m⠋[0m[96m[1m ○0% 0[0m[K
+[2C[4A[J
+[97m[97m● [0m[97mdone[0m
+[2K
+[2K[96m[1m  ○0% ↓1[0m
+[J❯ [38;5;252m[7m [27m[39m[2C[2K[96m[1m  ○0%  ↑100  ↓1  0[0m
+[2K❯ [1A[2A[J[96m  ○0%  ↑100  ↓1  0[0m
+[2K
+[2K[96m[1m  ○0%[0m
+[J❯ [38;5;252m[7m [27m[39m[2C
+[?25h[0m[?2004l[0 qECHO-PROBE-EXIT=0
+--- FILE CHECK ---
+OUT-ABSENT
+--- POLICY ---
+deny /
+allow ./
+ask ./vault/out.txt
+deny ./locked

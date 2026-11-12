@@ -1,0 +1,5 @@
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+[Suite] provider pre-wizard bailout commits as an ordinary command
+  [OK] unknown provider error echoes, clears the editor, recalls from history
+BAILOUT-EXIT=0

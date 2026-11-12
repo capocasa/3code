@@ -1,0 +1,84 @@
+commit 654840178f18b4372d13c4d814a9ead750bd3876
+Author: Carlo Capocasa <carlo@capocasa.net>
+Date:   Thu Nov 12 10:25:40 2026 +0100
+
+    windows-user: materialize denied-but-missing targets so the deny ACE bites
+
+diff --git a/src/sandwall/rtoken.nim b/src/sandwall/rtoken.nim
+index f2b7bfe..5159dbd 100644
+--- a/src/sandwall/rtoken.nim
++++ b/src/sandwall/rtoken.nim
+@@ -147,6 +147,13 @@ when defined(windows):
+   var denyStamped: seq[string] = @[]
+     ## Deny paths stamped this run; rolled back after the child exits.
+ 
++  var denyPreCreated: seq[string] = @[]
++    ## Deny targets that did not exist when the run started and were
++    ## materialized (empty) so the DENY ACE has an object to stamp on.
++    ## endRun deletes them again when the run leaves them pristine, so
++    ## a denied creation leaves the filesystem exactly as it was; a
++    ## run that wrote through (a later allow) keeps its content.
++
+   var relayPipe: stdio.RelayPipe
+     ## The current run's stdout pipe for the CPLW child; closed by
+     ## endRun after the child exits.
+@@ -265,11 +272,24 @@ when defined(windows):
+     for d in denied:
+       let n = norm(d)
+       if n.len == 0: continue
+-      # A deny on a not-yet-existing path cannot be stamped; the write
+-      # to it would fail the parent-dir allow anyway when the parent is
+-      # not writable, and when the parent IS writable the child could
+-      # create it - accepted gap, same as the token backend had.
+-      if not dirExists(n) and not fileExists(n): continue
++      # A deny on a not-yet-existing path cannot be stamped - but under
++      # an allowed root the child WOULD create it through the parent's
++      # inheritable ALLOW, and the deny would never bite (per-file ask
++      # rules were shadowed that way: `echo x > vault/out.txt` under
++      # allow ./ + ask ./vault/out.txt exited 0 silently). Materialize
++      # the target first - a file when it carries an extension, a
++      # directory otherwise - stamp the DENY on it, and roll the empty
++      # artifact back in endRun. A missing parent keeps the old skip:
++      # creating the chain just to deny its leaf changes too much of
++      # the tree the user can see.
++      if not dirExists(n) and not fileExists(n):
++        if not dirExists(n.parentDir): continue
++        try:
++          if splitFile(n).ext.len > 0: writeFile(n, "")
++          else: createDir(n)
++          denyPreCreated.add(n)
++        except CatchableError:
++          continue
+       acl.stampAce(n, sid, acl.denyAccess, acl.FILE_ALL_ACCESS)
+       denyStamped.add(n)
+ 
+@@ -284,12 +304,29 @@ when defined(windows):
+     let sid = sandboxUserSid()
+     let paths = denyStamped
+     denyStamped = @[]
++    let preCreated = denyPreCreated
++    denyPreCreated = @[]
+     for p in paths:
+       try:
+         acl.removeSidAces(p, sid)
+       except CatchableError as e:
+         stderr.writeLine("sandwall windows-user: deny rollback failed on " &
+           p & ": " & e.msg)
++      if p notin preCreated: continue
++      # The run started with this path absent. Delete the materialized
++      # placeholder again when nothing landed in it (a denied creation
++      # must not leave an empty file behind); content written through a
++      # grant outlives the run.
++      try:
++        if fileExists(p):
++          if getFileSize(p) == 0'i64: removeFile(p)
++        elif dirExists(p):
++          var empty = true
++          for kind, entry in walkDir(p):
++            empty = false
++            break
++          if empty: removeDir(p)
++      except CatchableError: discard
+ 
+   proc ensureJob(): Handle =
+     ## Create an unnamed Job Object with KILL_ON_JOB_CLOSE so the whole
