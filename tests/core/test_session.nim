@@ -1,9 +1,152 @@
-import std/[json, os, osproc, sequtils, strutils, times, unittest]
+import std/[algorithm, json, os, osproc, sequtils, strutils, times, unittest]
 import threecode/[api, session, types, util]
+
+when defined(posix):
+  import std/posix except Time
+when defined(windows):
+  import std/winlean
 
 if paramCount() == 2 and paramStr(1) == "--allocate":
   putEnv("XDG_DATA_HOME", paramStr(2))
   for i in 0..<30: echo newSessionPath()
+  quit(0)
+
+# -----------------------------------------------------------------------
+# Cross-process lock helpers. The compiled test binary doubles as the
+# lock scenario worker (same self-exec pattern as --allocate above):
+# each mode performs one lock operation against files passed in argv and
+# reports through files, so the controller never guesses at scheduling.
+# Every worker is bounded (stop file, or a hard sleep cap) so a lost
+# controller cannot strand a hung child.
+# -----------------------------------------------------------------------
+
+when defined(posix):
+  # LOCK_EX|LOCK_NB, bound here so the raw holder needs no session.nim
+  # machinery: it replicates the create-before-publication window with
+  # bare OS calls.
+  proc cFlock(fd: cint; op: cint): cint {.importc: "flock",
+    header: "<sys/file.h>".}
+  const kLockEx = 2.cint
+  const kLockNb = 4.cint
+
+  proc inoOf(path: string): BiggestInt =
+    var s: Stat
+    if posix.stat(path.cstring, s) == 0: result = BiggestInt(s.st_ino)
+
+proc rawHoldLock(path: string): bool =
+  ## Take the OS-level exclusive lock on `path` without publishing any
+  ## owner metadata: the file keeps whatever text it had (or none).
+  when defined(posix):
+    let fd = posix.open(path.cstring, O_RDWR or O_CREAT, 0o600)
+    if fd < 0: return false
+    if cFlock(fd, kLockEx or kLockNb) != 0:
+      discard posix.close(fd)
+      return false
+    result = true
+  else:
+    # GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ, OPEN_ALWAYS: the same
+    # ownership-grade open the session lock uses, minus the metadata write.
+    let h = winlean.createFileW(newWideCString(path), 0xC0000000'i32,
+      1'i32, nil, 4'i32, 0x80'i32, 0)
+    if h == winlean.INVALID_HANDLE_VALUE: return false
+    result = true
+
+proc waitForBarrier(path: string; seconds: float): bool =
+  let deadline = epochTime() + seconds
+  while epochTime() < deadline:
+    if fileExists(path): return true
+    sleep(20)
+  fileExists(path)
+
+proc spawnLockWorker(args: varargs[string]): Process =
+  startProcess(getAppFilename(), args = @args, options = {poStdErrToStdOut})
+
+proc hardKill(p: Process) =
+  when defined(posix):
+    discard posix.kill(Pid(p.processID()), SIGKILL)
+  else:
+    p.terminate()
+  discard p.waitForExit(10000)
+  p.close()
+
+proc spawnDeadPid(): int =
+  let sleepCmd = when defined(windows): "cmd /c exit 0" else: "true"
+  var p = startProcess(sleepCmd, options = {poEvalCommand})
+  result = p.processID()
+  discard p.waitForExit()
+  p.close()
+
+if paramCount() == 2 and paramStr(1) == "--locksleep":
+  sleep(60000)   # hard cap; the controller normally kills us sooner
+  quit(0)
+
+if paramCount() == 4 and paramStr(1) == "--lockhold":
+  acquireSessionLock(paramStr(2))
+  writeFile(paramStr(3), "1")
+  let stopDeadline = epochTime() + 20
+  while epochTime() < stopDeadline and not fileExists(paramStr(4)):
+    sleep(25)
+  releaseSessionLock(paramStr(2))
+  quit(0)
+
+if paramCount() == 4 and paramStr(1) == "--lockrawhold":
+  # Map the session path to its lock file exactly as a contender will, so
+  # the raw OS lock lands on the file the lock machinery uses.
+  if not rawHoldLock(sessionLockPathFor(paramStr(2))): quit(3)
+  writeFile(paramStr(3), "1")
+  let stopDeadline = epochTime() + 20
+  while epochTime() < stopDeadline and not fileExists(paramStr(4)):
+    sleep(25)
+  quit(0)
+
+if paramCount() == 3 and paramStr(1) == "--locktry":
+  # Rendezvous: contenders all reach the start line before any one tries,
+  # and a winner keeps holding until told, so every contender decides
+  # against a real holder instead of a released lock.
+  writeFile(paramStr(3) & ".started", "1")
+  let startDeadline = epochTime() + 10
+  while epochTime() < startDeadline and not fileExists(paramStr(3) & ".go"):
+    sleep(20)
+  try:
+    acquireSessionLock(paramStr(2))
+    writeFile(paramStr(3), "owned:" & $getCurrentProcessId())
+    let holdDeadline = epochTime() + 15
+    while epochTime() < holdDeadline and not fileExists(paramStr(3) & ".done"):
+      sleep(20)
+    releaseSessionLock(paramStr(2))
+  except SessionLocked:
+    writeFile(paramStr(3), "refused")
+  quit(0)
+
+if paramCount() == 4 and paramStr(1) == "--lockspawnexit":
+  # Acquire, spawn a tool-like grandchild that execs (closing inherited
+  # lock fds), then exit without releasing: the grandchild is the probe
+  # for whether the fd leaked across exec.
+  acquireSessionLock(paramStr(2))
+  let grand = spawnLockWorker("--locksleep", paramStr(4))
+  discard waitForBarrier(paramStr(4), 10)   # grandchild execed
+  writeFile(paramStr(3), $grand.processID())
+  quit(0)
+
+if paramCount() == 5 and paramStr(1) == "--dirlockhold":
+  acquireDirLock(paramStr(2), paramStr(3))
+  writeFile(paramStr(4), "1")
+  while epochTime() < epochTime() + 20 and not fileExists(paramStr(5)):
+    sleep(25)
+  releaseActiveDirLock()
+  quit(0)
+
+if paramCount() == 3 and paramStr(1) == "--dirprobe":
+  writeFile(paramStr(3), probeDirLockHeld(paramStr(2)))
+  quit(0)
+
+if paramCount() == 3 and paramStr(1) == "--dirlocktry":
+  try:
+    acquireDirLock(paramStr(2))
+    writeFile(paramStr(3), "owned:" & $getCurrentProcessId())
+    releaseActiveDirLock()
+  except DirLocked:
+    writeFile(paramStr(3), "refused")
   quit(0)
 
 suite "session: atomic allocation":
@@ -702,16 +845,15 @@ suite "session: session lock acquire/release":
   # Unique fake session per test so we never touch real sessions and tests
   # don't race each other.
   var tmpPath: string
-  var activeBefore: string
 
   setup:
-    activeBefore = activeLockPath
     tmpPath = getTempDir() / ("3code-test-lock-" & $epochTime().int64 & ".3log")
 
   teardown:
-    if activeLockPath != "": releaseActiveSessionLock()
-    # Restore prior global so one test's acquire can't leak into another.
-    activeLockPath = activeBefore
+    # Releases everything this process owns; lock files are persistent,
+    # so removing them afterwards is safe only because we no longer hold
+    # them.
+    releaseActiveSessionLock()
     if fileExists(tmpPath): removeFile(tmpPath)
     let lp = sessionLockPathFor(tmpPath)
     if fileExists(lp): removeFile(lp)
@@ -721,7 +863,7 @@ suite "session: session lock acquire/release":
     let lp = sessionLockPathFor(tmpPath)
     check fileExists(lp)
     check readFile(lp).strip == $getCurrentProcessId()
-    check activeLockPath == lp
+    check activeSessionLockPath() == lp
 
   test "acquiring a held lock raises SessionLocked with guidance":
     acquireSessionLock(tmpPath)
@@ -739,42 +881,59 @@ suite "session: session lock acquire/release":
     check $getCurrentProcessId() in msg
     check "stale" in msg.toLowerAscii
 
-  test "releaseSessionLock removes the file":
+  test "releaseSessionLock keeps the persistent file, emptied of owner text":
     acquireSessionLock(tmpPath)
     let lp = sessionLockPathFor(tmpPath)
     check fileExists(lp)
     releaseSessionLock(tmpPath)
-    check not fileExists(lp)
-    check activeLockPath == ""
+    # The file stays: unlinking a released path would let a second
+    # process lock a fresh inode while the first still owns the old one.
+    # Owner metadata is erased so stale pid text never counts as a lock.
+    check fileExists(lp)
+    check readFile(lp) == ""
+    check activeSessionLockPath() == ""
+    # An emptied file is plain state, not a lock: immediately acquirable.
+    acquireSessionLock(tmpPath)
+    check activeSessionLockPath() == lp
+    releaseSessionLock(tmpPath)
 
-  test "releaseActiveSessionLock removes the held file":
+  test "releaseActiveSessionLock clears ownership, keeps the file":
     acquireSessionLock(tmpPath)
     let lp = sessionLockPathFor(tmpPath)
-    check activeLockPath == lp
+    check activeSessionLockPath() == lp
     releaseActiveSessionLock()
-    check not fileExists(lp)
-    check activeLockPath == ""
+    check fileExists(lp)
+    check readFile(lp) == ""
+    check activeSessionLockPath() == ""
 
   test "release of a never-held lock is a no-op":
     releaseSessionLock(tmpPath)
-    check activeLockPath == ""
+    check activeSessionLockPath() == ""
+    # It must not disturb a lock this process legitimately holds.
+    let other = tmpPath & ".other"
+    acquireSessionLock(other)
+    releaseSessionLock(tmpPath)
+    check activeSessionLockPath() == sessionLockPathFor(other)
+    releaseSessionLock(other)
+
+  test "repeated release is safe":
+    acquireSessionLock(tmpPath)
+    releaseSessionLock(tmpPath)
+    releaseSessionLock(tmpPath)
+    check activeSessionLockPath() == ""
 
   test "acquire on empty path is a no-op":
     acquireSessionLock("")
-    check activeLockPath == ""
+    check activeSessionLockPath() == ""
 
   # ---- stale-lock recovery (cross-platform) -------------------------------
   # A lock left behind by a crashed/killed 3code must be reclaimed and
   # acquisition must succeed, not refuse.
 
-  test "stale lock whose owner pid is dead is auto-deleted and acquired":
+  test "stale lock whose owner pid is dead is reclaimed in place and acquired":
     # Produce a genuinely-dead pid: spawn a trivial child, wait for it to exit,
     # then write its (now-reaped) pid into the lock as if a 3code had died.
-    let sleepCmd = when defined(windows): "cmd /c exit 0" else: "true"
-    var p = startProcess(sleepCmd, options = {poEvalCommand})
-    let deadPid = p.processID()
-    discard p.waitForExit()
-    p.close()
+    let deadPid = spawnDeadPid()
     # Sanity: the pid we recorded really is dead. (Extremely unlikely to have
     # been reused instantly, but guard the test's own assumption.)
     check deadPid != getCurrentProcessId()
@@ -783,12 +942,16 @@ suite "session: session lock acquire/release":
     createDir(parentDir(lp))
     writeFile(lp, $deadPid)
     check fileExists(lp)
+    when defined(posix):
+      let inoBefore = inoOf(lp)
 
-    # Acquisition should reclaim the stale lock and succeed.
+    # Acquisition should take ownership and publish our pid in place,
+    # without deleting the file.
     acquireSessionLock(tmpPath)
-    check activeLockPath == lp
-    # Our pid now owns it.
+    check activeSessionLockPath() == lp
     check readFile(lp).strip == $getCurrentProcessId()
+    when defined(posix):
+      check inoOf(lp) == inoBefore
 
   test "corrupt lock (non-numeric pid) is reclaimed and acquired":
     let lp = sessionLockPathFor(tmpPath)
@@ -797,7 +960,7 @@ suite "session: session lock acquire/release":
     check fileExists(lp)
     # Must not crash; treat unparseable pid as stale and move on.
     acquireSessionLock(tmpPath)
-    check activeLockPath == lp
+    check activeSessionLockPath() == lp
     check readFile(lp).strip == $getCurrentProcessId()
 
   test "empty lock file is reclaimed and acquired":
@@ -806,18 +969,21 @@ suite "session: session lock acquire/release":
     writeFile(lp, "")
     check fileExists(lp)
     acquireSessionLock(tmpPath)
-    check activeLockPath == lp
+    check activeSessionLockPath() == lp
     check readFile(lp).strip == $getCurrentProcessId()
 
 suite "session: directory lock acquire/release":
-  var activeDirBefore: string
-
-  setup:
-    activeDirBefore = activeDirLockPath
 
   teardown:
-    if activeDirLockPath != "": releaseActiveDirLock()
-    activeDirLockPath = activeDirBefore
+    # Releases everything this process owns; the persistent lock files are
+    # then unowned and safe to remove.
+    releaseActiveDirLock()
+    let dld = dirLockDir()
+    if dirExists(dld):
+      for kind, path in walkDir(dld):
+        if kind == pcFile and
+            extractFilename(path).startsWith("test-dir-lock"):
+          try: removeFile(path) except OSError: discard
 
   test "acquire creates the lock file holding our pid":
     let cwd = "/home/carlo/p/test-dir-lock"
@@ -825,7 +991,7 @@ suite "session: directory lock acquire/release":
     let lp = dirLockPathFor(cwd)
     check fileExists(lp)
     check readFile(lp).strip == $getCurrentProcessId()
-    check activeDirLockPath == lp
+    check activeDirLockPath() == lp
 
   test "probeDirLockHeld names a live holder without acquiring":
     let cwd = "/home/carlo/p/test-dir-lock-probe"
@@ -838,6 +1004,8 @@ suite "session: directory lock acquire/release":
     check "session 20260101T000000" in msg
     check dirLockPathFor(cwd) in msg
     releaseActiveDirLock()
+    # The persistent file remains but carries no owner text: not a lock.
+    check fileExists(dirLockPathFor(cwd))
     check probeDirLockHeld(cwd) == ""
 
   test "acquiring a held lock raises DirLocked with guidance":
@@ -881,35 +1049,37 @@ suite "session: directory lock acquire/release":
     check "pid " & $getCurrentProcessId() in msg
     check "session" notin msg
 
-  test "releaseDirLock removes the file":
+  test "releaseDirLock keeps the persistent file, emptied of owner text":
     let cwd = "/home/carlo/p/test-dir-lock-rel"
     acquireDirLock(cwd)
     let lp = dirLockPathFor(cwd)
     check fileExists(lp)
     releaseDirLock(cwd)
-    check not fileExists(lp)
-    check activeDirLockPath == ""
+    check fileExists(lp)
+    check readFile(lp) == ""
+    check activeDirLockPath() == ""
 
-  test "releaseActiveDirLock removes the held file":
+  test "releaseActiveDirLock clears ownership, keeps the file":
     let cwd = "/home/carlo/p/test-dir-lock-active"
     acquireDirLock(cwd)
     let lp = dirLockPathFor(cwd)
-    check activeDirLockPath == lp
+    check activeDirLockPath() == lp
     releaseActiveDirLock()
-    check not fileExists(lp)
-    check activeDirLockPath == ""
+    check fileExists(lp)
+    check readFile(lp) == ""
+    check activeDirLockPath() == ""
 
   test "release of a never-held lock is a no-op":
     releaseDirLock("/home/carlo/p/test-dir-lock-never")
-    check activeDirLockPath == ""
+    check activeDirLockPath() == ""
 
   test "acquire on empty path is a no-op":
     acquireDirLock("")
-    check activeDirLockPath == ""
+    check activeDirLockPath() == ""
 
   test "distinct cwds get distinct locks":
-    let cwdA = "/home/carlo/p/a"
-    let cwdB = "/home/carlo/p/b"
+    let cwdA = "/home/carlo/p/test-dir-lock-a"
+    let cwdB = "/home/carlo/p/test-dir-lock-b"
     acquireDirLock(cwdA)
     acquireDirLock(cwdB)
     check dirLockPathFor(cwdA) != dirLockPathFor(cwdB)
@@ -918,23 +1088,23 @@ suite "session: directory lock acquire/release":
     releaseDirLock(cwdB)
     releaseDirLock(cwdA)
 
-  test "stale lock whose owner pid is dead is auto-deleted and acquired":
+  test "stale lock whose owner pid is dead is reclaimed in place and acquired":
     let cwd = "/home/carlo/p/test-dir-lock-stale"
-    let sleepCmd = when defined(windows): "cmd /c exit 0" else: "true"
-    var p = startProcess(sleepCmd, options = {poEvalCommand})
-    let deadPid = p.processID()
-    discard p.waitForExit()
-    p.close()
+    let deadPid = spawnDeadPid()
     check deadPid != getCurrentProcessId()
 
     let lp = dirLockPathFor(cwd)
     createDir(parentDir(lp))
     writeFile(lp, $deadPid)
     check fileExists(lp)
+    when defined(posix):
+      let inoBefore = inoOf(lp)
 
     acquireDirLock(cwd)
-    check activeDirLockPath == lp
+    check activeDirLockPath() == lp
     check readFile(lp).strip == $getCurrentProcessId()
+    when defined(posix):
+      check inoOf(lp) == inoBefore
 
   test "corrupt lock (non-numeric pid) is reclaimed and acquired":
     let cwd = "/home/carlo/p/test-dir-lock-corrupt"
@@ -943,7 +1113,7 @@ suite "session: directory lock acquire/release":
     writeFile(lp, "not-a-pid")
     check fileExists(lp)
     acquireDirLock(cwd)
-    check activeDirLockPath == lp
+    check activeDirLockPath() == lp
     check readFile(lp).strip == $getCurrentProcessId()
 
   test "empty lock file is reclaimed and acquired":
@@ -953,7 +1123,7 @@ suite "session: directory lock acquire/release":
     writeFile(lp, "")
     check fileExists(lp)
     acquireDirLock(cwd)
-    check activeDirLockPath == lp
+    check activeDirLockPath() == lp
     check readFile(lp).strip == $getCurrentProcessId()
 
 suite "session: prompt draft sidecar":
@@ -1078,3 +1248,234 @@ suite "session: prompt draft sidecar":
     let path = pendingDraftPathFor(sess.cwd)
     check not fileExists(path & ".tmp")
     check fileExists(path)
+
+suite "session: cross-process lock ownership":
+  # Real subprocesses contend for the same persistent lock files. Barriers
+  # are files the workers write once they hold the lock (or finished their
+  # attempt), so no test depends on timing loops. TMPDIR is inherited, so
+  # workers share this process's isolated lock directory.
+  var root: string
+
+  setup:
+    root = getTempDir() / ("3code-lockrace-" & $getCurrentProcessId())
+    createDir(root)
+
+  teardown:
+    releaseActiveSessionLock()
+    releaseActiveDirLock()
+    try: removeDir(root) except OSError: discard
+
+  test "contender refuses while the holder has not published owner metadata":
+    # The holder owns the OS lock but its owner record (pid line) is not
+    # written yet: exactly the window where an empty or stale-text file
+    # used to let a contender delete the live creator's lock.
+    var n = 0
+    for pretext in ["", "999999999"]:   # empty file, and a never-real pid
+      inc n
+      let target = root / "unpublished.3log"
+      let lp = sessionLockPathFor(target)
+      let ready = root / ("raw" & $n & ".ready")
+      let stop = root / ("raw" & $n & ".stop")
+      try: removeFile(lp) except OSError: discard
+      try: removeFile(ready) except OSError: discard
+      try: removeFile(stop) except OSError: discard
+      createDir(parentDir(lp))
+      writeFile(lp, pretext)
+      when defined(posix):
+        let inoBefore = inoOf(lp)
+      let holder = spawnLockWorker("--lockrawhold", target, ready, stop)
+      check waitForBarrier(ready, 10)
+      var refused = false
+      try:
+        acquireSessionLock(target)
+      except SessionLocked:
+        refused = true
+      check refused
+      # The contender neither deleted nor rewrote the holder's file, and
+      # the holder still owns the lock afterwards.
+      check fileExists(lp)
+      check readFile(lp) == pretext
+      check activeSessionLockPath() == ""
+      writeFile(stop, "1")
+      check holder.waitForExit(25000) == 0
+      holder.close()
+      when defined(posix):
+        check inoOf(lp) == inoBefore
+      # Holder gone: the unlocked file acquires cleanly.
+      acquireSessionLock(target)
+      releaseSessionLock(target)
+
+  test "two contenders reclaiming the same legacy-stale lock yield one owner":
+    let target = root / "stale.3log"
+    let lp = sessionLockPathFor(target)
+    createDir(parentDir(lp))
+    writeFile(lp, $spawnDeadPid())
+    let resA = root / "tryA"
+    let resB = root / "tryB"
+    var workers = @[spawnLockWorker("--locktry", target, resA),
+                    spawnLockWorker("--locktry", target, resB)]
+    # Barrier: release both from the rendezvous only once each has
+    # announced itself, so they contend for real.
+    let goDeadline = epochTime() + 10
+    while epochTime() < goDeadline and
+        not (fileExists(resA & ".started") and fileExists(resB & ".started")):
+      sleep(20)
+    writeFile(resA & ".go", "1")
+    writeFile(resB & ".go", "1")
+    # Workers publish their verdict with a plain write; wait until each
+    # file carries a complete verdict before reading it.
+    proc verdictComplete(path: string): bool =
+      if not fileExists(path): return false
+      let c = readFile(path)
+      c == "refused" or (c.startsWith("owned:") and c.len > "owned:".len)
+    let outDeadline = epochTime() + 20
+    while epochTime() < outDeadline and
+        not (verdictComplete(resA) and verdictComplete(resB)):
+      sleep(20)
+    check verdictComplete(resA) and verdictComplete(resB)
+    let outcomes = sorted(@[readFile(resA), readFile(resB)])
+    check outcomes.len == 2
+    check outcomes[0].startsWith("owned:")
+    check outcomes[1] == "refused"
+    # Exactly one owner published its pid; the loser did not delete the
+    # winner's lock.
+    check fileExists(lp)
+    check readFile(lp).strip == outcomes[0]["owned:".len .. ^1]
+    writeFile(resA & ".done", "1")
+    writeFile(resB & ".done", "1")
+    for w in workers:
+      check w.waitForExit(25000) == 0
+      w.close()
+
+  test "a killed owner's lock releases; the next owner acquires in place":
+    let target = root / "killed.3log"
+    let lp = sessionLockPathFor(target)
+    let ready = root / "kill.ready"
+    let stop = root / "kill.stop"
+    let holder = spawnLockWorker("--lockhold", target, ready, stop)
+    check waitForBarrier(ready, 10)
+    when defined(posix):
+      let inoBefore = inoOf(lp)
+    hardKill(holder)
+    acquireSessionLock(target)
+    check activeSessionLockPath() == lp
+    check readFile(lp).strip == $getCurrentProcessId()
+    when defined(posix):
+      check inoOf(lp) == inoBefore   # acquired without deleting the file
+    releaseSessionLock(target)
+
+  test "a non-owner's release cannot disturb another owner's lock":
+    let target = root / "foreign.3log"
+    let ready = root / "foreign.ready"
+    let stop = root / "foreign.stop"
+    let holder = spawnLockWorker("--lockhold", target, ready, stop)
+    check waitForBarrier(ready, 10)
+    # We hold nothing for `target`; this release must be a no-op.
+    releaseSessionLock(target)
+    check fileExists(sessionLockPathFor(target))
+    var refused = false
+    try:
+      acquireSessionLock(target)
+    except SessionLocked:
+      refused = true
+    check refused
+    check activeSessionLockPath() == ""
+    writeFile(stop, "1")
+    check holder.waitForExit(25000) == 0
+    holder.close()
+    acquireSessionLock(target)
+    releaseSessionLock(target)
+
+  test "a spawned tool process does not retain the owner's lock":
+    let target = root / "inherit.3log"
+    let pidfile = root / "grand.pid"
+    let execed = root / "grand.execed"
+    let helper = spawnLockWorker("--lockspawnexit", target, pidfile, execed)
+    check waitForBarrier(pidfile, 15)
+    check helper.waitForExit(25000) != -1   # owner exited
+    helper.close()
+    let grandPid = parseInt(readFile(pidfile).strip)
+    when defined(posix):
+      # The grandchild is still running: any inherited lock fd would keep
+      # the flock alive right now.
+      check pidAlive(grandPid)
+    acquireSessionLock(target)
+    check activeSessionLockPath() == sessionLockPathFor(target)
+    releaseSessionLock(target)
+    when defined(posix):
+      discard posix.kill(Pid(grandPid), SIGKILL)
+
+  test "advisory probe reports the live owner and blocks nothing afterwards":
+    let cwd = root / "probe-cwd"
+    let sess = root / "20260101T000000.3log"
+    let ready = root / "probe.ready"
+    let stop = root / "probe.stop"
+    let holder = spawnLockWorker("--dirlockhold", cwd, sess, ready, stop)
+    check waitForBarrier(ready, 10)
+    let msg = probeDirLockHeld(cwd)
+    check "already open" in msg
+    check $holder.processID() in msg
+    check "session 20260101T000000" in msg
+    check dirLockPathFor(cwd) in msg
+    # The probe stole nothing: the holder still owns the directory.
+    var refused = false
+    try:
+      acquireDirLock(cwd)
+    except DirLocked:
+      refused = true
+    check refused
+    # A separate process' probe agrees.
+    let probeOut = root / "probe.out"
+    let prober = spawnLockWorker("--dirprobe", cwd, probeOut)
+    check prober.waitForExit(25000) == 0
+    prober.close()
+    check "already open" in readFile(probeOut)
+    writeFile(stop, "1")
+    check holder.waitForExit(25000) == 0
+    holder.close()
+    check probeDirLockHeld(cwd) == ""
+    # Probing a free directory does not stand in the way of acquiring it.
+    acquireDirLock(cwd, sess)
+    releaseActiveDirLock()
+
+  test "probe ignores stale text in an unlocked dir lock file":
+    let cwd = root / "stale-probe-cwd"
+    let lp = dirLockPathFor(cwd)
+    createDir(parentDir(lp))
+    writeFile(lp, $spawnDeadPid() & "\n20251231T235959")
+    check probeDirLockHeld(cwd) == ""
+    acquireDirLock(cwd)
+    check activeDirLockPath() == lp
+    releaseActiveDirLock()
+
+  test "session and directory locks coexist; failed init releases only its own":
+    let cwdA = root / "both-a"
+    let s1 = root / "one.3log"
+    acquireDirLock(cwdA, s1)
+    acquireSessionLock(s1)
+    check activeSessionLockPath() == sessionLockPathFor(s1)
+    check activeDirLockPath() == dirLockPathFor(cwdA)
+    # A second initialization attempt (library.init shape): dir lock ok,
+    # session lock held by a live other process -> rollback releases the
+    # dir lock of that attempt only.
+    let cwdB = root / "both-b"
+    let s2 = root / "two.3log"
+    let ready = root / "both.ready"
+    let stop = root / "both.stop"
+    let holder = spawnLockWorker("--lockhold", s2, ready, stop)
+    check waitForBarrier(ready, 10)
+    acquireDirLock(cwdB)
+    var refused = false
+    try:
+      acquireSessionLock(s2)
+    except SessionLocked:
+      refused = true
+    check refused
+    releaseDirLock(cwdB)
+    check activeSessionLockPath() == sessionLockPathFor(s1)
+    check activeDirLockPath() == dirLockPathFor(cwdA)
+    writeFile(stop, "1")
+    check holder.waitForExit(25000) == 0
+    holder.close()
+    releaseSessionLock(s1)
+    releaseActiveDirLock()
