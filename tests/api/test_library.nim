@@ -1,6 +1,6 @@
 discard """
   targets: "c"
-  matrix: "; -d:providerStub"
+  matrix: "; -d:providerStub; -d:providerStub -d:sessionSaveTestHooks"
 """
 ## Library API end-to-end: init a headless AgentSession against the stub
 ## provider, run a blocking prompt (with a tool call), collect callback
@@ -15,6 +15,25 @@ import std/[json, os, strutils, atomics, unittest]
 import threecode/[api, library, types, util, sandbox, dirsettings, session]
 
 const stubbed = defined(providerStub)
+
+proc agentErrMsg(op: proc (): string): string =
+  ## The AgentError message from a call expected to be rejected. Fails the
+  ## running test when no AgentError is raised (unittest's expect cannot
+  ## capture the exception object on this Nim version).
+  try:
+    let v = op()
+    raise newException(AssertionDefect,
+      "expected AgentError, none was raised (returned: " & v & ")")
+  except AgentError as e:
+    result = e.msg
+
+proc expectAgentErr(op: proc ()) =
+  try:
+    op()
+    raise newException(AssertionDefect,
+      "expected AgentError, none was raised")
+  except AgentError:
+    discard
 
 # One startup snapshot: isolateEnv re-points TMPDIR per fixture, and
 # getTempDir reads it fresh on every call, so fixtures computed after the
@@ -382,6 +401,10 @@ models = "stub-model"
         discard s.promptAsync("again")
       expect AgentError:
         discard s.command(":tokens")
+      # Read accessors refuse a dead handle too: nothing on a closed
+      # session describes anything.
+      expectAgentErr(proc() = discard s.usage())
+      expectAgentErr(proc() = discard s.profileLabel())
       # The refusal happened before any model call: no user message, no
       # reply appended.
       check s.messages.len == msgCount
@@ -479,7 +502,7 @@ models = "stub-model"
                                              experimental: true))
       s2.close()
 
-    test "save failure on close reports failure and still releases ownership":
+    test "save failure on close still releases ownership and allows reopen":
       let root = newFixture("savefail")
       writeConfig(root)
       isolateEnv(root)
@@ -488,22 +511,24 @@ models = "stub-model"
       ]))
       putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
       resetStubResponses()
-      let target = root / "run" / "blocked.3log"
-      createDir(target)  # a directory at the save path: every write fails
       let s = initAgentSession(AgentOptions(cwd: root / "run",
-                                            sessionPath: target,
                                             experimental: true))
       check s.prompt("go") == "kept"
-      var closeMsg = ""
-      try: s.close()
-      except AgentError as e: closeMsg = e.msg
-      check "save" in closeMsg
-      # The raise came after cleanup: the directory and session locks are
-      # gone, so the same directory opens again right away.
+      let savePath = s.state.savePath
+      let before = readFile(savePath)
+      # Fault the close-time save at the last point before the commit:
+      # close reports, never raises, and releases ownership either way.
+      saveFaultHook = proc(p: SaveFaultPhase) {.gcsafe, raises: [CatchableError].} =
+        if p == sfpBeforeReplace:
+          raise newException(IOError, "injected replace failure")
+      s.close()
+      saveFaultHook = nil
+      check readFile(savePath) == before
+      # The directory and session locks are gone, so the same directory
+      # opens again right away.
       let s2 = initAgentSession(AgentOptions(cwd: root / "run",
                                              experimental: true))
-      try: s2.close()
-      except AgentError: discard
+      s2.close()
 
     test "failed init releases the locks it had acquired":
       let root = newFixture("rollback")
@@ -524,3 +549,35 @@ models = "stub-model"
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
       s.close()
+
+    test "a failed transcript save surfaces from prompt; close still releases":
+      # Blocking library calls must observe persistence failure, not a
+      # normal reply. The save target's parent is a regular file, so no
+      # transcript can ever commit there.
+      # Re-anchor TMPDIR first: newFixture picks up the current TMPDIR,
+      # and one isolateEnv per test deepens the lock path until it
+      # overflows NAME_MAX.
+      putEnv("TMPDIR", stableTmp)
+      let root = newFixture("savefail")
+      writeConfig(root)
+      isolateEnv(root)
+      writeFile(root / "blocker", "x")
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "lost reply"}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(
+        cwd: root / "run",
+        sessionPath: root / "blocker" / "lost.3log",
+        experimental: true))
+      expect SessionSaveError:
+        discard s.prompt("go")
+      check not fileExists(root / "blocker" / "lost.3log")
+      # close()'s shutdown save is best-effort but never raises, and the
+      # ownership release happens either way: a fresh session can open.
+      s.close()
+      let again = initAgentSession(AgentOptions(cwd: root / "run",
+                                                experimental: true))
+      again.close()
+

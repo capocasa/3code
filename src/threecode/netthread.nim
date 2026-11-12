@@ -9,28 +9,44 @@
 ##
 ## Why no channels: the user explicitly forbade `Channel[T]`. We use a
 ## plain `seq[NetDelta]` under a `Lock`, matching the atomics + lock idiom
-## used across the codebase. The worker only ever appends; the main
-## thread drains and clears the consumed prefix under the same lock.
+## used across the codebase. The worker only ever appends; the main thread
+## drains and clears the consumed prefix under the same lock.
 ##
 ## ORC constraint (from threecode.nim:140): the worker must hold no
 ## closures and no refs that the main thread also mutates. The
-## `NetJobState` is a stack `var` in `callModelThreaded` (lifetime
-## encloses the worker's run), passed by `ptr`. Communication is plain
-## value types (`string`, `int`, `bool`) plus `JsonNode`, which is a ref
-## the worker builds and serializes to a string for the main thread
-## before setting `phase = npDone`. No concurrent mutation of the same
-## node.
+## `NetJobState` is a MAIN-ALLOCATED heap block owned by whichever thread
+## currently holds the job (the caller until it joins or retires, then
+## the main-thread reaper), passed by `ptr`. Its lifetime always encloses
+## the worker's run: a caller only frees the job after `workerDone`
+## (workerGone) says the worker has finished touching it, and a job whose
+## caller stopped waiting is handed to `reapRetiredNetJobs`, which joins
+## the worker before freeing anything. Communication is plain value types
+## (`string`, `int`, `bool`) plus `JsonNode`, which is a ref the worker
+## builds and serializes to a string for the main thread before setting
+## `phase = npDone`. No concurrent mutation of the same node.
 ##
 ## ORC constraint 2 (issue #35): freeing a block on a thread other than
 ## its allocating thread leaks the page (nim-lang/Nim#23361; still open
 ## on devel, yrc included). So string ownership NEVER crosses threads:
 ## the main thread takes byte-wise copies of payloads under the lock
 ## (`drainDeltas`, `copyOutcome`), and the worker frees its own strings
-## on its own thread before exiting (`workerRelease`, gated on `reap`).
+## on its own thread in `workerRelease`, gated on the reap handshake.
+##
+## Every field access from either thread goes through the locked
+## accessors below (`phaseOf`, `outcomeReady`, `isReaped`, `workerDone`,
+## `activityCount`) or a locked mutator. No direct unsynchronized reads;
+## no lock is held while a callback runs or a thread joins.
 
-import std/[locks, json, nativesockets, os]
-import streamhttp
+import std/[locks, json, os]
 import types
+
+const NetReapWaitMs* {.intdefine.} = 5_000
+  ## How long the worker waits for the main thread's reap handshake in
+  ## `workerRelease` before freeing its own allocations anyway. A normal
+  ## caller reaps within one 50ms poll tick. The bound exists for the
+  ## retired-job path: a caller that raised or gave up may never reap, and
+  ## a worker parked here forever would strand its thread and its job.
+  ## An `intdefine` so tests can shrink it.
 
 type
   NetPhase* = enum
@@ -83,36 +99,36 @@ type
     outcome*: StreamOutcome
     outcomeWritten*: bool
     reaped*: bool
-    retired*: bool
-      ## Main stopped waiting (interrupt budget expired or a callback
-      ## raised): the outcome will never be read again. While set, `fire`
-      ## drops deltas instead of appending them, so an abandoned worker
-      ## that recovers and streams on cannot grow this job's memory
-      ## without bound.
-    cache*: NetConnCache
-      ## Job-owned connection state for the streaming transports. Two
-      ## calls can overlap (a retired worker and its replacement), so the
-      ## cached conn can no longer live in module globals: an old worker
-      ## must never close, reuse, or publish into a newer call's conn.
+    activity*: int  ## Monotonic count of deltas ever fired; the caller's
+                    ## liveness probe for a worker that may be wedged.
+    workerGone*: bool  ## Set by the worker as its LAST access to the job.
+                       ## Main may join and free the job only after this.
+    retired*: bool     ## Caller abandoned the job (reaper registry push):
+                       ## `fire` drops deltas, so an abandoned worker that
+                       ## keeps streaming cannot grow this job without
+                       ## bound before the reaper's drain (or the worker's
+                       ## own final `workerRelease` clear) runs.
 
   NetJob* = ptr NetJobState
 
-  NetConnCache* = object
-    ## Connection-reuse state for one streaming call. `fd` mirrors the
-    ## connected (or connect-in-progress) fd so retirement can
-    ## compare-and-clear the process-wide active-fd slot without touching
-    ## a newer call's fd.
-    conn*: StreamConn
-    hostKey*: string
-    fd*: SocketHandle = SocketHandle(-1)  # osInvalidSocket; a const default must compile
+proc markRetired*(job: NetJob) =
+  ## Caller abandons the job: the outcome will never be drained, so `fire`
+  ## stops accumulating deltas (the activity counter keeps counting — it
+  ## is the worker's liveness proof, not storage). Locked so the flag
+  ## flips atomically against a worker mid-`fire`.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    job.retired = true
+    release(job.lock)
 
 proc fire*(job: NetJob; delta: NetDelta) =
   ## Append a delta under the lock. Worker-only. Deltas for a retired job
-  ## are dropped: the caller that retired it will never drain again.
+  ## are dropped: its caller will never drain again.
   {.cast(gcsafe).}:
     acquire(job.lock)
     if not job.retired:
       job.deltas.add(delta)
+    inc job.activity
     release(job.lock)
 
 proc fireProgress*(job: NetJob; slurped: int) =
@@ -158,60 +174,43 @@ proc setPhase*(job: NetJob; phase: NetPhase) =
     release(job.lock)
 
 proc phaseOf*(job: NetJob): NetPhase =
-  ## Locked read of `phase`; the caller's poll loop used to read the
-  ## field directly while the worker wrote it.
+  ## Locked read. The caller polls this instead of touching `job.phase`.
   {.cast(gcsafe).}:
     acquire(job.lock)
     result = job.phase
     release(job.lock)
 
-proc hasOutcome*(job: NetJob): bool =
+proc outcomeReady*(job: NetJob): bool =
+  ## Locked read of `outcomeWritten`.
   {.cast(gcsafe).}:
     acquire(job.lock)
     result = job.outcomeWritten
     release(job.lock)
 
 proc isReaped*(job: NetJob): bool =
+  ## Locked read of `reaped`.
   {.cast(gcsafe).}:
     acquire(job.lock)
     result = job.reaped
     release(job.lock)
 
-proc isRetired*(job: NetJob): bool =
+proc workerDone*(job: NetJob): bool =
+  ## Locked read of `workerGone`: the worker has made its final job access
+  ## and freed its own allocations. Main may join (and free) after this.
   {.cast(gcsafe).}:
     acquire(job.lock)
-    result = job.retired
+    result = job.workerGone
     release(job.lock)
 
-proc retireJob*(job: NetJob): SocketHandle =
-  ## Main abandons the job: its outcome will never be drained or copied,
-  ## `fire` stops accumulating deltas, and a worker parked in
-  ## `workerRelease` is released (so retirement can never strand it
-  ## waiting for a reap that no longer has a caller to perform it).
-  ## Returns the job's advertised fd (if any) and clears it from the
-  ## cache, so the caller can compare-and-clear the process-wide wake
-  ## slot: retirement can only ever remove this job's own fd.
+proc activityCount*(job: NetJob): int =
+  ## Locked read of the monotonic delta counter. The caller uses the
+  ## delta between two polls as proof the worker is alive and producing;
+  ## silence across a whole join budget means the worker is wedged in an
+  ## operation no flag can interrupt.
   {.cast(gcsafe).}:
     acquire(job.lock)
-    job.retired = true
-    job.reaped = true
-    result = job.cache.fd
-    job.cache.fd = osInvalidSocket
+    result = job.activity
     release(job.lock)
-
-proc publishConnectFd*(job: NetJob; fd: SocketHandle): bool =
-  ## Worker-side publish of a connect-in-progress fd into the job cache.
-  ## Returns false when the job is retired (caller must not advertise the
-  ## fd process-wide); true when `cache.fd` now holds `fd`. Locked so the
-  ## retirement decision and the cache write are one atomic step.
-  {.cast(gcsafe).}:
-    acquire(job.lock)
-    if job.retired:
-      release(job.lock)
-      return false
-    job.cache.fd = fd
-    release(job.lock)
-    result = true
 
 proc rawCopy(src: string): string =
   ## Byte-wise copy that never touches `src`'s refcount, so the source
@@ -274,16 +273,22 @@ proc reap*(job: NetJob) =
     release(job.lock)
 
 proc workerRelease*(job: NetJob) =
-  ## Worker-side cleanup after `publishOutcome`: wait for `reap`, then
-  ## free the worker-owned strings here on this thread. The wait is
-  ## bounded: main either reaps after its final copies or retires the job
-  ## (which sets `reaped` under the same lock).
-  while not isReaped(job):
+  ## Worker-side cleanup after `publishOutcome`: wait (bounded) for
+  ## `reap`, then free the worker-owned strings here on this thread and
+  ## set `workerGone` as the job's last touch. The normal caller reaps
+  ## within one poll tick; the bound covers a caller that raised or gave
+  ## up without reaping (a retired job), so the worker can still exit.
+  ## Replacements are allocation-free (`@[]` / `StreamOutcome()`), so the
+  ## main thread's later destruction of these fields frees nothing across
+  ## threads — that is what makes freeing the job on main after
+  ## `workerDone` ORC-safe.
+  var waited = 0
+  while not isReaped(job) and waited < NetReapWaitMs:
     sleep(1)
+    inc waited
   {.cast(gcsafe).}:
     acquire(job.lock)
-    # @[] / StreamOutcome() are allocation-free replacements, so main's
-    # later destruction of these fields frees nothing across threads.
     job.deltas = @[]
     job.outcome = StreamOutcome()
+    job.workerGone = true
     release(job.lock)

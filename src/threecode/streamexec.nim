@@ -756,6 +756,14 @@ export DEBIAN_FRONTEND=noninteractive
         # box accepts). The script temp dir is read-only; the shell only
         # reads the script, never writes there.
         args.add ["--ro", tmp]
+        # The box child recomputes the policy-file guards itself, but it
+        # cannot know which stores the user config selected (its own
+        # dirconfig default is "project"): carry the authority paths —
+        # user config plus, under dirconfig=user, the cascade's store
+        # configs — over argv so a fenced command cannot write
+        # `sandbox = off` into the files the next session will obey.
+        for p in sandbox.authorityGuardPaths(getCurrentDir()):
+          args.add ["--deny", p]
         args.add "--"
         args.add shell
         args.add "-c"
@@ -777,6 +785,8 @@ export DEBIAN_FRONTEND=noninteractive
             args.add ["--policy", policy]
             args.add "restrict"
             args.add tmp
+            for p in sandbox.authorityGuardPaths(getCurrentDir()):
+              args.add ["--deny", p]
             args.add "--"
             args.add shell
             args.add "-c"

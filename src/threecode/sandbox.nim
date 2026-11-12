@@ -48,6 +48,7 @@ when defined(posix):
   from std/posix import kill, Pid
 import sandwall
 import sandwall/wall as sandwallWall
+import config
 import defaults
 import types
 import util
@@ -553,6 +554,20 @@ when defined(windows):
 proc mtimeOf(path: string): Time =
   try: getLastModificationTime(path)
   except OSError: fromUnix(0)
+
+proc authorityGuardPaths*(projectDir: string): seq[string] =
+  ## The user-owned files whose sandbox switches are authoritative for
+  ## this session: the user config, and — when the user config put the
+  ## stores under the config root (`dirconfig = "user"`) — the store
+  ## configs of the directory cascade. A project-local `.3code/config`
+  ## is deliberately absent: its security booleans are capped by the
+  ## monotonic overlay, and guarding the whole project store would
+  ## break legitimate goals and sticky-current writes. Paths are
+  ## guarded even when they do not exist yet, like the policy slots.
+  result = @[configPath()]
+  if dirsettings.dirConfigLocation == "user":
+    for d in dirsettings.ancestorsNearestFirst(projectDir):
+      result.add dirsettings.storeFileFor(d, dirsettings.StoreConfigFile)
 
 proc guardRules*(projectDir: string): seq[Rule] =
   ## Hidden read-only rules covering the policy file paths 3code can

@@ -2,6 +2,73 @@ Changelog
 
 Unreleased
 
+- **Windows asks before a per-file ask rule is pierced by a fresh
+  create.** A deny (and an `ask`, which denies until answered) naming a
+  file that did not exist yet was shadowed under the Windows ACL
+  backend: with no object to stamp the DENY ACE on, the child created
+  the file through the parent dir's inheritable ALLOW and `echo granted
+  > vault/out.txt` under `allow ./` + `ask ./vault/out.txt` succeeded
+  silently - no denial, no ask card, policy unchanged. The denied
+  target is now materialized (empty file, or directory when it carries
+  no extension) before the run so the ACE bites, and deleted again
+  after the run when nothing landed in it, so a declined ask leaves the
+  filesystem exactly as it was (sandwall's windows-user backend). The
+  bash ask gate,
+  the ask-path scraper, and the sandbox deny hint now also recognize
+  the Windows `Access is denied` shape (cmd.exe and native tools; msys
+  bash already prints `Permission denied`).
+- **A 400-recovery collapse can no longer keep a tail too big to send.**
+  The collapse pins tool results to their owning assistant, so one
+  batched run of ~1900 tool calls survived it intact: the rebuilt
+  request blew the route's byte limit again and the retry 400'd exactly
+  like the call it was recovering from, bricking the session. The
+  retained tail now also sheds its oldest entries head-first until the
+  rebuild fits the byte cap, and the pairing repair makes the survivors
+  legal again (orphan results drop, unanswered calls get synthetic
+  results).
+- **A hung provider can no longer wedge a worker thread for the life of
+  the process.** The network worker was owned by the frame that spawned
+  it: an interrupt cancelled the call but the thread stayed parked in an
+  uninterruptible resolver or connect, every later call queued behind
+  it, and a caller that gave up leaked the thread plus its connection
+  caches. Workers are now heap-owned and retired by budget: a caller
+  whose join budget expires moves on, a retired worker that finally
+  wakes exits safely instead of writing into a dead frame, connection
+  caches live with the job rather than the thread, and repeated short
+  calls leave no live jobs, retired jobs, or locks behind.
+- **Transcripts save atomically, and a failed save is never a silent
+  success.** `saveSession` used to overwrite the live `.3log` in place
+  and swallow errors into a stderr line: a truncated or half-written
+  transcript silently replaced a valid one, and a failed first save was
+  still indexed for resume. Saves now stage into a unique sibling file
+  that is owner-only from creation (no world-readable window for prompt
+  contents), fully written, flushed and synced before the atomic
+  rename commits, so a failure leaves the previous transcript
+  byte-for-byte intact and reloadable. The failure raises
+  `SessionSaveError` instead of vanishing: a blocking library `prompt`
+  surfaces it to its caller, headless runs exit non-zero, the RPC and
+  ACP frontends answer with an error instead of a false `end_turn`, and
+  interactive checkpoints report once per failing streak (the next
+  committed save clears the latch) while the conversation stays in
+  memory. The resume index is appended only after a real commit and
+  self-heals on a later save. Prompt drafts stage through the same
+  owner-only mechanism.
+- **Session and directory locks are kernel-owned, not pid-file
+  guesses.** Locking was an O_CREAT|O_EXCL race on a file holding the
+  owner's pid, with liveness probing and a remove-and-retry dance to
+  recover from crashes; a `kill -9`ed 3code left a stale file behind and
+  a spawned tool process that inherited the fd could keep the lock alive
+  after its parent died. The claim is now a kernel-level exclusive lock
+  held open for the life of the process: a crashed or killed owner's
+  session and directory are back the instant the process is gone, with
+  nothing to delete, a non-owner's release cannot disturb someone
+  else's hold, and a collision report names the live holder (pid and
+  session id, plus the lock file). The lock files under
+  `$TMPDIR/3code/lock` and `$TMPDIR/3code/dirlock` stay on disk as
+  stable lock targets, emptied of owner text; a lock held by an old
+  pre-kernel-lock release is still refused via its pid line, but mixed
+  old/new versions are not fully mutually exclusive, so don't run them
+  against the same session or directory.
 - **`update` replaces a renamed executable in place.** The updater
   mapped the archive's canonical binary member to its own name (`3code`),
   so an install the user had renamed (a `3code-mine` on `PATH`, the

@@ -22,15 +22,15 @@ suite "transport connection identity":
     let port = listener.getLocalAddr()[1]
     var server: Thread[Socket]
     createThread(server, rejectTls, listener)
-    let plain = acquireStreamConn(gStreamCache, "127.0.0.1", port, true)
-    check acquireStreamConn(gStreamCache, "127.0.0.1", port, true) == plain
+    let plain = acquireStreamConn("127.0.0.1", port, true)
+    check acquireStreamConn("127.0.0.1", port, true) == plain
     var rejected = false
     try:
-      discard acquireStreamConn(gStreamCache, "127.0.0.1", port, false)
+      discard acquireStreamConn("127.0.0.1", port, false)
     except CatchableError:
       rejected = true
     check rejected
-    check gStreamCache.conn == nil
+    check cachedStreamConn == nil
     # Also wake the listener on a regressed cache hit so failure cannot hang.
     if not rejected:
       let wake = newSocket()

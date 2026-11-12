@@ -53,6 +53,86 @@ suite "update: swapInstall skip list":
     check not fileExists(dst / "VERSION")
     removeDir(src); removeDir(dst)
 
+suite "update: swapInstall renamed destination":
+  ## A user can install under any name (curl > ~/bin/agent, a wrapper
+  ## copy, a second checkout). The canonical binary member must land on
+  ## the *destination* path — not beside it under the archive's own
+  ## name — while sibling runtime libraries still install in the
+  ## destination directory under their member names.
+  test "renamed target is replaced in place, no canonical sibling":
+    let src = getTempDir() / "3code-update-ren-src"
+    let dst = getTempDir() / "3code-update-ren-dst"
+    removeDir(src); removeDir(dst)
+    createDir(src); createDir(dst)
+    writeFile(src / "3code", "new-bin-bytes")
+    writeFile(src / "libagent.so", "fake-rt-lib")
+    writeFile(src / "README.md", "readme")
+    writeFile(src / "LICENSE", "license")
+    writeFile(src / "VERSION", "9.9.9")
+    let target = dst / "custom-code"
+    writeFile(target, "old-bin-bytes")
+    check swapInstall(src, target)
+    check readFile(target) == "new-bin-bytes"
+    when not defined(windows):
+      check fpUserExec in getFilePermissions(target)
+    check not fileExists(dst / "3code")
+    check readFile(dst / "libagent.so") == "fake-rt-lib"
+    check not fileExists(dst / "README.md")
+    check not fileExists(dst / "LICENSE")
+    check not fileExists(dst / "VERSION")
+    removeDir(src); removeDir(dst)
+
+  test "bundle without canonical binary fails before touching anything":
+    let src = getTempDir() / "3code-update-nobin-src"
+    let dst = getTempDir() / "3code-update-nobin-dst"
+    removeDir(src); removeDir(dst)
+    createDir(src); createDir(dst)
+    writeFile(src / "stray-file", "stray")
+    writeFile(src / "README.md", "readme")
+    let target = dst / "3code"
+    writeFile(target, "old-bin-bytes")
+    check not swapInstall(src, target)
+    check readFile(target) == "old-bin-bytes"
+    check not fileExists(dst / "stray-file")
+    removeDir(src); removeDir(dst)
+
+  test "target name colliding with another member is refused":
+    ## With the target named `custom-code`, a bundle also carrying a
+    ## `custom-code` member would race the exe against it in directory
+    ## iteration order. That bundle/target pair must be rejected
+    ## before any file changes.
+    let src = getTempDir() / "3code-update-col-src"
+    let dst = getTempDir() / "3code-update-col-dst"
+    removeDir(src); removeDir(dst)
+    createDir(src); createDir(dst)
+    writeFile(src / "3code", "new-bin-bytes")
+    writeFile(src / "helper-tool", "helper")
+    let target = dst / "helper-tool"
+    writeFile(target, "old-helper-bytes")
+    check not swapInstall(src, target)
+    check readFile(target) == "old-helper-bytes"
+    check not fileExists(dst / "3code")
+    removeDir(src); removeDir(dst)
+
+when defined(windows):
+  suite "update: swapInstall renamed .exe on windows":
+    test "renamed .exe target swaps in place, stale .old from destination":
+      let src = getTempDir() / "3code-update-wex-src"
+      let dst = getTempDir() / "3code-update-wex-dst"
+      removeDir(src); removeDir(dst)
+      createDir(src); createDir(dst)
+      writeFile(src / "3code.exe", "new-bin-bytes")
+      let target = dst / "custom-tool.exe"
+      writeFile(target, "old-bin-bytes")
+      check swapInstall(src, target)
+      check readFile(target) == "new-bin-bytes"
+      check not fileExists(dst / "3code.exe")
+      check not fileExists(dst / "3code")
+      check not fileExists(dst / "3code.exe.old")
+      # the in-use file was parked beside the *actual* destination
+      check fileExists(dst / "custom-tool.exe.old")
+      removeDir(src); removeDir(dst)
+
 when not defined(windows):
   suite "update: flat release archive":
     ## Release archives are flat since e938c59: members sit at the

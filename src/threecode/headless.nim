@@ -20,7 +20,7 @@
 ]##
 
 import std/[json, os, parseopt, strutils]
-import types, util, config, api, library, plugins, pluginagent, minline
+import types, util, config, api, library, plugins, pluginagent, minline, session
 import dirsettings
 
 type HeadlessOpts = object
@@ -130,12 +130,16 @@ proc headlessMain*(args: seq[string]): int =
     return ExitConfig
   try:
     discard s.prompt(o.prompt)
-  except AgentError:
-    try: s.close() except AgentError: discard
-    return 1
-  try:
+  except SessionSaveError as e:
+    # A failed transcript save is a failed turn for a headless frontend,
+    # not a normal completion: report it and exit non-zero (close below
+    # re-saves best-effort; its failure is already reported via the
+    # shared once-per-streak latch).
+    reportSaveFailure(e)
     s.close()
-  except AgentError:
-    # Cleanup completed; the save failure is the exit signal.
     return 1
+  except AgentError:
+    s.close()
+    return 1
+  s.close()
   0

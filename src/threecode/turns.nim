@@ -886,7 +886,7 @@ proc accountVerifierUsage*(session: var Session; messages: JsonNode;
   session.usage.completionTokens += usage.completionTokens
   session.usage.totalTokens += usage.totalTokens
   session.usage.cachedTokens += usage.cachedTokens
-  saveSession(session, messages)
+  saveSessionReported(session, messages)
   let main = lastAssistantUsage(messages)
   if main.totalTokens <= 0: return
   let combined = Usage(
@@ -1130,7 +1130,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       commitTranscriptBytes(rolloverReceipt, true)
       commitTranscriptBytes(
         formatItem(agentPromptItem(note{"content"}.getStr)), true)
-      saveSession(session, messages)
+      saveSessionReported(session, messages)
   # Computer use activates once per run, before the first request: the
   # backend probe, the `shot` script and the one-time note all happen
   # here so every entry path (REPL :command, --computer flag, config
@@ -1152,7 +1152,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         break computerGate
       let sp = screen.shotScriptPath(sessionIdFromPath(session.savePath))
       messages.add %*{"role": "user", "content": computerUseNote(sp)}
-    saveSession(session, messages)
+    saveSessionReported(session, messages)
   # dmail is offered only when the active profile's tool schema includes
   # it (kimi family); the marker tagging below keys off the same flag.
   var dmailEnabled = false
@@ -1203,7 +1203,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         maxTokensOverride)
     except ApiError as e:
       if isInterruptedMsg(e.msg):
-        saveSession(session, messages)
+        saveSessionReported(session, messages)
         onTurnInterrupted()
         # onTurnInterrupted already stopped the spinner/bar-tick and
         # repainted the editor via writeTranscriptWithFatPrompt; the
@@ -1231,7 +1231,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           if summarized > 0: summarized
           else: applySummary(messages, OverflowFallbackSummary)
         if collapsed > 0:
-          saveSession(session, messages)
+          saveSessionReported(session, messages)
           let collapsedNotice = hintLnS(
             "· request rejected as too large; collapsed " &
               $collapsed & " message" &
@@ -1255,7 +1255,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # error is part of the same scrollback block as the rest of the
       # turn. `endTurnAfterTranscriptAppend` finalizes the turn without
       # rewriting the prompt.
-      saveSession(session, messages)
+      saveSessionReported(session, messages)
       commitTurnEndNotice(errLnS(e.msg))
       endTurnAfterTranscriptAppend(failed = true)
       turnEnded = true
@@ -1266,7 +1266,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     session.usage.cachedTokens += usage.cachedTokens
     session.lastPromptTokens = usage.promptTokens
     if isInterrupted():
-      saveSession(session, messages)
+      saveSessionReported(session, messages)
       onTurnInterrupted()
       # onTurnInterrupted already stopped the spinner/bar-tick and
       # repainted the editor via writeTranscriptWithFatPrompt; the
@@ -1305,12 +1305,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add msg
         messages.add %*{"role": "user", "content": ReasoningLoopSteerMsg,
                         "agentSent": true}
-        saveSession(session, messages)
+        saveSessionReported(session, messages)
         commitTranscriptBytes(
           formatItem(agentPromptItem(ReasoningLoopSteerMsg)), true)
         incEmptyRetryLevel()
         if emptyReplyWait():
-          saveSession(session, messages)
+          saveSessionReported(session, messages)
           onTurnInterrupted()
           turnEnded = true
           return true
@@ -1321,7 +1321,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # leave the loop on its own. Commit the empty turn and end with a
         # notice instead of feeding the bare-resend loop a cut every time.
         messages.add msg
-        saveSession(session, messages)
+        saveSessionReported(session, messages)
         commitTurnEndNotice(
           errLnS("reasoning loop - giving up after " & $MaxLoopSteers &
             " re-prompts"))
@@ -1372,7 +1372,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         commitTranscriptBytes(lengthNotice, true)
         incEmptyRetryLevel()
         if emptyReplyWait():
-          saveSession(session, messages)
+          saveSessionReported(session, messages)
           onTurnInterrupted()
           turnEnded = true
           return true
@@ -1387,12 +1387,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add msg
         messages.add %*{"role": "user", "content": EmptyReplySteerMsg,
                         "agentSent": true}
-        saveSession(session, messages)
+        saveSessionReported(session, messages)
         commitTranscriptBytes(
           formatItem(agentPromptItem(EmptyReplySteerMsg)), true)
         incEmptyRetryLevel()
         if emptyReplyWait():
-          saveSession(session, messages)
+          saveSessionReported(session, messages)
           onTurnInterrupted()
           turnEnded = true
           return true
@@ -1415,7 +1415,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         commitTranscriptBytes(emptyNotice, true)
         incEmptyRetryLevel()
         if emptyReplyWait():
-          saveSession(session, messages)
+          saveSessionReported(session, messages)
           onTurnInterrupted()
           turnEnded = true
           return true
@@ -1424,7 +1424,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # All retries exhausted. Persist the empty turn and surface a final
       # notice so the user knows the model gave nothing back.
       messages.add msg
-      saveSession(session, messages)
+      saveSessionReported(session, messages)
       commitTurnEndNotice(
         errLnS("empty reply - giving up after " & $MaxEmptyRetries &
           " retries"))
@@ -1435,7 +1435,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       tagCheckpoint(msg, nextCheckpoint)
       inc nextCheckpoint
     messages.add msg
-    saveSession(session, messages)
+    saveSessionReported(session, messages)
     let window = contextWindowFor(p)
     var action = decideContextAction(usage.promptTokens, window, messages.len)
     # Zen byte-envelope guard: the token threshold above cannot predict a
@@ -1475,7 +1475,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
                &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)"))
         termengine.noteNonMessageTail(summarizeNotice, messages.len)
         commitTranscriptBytes(summarizeNotice, true)
-        saveSession(session, messages)
+        saveSessionReported(session, messages)
         # This reply's tool_calls may still be unanswered: defer the
         # handoff to the point just after their results land, or inject
         # now when there are none.
@@ -1751,7 +1751,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           if ok:
             messages.add %*{"role": "user", "content":
               "[dmail from your future self] " & act.body}
-            saveSession(session, messages)
+            saveSessionReported(session, messages)
             dmailRevert = true
             let dmailNotice = hintLnS(
               "· dmail to checkpoint " & $cp & " (" &
@@ -1804,7 +1804,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             session.name = ""
             acquireSessionLock(session.savePath)
             updateActiveDirLockSession(session.savePath)
-          saveSession(session, messages)
+          saveSessionReported(session, messages)
           cleared = true
           break
       # The deferred receipt was captured before the loop, but a tool can
@@ -1821,7 +1821,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if dmailRevert:
         continue
       if flailAbort:
-        saveSession(session, messages)
+        saveSessionReported(session, messages)
         commitTurnEndNotice(formatItem(agentPromptItem(flailAbortNote)))
         endTurnAfterTranscriptAppend(failed = true)
         turnEnded = true
@@ -1852,7 +1852,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let joined = parts.join(", ")
         messages.add imageUserMessage(
           &"attached: {joined} ({label}){extraNote}", imgs)
-      saveSession(session, messages)
+      saveSessionReported(session, messages)
       if rolloverDue:
         # The deferred handoff: tool pairing has settled, the fresh
         # context re-anchors before the next model call.
@@ -1952,7 +1952,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             session.changeCountStart = session.readCache.changes.len
           let kickoff = mode.kickoffMessage(detectedText)
           messages.add kickoff
-          saveSession(session, messages)
+          saveSessionReported(session, messages)
           commitTranscriptBytes(
             formatItem(agentPromptItem(
               kickoffDisplayText(kickoff{"content"}.getStr),
@@ -1979,7 +1979,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         commitHarnessNotice(
           receiptBytes(mode.name & " check: plan structure lost"), messages)
         messages.add harnessNote(guard)
-        saveSession(session, messages)
+        saveSessionReported(session, messages)
         commitTranscriptBytes(formatItem(agentPromptItem(guard)), true)
         debugOut "runTurns: " & mode.name & " structure lost, continuing"
         continue
@@ -2014,7 +2014,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # announces it - the next turn starting IS the announcement.
         let cont = mode.feedbackMessage(modeText, content)
         messages.add cont
-        saveSession(session, messages)
+        saveSessionReported(session, messages)
         commitTranscriptBytes(
           formatItem(agentPromptItem(content, agentPromptMarker(cont))), true)
         debugOut "runTurns: " & why
@@ -2091,8 +2091,15 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     return false
   try:
     return runTurns(p, messages, session)
+  except SessionSaveError as e:
+    # A checkpoint save could not commit: the previous transcript on disk
+    # is intact, the turn's result lives on in memory, and the next save
+    # will retry. Report it and keep the session usable instead of letting
+    # the generic net below call an uncommitted turn an internal error.
+    stderr.writeLine "3code: " & e.msg
+    return false
   except ApiError as e:
-    saveSession(session, messages)
+    saveSessionReported(session, messages)
     if isInterruptedMsg(e.msg):
       # Safety net: `callModel`'s interrupt raises are normally caught inside
       # `runTurns` so `onTurnInterrupted` lands before the deferred
@@ -2135,7 +2142,7 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # user `rm -rf`'d it in another shell). There is nothing useful
     # to keep doing, so save what we have and exit cleanly. `quit`
     # runs the registered exit procs, which restore terminal state.
-    try: saveSession(session, messages) except CatchableError: discard
+    try: saveSessionReported(session, messages) except CatchableError: discard
     commitTranscriptBytes(errLnS("working directory gone: " & e.msg), true)
     quit()
   except CatchableError as e:
