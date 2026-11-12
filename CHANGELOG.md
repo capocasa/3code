@@ -2,6 +2,16 @@ Changelog
 
 Unreleased
 
+- **A hung provider can no longer wedge a worker thread for the life of
+  the process.** The network worker was owned by the frame that spawned
+  it: an interrupt cancelled the call but the thread stayed parked in an
+  uninterruptible resolver or connect, every later call queued behind
+  it, and a caller that gave up leaked the thread plus its connection
+  caches. Workers are now heap-owned and retired by budget: a caller
+  whose join budget expires moves on, a retired worker that finally
+  wakes exits safely instead of writing into a dead frame, connection
+  caches live with the job rather than the thread, and repeated short
+  calls leave no live jobs, retired jobs, or locks behind.
 - **Transcripts save atomically, and a failed save is never a silent
   success.** `saveSession` used to overwrite the live `.3log` in place
   and swallow errors into a stderr line: a truncated or half-written
