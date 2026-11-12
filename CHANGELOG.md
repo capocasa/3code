@@ -2,6 +2,15 @@ Changelog
 
 Unreleased
 
+- **A 400-recovery collapse can no longer keep a tail too big to send.**
+  The collapse pins tool results to their owning assistant, so one
+  batched run of ~1900 tool calls survived it intact: the rebuilt
+  request blew the route's byte limit again and the retry 400'd exactly
+  like the call it was recovering from, bricking the session. The
+  retained tail now also sheds its oldest entries head-first until the
+  rebuild fits the byte cap, and the pairing repair makes the survivors
+  legal again (orphan results drop, unanswered calls get synthetic
+  results).
 - **A hung provider can no longer wedge a worker thread for the life of
   the process.** The network worker was owned by the frame that spawned
   it: an interrupt cancelled the call but the thread stayed parked in an
