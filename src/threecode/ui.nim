@@ -83,9 +83,20 @@ type
     startGoalTurn*: bool
       ## A harness mode was armed: the controller kicks the mode's work
       ## off immediately instead of waiting for the next turn boundary.
+    preNewlineRows*: int
+      ## Volatile rows the modal greeting newline opened above the cursor
+      ## (written before a modal dispatch). A command converted to a
+      ## transcript result must walk over them or its commit erases one
+      ## row low and strands the blank as scrollback.
 
 var wizardReadLineHook*: WizardReadLineHook
 var wizardVerifyCancelHook*: WizardVerifyCancelHook
+var wizardPromptEngaged = false
+  ## True once the command being dispatched has run a wizard field
+  ## prompt. The `:provider` modal dispatch reads it to tell a wizard
+  ## that painted its own UI from a bail-out that never opened one: the
+  ## latter must take the ordinary echo+body commit so the typed line
+  ## lands in history and the editor clears.
 var wizardOauthLoginHook*: WizardOauthLoginHook
 
 proc handleCommandResult*(cmd: string, messages: var JsonNode,
@@ -352,6 +363,7 @@ proc readRequired*(editor: var minline.LineEditor, prompt: string,
   ## ctrl+c raises `minline.InputCancelled` to the caller; ctrl+d aborts
   ## the program. Empty input keeps re-prompting.
   while true:
+    wizardPromptEngaged = true
     let s =
       if wizardReadLineHook != nil:
         wizardReadLineHook(prompt, hidden, noHistory).strip
@@ -367,6 +379,7 @@ proc readOptional*(editor: var minline.LineEditor, prompt: string,
                   hidden = false, noHistory = true): string =
   ## ctrl+c raises `minline.InputCancelled` to the caller; ctrl+d aborts
   ## the program. Empty input is returned as "".
+  wizardPromptEngaged = true
   if wizardReadLineHook != nil:
     return wizardReadLineHook(prompt, hidden, noHistory).strip
   try: wizardReadLine(editor, prompt, hidechars = hidden, noHistory = noHistory).strip
@@ -2317,19 +2330,24 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
     # turn it into an empty `cdModal` return so the main loop
     # restores its idle state.
     var wizardBody = ""
+    wizardPromptEngaged = false
     try:
       case name
       of ":provider":
         wizardBody = cmdProvider(arg, editor, prof)
         session.profileName = prof.name
-        # Usage errors (`:provider add <extra>`) never enter the wizard;
-        # they come back as an error body. Surface those through the
-        # normal transcript path instead of swallowing them.
-        if wizardBody.len > 0 and wizardBody.contains("usage:"):
+        # A body from a command that never ran a wizard field (usage
+        # errors, `update`/`rm` on an unknown name, the `new` report) is
+        # a plain transcript result: echo the typed line, clear the
+        # editor, land it in history - like every non-modal command.
+        # A wizard that ran keeps cdModal: its own UI owns the screen
+        # and the typed line is consumed by the wizard's fields.
+        if wizardBody.len > 0 and not wizardPromptEngaged:
           return CommandResult(recognized: true, ok: false,
                                name: commandTitle(name, arg, false),
                                body: wizardBody, plainBody: false,
-                               disposition: cdTranscriptResult)
+                               disposition: cdTranscriptResult,
+                               preNewlineRows: 1)
       else:
         discard
     except minline.InputCancelled:

@@ -107,116 +107,126 @@ else:
       putEnv("THREECODE_SCREENSHOT_SRC", "")
 
     test "model screenshot -> receipt + image block on the next message":
-      if not x11Ready(): skip()
-      let root = newFixture("shot")
-      writeConfig(root)
-      isolateEnv(root)
-      copyFile("testdata/images/tiny.png", root / "run" / "tiny.png")
-      putEnv("THREECODE_SCREENSHOT_SRC", root / "run" / "tiny.png")
-      writeFile(root / "run" / "stub_responses.json", $(%*[
-        %*{"content": "", "tool_calls": [{
-          "id": "call_1",
-          "type": "function",
-          "function": {"name": "screenshot", "arguments": "{}"}}]},
-        %*{"content": "screen seen"}
-      ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
-      resetStubResponses()
+      # skip() only marks the test; the body must live under the
+      # guard or the checks (and the nil-image deref) run where the
+      # backend cannot exist.
+      if not x11Ready():
+        skip()
+      else:
+        let root = newFixture("shot")
+        writeConfig(root)
+        isolateEnv(root)
+        copyFile("testdata/images/tiny.png", root / "run" / "tiny.png")
+        putEnv("THREECODE_SCREENSHOT_SRC", root / "run" / "tiny.png")
+        writeFile(root / "run" / "stub_responses.json", $(%*[
+          %*{"content": "", "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "screenshot", "arguments": "{}"}}]},
+          %*{"content": "screen seen"}
+        ]))
+        putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+        resetStubResponses()
 
-      # Config `computer = on` only arms a -d:computerUse build now; arm
-      # directly so the e2e covers the capture path in every build. The
-      # config arming itself is covered by tests/tty/test_computer_shot.
-      computerUseEnabled = true
+        # Config `computer = on` only arms a -d:computerUse build now; arm
+        # directly so the e2e covers the capture path in every build. The
+        # config arming itself is covered by tests/tty/test_computer_shot.
+        computerUseEnabled = true
 
-      let s = initAgentSession(AgentOptions(cwd: root / "run",
-                                            experimental: true))
-      check s.prompt("look at the screen") == "screen seen"
+        let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                              experimental: true))
+        check s.prompt("look at the screen") == "screen seen"
 
-      # Activation: one-time note in the conversation, shot script on disk.
-      var note = ""
-      for m in s.messages:
-        if m{"role"}.getStr == "user" and
-            m{"content"}.getStr.startsWith("[computer use on]"):
-          note = m{"content"}.getStr
-      check note.len > 0
-      let sid = sessionIdFromPath(s.state.savePath)
-      check note.contains(shotScriptPath(sid))
-      check fileExists(shotScriptPath(sid))
+        # Activation: one-time note in the conversation, shot script on disk.
+        var note = ""
+        for m in s.messages:
+          if m{"role"}.getStr == "user" and
+              m{"content"}.getStr.startsWith("[computer use on]"):
+            note = m{"content"}.getStr
+        check note.len > 0
+        let sid = sessionIdFromPath(s.state.savePath)
+        check note.contains(shotScriptPath(sid))
+        check fileExists(shotScriptPath(sid))
 
-      # Tool result: text receipt, no base64.
-      var receipt = ""
-      for m in s.messages:
-        if m{"role"}.getStr == "tool":
-          receipt = m{"content"}.getStr
-      check receipt.startsWith("screenshot 16x12 -> delivered")
-      check "; shot attached below" in receipt
-      check "base64" notin receipt
+        # Tool result: text receipt, no base64.
+        var receipt = ""
+        for m in s.messages:
+          if m{"role"}.getStr == "tool":
+            receipt = m{"content"}.getStr
+        check receipt.startsWith("screenshot 16x12 -> delivered")
+        check "; shot attached below" in receipt
+        check "base64" notin receipt
 
-      # Follow-up user message: screenshot-labeled text + image block that
-      # embeds the exact delivered bytes from disk (cache parity).
-      var imageMsg: JsonNode = nil
-      for m in s.messages:
-        if m{"role"}.getStr == "user" and m{"content"}.kind == JArray:
-          imageMsg = m
-      require imageMsg != nil
-      let blocks = imageMsg{"content"}
-      check blocks.len == 2
-      check "attached: shot 1 16x12 -> " in blocks[0]{"text"}.getStr
-      check "(screenshot)" in blocks[0]{"text"}.getStr
-      check blocks[1]{"type"}.getStr == "image_url"
-      let uri = blocks[1]{"image_url"}{"url"}.getStr
-      check uri.startsWith("data:image/")
-      let imgDir = sessionImageDir(s.state.savePath)
-      check fileExists(imgDir / "001.jpeg")
-      check uri.endsWith(encode(readFile(imgDir / "001.jpeg")))
+        # Follow-up user message: screenshot-labeled text + image block that
+        # embeds the exact delivered bytes from disk (cache parity).
+        var imageMsg: JsonNode = nil
+        for m in s.messages:
+          if m{"role"}.getStr == "user" and m{"content"}.kind == JArray:
+            imageMsg = m
+        require imageMsg != nil
+        let blocks = imageMsg{"content"}
+        check blocks.len == 2
+        check "attached: shot 1 16x12 -> " in blocks[0]{"text"}.getStr
+        check "(screenshot)" in blocks[0]{"text"}.getStr
+        check blocks[1]{"type"}.getStr == "image_url"
+        let uri = blocks[1]{"image_url"}{"url"}.getStr
+        check uri.startsWith("data:image/")
+        let imgDir = sessionImageDir(s.state.savePath)
+        check fileExists(imgDir / "001.jpeg")
+        check uri.endsWith(encode(readFile(imgDir / "001.jpeg")))
 
-      # Frame state binds the delivered raster for `shot`.
-      let st = readFile(shotDir(sid) / "state")
-      check st.contains("native=16x12")
-      check st.contains("delivered=16x12")
-      s.close()
+        # Frame state binds the delivered raster for `shot`.
+        let st = readFile(shotDir(sid) / "state")
+        check st.contains("native=16x12")
+        check st.contains("delivered=16x12")
+        s.close()
 
     test "consecutive captures without an action are capped at 3":
-      if not x11Ready(): skip()
-      let root = newFixture("cap")
-      writeConfig(root)
-      isolateEnv(root)
-      copyFile("testdata/images/tiny.png", root / "run" / "tiny.png")
-      putEnv("THREECODE_SCREENSHOT_SRC", root / "run" / "tiny.png")
-      # Varying args keep the flail identical-repeat signal out of the
-      # way; the cap is the turn-scoped consecutive counter.
-      proc shotCall(n: int): JsonNode =
-        %*{"content": "", "tool_calls": [{
-          "id": "call_" & $n,
-          "type": "function",
-          "function": {"name": "screenshot",
-                       "arguments": $(%*{"n": n})}}]}
-      writeFile(root / "run" / "stub_responses.json", $(%*[
-        shotCall(1), shotCall(2), shotCall(3), shotCall(4),
-        %*{"content": "capped"}
-      ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
-      resetStubResponses()
+      # skip() only marks the test; the body must live under the
+      # guard or the checks (and the nil-image deref) run where the
+      # backend cannot exist.
+      if not x11Ready():
+        skip()
+      else:
+        let root = newFixture("cap")
+        writeConfig(root)
+        isolateEnv(root)
+        copyFile("testdata/images/tiny.png", root / "run" / "tiny.png")
+        putEnv("THREECODE_SCREENSHOT_SRC", root / "run" / "tiny.png")
+        # Varying args keep the flail identical-repeat signal out of the
+        # way; the cap is the turn-scoped consecutive counter.
+        proc shotCall(n: int): JsonNode =
+          %*{"content": "", "tool_calls": [{
+            "id": "call_" & $n,
+            "type": "function",
+            "function": {"name": "screenshot",
+                         "arguments": $(%*{"n": n})}}]}
+        writeFile(root / "run" / "stub_responses.json", $(%*[
+          shotCall(1), shotCall(2), shotCall(3), shotCall(4),
+          %*{"content": "capped"}
+        ]))
+        putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+        resetStubResponses()
 
-      computerUseEnabled = true
-      let s = initAgentSession(AgentOptions(cwd: root / "run",
-                                            experimental: true))
-      check s.prompt("keep looking") == "capped"
-      var receipts = 0
-      var capNote = ""
-      for m in s.messages:
-        if m{"role"}.getStr == "tool":
-          let c = m{"content"}.getStr
-          if c.startsWith("screenshot "): inc receipts
-          elif "screenshots in a row" in c: capNote = c
-      check receipts == 3
-      check "no action between them" in capNote
-      check "shot" in capNote
-      # Only the three executed captures delivered numbered files (the
-      # sha-named persistence copies dedupe identical captures too).
-      var delivered = 0
-      for f in walkFiles(sessionImageDir(s.state.savePath) / "*"):
-        let stem = f.extractFilename.split('.')[0]
-        if stem.len == 3 and stem.allCharsInSet(Digits): inc delivered
-      check delivered == 3
-      s.close()
+        computerUseEnabled = true
+        let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                              experimental: true))
+        check s.prompt("keep looking") == "capped"
+        var receipts = 0
+        var capNote = ""
+        for m in s.messages:
+          if m{"role"}.getStr == "tool":
+            let c = m{"content"}.getStr
+            if c.startsWith("screenshot "): inc receipts
+            elif "screenshots in a row" in c: capNote = c
+        check receipts == 3
+        check "no action between them" in capNote
+        check "shot" in capNote
+        # Only the three executed captures delivered numbered files (the
+        # sha-named persistence copies dedupe identical captures too).
+        var delivered = 0
+        for f in walkFiles(sessionImageDir(s.state.savePath) / "*"):
+          let stem = f.extractFilename.split('.')[0]
+          if stem.len == 3 and stem.allCharsInSet(Digits): inc delivered
+        check delivered == 3
+        s.close()

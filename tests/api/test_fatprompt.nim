@@ -124,13 +124,17 @@ suite "fat prompt frame model":
                         completionTokens: 25, totalTokens: 2025),
                   window = 128000, apiActive = true, spinner = "●",
                   elapsedS = 3)
-    check tokenBarText(p.tokenBar) == "●  ○1%  ↑2.0k  ↻500  ↓25  3"
+    # ↑ is the raw fresh input (2000 - 500); the cached share rides ↻,
+    # so the slots sum to the provider's bill.
+    check tokenBarText(p.tokenBar) == "●  ○1%  ↑1.5k  ↻500  ↓25  3"
 
+    # A cached share reported above the prompt clamps ↑ to 0: the slot
+    # drops out instead of painting a negative fresh count.
     p.setTokenBar(Usage(promptTokens: 16, cachedTokens: 3200,
                         completionTokens: 36, totalTokens: 52),
                   window = 128000, apiActive = true, spinner = "○",
                   elapsedS = 3)
-    check tokenBarText(p.tokenBar) == "○  ○0%  ↑16  ↻3.2k  ↓36  3"
+    check tokenBarText(p.tokenBar) == "○  ○0%  ↻3.2k  ↓36  3"
 
   test "bash viewport shows cutoff plus bottom seven while active":
     var p = initFatPrompt(width = 50, height = 13, window = 1000)

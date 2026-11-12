@@ -1391,7 +1391,8 @@ proc main() =
           restoreEditor = true,
           beforeRepaint = clearSubmittedCommandEditor,
           reserveFooter = true,
-          clearEditor = true)
+          clearEditor = true,
+          extraWalkRows = commandResult.preNewlineRows)
         releaseIdleSubmittedInput()
         if commandResult.startGoalTurn:
           if runModeKickoff(activeMode(session.cwd)):

@@ -299,7 +299,7 @@ suite "shell command and edit-in-editor":
     check readFile(root / "run" / ".sandbox") ==
       "allow ./\ndeny ./secrets\nallow ./from-editor\n"
 
-    tty.typeText ":sandbox"
+    tty.typeText ":sandbox show"
     tty.send "\n"
     tty.drain(300)
     tty.expectInHistory "from-editor"

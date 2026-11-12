@@ -330,7 +330,11 @@ proc tokenBarText*(state: TokenBarState): string =
   let ctx = contextPart(state.usage, state.window)
   if ctx.len > 0:
     parts.add ctx
-  let input = tokenSlot("↑", state.usage.promptTokens)
+  # ↑ stays the raw fresh input (prompt minus cached, clamped at 0);
+  # the cached share rides ↻ on its own, so the slots sum to the
+  # provider's bill and round only at display.
+  let input = tokenSlot("↑",
+    max(0, state.usage.promptTokens - state.usage.cachedTokens))
   if input.len > 0:
     parts.add input
   let cache = tokenSlot("↻", state.usage.cachedTokens)

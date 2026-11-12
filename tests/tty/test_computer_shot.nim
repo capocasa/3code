@@ -59,37 +59,41 @@ proc x11Ready(): bool =
 
 suite "computer use via shot (real binary)":
   test "screenshot banner, shot stale-frame error through the sandbox":
-    if not x11Ready(): skip()
-    let root = newFixture("computer_shot")
-    writeConfiguredProvider(root)
-    # The session id is unknown up front, so the model's bash command
-    # reaches the script through the glob $TMPDIR/3code-shot-*/shot.
-    let shotCmd = "\"$TMPDIR\"/3code-shot-*/shot click 640 360"
-    writeFile(root / "run" / "stub_responses.json", $(%*[
-      {"content": "", "tool_calls": [{
-        "id": "call_1", "type": "function",
-        "function": {"name": "screenshot", "arguments": "{}"}}]},
-      {"content": "", "tool_calls": [{
-        "id": "call_2", "type": "function",
-        "function": {"name": "bash",
-                     "arguments": $(%*{"command": shotCmd})}}]},
-      {"content": "stale confirmed", "contentChunks": ["stale confirmed"]}
-    ]))
-    let stub = ensureStubBinary("-d:computerUse")
-    let tty = newTtySession(stub,
-                            args = ["-x", "-i"],
-                            cwd = root / "run",
-                            env = stubEnv(root, root / "run" / "stub_responses.json"),
-                            keepHistory = true)
-    defer: tty.close()
-    tty.expect "\u276f"
-    tty.send "look and click\n"
-    # Capture receipt: one-line banner, no base64 on screen.
-    tty.expectInHistory "shot 16x12 -> 16x12"
-    # The bash-driven shot script ran for real: faked 16x12 frame vs the
-    # live display geometry is a stale frame, loudly.
-    tty.expectInHistory "stale frame"
-    tty.expectInHistory "screenshot()"
-    tty.expectInHistory "stale confirmed"
-    tty.drain(200)
-    tty.expect "\u276f"
+    # skip() only marks the test; the body must live under the guard
+    # or the PTY session runs (and its expects fail) headless.
+    if not x11Ready():
+      skip()
+    else:
+      let root = newFixture("computer_shot")
+      writeConfiguredProvider(root)
+      # The session id is unknown up front, so the model's bash command
+      # reaches the script through the glob $TMPDIR/3code-shot-*/shot.
+      let shotCmd = "\"$TMPDIR\"/3code-shot-*/shot click 640 360"
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "", "tool_calls": [{
+          "id": "call_1", "type": "function",
+          "function": {"name": "screenshot", "arguments": "{}"}}]},
+        {"content": "", "tool_calls": [{
+          "id": "call_2", "type": "function",
+          "function": {"name": "bash",
+                       "arguments": $(%*{"command": shotCmd})}}]},
+        {"content": "stale confirmed", "contentChunks": ["stale confirmed"]}
+      ]))
+      let stub = ensureStubBinary("-d:computerUse")
+      let tty = newTtySession(stub,
+                              args = ["-x", "-i"],
+                              cwd = root / "run",
+                              env = stubEnv(root, root / "run" / "stub_responses.json"),
+                              keepHistory = true)
+      defer: tty.close()
+      tty.expect "\u276f"
+      tty.send "look and click\n"
+      # Capture receipt: one-line banner, no base64 on screen.
+      tty.expectInHistory "shot 16x12 -> 16x12"
+      # The bash-driven shot script ran for real: faked 16x12 frame vs the
+      # live display geometry is a stale frame, loudly.
+      tty.expectInHistory "stale frame"
+      tty.expectInHistory "screenshot()"
+      tty.expectInHistory "stale confirmed"
+      tty.drain(200)
+      tty.expect "\u276f"

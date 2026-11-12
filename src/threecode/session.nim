@@ -176,6 +176,12 @@ proc mangleCwd*(cwd: string): string =
   when defined(windows):
     s = s.replace(":", "_")       # drive letter colon (C:)
   if s.len == 0: s = "root"       # cwd "/" (and "") collapse to a stable name
+  # The mangled name is a filename (index, drafts, dir lock): past a few
+  # hundred chars it blows NAME_MAX (255) and every lock/draft write
+  # fails with ENAMETOOLONG. Keep a readable head, disambiguate with a
+  # digest of the full name so distinct paths never collide.
+  if s.len > util.MangledNameCap:
+    s = s[0 ..< util.MangledNameCap - 17] & "-" & fnv1aHex(s)
   s
 
 # ---------------------------------------------------------------------------

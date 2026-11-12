@@ -1038,7 +1038,8 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
                             reserveFooter = true;
                             flushWithPrevious = false;
-                            clearEditor = false) =
+                            clearEditor = false;
+                            extraWalkRows = 0) =
   ## Commit transcript output while preserving the volatile footer.
   ## The controller owns the transcript bytes and item spacing. This proc owns
   ## the terminal mechanics: clear the volatile footer, append the bytes as
@@ -1072,7 +1073,7 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
         inputEditor,
         oldFooter,
         newFooter,
-        0,
+        extraWalkRows,
         restoreEditor,
         reserveFooter,
         flushWithPrevious)
@@ -1085,7 +1086,7 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
         inputEditor,
         oldFooter,
         newFooter,
-        0,
+        extraWalkRows,
         restoreEditor,
         reserveFooter,
         flushWithPrevious,

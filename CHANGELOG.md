@@ -2,6 +2,49 @@ Changelog
 
 Unreleased
 
+- **A `:provider` bail-out commits like an ordinary command.**
+  Commands that never open a wizard field - `update`/`edit`/`rm` on an
+  unknown name, usage errors, the read-only `new` report - now echo the
+  typed line as scrollback, print their body under it, clear the editor
+  to a fresh `❯`, and land the line in history for recall with the
+  normal keys. Previously the modal path swallowed the echo, erased the
+  typed row to blank, and left the text live in the editor: one Enter
+  away from an accidental resubmit and unreachable from history. A
+  wizard that actually runs (or a cancel inside one) keeps its old
+  screen-owning behavior.
+- **The token bar and receipts count raw fresh input again; rounding
+  happens only at display.** Since the May rendering shake-down, the ↑
+  slot on the token bar and the per-turn receipts showed the whole
+  prompt (cached tokens included) instead of the fresh count — on
+  DS 4.1 Flash, whose first-party API reports large cache-hit numbers
+  every turn, a receipt read `↑12.5k ↻11.8k` as if the cached input was
+  counted twice, and summing receipt columns as the manual documents
+  over-counted by the cached share. The ↑ slot is back to the raw
+  fresh input (prompt minus cached, clamped at 0 — `↻` carries the
+  cached share on its own), matching the manual's receipt math, the
+  `:tokens` session total, and the `.3log` `tokens` record; the numbers
+  round to "12.3k" only when painted.
+- **Windows startup no longer faults on a config with plugin
+  defaults.** The early config parse (the one that gates plugin
+  loading) asked the plugin registry for its registered defaults
+  before the registry's lock had ever been initialized; on Windows an
+  unheld CRITICAL_SECTION is undefined, and under ConPTY the
+  first run with a config file died with SIGSEGV before the first
+  frame. POSIX happens to tolerate a zeroed mutex, so only Windows
+  users saw it. The accessors now initialize the lock on first use.
+- **Very deep working directories no longer fail the directory
+  lock.** The per-cwd lock, session index and draft names embed the
+  full mangled path; past 200 characters that blew the filesystem's
+  255-byte name limit and every startup under such a cwd died with
+  "File name too long". Long names now keep a readable head and carry
+  an FNV-1a digest of the full path, so distinct directories stay
+  distinct.
+- **Fenced `dotnet build` on Linux needs `XDG_RUNTIME_DIR` inside the
+  fence.** dotnet's first-run NuGet migrations take their named mutex
+  via mkdtemp in `$XDG_RUNTIME_DIR` (`/run/user/<uid>`), which no
+  policy grants; the build died with EACCES before the first-use
+  sentinel was ever consulted. The manual's dotnet recipe now says to
+  run fenced builds with `XDG_RUNTIME_DIR=$TMPDIR`.
 - **`-r` checks for a running 3code before session availability.**
   Resuming in a directory another live 3code holds now reports the holder
   (pid, session id, lock file) even when the holder has not saved its
