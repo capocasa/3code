@@ -1,4 +1,4 @@
-import std/[os, strutils, times, unittest]
+import std/[os, osproc, strutils, times, unittest]
 import threecode/[actions, types, streamexec]
 
 suite "streamexec: basic streaming":
@@ -548,6 +548,37 @@ when defined(posix):
         check boxed == plain
         check "pipestatus=3-0" in boxed
         check "heredoc=heredoc payload" in boxed
+
+    test "a deny already covered by a denied root stays silent and unreachable":
+      # Integration regression: the authority denies ride every fenced
+      # command (argv plus the box child's own guards). Under a policy
+      # that already refuses their ancestors they are implied, and
+      # raising the Linux bind-mask for them printed the sandwall
+      # degrade notice into the fenced output on hosts without user
+      # namespaces. The denial itself never needed the mask here: the
+      # covering root refuses the path in every backend, so the output
+      # must stay clean while the guarded file still does not open.
+      let bin = getCurrentDir() / "3code"
+      if not fileExists(bin) or not sandbox.backendWorks(bin):
+        skip()
+      else:
+        let dir = getTempDir() /
+          ("3code-implied-deny-" & $getCurrentProcessId() & "-" &
+            $epochTime().int64)
+        createDir(dir)
+        writeFile(dir / ".sandbox", "deny /\nallow " & dir & "\n")
+        defer: removeDir(dir)
+        let guarded = "/nonexistent/3code-implied-deny/config"
+        let cmd = bin.quoteShell & " sandbox --policy " &
+          (dir / ".sandbox").quoteShell & " restrict " & dir.quoteShell &
+          " --deny " & guarded.quoteShell & " -- sh -c " &
+          quoteShell("echo boxed-ok; cat " & guarded)
+        let (merged, code) = execCmdEx(cmd, options = {poStdErrToStdOut})
+        check "boxed-ok" in merged
+        check "sandwall:" notin merged
+        # The implied deny must not loosen anything: the covered path
+        # stays unreachable, so the trailing cat fails the command.
+        check code != 0
 else:
   suite "streamexec: sandboxed bash parity":
     test "posix-only contract":

@@ -29,6 +29,7 @@ when defined(posix):
   import std/posix except Time
 import std/[os, strutils]
 import sandwall
+import sandwall/baseline
 import sandbox
 import dirsettings
 
@@ -55,6 +56,10 @@ Usage:
   --deny paths are unreachable (read and write) even where the policy
   allows their parent: 3code passes the user-owned files whose sandbox
   switches are authoritative so a confined command cannot edit them.
+  A --deny under no granted path at all is dropped as already
+  unreachable (this also keeps the Linux bind-mask from being raised
+  - and, where namespaces are unavailable, its notice printed - for
+  entries that could never bite).
 
   System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
   command's binaries, libs, and device nodes stay runnable; --ro adds to
@@ -173,6 +178,38 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
   # Explicit --deny args union with the policy's denies: the backends
   # enforce both against the writable roots (mask/Seatbelt/ACL).
   denied.add a.denied
+  # A deny is meaningful only where it narrows something the backends
+  # would otherwise grant: under a policy root (the Linux bind-mask's
+  # job) or under an auto-granted baseline root (Landlock's carve-out).
+  # Anywhere else "unmentioned is already denied", and policy-file
+  # denies outside every grant are filtered out by resolve() for
+  # exactly that reason. The explicit --deny entries used to skip that
+  # filter, so the authority denies rode every fenced command as mask
+  # requests for paths no grant could reach - on hosts without user
+  # namespaces the attempt printed a degrade notice into the fenced
+  # command's output. Narrowed keeps enforce identically on all three
+  # backends; dropped keeps were unreachable by construction.
+  # Cleaned absolute form for the reachability comparison only; the
+  # entries themselves pass through unchanged, and no symlink
+  # resolution happens here (policy targets match as written).
+  proc absNorm(p: string): string =
+    try: result = absolutePath(p).normalizedPath
+    except CatchableError: result = p
+  var kept: seq[string]
+  for d in denied:
+    let dn = absNorm(d)
+    var meaningful = false
+    for root in writable:
+      if isPathUnder(dn, absNorm(root)): meaningful = true; break
+    if not meaningful:
+      for root in readonly:
+        if isPathUnder(dn, absNorm(root)): meaningful = true; break
+    if not meaningful:
+      for root in baselineRead:
+        if isPathUnder(dn, root): meaningful = true; break
+    if not meaningful: continue
+    kept.add d
+  denied = kept
   (writable, readonly, denied, hostRules > 0)
 
 proc boxRestrict(args: seq[string]): int =

@@ -2146,7 +2146,16 @@ session.close()
 finishes calling tools and returns its reply. Meanwhile, `onEvent` receives
 text, reasoning, tool output, retry notices, and usage. `promptAsync` puts the
 turn on a library-managed thread and reports failures with `aevError`;
-`interrupt` cancels it. Sessions use the same provider config, filesystem
+`interrupt` cancels it — the cancelled turn still saves what it had, and
+the next `prompt` is admitted once the worker has been joined with
+`joinTurn`. The lifecycle is enforced with stable errors: a second turn
+while one runs (async or blocking) and a `close` during a turn raise
+`AgentError` ("a turn is already running", "cannot close: a turn is in
+flight"), and a closed session rejects every call with "session is
+closed"; shutting down means `interrupt`, `joinTurn`, then `close`. A
+transcript save failure raises `SessionSaveError` out of `prompt` (async
+turns: `aevError`), keeps the conversation in memory, and preserves the
+previous file on disk. Sessions use the same provider config, filesystem
 policy, locks, and saved format as the CLI.
 
 Only one `AgentSession` may be active in a process, and calls on it are not

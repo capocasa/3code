@@ -369,6 +369,49 @@ suite "library: AgentSession":
       check s.prompt("") == "turn finished"
       s.close()
 
+    test "an interrupted async turn releases the reservation, saves, and admits the next turn":
+      # Cross-boundary: cancel a turn behind the AgentSession lifecycle gate
+      # (the mechanism rpc /session/cancel and acp session/cancel drive) and
+      # require the whole chain: the worker surfaces the interruption as
+      # aevError, the turn reservation is released so a later turn is
+      # admitted, the interrupted turn persisted its user message, and the
+      # retired worker cannot interfere with the follow-up turn.
+      putEnv("TMPDIR", stableTmp / ("a7t_interrupt_" & $getCurrentProcessId()))
+      let root = newFixture("interrupt")
+      writeConfig(root)
+      isolateEnv(root)
+      # The marker file appears when the stub selects this response, before
+      # the pre-stream delay parks the turn: deterministic cancel timing.
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "late reply", "preStreamDelayMs": 30000,
+         "markerPath": root / "run" / "in_flight"},
+        {"content": "after interrupt"}]))
+      putEnv("THREECODE_STUB_RESPONSES",
+             root / "run" / "stub_responses.json")
+      resetStubResponses()
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                           experimental: true))
+      var errText = ""
+      s.onEvent = proc(ev: AgentEvent) =
+        if ev.kind == aevError: errText = ev.text
+      s.promptAsync("go")
+      var inFlight = false
+      for i in 0 ..< 500:
+        if fileExists(root / "run" / "in_flight"):
+          inFlight = true
+          break
+        sleep(20)
+      check inFlight
+      s.interrupt()
+      s.joinTurn()
+      check errText == InterruptedByUserMsg
+      # Persistence policy: the interrupted turn saved what it had.
+      check "go" in readFile(s.state.savePath)
+      # The reservation is gone: the very next submission is admitted and
+      # runs to completion with no interference from the retired worker.
+      check s.prompt("") == "after interrupt"
+      s.close()
+
     when defined(sessionSaveTestHooks):
       test "save failure on close still releases ownership and allows reopen":
         putEnv("TMPDIR", stableTmp / ("a4t_savefail_" & $getCurrentProcessId()))

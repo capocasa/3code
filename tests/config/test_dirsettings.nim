@@ -227,6 +227,47 @@ suite "dirsettings: sandbox authority in the store cascade":
     check "sandbox" notin readFile(cfgPath)
     sandboxEnabled = true
 
+  test "a rejected project disablement survives a config write, a switch, and a reload":
+    # The full sequence a session lives through: start inside the project
+    # (refusal), a mid-session config write, a switch to a store-less
+    # directory, a config reload, and a switch back into the project. No
+    # step may launder the refused store value into the user config or
+    # weaken the booleans it guards.
+    let f = newFixture("sbseq")
+    defer: dropFixture(f.base)
+    sandboxEnabled = true
+    sandboxWallWarn = true
+    writeStoreConfig(f.proj, "[settings]\nsandbox = \"off\"\n")
+    dirsettings.applyDirConfig(f.proj)
+    check sandboxEnabled
+    check not dirsettings.dirSandboxOverridden
+    # Mid-session write (as a :model switch performs one): the refused
+    # value must not land in the user config, and with no override in
+    # effect the write must not hoist anything else either.
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeConfigFile(cfgPath, "p.m", @[])
+    check "sandbox" notin readFile(cfgPath)
+    # Switch to a directory whose cascade carries no stores: the user
+    # config's own values (sandbox absent = on) are the floor.
+    let elsewhere = f.base / "elsewhere"
+    createDir(elsewhere)
+    dirsettings.applyDirConfig(elsewhere)
+    check sandboxEnabled
+    check sandboxWallWarn
+    check not dirsettings.dirSandboxOverridden
+    # Reload (config parse + overlay re-application) back in the project:
+    # the same refusal, and a later write still has nothing to leak.
+    discard tryLoadStateOrEmpty(cfgPath)
+    dirsettings.applyDirConfig(f.proj)
+    check sandboxEnabled
+    check sandboxWallWarn
+    check not dirsettings.dirSandboxOverridden
+    writeConfigFile(cfgPath, "p.m", @[])
+    check "sandbox" notin readFile(cfgPath)
+    sandboxEnabled = true
+    sandboxWallWarn = true
+
   test "writeConfigFile does not leak the directory override":
     let f = newFixture("noleak")
     defer: dropFixture(f.base)
