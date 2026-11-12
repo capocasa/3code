@@ -108,7 +108,14 @@ proc agentCloseImpl(): cint {.gcsafe.} =
       agentSession.interrupt()
       joinThread(turnThread)
       turnStarted = false
-    agentSession.close()
+    try:
+      agentSession.close()
+    except AgentError as e:
+      # Cleanup already completed inside close; report the save failure
+      # through lastError instead of crossing the cdecl boundary.
+      agentSession = nil
+      agentErr = e.msg
+      return 3.cint
     agentSession = nil
     0.cint
 

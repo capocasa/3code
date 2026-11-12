@@ -353,3 +353,41 @@ suite "acp frontend":
       check userText == "begin"
       check "first reply." in agentText
       check "continued without a prompt." in agentText
+
+  test "failed session/load leaves the frontend sessionless, later open recovers":
+    let root = newFixture("acp_switchfail")
+    defer: removeDir(root)
+    writeConfiguredProvider(root)
+    writeResponses(root, "plain.json", %*[
+      {"role": "assistant", "content": "Hello from the stub agent.",
+       "usage": {"promptTokens": 10, "completionTokens": 5,
+                 "totalTokens": 15, "cachedTokens": 0}}])
+    let s = spawnAcp(stub, root, root / "run" / "plain.json")
+    defer: discard closeAcp(s)
+    s.send(frame(1, "initialize", %*{"protocolVersion": 1}))
+    discard s.waitFor(1)
+    # A live session first, so the failed load must tear it down.
+    s.send(frame(2, "session/new", %*{"cwd": root / "proj"}))
+    let sid = s.waitFor(2){"result"}{"sessionId"}.getStr
+    check sid.len > 0
+    # Loading an unknown id fails and must not leave the old object served.
+    s.send(frame(3, "session/load",
+      %*{"sessionId": "no-such-session", "cwd": root / "proj"}))
+    let fail = s.waitFor(3)
+    check fail{"error"}{"code"}.getInt == -32000
+    check fail{"error"}{"message"}.getStr.len > 0
+    # The old session is gone: even its own (previously valid) id cannot
+    # prompt, and the answer names the sessionless state.
+    s.send(frame(4, "session/prompt",
+      %*{"sessionId": sid, "prompt": [{"type": "text", "text": "x"}]}))
+    let nos = s.waitFor(4)
+    check nos{"error"}{"message"}.getStr.startsWith("no session")
+    # A subsequent valid open succeeds and serves the new session.
+    s.send(frame(5, "session/new", %*{"cwd": root / "proj"}))
+    let reopened = s.waitFor(5)
+    let sid2 = reopened{"result"}{"sessionId"}.getStr
+    check sid2.len > 0 and sid2 != sid
+    s.send(frame(6, "session/prompt", %*{
+      "sessionId": sid2,
+      "prompt": [{"type": "text", "text": "go"}]}))
+    check s.waitFor(6){"result"}{"stopReason"}.getStr == "end_turn"

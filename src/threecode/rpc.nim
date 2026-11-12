@@ -7,9 +7,14 @@
 ##
 ##   GET  /id                     one row: pid cwd model busy version
 ##                                sessionid error   (busy 0/1; error is
-##                                empty when the session is live)
+##                                empty when the session is live; a
+##                                failed switch reports an empty
+##                                sessionid plus its initError)
 ##   POST /session/new?dir=DIR    reopen the session in DIR; answer:
-##                                sessionid, or `error: ...`
+##                                sessionid, or `error: ...` (the
+##                                frontend then stays sessionless —
+##                                no usable old session — until a
+##                                later valid open succeeds)
 ##   POST /prompt                 body: the whole prompt; an empty body
 ##                                continues the ongoing turn (no message
 ##                                appended); answer:
@@ -141,12 +146,30 @@ proc sweepStaleRpcEntries() =
 proc openSession(st: RpcState; dir: string) =
   ## Swap the live session (saved and unlocked) for a fresh one in `dir`
   ## ("" = process cwd). Raises `AgentError` (no provider, locks held).
-  if st.s != nil: st.s.close()
-  st.s = initAgentSession(AgentOptions(
-    cwd: dir, model: st.model, debug: st.debug))
-  st.sessionId = sessionIdFromPath(st.s.state.savePath)
+  ## One AgentSession per process means the old session must be fully
+  ## closed before the new init is attempted, so replacement goes through
+  ## an explicit sessionless gap: the old object and its identity are
+  ## dropped first, and on failure the frontend stays sessionless (nil
+  ## session, empty session id, `initError` set) with the registry row
+  ## moved to the attempted directory. A later valid open recovers. The
+  ## event ring deliberately spans sessions (clients reconnect with
+  ## `after`); scrollback is the transcript surface and reads only from
+  ## the live session.
+  let old = st.s
+  st.s = nil
+  st.sessionId = ""
+  let wanted = if dir.len > 0: dir else: getCurrentDir()
+  try:
+    if old != nil: old.close()
+    st.s = initAgentSession(AgentOptions(
+      cwd: dir, model: st.model, debug: st.debug))
+  except CatchableError as e:
+    st.initError = e.msg
+    st.cwd = wanted
+    raise
   st.initError = ""
-  st.cwd = if dir.len > 0: dir else: getCurrentDir()
+  st.sessionId = sessionIdFromPath(st.s.state.savePath)
+  st.cwd = wanted
 
 proc removeBlock(text, openTag, closeTag: string): string =
   ## Same normalization as acp.replayUserText: drop open..close pairs; a
@@ -219,7 +242,12 @@ proc runRpcTurn(job: RpcJob) =
       st.push("error", ev.text)
   try:
     discard st.s.prompt(job.text)
-    st.push("end", "end_turn")
+    # Persistence failure is an error end, never a false end_turn.
+    if sessionSaveError.len > 0:
+      st.push("error", "session save failed: " & sessionSaveError)
+      st.push("end", "error")
+    else:
+      st.push("end", "end_turn")
   except AgentError as e:
     if e.msg == InterruptedByUserMsg:
       st.push("end", "cancelled")
@@ -229,8 +257,11 @@ proc runRpcTurn(job: RpcJob) =
   except CatchableError as e:
     st.push("error", e.msg)
     st.push("end", "error")
-  st.s.onEvent = nil
-  st.busy.store(false)
+  finally:
+    # Exception-safe reset: busy clears only after the ring is closed out,
+    # and never leaks on an unexpected raise above.
+    st.s.onEvent = nil
+    st.busy.store(false)
 
 proc rpcTurnThread(job: RpcJob) {.thread.} =
   {.cast(gcsafe).}:
@@ -238,11 +269,16 @@ proc rpcTurnThread(job: RpcJob) {.thread.} =
 
 proc startTurn(st: RpcState; text: string): bool =
   ## Atomically claim the busy flag; false means a turn already runs and
-  ## the caller answers `busy`.
+  ## the caller answers `busy`. A failed spawn gives the flag back, so a
+  ## refused-to-start turn never wedges the frontend.
   if st.busy.exchange(true): return false
   if st.workerStarted: joinThread(st.worker)
+  try:
+    createThread(st.worker, rpcTurnThread, RpcJob(st: st, text: text))
+  except CatchableError:
+    st.busy.store(false)
+    raise
   st.workerStarted = true
-  createThread(st.worker, rpcTurnThread, RpcJob(st: st, text: text))
   true
 
 # ---------- HTTP ----------
@@ -322,8 +358,11 @@ proc handle(st: RpcState; req: Request): Future[void] {.async, gcsafe.} =
             openSession(st, dir)
           writeRegistry(boundPort, st.cwd)
           await text(req, Http200, st.sessionId & "\n")
-        except AgentError as e:
-          st.initError = e.msg
+        except CatchableError as e:
+          # openSession left the sessionless identity and moved st.cwd;
+          # keep the registry row consistent with the failure.
+          try: writeRegistry(boundPort, st.cwd)
+          except CatchableError: discard
           await text(req, Http500, "error: " & e.msg & "\n")
     else:
       await text(req, Http404, "no such endpoint\n")
