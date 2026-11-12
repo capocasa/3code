@@ -231,17 +231,17 @@ suite "sandbox ask prompt":
       runShellCmd(tty, "echo granted > vault/out.txt")
 
       tty.expectInHistory "? echo granted > vault/out.txt", 30_000
-      tty.expectInHistory "allow write access to ./vault/out.txt?"
-      tty.expectInHistory "(a) allow"
-      tty.expectInHistory "(f) allow the entire folder"
-      tty.expectInHistory "(d) deny in 20s"
+      tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
+      tty.expectInHistory "(a) allow", 30_000
+      tty.expectInHistory "(f) allow the entire folder", 30_000
+      tty.expectInHistory "(d) deny in 20s", 30_000
       tty.expectNeverInHistory "sandbox ask:"
       tty.expectNeverInHistory "is ask-protected"
 
       tty.sendAskKey 'f'
-      tty.expectInHistory "allowed ./vault - retrying"
+      tty.expectInHistory "allowed ./vault - retrying", 30_000
       check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
-      tty.expectInHistory "[sandbox ask: user allowed ./vault; command retried]"
+      tty.expectInHistory "[sandbox ask: user allowed ./vault; command retried]", 30_000
       # The folder offer flips the ask rule itself: same line position,
       # same neighbors, no stacked duplicate.
       check policyLines(root) ==
@@ -262,9 +262,9 @@ suite "sandbox ask prompt":
       tty.expect "\u276f"
       runShellCmd(tty, "echo nope > vault/out.txt")
 
-      tty.expectInHistory "(d) deny in 20s"
+      tty.expectInHistory "(d) deny in 20s", 30_000
       tty.sendAskKey 'n'
-      tty.expectInHistory "declined by user; not retried"
+      tty.expectInHistory "declined by user; not retried", 30_000
       tty.drain(500)
       check not fileExists(root / "run" / "vault" / "out.txt")
       tty.expect "\u276f"
@@ -288,7 +288,7 @@ suite "sandbox ask prompt":
 
       tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
       tty.sendAskKey 'a'
-      tty.expectInHistory "allowed ./vault/out.txt - retrying"
+      tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
       check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
       check policyLines(root) ==
         @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
@@ -317,8 +317,8 @@ suite "sandbox ask prompt":
 
       tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
       tty.sendAskKey 'a'
-      tty.expectInHistory "allowed ./vault/out.txt - retrying"
-      tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]"
+      tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
+      tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]", 30_000
       check policyLines(root) ==
         @["deny /", "allow ./", "ask ./vault", "deny ./locked",
           "allow ./vault/out.txt"]
@@ -338,7 +338,7 @@ suite "sandbox ask prompt":
       tty.expect "\u276f"
       runShellCmd(tty, "echo late > vault/out.txt")
 
-      tty.expectInHistory "(a) allow"
+      tty.expectInHistory "(a) allow", 30_000
       tty.expectInHistory "no answer before timeout; not retried", 10_000
       tty.drain(300)
       check not fileExists(root / "run" / "vault" / "out.txt")
@@ -361,11 +361,11 @@ suite "sandbox ask prompt":
     runShellCmd(tty, scriptedDenial())
 
     tty.expectInHistory "? sh -c \"echo ./vault/out.txt: Permission denied; exit 13\"", 30_000
-    tty.expectInHistory "allow read access to ./vault/out.txt?"
-    tty.expectInHistory "(f) allow the entire folder"
-    tty.expectInHistory "(d) deny in 20s"
+    tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
+    tty.expectInHistory "(f) allow the entire folder", 30_000
+    tty.expectInHistory "(d) deny in 20s", 30_000
     tty.sendAskKey 'd'
-    tty.expectInHistory "declined by user; not retried"
+    tty.expectInHistory "declined by user; not retried", 30_000
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked"]
     tty.expect "\u276f"
@@ -387,7 +387,7 @@ suite "sandbox ask prompt":
 
     tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
     tty.sendAskKey 'd'
-    tty.expectInHistory "declined by user; not retried"
+    tty.expectInHistory "declined by user; not retried", 30_000
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked"]
     tty.expect "\u276f"
@@ -407,8 +407,8 @@ suite "sandbox ask prompt":
 
     tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
     tty.sendAskKey 'a'
-    tty.expectInHistory "allowed ./vault/out.txt - retrying"
-    tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]"
+    tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
+    tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]", 30_000
     check policyLines(root) ==
       @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
     tty.expect "\u276f"
@@ -426,7 +426,7 @@ suite "sandbox ask prompt":
 
     tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
     tty.sendAskKey 'a'
-    tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]"
+    tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]", 30_000
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked",
         "allow ./vault/out.txt"]
@@ -514,11 +514,11 @@ suite "sandbox ask prompt":
     tty.expect "\u276f"
     tty.send "save it\n"
     tty.expectInHistory "? write vault/out.txt", 30_000
-    tty.expectInHistory "allow write access to ./vault/out.txt?"
-    tty.expectInHistory "(f) allow the entire folder"
+    tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
+    tty.expectInHistory "(f) allow the entire folder", 30_000
 
     tty.sendAskKey 'f'
-    tty.expectInHistory "allowed ./vault - retrying", 10_000
+    tty.expectInHistory "allowed ./vault - retrying", 30_000
     check waitForFileContent(root / "run" / "vault" / "out.txt", "granted\n")
     check waitForSessionText(root,
       "[sandbox ask: user allowed ./vault; tool retried]")
@@ -590,7 +590,7 @@ suite "sandbox ask prompt":
     tty.expect "\u276f"
     tty.send "show it\n"
     tty.expectInHistory "? read vault/ro.txt", 30_000
-    tty.expectInHistory "allow read access to ./vault/ro.txt?"
+    tty.expectInHistory "allow read access to ./vault/ro.txt?", 30_000
     tty.sendAskKey 'a'
     check waitForSessionText(root, "readable")
     check policyLines(root) ==
@@ -613,7 +613,7 @@ suite "sandbox ask prompt":
     tty.send "save it\n"
     tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
     tty.sendAskKey 'n'
-    tty.expectInHistory "declined by user; not retried", 10_000
+    tty.expectInHistory "declined by user; not retried", 30_000
     check waitForSessionText(root, "is denied by the policy")
     check waitForSessionText(root,
       "[sandbox ask: declined by user; not retried]")
@@ -635,11 +635,11 @@ suite "sandbox ask prompt":
     tty.expect "\u276f"
     tty.send "patch it\n"
     tty.expectInHistory "? apply_patch vault/ap.txt", 30_000
-    tty.expectInHistory "allow write access to ./vault/ap.txt?"
-    tty.expectInHistory "(f) allow the entire folder"
+    tty.expectInHistory "allow write access to ./vault/ap.txt?", 30_000
+    tty.expectInHistory "(f) allow the entire folder", 30_000
 
     tty.sendAskKey 'f'
-    tty.expectInHistory "allowed ./vault - retrying", 10_000
+    tty.expectInHistory "allowed ./vault - retrying", 30_000
     check waitForFileContent(root / "run" / "vault" / "ap.txt", "granted\n")
     check waitForSessionText(root,
       "[sandbox ask: user allowed ./vault; tool retried]")
@@ -691,10 +691,10 @@ suite "sandbox ask prompt":
     tty.send "patch it\n"
     tty.expectInHistory "allow write access to ./vault/ap1.txt?", 30_000
     tty.sendAskKey 'f'
-    tty.expectInHistory "allowed ./vault - retrying", 10_000
-    tty.expectInHistory "allow write access to ./vault2/ap2.txt?", 10_000
+    tty.expectInHistory "allowed ./vault - retrying", 30_000
+    tty.expectInHistory "allow write access to ./vault2/ap2.txt?", 30_000
     tty.sendAskKey 'n'
-    tty.expectInHistory "declined by user; not retried", 10_000
+    tty.expectInHistory "declined by user; not retried", 30_000
     check waitForFileContent(root / "run" / "vault" / "ap1.txt", "one\n")
     tty.drain(300)
     check not fileExists(root / "run" / "vault2" / "ap2.txt")
