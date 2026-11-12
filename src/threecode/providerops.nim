@@ -221,7 +221,9 @@ proc setCurrentSpec*(spec: string): string =
   ## caller). Model may be the short spelling; the full list id is what
   ## gets stored. Enforces the same gates as the REPL: verification-
   ## class models are refused, and an experimental (non-known-good)
-  ## pick needs the caller to run under --experimental.
+  ## pick needs the caller to run under --experimental. The write keeps
+  ## a still-resolving global floor `current` (see writeConfigFile);
+  ## only a floor with no resolvable target moves.
   let dot = spec.find('.')
   if dot < 1 or dot == spec.len - 1:
     return &"current must be provider.model, got: {spec}"

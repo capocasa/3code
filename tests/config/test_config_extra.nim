@@ -774,7 +774,6 @@ suite "config: concurrent instances don't clobber each other":
 
   teardown:
     removeFile(tmp)
-    dirStickyCurrent = ""
 
   proc loadLikeStartup(path: string): (string, seq[ProviderRec]) =
     # Model an instance's startup: parse the file AND record the baseline
@@ -804,11 +803,12 @@ suite "config: concurrent instances don't clobber each other":
     var aEdited = aProviders
     aEdited[0].models = @["model-a", "model-a2"]
     writeConfigFile(tmp, aCurrent, aEdited)
-    # Instance B switches its current (unrelated write, stale snapshot).
+    # Instance B switches its current (unrelated write, stale snapshot);
+    # the switch belongs to B's directory and must not reach the floor.
     writeConfigFile(tmp, "beta.model-b", bProviders)
-    # The merged file must keep A's edit AND B's current switch.
+    # The merged file must keep A's edit AND the floor B never moved.
     let (current, merged, _, _, _, _) = parseConfigFile(tmp)
-    check current == "beta.model-b"
+    check current == "alpha.model-a"
     check merged.len == 2
     check merged[0].name == "alpha"
     check merged[0].models == @["model-a", "model-a2"]
@@ -864,11 +864,12 @@ suite "config: concurrent instances don't clobber each other":
     let (_, merged, _, _, _, _) = parseConfigFile(tmp)
     check merged[0].models == @["model-a", "model-a2"]
 
-  test "a stale instance's write keeps another instance's current switch":
-    # Instance A switches to beta and persists; instance B (started
-    # earlier, never switched in-session) then writes for an unrelated
-    # reason. B still holds its startup current, so the different disk
-    # value is A's switch and must survive B's write.
+  test "a stale instance's write keeps another instance's repaired floor":
+    # Switches no longer land on the floor, so the disk floor can only
+    # have been authored by a repair: instance A removed alpha and its
+    # write repaired the floor to beta. Instance B (started earlier,
+    # still holding alpha) then writes for an unrelated reason; the
+    # repaired floor and A's removal both survive.
     let providers = @[
       ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
                   models: @["model-a"]),
@@ -878,16 +879,18 @@ suite "config: concurrent instances don't clobber each other":
     writeConfigFile(tmp, "alpha.model-a", providers)
     let (bCurrent, bProviders) = loadLikeStartup(tmp)
     check bCurrent == "alpha.model-a"
-    writeConfigFile(tmp, "beta.model-b", providers)  # instance A switches
+    writeConfigFile(tmp, "beta.model-b", @[providers[1]])  # A removes alpha
     writeConfigFile(tmp, bCurrent, bProviders)        # instance B writes stale
     let (current, merged, _, _, _, _) = parseConfigFile(tmp)
     check current == "beta.model-b"
-    check merged.len == 2
+    check merged.len == 1
+    check merged[0].name == "beta"
 
-  test "this instance's own current switch wins over the disk value":
-    # Both the disk and this instance moved current after startup; the
-    # in-session switch (differs from baseline) is this instance's own
-    # edit, so it wins instead of being reverted to the disk value.
+  test "this instance's own switch keeps out of the floor; disk survives":
+    # The disk floor (authored by another instance's repair after alpha
+    # went away) differs from this instance's in-session switch. A
+    # switch sticks in the switching directory's store; the floor stays
+    # for directories without one.
     let providers = @[
       ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
                   models: @["model-a", "model-a2"]),
@@ -896,10 +899,10 @@ suite "config: concurrent instances don't clobber each other":
     ]
     writeConfigFile(tmp, "alpha.model-a", providers)
     let (bCurrent, bProviders) = loadLikeStartup(tmp)
-    writeConfigFile(tmp, "beta.model-b", providers)  # another instance
+    writeConfigFile(tmp, "beta.model-b", @[providers[1]])  # alpha removed there
     writeConfigFile(tmp, "alpha.model-a2", bProviders)  # own switch
     let (current, _, _, _, _, _) = parseConfigFile(tmp)
-    check current == "alpha.model-a2"
+    check current == "beta.model-b"
 
   test "a write is skipped when the disk config is unreadable":
     # A config that went bad on disk (hand edit, truncation) must be left
@@ -938,12 +941,14 @@ suite "config: concurrent instances don't clobber each other":
     check bCurrent == "alpha.model-a"
     # This instance booted in a directory whose sticky is beta: no
     # switch command ran, the overlay alone put beta in memory.
-    dirStickyCurrent = "beta.model-b"
     writeConfigFile(tmp, "beta.model-b", bProviders)  # unrelated flush
     let (current, _, _, _, _, _) = parseConfigFile(tmp)
     check current == "alpha.model-a"
 
-  test "a directory-sticky session's in-session switch does persist":
+  test "an in-session switch stays out of the global floor":
+    # The REPL writes the switch into the calling directory's store
+    # (persistCurrent) and keeps the floor for directories without one:
+    # the floor must not move to whichever directory switched last.
     let providers = @[
       ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
                   models: @["model-a"]),
@@ -952,12 +957,60 @@ suite "config: concurrent instances don't clobber each other":
     ]
     writeConfigFile(tmp, "alpha.model-a", providers)
     let (bCurrent, bProviders) = loadLikeStartup(tmp)
-    dirStickyCurrent = "alpha.model-a"
     writeConfigFile(tmp, "beta.model-b", bProviders)  # a real :provider switch
     let (current, _, _, _, _, _) = parseConfigFile(tmp)
-    check current == "beta.model-b"
+    check current == "alpha.model-a"
 
-  test "a sticky session keeps another instance's switch even when sticky equals the baseline":
+  test "a floor whose provider is gone is repaired by the write":
+    # The keep-the-disk rule stops at a floor that no longer resolves:
+    # otherwise every store-less directory would boot an empty profile.
+    let withGamma = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"]),
+      ProviderRec(name: "gamma", url: "https://g.test", key: "sk-g",
+                  models: @["model-g"])
+    ]
+    writeConfigFile(tmp, "gamma.model-g", withGamma)
+    let (bCurrent, bProviders) = loadLikeStartup(tmp)
+    check bCurrent == "gamma.model-g"
+    # gamma was removed here (and everywhere: the merged list lacks it);
+    # the write repairs the floor with a usable value.
+    let withoutGamma = @[withGamma[0]]
+    writeConfigFile(tmp, "alpha.model-a", withoutGamma)
+    let (current, _, _, _, _, _) = parseConfigFile(tmp)
+    check current == "alpha.model-a"
+
+  test "a floor naming a provider only another instance added survives":
+    # The keep check must yardstick the merged provider list, not the
+    # caller's: a floor can name a provider this instance has never seen.
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    discard loadLikeStartup(tmp)
+    # Another instance added delta and made it the floor.
+    writeFile(tmp, """[settings]
+current = "delta.model-d"
+
+[provider]
+name = "alpha"
+url = "https://a.test"
+key = "sk-a"
+models = "model-a"
+
+[provider]
+name = "delta"
+url = "https://d.test"
+key = "sk-d"
+models = "model-d"
+""")
+    writeConfigFile(tmp, "alpha.model-a", providers)  # unrelated flush
+    let (current, merged, _, _, _, _) = parseConfigFile(tmp)
+    check current == "delta.model-d"
+    check merged.len == 2
+
+  test "a stale write keeps another instance's repaired floor even when current equals the baseline":
     let providers = @[
       ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
                   models: @["model-a"]),
@@ -967,8 +1020,7 @@ suite "config: concurrent instances don't clobber each other":
     writeConfigFile(tmp, "alpha.model-a", providers)
     let (bCurrent, bProviders) = loadLikeStartup(tmp)
     check bCurrent == "alpha.model-a"
-    dirStickyCurrent = "alpha.model-a"  # overlay happens to equal the baseline
-    writeConfigFile(tmp, "beta.model-b", providers)   # another instance switches
+    writeConfigFile(tmp, "beta.model-b", @[providers[1]])  # alpha removed there
     writeConfigFile(tmp, bCurrent, bProviders)        # this instance: unrelated flush
     let (current, _, _, _, _, _) = parseConfigFile(tmp)
     check current == "beta.model-b"
