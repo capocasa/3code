@@ -441,6 +441,11 @@ when not defined(windows):
         check "Start working toward it now" notin rendered
         check "then ship it" in rendered   # multi-paragraph goal stays whole
         check "❯ fix the login" notin rendered
+        # continuation lines indent 2 chars under the flag, like every
+        # other item's continuation rows (a flush-left row would read as
+        # a new item)
+        check "\r\n  then ship it" in rendered
+        check "\r\nthen ship it" notin rendered
 
     test "flail-noted call replays as its tool item plus the » note":
       # A flail-escalated call executes: replay renders the real tool item
