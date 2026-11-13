@@ -2,6 +2,13 @@ Changelog
 
 Unreleased
 
+- **Multiline goal text now indents under the `⚑` kickoff item.** A
+  goal (or plan) description with multiple lines rendered its
+  continuation lines flush at column 0 - only wrapped rows were indented
+  under the flag - so a multi-paragraph goal read as a stack of separate
+  items instead of one. The `⚑` item now indents every continuation row
+  by two chars, matching the user echo and every other scrollback item
+  (fix in `formatAgentPromptItem`, live arm and replay alike).
 - **Windows asks before a per-file ask rule is pierced by a fresh
   create.** A deny (and an `ask`, which denies until answered) naming a
   file that did not exist yet was shadowed under the Windows ACL
