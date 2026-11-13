@@ -195,7 +195,8 @@ proc warnNoBash() =
   ## tool is dropped from the advertised tool list for the session (a
   ## ```bash fence in a reply still returns the install one-liner via the
   ## streamexec guard) and this one-line warning says how to fix it. POSIX
-  ## always has /bin/sh so this is a no-op there.
+  ## resolves its shell in shPath, which halts when no bash-compatible
+  ## shell exists, so this is a no-op there.
   ##
   ## The provider-stub binary (the tty test harness) skips this: those tests
   ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2

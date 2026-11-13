@@ -39,34 +39,44 @@ with an environment snapshot, not by running the login shell itself.
 
 1. `bash_path` / `bash` config override (unchanged; wins on every OS)
 2. **`$SHELL`** — the shell 3code was started in — when it names a
-   *working POSIX shell*:
+   *working bash-compatible shell*:
    - probed with a real `echo` one-liner (`shellUsable`), so a dead
      binary (removed brew formula, `chsh` without install) falls
      through instead of breaking every command;
-   - non-POSIX login shells (fish, nushell, elvish, xonsh, csh/tcsh,
-     powershell) are skipped (`posixShellFamily`): they parse a
-     different language than the prompts teach, so honoring them would
-     break the contract *worse* than sh did.
+   - non-bash login shells are skipped (`posixShellFamily`): fish,
+     nushell, elvish, xonsh, csh/tcsh, powershell parse a different
+     language than the prompts teach, and the plain-POSIX family
+     (sh, dash, ash, busybox, ksh, mksh) parses a reduced one (no
+     `PIPESTATUS`, no `&>`), so honoring them would break the
+     contract *worse* than the old sh fallback did.
 3. **bash** — PATH, then `/bin/bash`, `/usr/bin/bash`,
    `/usr/local/bin/bash`, `/opt/homebrew/bin/bash`
 4. **zsh** — PATH, then the standard locations
-5. sh — last resort (Termux `$PREFIX/bin/sh`, Alpine busybox), unchanged
+
+There is no sh last resort anymore. The old rung (Termux
+`$PREFIX/bin/sh`, Alpine busybox) silently ran a shell that rejects
+the language every prompt teaches — the exact bug the bash-first order
+exists to prevent — so a host with no bash-compatible shell now halts
+with an error naming the fix (`pkg install bash` / `apk add bash`, or
+a `bash = <path>` config value) instead of degrading every command.
 
 Resolution is memoized per thread (`cachedPosixShell`); the sandboxed
 box child execs the same resolved shell, so fenced and unfenced runs
 stay byte-identical.
 
-### Why the POSIX guard (and not "any login shell")
+### Why the bash-compatibility guard (and not "any login shell")
 
-The tool's contract is POSIX/bash syntax. fish and nushell are not even
-POSIX-compatible; running the tool through them would reproduce the
-original bug in a worse form. The guard keeps the user's shell when it
-speaks the language the prompts teach, and falls back otherwise.
+The tool's contract is bash syntax. fish and nushell are not even
+POSIX-compatible; sh/dash/ksh are POSIX but not bash; running the tool
+through any of them would reproduce the original bug in the same or
+worse form. The guard keeps the user's shell when it speaks the
+language the prompts teach, and falls back otherwise.
 
 ## Verification
 
-- New suite `streamexec: posix shell resolution` (4 tests): `$SHELL`
-  honored; non-POSIX skipped → bash; dead `$SHELL` → bash; end-to-end
+- New suite `streamexec: posix shell resolution` (5 tests): `$SHELL`
+  honored; non-POSIX skipped → bash; plain-POSIX `$SHELL`
+  (sh/dash/ksh) skipped → bash; dead `$SHELL` → bash; end-to-end
   exec through the resolved shell. All pass.
 - End-to-end probes (compiled against the real `streamexec`):
   `SHELL=/bin/bash` → tool runs bash 5.3.20 (`BASH_VERSION` set,

@@ -25,7 +25,12 @@ var cachedPosixShell* {.threadvar.}: string
   ## the config overrides). Tests reset it to pin `$SHELL`.
 
 const NonPosixShells = ["fish", "nu", "nushell", "elvish", "xonsh",
-                        "csh", "tcsh", "powershell", "pwsh"]
+                        "csh", "tcsh", "powershell", "pwsh", "sh",
+                        "dash", "ash", "busybox", "ksh", "mksh"]
+  ## `sh`/`dash`/`ash`/`busybox` are excluded even as `$SHELL`: the
+  ## tool's contract is bash, and they drop the bash-only constructs
+  ## models write. `ksh`/`mksh` are POSIX-but-not-bash-compatible
+  ## (no `PIPESTATUS`, no `&>`, different `[[ ]]` semantics).
 
 proc shellUsable(path: string): bool =
   ## The interpreter must exist and actually run a POSIX one-liner:
@@ -41,23 +46,25 @@ proc shellUsable(path: string): bool =
 
 proc posixShellFamily(path: string): bool =
   ## `$SHELL` names the shell 3code was started in, but the tool's
-  ## contract is POSIX: fish, nushell, elvish, xonsh, and the csh
-  ## family parse a different language, so they are skipped in favor
-  ## of the bash/zsh fallback instead of breaking every command.
+  ## contract is bash: fish, nushell, elvish, xonsh, the csh family,
+  ## and the plain-POSIX shells (sh/dash/ash/ksh) parse a different
+  ## or reduced language, so they are skipped in favor of the
+  ## bash/zsh fallback instead of breaking every command.
   result = path.lastPathPart.toLowerAscii notin NonPosixShells
 
 proc shPath*(): string =
   ## POSIX interpreter for the bash tool. A `bash_path` or `bash`
   ## config value that names an existing file wins, so the same
   ## setting works on every OS. Otherwise the shell 3code was started
-  ## in (`$SHELL`, the login shell) when it is a working POSIX shell,
-  ## then bash, then zsh: the tool's contract (and every prompt) says
-  ## bash, while /bin/sh is dash on Debian/Ubuntu, which drops the
-  ## bash-only constructs models write (`PIPESTATUS`, `[[ ]]`,
-  ## multiline heredocs) in confusing ways (community thread 15).
-  ## Last resort is sh: Termux has no /bin/sh ($PREFIX/bin/sh is the
-  ## interactive shell, and bash may be unbundled), and Alpine's
-  ## busybox sh is the only shell there is.
+  ## in (`$SHELL`, the login shell) when it is a working
+  ## bash-compatible shell, then bash, then zsh: the tool's contract
+  ## (and every prompt) says bash, while /bin/sh is dash on
+  ## Debian/Ubuntu, which drops the bash-only constructs models write
+  ## (`PIPESTATUS`, `[[ ]]`, multiline heredocs) in confusing ways
+  ## (community thread 15). There is no sh fallback: silently
+  ## running a shell that rejects the language the prompts teach is
+  ## the bug this order exists to prevent, so a host with no
+  ## bash-compatible shell halts with an error instead of degrading.
   when declared(bashPathOverride):
     if bashPathOverride.len > 0 and fileExists(bashPathOverride):
       return bashPathOverride
@@ -86,10 +93,9 @@ proc shPath*(): string =
                  "/opt/homebrew/bin/zsh"]:
       if fileExists(cand): result = cand; break
   if result.len == 0:
-    when defined(android):
-      result = getEnv("PREFIX", "/data/data/com.termux/files/usr") & "/bin/sh"
-    else:
-      result = "/bin/sh"
+    die "no bash-compatible shell found (looked for $SHELL, bash, zsh). " &
+        "Install bash (e.g. 'pkg install bash' on Termux, 'apk add bash' " &
+        "on Alpine) or set 'bash = <path>' in the config."
   cachedPosixShell = result
 
 when defined(windows):

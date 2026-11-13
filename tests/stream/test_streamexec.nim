@@ -506,9 +506,10 @@ when defined(posix):
   suite "streamexec: posix shell resolution":
     # The bash tool runs its script through shPath(): config override,
     # then the shell 3code was started in ($SHELL) when it is a working
-    # POSIX shell, then bash, then zsh, then sh. These tests pin $SHELL
-    # and reset the memo cache to exercise each rung; the ambient SHELL
-    # is restored so the parity suite below sees the real one.
+    # bash-compatible shell, then bash, then zsh — and never sh. These
+    # tests pin $SHELL and reset the memo cache to exercise each rung;
+    # the ambient SHELL is restored so the parity suite below sees the
+    # real one.
     let ambientShell = getEnv("SHELL")
 
     template withShell(sh: string, body: untyped) =
@@ -526,9 +527,17 @@ when defined(posix):
 
     test "a non-POSIX $SHELL falls back to bash":
       # fish/nushell/elvish/xonsh/csh parse a different language; the
-      # tool's contract is POSIX, so they are skipped.
+      # tool's contract is bash, so they are skipped.
       withShell("/usr/bin/fish"):
         check shPath() == findExe("bash")
+
+    test "a plain-POSIX $SHELL (sh/dash/ksh) falls back to bash":
+      # Even as $SHELL, sh/dash/ash and ksh are rejected: they parse a
+      # reduced language (no PIPESTATUS, no &>), which is the original
+      # /bin/sh bug in login-shell form.
+      for sh in ["/bin/sh", "/usr/bin/dash", "/bin/ksh"]:
+        withShell(sh):
+          check shPath() == findExe("bash")
 
     test "a dead $SHELL falls back to bash":
       # chsh without install, a removed brew formula: $SHELL names a

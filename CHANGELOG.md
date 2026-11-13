@@ -2,20 +2,26 @@ Changelog
 
 Unreleased
 
-- **The bash tool runs in the shell 3code was started in.** POSIX
-  resolution was bash-only: `shPath()` picked `bash` from PATH or the
-  standard locations and never looked at the login shell, so a zsh
-  user's PATH (set in `.zprofile`) and any zsh-specific environment
-  were invisible to every tool command. The order is now: a
-  `bash_path`/`bash` config override, then `$SHELL` when it names a
-  working POSIX shell (probed with a real `echo` one-liner, so a dead
-  binary from a removed install or a `chsh` without install falls
-  through), then bash, then zsh, then sh (Termux/Alpine last resort).
-  Non-POSIX login shells (fish, nushell, elvish, xonsh, csh/tcsh) are
-  skipped in favor of the fallbacks: the tool's contract and every
-  prompt teach POSIX/bash syntax, and those shells parse a different
-  language. The resolution is memoized per thread; tests reset the
-  cache to pin `$SHELL` per case.
+- **The bash tool runs in the shell 3code was started in, and never
+  falls back to sh.** POSIX resolution was bash-only: `shPath()` picked
+  `bash` from PATH or the standard locations and never looked at the
+  login shell, so a zsh user's PATH (set in `.zprofile`) and any
+  zsh-specific environment were invisible to every tool command. The
+  order is now: a `bash_path`/`bash` config override, then `$SHELL`
+  when it names a working bash-compatible shell (probed with a real
+  `echo` one-liner, so a dead binary from a removed install or a
+  `chsh` without install falls through), then bash, then zsh — and
+  nothing else. The sh last resort (Termux `$PREFIX/bin/sh`, Alpine
+  busybox) is gone: silently running a shell that rejects the
+  language the prompts teach is the bug the bash-first order exists
+  to prevent, so a host with no bash-compatible shell now halts with
+  an error naming the fix instead of degrading. Non-bash login shells
+  (fish, nushell, elvish, xonsh, csh/tcsh, and the plain-POSIX
+  sh/dash/ash/ksh family) are skipped in favor of the fallbacks: the
+  tool's contract and every prompt teach bash syntax, and those
+  shells parse a different or reduced language. The resolution is
+  memoized per thread; tests reset the cache to pin `$SHELL` per
+  case.
 - **Windows asks before a per-file ask rule is pierced by a fresh
   create.** A deny (and an `ask`, which denies until answered) naming a
   file that did not exist yet was shadowed under the Windows ACL
