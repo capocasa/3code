@@ -2,6 +2,20 @@ Changelog
 
 Unreleased
 
+- **The bash tool runs in the shell 3code was started in.** POSIX
+  resolution was bash-only: `shPath()` picked `bash` from PATH or the
+  standard locations and never looked at the login shell, so a zsh
+  user's PATH (set in `.zprofile`) and any zsh-specific environment
+  were invisible to every tool command. The order is now: a
+  `bash_path`/`bash` config override, then `$SHELL` when it names a
+  working POSIX shell (probed with a real `echo` one-liner, so a dead
+  binary from a removed install or a `chsh` without install falls
+  through), then bash, then zsh, then sh (Termux/Alpine last resort).
+  Non-POSIX login shells (fish, nushell, elvish, xonsh, csh/tcsh) are
+  skipped in favor of the fallbacks: the tool's contract and every
+  prompt teach POSIX/bash syntax, and those shells parse a different
+  language. The resolution is memoized per thread; tests reset the
+  cache to pin `$SHELL` per case.
 - **Windows asks before a per-file ask rule is pierced by a fresh
   create.** A deny (and an `ask`, which denies until answered) naming a
   file that did not exist yet was shadowed under the Windows ACL

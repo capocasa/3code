@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, times, unittest]
+import std/[os, osproc, streams, strutils, times, unittest]
 import threecode/[actions, types, streamexec]
 
 suite "streamexec: basic streaming":
@@ -503,6 +503,46 @@ when defined(windows):
 when defined(posix):
   import threecode/sandbox
 
+  suite "streamexec: posix shell resolution":
+    # The bash tool runs its script through shPath(): config override,
+    # then the shell 3code was started in ($SHELL) when it is a working
+    # POSIX shell, then bash, then zsh, then sh. These tests pin $SHELL
+    # and reset the memo cache to exercise each rung; the ambient SHELL
+    # is restored so the parity suite below sees the real one.
+    let ambientShell = getEnv("SHELL")
+
+    template withShell(sh: string, body: untyped) =
+      putEnv("SHELL", sh)
+      cachedPosixShell = ""
+      try:
+        body
+      finally:
+        putEnv("SHELL", ambientShell)
+        cachedPosixShell = ""
+
+    test "$SHELL wins when it is a working POSIX shell":
+      withShell(findExe("bash")):
+        check shPath() == findExe("bash")
+
+    test "a non-POSIX $SHELL falls back to bash":
+      # fish/nushell/elvish/xonsh/csh parse a different language; the
+      # tool's contract is POSIX, so they are skipped.
+      withShell("/usr/bin/fish"):
+        check shPath() == findExe("bash")
+
+    test "a dead $SHELL falls back to bash":
+      # chsh without install, a removed brew formula: $SHELL names a
+      # binary that is gone, so the probe rejects it.
+      withShell("/nonexistent/3code-test/sh"):
+        check shPath() == findExe("bash")
+
+    test "the resolved shell actually executes the tool script":
+      withShell(findExe("bash")):
+        let act = Action(kind: akBash, body: "echo shell-ok")
+        let (outp, code, _) = runStreamingBash(act, nil, nil)
+        check code == 0
+        check "shell-ok" in outp
+
   suite "streamexec: sandboxed bash parity":
     test "PIPESTATUS and heredoc survive the sandboxed path":
       # community.3code thread 15: on a Debian box the bash tool ran its
@@ -513,7 +553,38 @@ when defined(posix):
       # exec paths resolve one interpreter now, so the sandboxed run
       # must answer byte-identically to the unconfined one.
       let bin = getCurrentDir() / "3code"
-      if not fileExists(bin) or not sandbox.backendWorks(bin):
+      # Probe-and-skip, matching the suite's documented posture for
+      # hosts where a leg cannot engage: backendWorks covers the
+      # Landlock domain, but the parity contract also rides the Linux
+      # bind-mask (the authority denies every fenced command carries),
+      # and that leg needs unprivileged user namespaces. Where they
+      # are disabled (some distros, most containers) the mask degrades
+      # with a notice that lands in the fenced output and breaks the
+      # byte-equality check for a reason that has nothing to do with
+      # the interpreter under test. A `--deny` of a scratch file is
+      # exactly the masked shape: silent where the namespaces work,
+      # the degrade notice where they do not.
+      var maskWorks = true
+      block:
+        let probeDir = getTempDir() /
+          ("3code-maskprobe-" & $getCurrentProcessId())
+        try:
+          createDir(probeDir)
+          writeFile(probeDir / "f", "")
+          var p = startProcess(bin,
+            args = ["sandbox", "restrict", probeDir, "--deny",
+                     probeDir / "f", "--", "true"],
+            options = {poStdErrToStdOut})
+          let outp = readAll(p.outputStream)
+          maskWorks = p.waitForExit() == 0 and
+            "unshare" notin outp
+          p.close()
+        except CatchableError:
+          maskWorks = false
+        finally:
+          try: removeDir(probeDir) except CatchableError: discard
+      if not fileExists(bin) or not sandbox.backendWorks(bin) or
+          (when defined(linux): not maskWorks else: false):
         skip()
       else:
         let dir = getTempDir() /
