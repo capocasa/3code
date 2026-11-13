@@ -779,14 +779,15 @@ proc formatAgentPromptItem*(line: string; marker = "»"): string =
   ## exclusive (cyan = token bookkeeping, magenta = errors), it is
   ## palette-proof in light mode, and routine autosends must not read as
   ## alarms. Wrapped like the user echo with continuation rows indented
-  ## under the marker.
+  ## under the marker: wrapped chunks and newline-separated lines alike
+  ## (a multiline goal body indents just like a multiline user echo).
   let termW = try: terminalWidth() except CatchableError: 0
   let lines = line.splitLines
   for idx, l in lines:
     let chunks =
       if termW <= 0: @[l]
       else: wrapPlain(l, max(1, termW - 2))
-    result.add (if idx == 0: BoldOn & marker & " " & Reset else: "") & chunks[0]
+    result.add (if idx == 0: BoldOn & marker & " " & Reset else: "  ") & chunks[0]
     for chunk in chunks[1 ..< chunks.len]:
       result.add "\r\n  " & chunk
     if idx < lines.high:
