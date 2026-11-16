@@ -18,7 +18,7 @@
 
 import std/[json, os, sequtils, strformat, strutils, tables, times, uri]
 import types, util, shell, web, config, streamexec, sandbox, plugins,
-  images, screen
+  images, screen, snap
 when browserFetchBuild:
   import browse
 
@@ -954,6 +954,11 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
       if beforeContent != after:
         diff = computeDiff(beforeContent, after, p)
         recordChange(cache, p, beforeContent, after)
+  # The manifest re-walk (goal mode only — it arms with the mode): every
+  # signature that moved since the last observation folds into the change
+  # log, so mutations with no parsed target (python, builds, tar) record
+  # like a write tool's target instead of passing unnoticed.
+  foldManifest(cache)
   if body.len == 0 and code == 0:
     body = "exit 0 (no output)"
   return (body, code, diff)

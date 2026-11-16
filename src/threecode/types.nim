@@ -4,7 +4,7 @@
 ## `experimentalEnabled` is a global because every module that validates a
 ## profile needs it, and threading it through every call site is noise.
 
-import std/[json, options, strutils, tables, times]
+import std/[json, options, sets, strutils, tables, times]
 when defined(windows):
   # os is needed only by the ConPTY relay window in `exitWith`; locks by
   # the shared test-pipe connection cache
@@ -342,6 +342,18 @@ type
       ## diff per mutated path. Rides the read cache because it is the
       ## one session-scoped ref already plumbed to every action executor;
       ## a nil cache (skill runs, some tests) simply records nothing.
+    manifest*: Table[string, (Time, int)]
+      ## The goal-mode tree snapshot: (mtime, size) per path at the last
+      ## observation (arm or fold) — a manifest, never content copies.
+      ## Copy-on-write stays the capture rule: originals enter `changes`
+      ## only when a mutation is observed (snap.foldManifest).
+    manifestRoot*: string
+    manifestArmed*: bool  ## false outside a harness mode: no walk, no fold
+    manifestTime*: Time  ## arming moment; a newer mode file re-arms
+    shellTouched*: HashSet[string]
+      ## Change-log paths first seen mutated by an opaque shell run: no
+      ## original bytes existed to copy, so the render says so instead of
+      ## fabricating a before-state.
   PromptState* = object
     ## Cache proof for the constructed system prompt: `identity` is the
     ## `profileIdentity` stamp of the profile that built it, `skills` the

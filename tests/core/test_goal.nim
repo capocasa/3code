@@ -4,7 +4,7 @@
 ## text line plus the `goalCheckHook` seam make the whole loop testable
 ## with canned verdicts and no provider.
 
-import std/[json, os, osproc, sequtils, strutils, tempfiles, unittest]
+import std/[json, os, sequtils, strutils, tempfiles, unittest]
 import threecode/goal
 import threecode/display
 import threecode/util except dumpIssue
@@ -14,9 +14,6 @@ import threecode/types
 import threecode/turns
 import threecode/fatprompt
 
-proc sh(cmd: string): bool =
-  execCmdEx(cmd).exitCode == 0
-
 proc withGoalDir(body: proc (dir: string)) =
   let dir = createTempDir("goal-test-", "")
   defer: removeDir(dir)
@@ -24,19 +21,6 @@ proc withGoalDir(body: proc (dir: string)) =
   setCurrentDir(dir)
   defer: setCurrentDir(old)
   body(dir)
-
-proc withGitRepo(body: proc (dir: string)) =
-  ## A committed base file plus a dirty tree: one tracked change and a
-  ## couple of untracked files, the shape the verifier's diff feed is
-  ## for.
-  withGoalDir proc (dir: string) =
-    let cfg = "-c user.email=t@t -c user.name=t "
-    doAssert sh("git init -q .")
-    doAssert sh("git " & cfg & "commit -q --allow-empty -m base")
-    writeFile("base.txt", "base\n")
-    doAssert sh("git add base.txt")
-    doAssert sh("git " & cfg & "commit -qm base-file")
-    body(dir)
 
 suite "goal mode":
   test "activation is bare existence of goal.md in the cwd":
@@ -298,8 +282,10 @@ suite "goal mode":
     check "ship it" in p
     check "bash: ran tests" in p
     check GoalFileName in p
-    # No diff (non-git dir): the section is absent, not an empty header.
+    # No change log yet: the section is absent, not an empty header, and
+    # no git feed exists to fall back to — the change log is the record.
     check "diff" notin p
+    check "Working-tree" notin p
 
   test "preamble makes the sufficiency deal explicit":
     # "Fully satisfied" plus "do not infer" leaves an honest model no
@@ -310,58 +296,13 @@ suite "goal mode":
     # The verdict contract instruction survives the edit.
     check "End with exactly one line" in VerifierPreamble
 
-  test "verifier prompt embeds the diff as a third section":
+  test "verifier prompt carries the session change log, never a git feed":
     let p = verifierPrompt("ship it", "bash: ran tests\n  => ok",
-                           " M a.txt\n+changed")
-    check "Working-tree diff vs HEAD" in p
-    check "+changed" in p
-    check p.find("Working-tree diff") > p.find("bash: ran tests")
-
-suite "verifier diff feed":
-  test "tracked change and untracked file content both appear":
-    withGitRepo proc (dir: string) =
-      writeFile("base.txt", "changed\n")
-      writeFile("fresh.txt", "brand new\n")
-      let d = buildGoalDiff()
-      check " M base.txt" in d
-      check "+changed" in d
-      check "new file: fresh.txt" in d
-      check "+brand new" in d
-
-  test "clean tree yields an empty feed":
-    withGitRepo proc (dir: string) =
-      check buildGoalDiff().strip.len == 0
-
-  test "outside a git repo the feed is empty":
-    withGoalDir proc (dir: string) =
-      check buildGoalDiff() == ""
-
-  test "a repo with no commits yet lists untracked files, no fatal":
-    withGoalDir proc (dir: string) =
-      doAssert sh("git init -q .")
-      writeFile("first.txt", "hello\n")
-      let d = buildGoalDiff()
-      check "?? first.txt" in d
-      check "new file: first.txt" in d
-      check "+hello" in d
-      check "fatal" notin d
-
-  test "oversized diff is truncated with a note":
-    withGitRepo proc (dir: string) =
-      var big = "x\n"
-      writeFile("big.txt", big.repeat(6000))
-      discard sh("git add big.txt")
-      let d = buildGoalDiff()
-      check d.len < GoalDiffCapBytes + 200
-      check "diff truncated at" in d
-
-  test "many untracked files stop at the elision limit":
-    withGitRepo proc (dir: string) =
-      for i in 1 .. GoalDiffMaxUntracked + 5:
-        writeFile("u" & $i & ".txt", "u\n")
-      let d = buildGoalDiff()
-      check "more omitted" in d
-      check "u30.txt" notin d
+                           sessionDiff = "--- a/w.txt\n+++ b/w.txt\n@@ +1 @@\n+done\n")
+    check "Changes this session" in p
+    check "+done" in p
+    check p.find("Changes this session") > p.find("bash: ran tests")
+    check "Working-tree diff vs HEAD" notin p
 
 suite "startGoal (the :goal writer)":
   test "empty text is a usage error":

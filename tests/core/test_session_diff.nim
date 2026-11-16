@@ -4,9 +4,10 @@
 ## heuristic consume. Recorded through the REAL action paths (write,
 ## patch, apply_patch, bash) with a ReadCache, like the live turn loop.
 
-import std/[json, os, strutils, tables, tempfiles, unittest]
+import std/[json, os, sets, strutils, tables, tempfiles, times, unittest]
 import threecode/[types, actions]
 import threecode/goal except Usage
+import threecode/snap
 
 proc withLogDir(body: proc (dir: string)) =
   let dir = createTempDir("changelog-test-", "")
@@ -147,3 +148,124 @@ suite "session change log":
       check turnDidWork(msgs, cache, 0)
       # Baseline caught up: last turn's growth already accounted for.
       check not turnDidWork(msgs, cache, 1)
+
+suite "working-tree manifest (goal-mode COW snapshot)":
+  ## `bash -c '...'` wraps the redirect in quotes, so the command-line
+  ## scraper (`bashMutationPath`) sees no target at all — the exact
+  ## blind spot the manifest exists to close: detection by tree state.
+  test "armed manifest folds an opaque shell rewrite, honestly":
+    withLogDir proc (dir: string) =
+      writeFile("f.txt", "old\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      discard runAction(act(akBash, cmd = "bash -c 'echo new > f.txt'"), cache)
+      check cache.changes.len == 1
+      let e = cache.changes["f.txt".absolutePath]
+      check e.before == ""  # no original existed to copy by the time the
+                             # re-walk saw it: never fabricated
+      check e.after == "new\n"
+      check "f.txt".absolutePath in cache.shellTouched
+      let d = buildSessionDiff(cache)
+      check "changed via shell (original not captured" in d
+      check "+new" in d
+
+  test "no manifest, no fold: outside goal mode nothing walks":
+    withLogDir proc (dir: string) =
+      writeFile("f.txt", "old\n")
+      let cache = newReadCache()  # never armed: no mode is active
+      discard runAction(act(akBash, cmd = "bash -c 'echo new > f.txt'"), cache)
+      check cache.changes.len == 0
+      check not cache.manifestArmed
+      check buildSessionDiff(cache).len == 0
+
+  test "opaque shell creation records like a write-tool creation":
+    withLogDir proc (dir: string) =
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      discard runAction(act(akBash, cmd = "bash -c 'echo hi > g.txt'"), cache)
+      let e = cache.changes["g.txt".absolutePath]
+      check e.before == ""
+      check e.after == "hi\n"
+      check "g.txt".absolutePath notin cache.shellTouched
+      let d = buildSessionDiff(cache)
+      check "+hi" in d
+      check "via shell" notin d
+
+  test "observed first, shell after: the true original survives":
+    withLogDir proc (dir: string) =
+      writeFile("t.txt", "orig\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      discard runAction(act(akPatch, path = "t.txt",
+        edits = @[("orig", "v1")]), cache)
+      discard runAction(act(akBash, cmd = "bash -c 'echo v2 > t.txt'"), cache)
+      let e = cache.changes["t.txt".absolutePath]
+      check e.before == "orig\n"  # first touch copied it — the COW in COW
+      check e.after == "v2\n"
+      check "t.txt".absolutePath notin cache.shellTouched
+      check "-orig" in buildSessionDiff(cache)
+      check "+v2" in buildSessionDiff(cache)
+
+  test "opaque shell deletion renders a name-only line":
+    withLogDir proc (dir: string) =
+      writeFile("d.txt", "x\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      discard runAction(act(akBash, cmd = "bash -c 'rm d.txt'"), cache)
+      let e = cache.changes["d.txt".absolutePath]
+      check e.before == ""
+      check e.after == ""
+      let d = buildSessionDiff(cache)
+      check ("deleted via shell: " & "d.txt".absolutePath) in d
+
+  test "oversize shell mutation degrades to a name-only line":
+    withLogDir proc (dir: string) =
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      discard runAction(act(akBash,
+        cmd = "bash -c 'head -c 2000000 /dev/zero > big.bin'"), cache)
+      check cache.changes["big.bin".absolutePath].after == ""
+      check "big.bin".absolutePath in cache.shellTouched
+      check "content not captured" in buildSessionDiff(cache)
+
+  test "skip dirs never enter the manifest":
+    withLogDir proc (dir: string) =
+      createDir("node_modules/pkg")
+      writeFile("node_modules/pkg/junk.js", "x\n")
+      writeFile("real.txt", "r\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      check "real.txt".absolutePath in cache.manifest
+      check "node_modules/pkg/junk.js".absolutePath notin cache.manifest
+      discard runAction(act(akBash,
+        cmd = "bash -c 'echo y > node_modules/pkg/junk.js'"), cache)
+      check cache.changes.len == 0
+
+  test "syncManifest arms with the mode and disarms without it":
+    withLogDir proc (dir: string) =
+      writeFile("goal.md", "do the thing\n")
+      writeFile("s.txt", "s\n")
+      let cache = newReadCache()
+      syncManifest(cache, ".", "goal.md", false)
+      check not cache.manifestArmed
+      syncManifest(cache, ".", "goal.md", true)
+      check cache.manifestArmed
+      check "s.txt".absolutePath in cache.manifest
+      syncManifest(cache, ".", "goal.md", false)
+      check not cache.manifestArmed
+      check cache.manifest.len == 0
+
+  test "syncManifest re-arms when the mode file is newer":
+    withLogDir proc (dir: string) =
+      writeFile("goal.md", "first\n")
+      let cache = newReadCache()
+      syncManifest(cache, ".", "goal.md", true)
+      let firstCount = cache.manifest.len
+      writeFile("late.txt", "l\n")
+      # Same mtime second resolution can hide a re-write: force the issue.
+      writeFile("goal.md", "second\n")
+      let t = getTime()
+      setLastModificationTime("goal.md", t + 2.seconds)
+      syncManifest(cache, ".", "goal.md", true)
+      check cache.manifestArmed
+      check cache.manifest.len == firstCount + 1  # fresh baseline saw it

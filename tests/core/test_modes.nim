@@ -390,8 +390,8 @@ s
         check "evidence line" in prompt
         (true, "VERDICT: SATISFIED", "")
       defer: goalCheckHook = nil
-      # A hermetic cwd: buildGoalDiff captures the working tree, and this
-      # repo's own diff would leak into the content assertions.
+      # A hermetic cwd keeps the prompt deterministic: no session cache
+      # means no change-log section, and nothing walks this repo's tree.
       withModeDir proc (dir: string) =
         let pre = "- [ ] a\n\n## Current state\n\ns"
         let post = "- [x] a\n\n## Current state\n\ns"
@@ -457,15 +457,16 @@ Phase 3 merged. Rollover next.
     check goalMode.rolloverNote == nil
 
 suite "verifier meets the session change log":
-  test "the session diff is the primary feed; git becomes the complement":
+  test "the session diff is the only diff feed; no git is consulted":
     let prof = Profile(name: "stub", family: "glm", model: "stub-model")
     goalCheckHook = proc (p: Profile, preamble, prompt: string):
         tuple[ok: bool, text: string, err: string] =
       check "Changes this session (harness change log" in prompt
       check "+SESSION_LOG_LINE" in prompt
-      # The git section is demoted, not dropped, and labeled as the
-      # complement.
-      check "complement; what git reports now" in prompt
+      # Git is not demoted to a complement anymore: nothing shells out,
+      # so a repo around the session changes nothing about the prompt.
+      check "git reports now" notin prompt
+      check "Working-tree diff" notin prompt
       (true, "VERDICT: SATISFIED", "")
     defer: goalCheckHook = nil
     withModeDir proc (dir: string) =
@@ -476,7 +477,8 @@ suite "verifier meets the session change log":
       let cache = newReadCache()
       discard runAction(Action(kind: akWrite, path: "log.txt",
         body: "SESSION_LOG_LINE\n"), cache)
-      # A git-tracked change too, so both sections are present.
+      # A git-tracked change too: inside a repo the prompt must stay
+      # exactly what the change log says, nothing more.
       writeFile("base.txt", "changed\n")
       when cyberneticBuild:
         let r = runGoalCheck(prof, cyberneticMode,

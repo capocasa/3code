@@ -940,7 +940,8 @@ switch to a zero-training provider; :private lists)
 ```
 
 The goal-mode verifier is fenced the same way: the satisfaction check ships
-the goal text and the working-tree diff, so while private mode is on a
+the goal text and the session change log (net per-path diffs of what the
+session changed on disk), so while private mode is on a
 verifier that is not allow-private never sees them — the check quietly
 takes the session model instead (a dim note in scrollback says so). Trust a
 verifier with `:private allow` like any other model.
@@ -1338,8 +1339,10 @@ you ask for multi-part work.
 While `goal.md` exists, every turn end runs a satisfaction check: a fresh
 side conversation with the session's own model, given the goal text, a
 summary of what the turn actually did (files, patches, commands — never the
-agent's own claims), and the working-tree diff, judges from those inputs
-alone and answers with a verdict. Not satisfied, the agent is sent back in
+agent's own claims), and the session change log — the net per-path record
+of everything the session changed on disk, shell commands included —
+judges from those inputs alone and answers with a verdict. Not satisfied,
+the agent is sent back in
 with the verifier's feedback. Satisfied, the harness renames the file to
 `achieved.md` (the record of the run) and idles. The check has no
 tools and no rounds: orientation is the harness's job, so the check is one
