@@ -41,6 +41,7 @@ The modules a host or contributor touches most, with their job in one line:
 | --- | --- |
 | [turns](dev/threecode/turns.html) | turn lifecycle orchestration |
 | [actions](dev/threecode/actions.html) | tool dispatch: model tool_call JSON into Actions, then execute |
+| [snap](dev/threecode/snap.html) | goal-mode tree manifest: arm at the mode, re-walk after bash, fold shell mutations into the change log |
 | [api](dev/threecode/api.html) | HTTP client and SSE parsing |
 | [session](dev/threecode/session.html) | session persistence in the `.3log` format |
 | [config](dev/threecode/config.html) | config file parsing and provider/profile resolution |

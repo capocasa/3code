@@ -15,6 +15,7 @@ when defined(windows):
 import types, util, prompts, session, compact, config, actions, api, plugins,
   display, fatprompt, streamexec, toolstream, transcript, images, screen
 from shell import bashMutationPath
+import snap
 import sandbox
 import tabtitle
 import goal
@@ -1218,8 +1219,15 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   let startMode = activeMode(session.cwd)
   if not noMode(startMode):
     session.modeSnapshot = readModeText(startMode, session.cwd)
-    if session.readCache != nil:
-      session.changeCountStart = session.readCache.changes.len
+    if session.readCache == nil: session.readCache = newReadCache()
+    session.changeCountStart = session.readCache.changes.len
+    # The tree manifest arms with the mode and only then: outside a mode
+    # there is no walk, no post-bash fold, no diffing — the change log
+    # records only what the tool executors themselves observe.
+    syncManifest(session.readCache, session.cwd,
+                 modeFilePath(startMode, session.cwd), true)
+  else:
+    syncManifest(session.readCache, session.cwd, "", false)
   while true:
     var usage: Usage
     var msg: JsonNode
@@ -1939,7 +1947,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     # already announced goes to the check: a fresh-context side-call
     # verifier (same model, own message list, no tools) judges the mode's
     # text against harness-built evidence from this turn plus the
-    # check-time working-tree diff. FEEDBACK sends the agent back in
+    # session change log. FEEDBACK sends the agent back in
     # with the verifier's words; SATISFIED retires the file and idles
     # normally. Interrupt is the pause lever: it skips the check and
     # ends the turn; on resume the file is still there, so the mode is
@@ -1976,8 +1984,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
               receiptBytes(modeConflictLabel(mode, other)), messages)
           let detectedText = readModeText(mode, session.cwd)
           session.modeSnapshot = detectedText
-          if session.readCache != nil:
-            session.changeCountStart = session.readCache.changes.len
+          if session.readCache == nil: session.readCache = newReadCache()
+          session.changeCountStart = session.readCache.changes.len
+          # A fresh arming takes a fresh manifest baseline, so work before
+          # this goal never feeds this goal's checks.
+          discard armManifest(session.readCache, session.cwd)
           let kickoff = mode.kickoffMessage(detectedText)
           messages.add kickoff
           saveSessionReported(session, messages)

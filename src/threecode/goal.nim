@@ -24,8 +24,9 @@
 ## when one is configured via `:verifier`, e.g. a System One decision
 ## model like Jev) judges the
 ## goal text against harness-built evidence from the just-finished
-## turn plus the harness-captured working-tree diff. FEEDBACK sends
-## the agent back in; SATISFIED renames the file to
+## turn plus the session change log (net per-path deltas, shell
+## mutations folded in by the armed tree manifest — no git involved).
+## FEEDBACK sends the agent back in; SATISFIED renames the file to
 ## `achieved.md` and the session idles normally. Bare `:goal!`
 ## cancels into `goal-cancelled.md`. No per-tool-call checks, no
 ## system-prompt changes: the continuation message carries everything.
@@ -33,8 +34,8 @@
 ## The side call is also the future subagent primitive, so it is kept
 ## separate: its own message list, no session mutation, no tools.
 
-import std/[algorithm, json, options, os, osproc, sequtils, strformat,
-           strutils, tables]
+import std/[algorithm, json, options, os, sequtils, sets,
+           strformat, strutils, tables]
 import types, util, prompts, api, config, actions
 import dirsettings
 
@@ -52,8 +53,7 @@ const
   EvidenceCapBytes* = 6000  ## evidence summary ceiling
   EvidenceBriefCap* = 160   ## per-call argument digest ceiling
   EvidenceResultCap* = 240  ## per-call result head ceiling
-  GoalDiffCapBytes* = 8000  ## working-tree diff feed ceiling
-  GoalDiffMaxUntracked* = 24  ## untracked files diffed before the elision note
+  GoalDiffCapBytes* = 8000  ## rendered session-diff feed ceiling
 type
   GoalVerdictKind* = enum
     gvkNone      ## output carried no contract line; never counts as satisfied
@@ -85,7 +85,8 @@ type
 const VerifierPreamble* = """You are verifying progress toward a goal. You get the goal text, an
 evidence summary of the agent's last turn (harness-built from the
 transcript's tool calls and their recorded results; the agent's prose
-is excluded), and the harness-captured working-tree diff. You have no
+is excluded), and the session change log — the net per-path record of
+what this session changed on disk, shell commands included. You have no
 tools and exactly one reply: judge from these inputs alone, briefly -
 at most 40 words, nothing trivial.
 The recorded results are real harness captures, but they can be stale
@@ -93,9 +94,10 @@ if the agent changed things after the check they show. The agent's
 claims are never evidence. If the goal requires runtime behavior
 these inputs cannot confirm (tests passing, a build succeeding), do
 not infer it: name the unconfirmed check in your feedback.
-Sufficiency is relative to these inputs: when the diff is consistent
-with the goal and a recorded result shows the goal's own verification
-commands (tests, build) ran and passed, that counts as confirmation.
+Sufficiency is relative to these inputs: when the change log is
+consistent with the goal and a recorded result shows the goal's own
+verification commands (tests, build) ran and passed, that counts as
+confirmation.
 Accept SATISFIED then; do not demand proof these inputs cannot
 contain. Judge whether the goal as stated is fully satisfied by what
 the inputs actually show. Report exactly what you verified and how; never
@@ -105,7 +107,7 @@ next>."""
 
 const StepTruthClause* = """The goal is a PLAN: you also get the harness-parsed task list and
 the checkbox delta for this turn. Judge step truth: a checked box
-must match the evidence and the diff; name the first box that lies
+must match the evidence and the change log; name the first box that lies
 (checked without the work it claims, or finished work left unchecked
 and unexplained). Treat newly checked boxes as claims to verify."""
   ## Prepended to the shared preamble for plan modes; the verdict
@@ -885,68 +887,46 @@ proc buildGoalEvidence*(messages: JsonNode): string =
     result.add "(" & $(calls.len - shown) & " of " & $calls.len &
       " tool calls omitted, evidence cap reached)"
 
-proc buildGoalDiff*(dir = "."): string =
-  ## Harness-captured working-tree delta fed to the verifier: porcelain
-  ## status, the tracked changes (`git diff HEAD`), and the untracked
-  ## files that diff cannot see, appended as new-file diffs. Capped hard:
-  ## this is orientation so the verifier's tool rounds go into checking
-  ## the work instead of discovering it. Empty outside a git repo.
-  let git = "git -C " & quoteShell(dir) & " --no-optional-locks "
-  let (status, code) = execCmdEx(git & "status --porcelain")
-  if code != 0: return ""
-  # Trailing-only trim: porcelain's leading column is meaningful
-  # (" M" is worktree-dirty, "M " is staged).
-  var parts = @[status.strip(leading = false)]
-  # Exit code matters: a repo with no commits yet fails `diff HEAD`
-  # with a fatal message that must not become feed content.
-  let (tracked, tcode) = execCmdEx(git & "diff HEAD")
-  if tcode == 0 and tracked.strip.len > 0: parts.add tracked.strip
-  # Line list, not -z: execCmdEx is line-based (it re-appends the
-  # newline per line), which would corrupt NUL-terminated output and
-  # invent a phantom "\n" path. Newline-split is faithful here; git
-  # C-quotes exotic names so they stay on one line.
-  let (others, _) = execCmdEx(
-    git & "ls-files --others --exclude-standard")
-  var shown = 0
-  for path in others.splitLines:
-    if path.strip.len == 0: continue
-    if shown >= GoalDiffMaxUntracked:
-      parts.add "(" & $shown & " untracked files shown, more omitted)"
-      break
-    inc shown
-    let (d, dcode) = execCmdEx(git & "diff --no-index -- /dev/null " &
-      quoteShell(path))
-    # Exit 1 is "files differ"; above that (missing file, a platform
-    # refusing /dev/null) the header alone still names the file.
-    if dcode > 1:
-      parts.add "new file: " & path
-    else:
-      parts.add "new file: " & path & "\n" & d.strip
-  result = parts.join("\n")
-  if result.len > GoalDiffCapBytes:
-    result = utf8ByteCut(result, GoalDiffCapBytes) &
-      "\n(diff truncated at " & $GoalDiffCapBytes &
-      " bytes; run git yourself for the rest)"
-
 const SessionDiffPerPathCap* = 4000
   ## One path's rendered net diff ceiling inside the session change log
   ## feed; past it the path degrades to a name-only line.
 
 proc buildSessionDiff*(cache: ReadCache): string =
   ## The session change log rendered as one net diff per mutated path,
-  ## path-sorted and capped: what the agent's own tool actions changed
-  ## this session, git or no git. Binary and oversize paths degrade to
-  ## name-only lines - silent omission is the only unforgivable mode.
+  ## path-sorted and capped: what the session changed on disk — tool
+  ## actions and, when a mode armed the tree manifest, shell mutations
+  ## with no parsed target — git or no git. Binary, oversize, and
+  ## no-original paths degrade to name-only lines - silent omission is
+  ## the only unforgivable mode.
   if cache == nil or cache.changes.len == 0: return
   var paths = toSeq(cache.changes.keys)
   paths.sort
   for p in paths:
     let (before, after) = cache.changes[p]
-    if before == after: continue  # touched but net-identical
-    if isBinaryContent(before) or isBinaryContent(after):
-      result.add "changed (binary, content not shown): " & p & "\n"
+    let viaShell = p in cache.shellTouched
+    if before == after and not viaShell:
+      continue  # touched but net-identical
+    if viaShell and after.len == 0:
+      # No original existed to copy and no bytes were captured (over the
+      # fold caps, or the path is gone). Name it; never stay silent, and
+      # never fabricate a before-state the tree cannot supply.
+      let line = (if fileExists(p): "changed via shell (content not " &
+          "captured): " else: "deleted via shell: ") & p & "\n"
+      if result.len + line.len > GoalDiffCapBytes:
+        result.add "(session diff truncated at " & $GoalDiffCapBytes &
+          " bytes; remaining changed paths omitted)\n"
+        break
+      result.add line
       continue
-    let d = computeDiff(before, after, p)
+    if isBinaryContent(before) or isBinaryContent(after):
+      result.add "changed (binary, content not shown): " & p &
+        (if viaShell: " [via shell]" else: "") & "\n"
+      continue
+    var d = computeDiff(before, after, p)
+    if viaShell and before.len == 0:
+      # First seen mutated by an opaque shell run: the current content is
+      # real evidence, the empty original is not — say which is which.
+      d = "changed via shell (original not captured; current content):\n" & d
     if d.len > SessionDiffPerPathCap:
       result.add "changed (diff over " & $SessionDiffPerPathCap &
         " bytes, not shown): " & p & "\n"
@@ -959,7 +939,7 @@ proc buildSessionDiff*(cache: ReadCache): string =
     if not result.endsWith("\n"): result.add "\n"
   result = result.strip(chars = {'\n'})
 
-proc verifierPrompt*(goalText, evidence: string; diff = "";
+proc verifierPrompt*(goalText, evidence: string;
                     sourceFile = GoalFileName; planFeed = "";
                     sessionDiff = ""): string =
   result = "Goal (from " & sourceFile & " in the repo root):\n\n" &
@@ -967,13 +947,11 @@ proc verifierPrompt*(goalText, evidence: string; diff = "";
     "\n\nEvidence from the agent's just-finished turn (harness-built from " &
     "the transcript; the agent's prose is excluded):\n\n" & evidence
   if sessionDiff.strip.len > 0:
-    # The session change log is the primary record: the agent's own tool
-    # actions, net per path, git or no git.
+    # The session change log is the whole record of what the session
+    # changed on disk: tool actions net per path, plus shell mutations
+    # the armed tree manifest folded in. No git is consulted.
     result.add "\n\nChanges this session (harness change log, net per " &
       "mutated path):\n\n" & sessionDiff.strip
-  if diff.strip.len > 0:
-    result.add "\n\nWorking-tree diff vs HEAD captured by the harness " &
-      "(complement; what git reports now):\n\n" & diff.strip
   if planFeed.strip.len > 0:
     result.add "\n\n" & planFeed.strip
   result.add "\n\nJudge from these inputs and end with the verdict line."
@@ -1140,7 +1118,7 @@ proc runDecisionCheck(p: Profile; m: ModeDesc; modeText, evidence,
   var usage: Usage
   try:
     let resp = callSystemOne(p, verifierPrompt(modeText, evidence,
-      buildGoalDiff(), m.fileName, m.verifierFeed(preSnapshot, modeText),
+      m.fileName, m.verifierFeed(preSnapshot, modeText),
       buildSessionDiff(cache)), decisionQuestions(), usage)
     let answers = resp{"answers"}
     let v = verdictFromDecision(answers)
@@ -1166,7 +1144,7 @@ proc verifierProfileFor*(p: Profile): Profile =
       "), checking with the session model")
     return p
   if privateMode and not privateAllowed(cand):
-    # The check ships the goal text and the working-tree diff, so it is
+    # The check ships the goal text and the session change log, so it is
     # exactly the data private mode exists to fence: an untrusted
     # verifier never sees it. The session model (already allow-private,
     # or it would not be running) takes the check instead.
@@ -1191,7 +1169,7 @@ proc runGoalCheck*(p: Profile; m: ModeDesc; modeText, evidence,
     return runDecisionCheck(vp, m, modeText, evidence, preSnapshot, cache)
   let preamble =
     if m.judgeStepTruth: CyberVerifierPreamble else: VerifierPreamble
-  let prompt = verifierPrompt(modeText, evidence, buildGoalDiff(),
+  let prompt = verifierPrompt(modeText, evidence,
                               m.fileName, m.verifierFeed(preSnapshot, modeText),
                               buildSessionDiff(cache))
   # The hook is the providerless test seam (no wire, no usage); the real
