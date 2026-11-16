@@ -32,6 +32,7 @@ proc contextWindowFor*(model: string): int =
   if m == "stub-model": 12_000
   elif "kimi-k2" in m: 262_144
   elif "qwen3-coder" in m or "qwen3_coder" in m: 262_144
+  elif "qwen4" in m: 1_000_000
   elif "qwen" in m: 128_000
   elif "claude" in m: 200_000
   elif "gpt-6" in m: 1_050_000

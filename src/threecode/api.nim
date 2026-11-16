@@ -2978,6 +2978,26 @@ proc applyQwenReasoning(p: Profile, body: JsonNode) =
   ## DashScope (first-party qwen/qwen-cn/qwen-us compatible-mode) also
   ## rejects `chat_template_kwargs`: it takes a top-level
   ## `enable_thinking` boolean instead.
+  ##
+  ## Qwen4-Max is a graded-reasoning hybrid: DashScope takes a top-level
+  ## `reasoning_effort` (low/high/xhigh) alongside `enable_thinking`, and
+  ## `enable_thinking=false` cuts thinking entirely. OpenRouter normalizes
+  ## the same levels to `reasoning.effort`, and `reasoning.enabled=false`
+  ## turns it off.
+  if p.family == "qwen" and p.version == "4":
+    if p.reasoning == "": return
+    if providerOf(p) == "openrouter":
+      if p.reasoning == "off":
+        body["reasoning"] = %*{"enabled": false}
+      else:
+        body["reasoning"] = %*{"enabled": true, "effort": p.reasoning}
+    else:
+      if p.reasoning == "off":
+        body["enable_thinking"] = %false
+      else:
+        body["enable_thinking"] = %true
+        body["reasoning_effort"] = %p.reasoning
+    return
   if providerOf(p) in ["qwen", "qwen-cn", "qwen-us"]:
     case p.reasoning
     of "off": body["enable_thinking"] = %false

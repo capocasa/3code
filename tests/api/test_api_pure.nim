@@ -312,6 +312,55 @@ suite "api: applyReasoning — neuralwatt":
       check body{"reasoning_effort"}.getStr == "none"
       check not body.hasKey("thinking")
 
+suite "api: applyReasoning — qwen4":
+  # qwen4-max is a graded-reasoning hybrid, unlike the binary qwen3.x
+  # line: DashScope takes a top-level reasoning_effort (low/high/xhigh)
+  # alongside enable_thinking, and enable_thinking=false cuts thinking
+  # entirely; OpenRouter normalizes the levels to reasoning.effort and
+  # the off to reasoning.enabled=false.
+  test "dashscope: off cuts thinking, levels set effort":
+    block off:
+      var body = %*{"stream": true}
+      let p = Profile(name: "qwen.qwen4-max", family: "qwen", version: "4",
+                      model: "qwen4-max", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"enable_thinking"}.getBool == false
+      check not body.hasKey("reasoning_effort")
+    for level in ["low", "high", "xhigh"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "qwen.qwen4-max", family: "qwen", version: "4",
+                      model: "qwen4-max", reasoning: level)
+      applyReasoning(p, body)
+      check body{"enable_thinking"}.getBool == true
+      check body{"reasoning_effort"}.getStr == level
+      check not body.hasKey("chat_template_kwargs")
+
+  test "openrouter: levels ride reasoning.effort, off disables":
+    block level:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.qwen/qwen4-max", family: "qwen",
+                      version: "4", model: "qwen/qwen4-max", reasoning: "low")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"effort"}.getStr == "low"
+      check body{"reasoning"}{"enabled"}.getBool == true
+      check not body.hasKey("reasoning_effort")
+    block off:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.qwen/qwen4-max", family: "qwen",
+                      version: "4", model: "qwen/qwen4-max", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"enabled"}.getBool == false
+      check not body.hasKey("reasoning_effort")
+
+  test "empty reasoning sends nothing":
+    var body = %*{"stream": true}
+    let p = Profile(name: "qwen.qwen4-max", family: "qwen", version: "4",
+                    model: "qwen4-max", reasoning: "")
+    applyReasoning(p, body)
+    check not body.hasKey("enable_thinking")
+    check not body.hasKey("reasoning_effort")
+    check not body.hasKey("reasoning")
+
 suite "api: applyReasoning — minimax":
   # M-series on the OpenAI-compatible surface exposes a binary on/off
   # knob (`chat_template_kwargs.enable_thinking`). low/medium/high are

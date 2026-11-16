@@ -331,6 +331,16 @@ suite "api request shaping":
     check knownGoodReasonings("together", "zai-org/GLM-5.1") == @["off", "on"]
     check knownGoodReasonings("together", "zai-org/GLM-5") == @["off", "on"]
 
+  test "qwen4-max grades effort, keeps the qwen3.x line binary":
+    check knownGoodReasonings("qwen", "qwen4-max") == @["off", "low", "high", "xhigh"]
+    check knownGoodReasonings("openrouter", "qwen/qwen4-max") == @["off", "low", "high", "xhigh"]
+    check knownGoodReasonings("qwen", "qwen3.8-max") == @["off", "on"]
+    check knownGoodContextWindow("qwen", "qwen4-max") == 1_000_000
+    check knownGoodContextWindow("openrouter", "qwen/qwen4-max") == 1_000_000
+    # output cap (thinking + answer share 262,144) sits under the 1M window
+    check maxOutputTokensFor(Profile(name: "openrouter.qwen/qwen4-max",
+      model: "qwen/qwen4-max", family: "qwen")) == 262_144
+
   test "hy4 narrows the knob to two levels":
     # Hy4's chat template accepts exactly high and no_think; Hy3 keeps low.
     check knownGoodReasonings("openrouter", "tencent/hy4-preview") == @["no_think", "high"]

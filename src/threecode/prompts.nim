@@ -588,6 +588,12 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("qwen", "qwen3.5-35b-a3b", "qwen", "3.5", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("qwen", "qwen3-max", "qwen", "3", "max", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("qwen", "qwen-plus", "qwen", "3", "plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    # qwen4-max: first Qwen4 model (Nov 2026), flagship MoE with native
+    # vision (text/image/video) and 1M context, hybrid thinking. Graded
+    # reasoning_effort low/high/xhigh (default high) on DashScope, plus
+    # enable_thinking=false to cut it; see applyQwenReasoning. Vision
+    # stays unmarked until a live image probe earns it.
+    ("qwen", "qwen4-max", "qwen", "4", "max", "high", 0.2, 65536, tbNone, false, 1_000_000, false, false),
 
     # inkling (Thinking Machines Lab, thinkingmachines/Inkling; 975B MoE,
     # 41B active, multimodal. Level-based reasoning via `reasoning_effort`
@@ -1079,6 +1085,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "poolside/laguna-s-2.1:free", "laguna", "2", "s-free", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen-plus", "qwen", "3", "plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "qwen/qwen3.8-max-0902", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
+    ("openrouter", "qwen/qwen4-max", "qwen", "4", "max", "high", 0.2, 65536, tbNone, false, 1_000_000, false, false),
     ("fireworks", "accounts/fireworks/routers/kimi-k3-fast", "kimi", "3", "-fast", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("tensorx", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
     ("tensorx", "qwen/qwen3-235b-a22b-2507", "qwen", "3", "235b-a22b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
@@ -4362,6 +4369,8 @@ proc maxOutputTokensFor*(p: Profile): int =
     if "haiku" in m or "4-5" in m or "4.5" in m: return 65_536
     return 131_072
   if "glm-5.3" in m: return 131_072
+  # qwen4 caps thinking + answer together at 262,144 inside its 1M window
+  if "qwen4" in m: return 262_144
   if "deepseek" in m and "v4" in m: return 384_000
   if "gpt-6" in m: return 128_000
   if "gemini-3" in m or "gemini-4" in m: return 65_536
@@ -4477,6 +4486,12 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         if combo.variant.startsWith("7-code"):
           return @[]
         return @["off", "on"]
+      if fam == "qwen" and combo.version == "4":
+        # qwen4-max: graded reasoning_effort low/high/xhigh (default
+        # high) on DashScope and OpenRouter, plus a true off via
+        # enable_thinking=false / reasoning.enabled=false. See
+        # applyQwenReasoning.
+        return @["off", "low", "high", "xhigh"]
       if fam == "qwen" and p == "neuralwatt":
         # qwen3.6 is high/none binary, qwen3.8 grades xhigh/medium/low
         # with high aliased to xhigh; all four 3code levels are valid
