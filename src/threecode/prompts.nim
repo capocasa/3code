@@ -592,7 +592,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # vision (text/image/video) and 1M context, hybrid thinking. Graded
     # reasoning_effort low/high/xhigh (default high) on DashScope, plus
     # enable_thinking=false to cut it; see applyQwenReasoning. Vision
-    # stays unmarked until a live image probe earns it.
+    # earned on openrouter by a live probe (read ZORB off a real image);
+    # first-party stays unmarked until probed.
     ("qwen", "qwen4-max", "qwen", "4", "max", "high", 0.2, 65536, tbNone, false, 1_000_000, false, false),
 
     # inkling (Thinking Machines Lab, thinkingmachines/Inkling; 975B MoE,
@@ -1085,7 +1086,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "poolside/laguna-s-2.1:free", "laguna", "2", "s-free", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen-plus", "qwen", "3", "plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "qwen/qwen3.8-max-0902", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
-    ("openrouter", "qwen/qwen4-max", "qwen", "4", "max", "high", 0.2, 65536, tbNone, false, 1_000_000, false, false),
+    ("openrouter", "qwen/qwen4-max", "qwen", "4", "max", "high", 0.2, 65536, tbNone, false, 1_000_000, false, true),
     ("fireworks", "accounts/fireworks/routers/kimi-k3-fast", "kimi", "3", "-fast", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("tensorx", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
     ("tensorx", "qwen/qwen3-235b-a22b-2507", "qwen", "3", "235b-a22b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),

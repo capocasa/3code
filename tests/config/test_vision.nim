@@ -47,7 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 325
+    check visionRows == 326
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
@@ -61,6 +61,10 @@ suite "vision: known-good curation":
     check knownGoodVision("openai", "gpt-5.4")
     check knownGoodVision("mistral", "mistral-large-4")
     check knownGoodVision("together", "thinkingmachines/Inkling")
+    # qwen4-max sees on openrouter (live probe read ZORB off a real
+    # image); first-party stays unmarked until probed.
+    check knownGoodVision("openrouter", "qwen/qwen4-max")
+    check not knownGoodVision("qwen", "qwen4-max")
     check knownGoodVision("xiaomi", "mimo-v2.6-flash")
     # kimi k3.1 pro is natively multimodal; live image pings on the
     # hosts that took a key (novita, venice, cheaperinference).
