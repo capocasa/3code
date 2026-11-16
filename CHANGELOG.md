@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **Qwen4-Max joins the known-good table with graded reasoning.** The
+  hybrid model takes a top-level `reasoning_effort` (low/high/xhigh,
+  default high) alongside `enable_thinking` on DashScope, and
+  OpenRouter normalizes the same levels to `reasoning.effort` with
+  `reasoning.enabled=false` to cut thinking entirely; `applyQwenReasoning`
+  now routes the `qwen`/`4` family to the right shape per provider. The
+  1M context window lives in `contextWindowFor`, output is capped at
+  262,144 (thinking + answer together), and `knownGoodReasonings` lists
+  off/low/high/xhigh. Vision on the OpenRouter row was earned by a live
+  probe that read ZORB off a real image; first-party stays unmarked
+  until probed (`tests/config/test_vision.nim`).
 - **Multiline goal text now indents under the `⚑` kickoff item.** A
   goal (or plan) description with multiple lines rendered its
   continuation lines flush at column 0 - only wrapped rows were indented
