@@ -2,6 +2,33 @@ Changelog
 
 Unreleased
 
+- **The goal-mode snapshot landed: a cross-platform, filesystem-independent
+  copy-on-write manifest replaces every git call.** The satisfaction
+  check's second input used to shell out to `git status` / `git diff
+  HEAD` — empty outside a repo, dependent on a git binary, and blind to
+  which changes were the session's own. That feed is gone; the session
+  change log is now the whole record, and it learned to see shell work:
+  arming a mode takes one stat walk of the project (path, mtime, size
+  per file — a manifest, no content copies), and after every bash run a
+  re-walk folds each signature that moved into the change log like any
+  write tool's target (`snap.nim`). `python rewrite.py`, a build, a
+  `tar xf` now record; the command-line scraper's one-path-per-command
+  limit no longer bounds what the log sees (it keeps its other duties:
+  read-cache invalidation, ask-gating). Copy-on-write stays the capture
+  rule — originals are copied at first observed mutation, never up
+  front — so nothing assumes reflinks, APFS/btrfs, or hardlinks and it
+  works on any filesystem on any OS, the bundled bash on Windows included.
+  A path first seen already mutated by an opaque command has no
+  recoverable original: it renders with an honest `changed via shell
+  (original not captured)` header plus the current content instead of a
+  fabricated before-state, and deletions render name-only. Oversize
+  mutations (1MB/file, 4MB/run budgets) and binary content degrade to
+  name-only lines; `.git`, `node_modules`, and build caches never enter
+  the manifest. All of it arms only with a mode: no `goal.md`, no walk,
+  no fold, no diffing — the change log outside goal mode records exactly
+  what it always did. The verifier preamble now names the change log as
+  an input, and a session inside a git repo gets the same prompt as one
+  outside (`tests/core/test_session_diff.nim`).
 - **Qwen4-Max joins the known-good table with graded reasoning.** The
   hybrid model takes a top-level `reasoning_effort` (low/high/xhigh,
   default high) alongside `enable_thinking` on DashScope, and
