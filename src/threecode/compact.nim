@@ -16,11 +16,10 @@ import util
 import types
 import prompts
 import images
-when defined(providerStub):
-  # Test-only: the stub provider serves the summarizer meta-call from
-  # its canned-response queue (see stubNextSummarizerReply). api imports
-  # nothing from compact, so this stays acyclic.
-  import api
+# applyReasoning lives here; under providerStub the stub serves the
+# meta-call itself (see stubNextSummarizerReply). api imports nothing
+# from compact, so this stays acyclic.
+import api
 
 proc contextWindowFor*(model: string): int =
   ## Heuristic fallback for models off the known-good table
@@ -213,7 +212,9 @@ proc collapseForSummary*(payload: JsonNode): JsonNode =
       result.add m
 
 const
-  BtwMaxTokens* = 2000
+  # Forced-thinking models spend this budget on reasoning before the
+  # first answer token, so it is headroom, not just answer length.
+  BtwMaxTokens* = 8192
   BtwSystemPrompt* = """You are answering a side question ("btw") about an ongoing coding session. The messages below are the conversation so far, followed by the user's question as the final user message. Answer that question from the conversation's content. Be brief and direct; no filler, no follow-up questions. This exchange is a private aside: it never enters the conversation, so the next real turn will not have seen it."""
 
 proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
@@ -294,6 +295,9 @@ proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
       "max_output_tokens": maxTokens,
       "stream": false
     }
+    # Same reasoning-effort shape responsesBody sends on the main path.
+    if p.reasoning.len > 0:
+      body["reasoning"] = %*{"effort": %p.reasoning}
     endpoint = p.url & "/responses"
   else:
     body = %*{
@@ -302,6 +306,10 @@ proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
       maxTokensField(p): maxTokens,
       "stream": false
     }
+    # Same per-family reasoning wire mapping the main turn sends. Without
+    # it a forced-thinking model (GLM-5.3 et al.) burns the meta-call's
+    # whole token budget on reasoning and returns an empty answer.
+    applyReasoning(p, body)
     endpoint = p.url & "/chat/completions"
   var status = 0
   var respBody = ""

@@ -140,6 +140,25 @@ suite ":btw side questions":
     check sent["model"].getStr == h.prof.model
     check sent["max_tokens"].getInt == BtwMaxTokens
 
+  test "meta-call carries the family reasoning knob":
+    # Regression: the meta-call used to omit the per-family reasoning
+    # wire mapping the main turn sends. On forced-thinking GLM-5.3 the
+    # omission starved the whole token budget into reasoning and :btw
+    # came back with "no answer" every time.
+    let h = startBtwSrv()
+    defer: stopBtwSrv(h)
+    var prof = h.prof
+    prof.family = "glm"
+    prof.model = "glm-5.3"
+    prof.version = "5"
+    prof.variant = "3"
+    prof.reasoning = "high"
+    var messages = history()
+    discard askBtw("why?", messages, prof)
+    check h.srv.payloads.len == 1
+    let sent = parseJson(h.srv.payloads[0])
+    check sent{"reasoning_effort"}.getStr == "high"
+
   test "command path answers without touching messages":
     let h = startBtwSrv()
     defer: stopBtwSrv(h)
