@@ -52,7 +52,8 @@ suite "oneshot prompt persistence":
     env["TMPDIR"] = root / "tmp"
     env["HOME"] = root
     env["TERM"] = "dumb"
-    env["THREECODE_STUB_RESPONSES"] = root / "run" / "stub_responses.json"
+    mergeChildConf(childConfigFile(env),
+      test = [("stub_responses", root / "run" / "stub_responses.json")])
     # Shell-wrap only for the >out 2>err redirects: the binary's TUI bytes
     # must never sit in an unread osproc pipe (64KiB buffer = deadlock).
     let cmdline = "exec " & stub.quoteShell & " -x " &
@@ -107,7 +108,8 @@ suite "oneshot prompt persistence":
     env["TMPDIR"] = root / "tmp"
     env["HOME"] = root
     env["TERM"] = "dumb"
-    env["THREECODE_STUB_RESPONSES"] = root / "run" / "stub_responses.json"
+    mergeChildConf(childConfigFile(env),
+      test = [("stub_responses", root / "run" / "stub_responses.json")])
     let cmdline = "exec " & stub.quoteShell & " -x -s " &
       (root / "blocker" / "x.3log").quoteShell & " " &
       "a castle".quoteShell &

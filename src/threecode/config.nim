@@ -20,6 +20,7 @@ when defined(windows):
   import std/winlean
 import types, prompts, util, auth_openai, modelname, minline
 import dirsettings
+import runtime
 
 type
   ProviderRec* = object
@@ -116,23 +117,14 @@ var activeConfigWarnings*: seq[string]
   ## live TUI would be noise, not news.
 var activeSearchKey*: string = ""
   ## The key for the *active* search engine, resolved at config load from
-  ## the engine-specific `[search] exa-key` / `brave-key` (or the matching
-  ## env var `EXA_API_KEY` / `BRAVE_API_KEY`). Keyless by default: exa and
-  ## parallel work without a key, brave requires one.
+  ## the engine-specific `[search] exa-key` / `brave-key`. Keyless by
+  ## default: exa and parallel work without a key, brave requires one.
 
 var activeSearchKeys*: Table[string, string]
   ## All configured search keys, keyed by engine name (`exa`, `brave`).
   ## Mirrors what was read from `[search] exa-key` / `brave-key`. The
   ## `activeSearchKey` is derived from this for the active engine; this map
   ## is kept so a future engine switch doesn't require a config re-read.
-
-const SearchEngineEnv*: array[2, (string, string)] = [
-  ("exa", "EXA_API_KEY"),
-  ("brave", "BRAVE_API_KEY")
-]
-  ## Engines that take an optional key, mapped to the env var that supplies
-  ## it. `parallel` is keyless in practice, so it has no entry. Used by
-  ## `resolveSearchKey` to fall back to the environment.
 
 var activeSearchEngine*: string = "exa"
   ## Active search engine: "exa" (default), "parallel", or "brave". Set via
@@ -143,6 +135,21 @@ var activeSearchEngine*: string = "exa"
 var activeShortcuts*: Table[string, string]
   ## [shortcuts] map loaded from the active config, exposed so minline can
   ## apply the user's bindings at startup and after config reloads.
+
+var activeExtraConf*: seq[tuple[section, key, value: string]]
+  ## Raw lines of the runtime knobs — the `[test]` harness section and
+  ## the `[settings]`/`[plugins]` keys `runtime.nim` consumes — exactly as
+  ## the config file carried them. `writeConfigFile` round-trips them so a
+  ## mid-session write does not silently drop the harness's frame
+  ## handshake or a user's `allow_root` line; nothing in the session
+  ## mutates them.
+
+proc stashRuntime(section, key, value: string) =
+  ## Feed one config line into the runtime store and the round-trip
+  ## capture. `[plugins]` keys get a `plugin_` prefix in the store so
+  ## they cannot collide with a same-named `[settings]` key.
+  runtime.put(if section == "plugins": "plugin_" & key else: key, value)
+  activeExtraConf.add (section, key, value)
 
 var bashPathOverride*: string
   ## Windows-only. `[settings]` `bash_path = "..."` overrides bash
@@ -191,13 +198,13 @@ proc emitTestFrameEvent*() =
   ## live in config.nim (the experimental-gate refusal). Tests synchronize on
   ## this instead of wall-clock polling.
   when defined(posix):
-    let fdText = getEnv("THREECODE_TEST_FRAME_FD")
+    let fdText = runtime.get("frame_fd")
     if fdText.len > 0:
       try:
         let fd = cint(parseInt(fdText))
         var ch = 'f'
         discard posix.write(fd, addr ch, 1)
-        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        let ackText = runtime.get("frame_ack_fd")
         if ackText.len > 0:
           let ackFd = cint(parseInt(ackText))
           var ack: array[1, char]
@@ -205,15 +212,15 @@ proc emitTestFrameEvent*() =
       except CatchableError:
         discard
   elif defined(windows):
-    # Same handshake on inherited pipe HANDLEs; see turns.nim's twin.
-    let hText = getEnv("THREECODE_TEST_FRAME_FD")
+    # Same handshake on named pipes; see turns.nim's twin.
+    let hText = runtime.get("frame_fd")
     if hText.len > 0:
       try:
         let h = openTestPipe(hText, childWrites = true)
         var ch = 'f'
         var written: int32 = 0
         discard writeFile(h, addr ch, 1, addr written, nil)
-        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        let ackText = runtime.get("frame_ack_fd")
         if ackText.len > 0:
           let ackH = openTestPipe(ackText, childWrites = false)
           var ack: array[1, char]
@@ -390,15 +397,6 @@ proc splitModels*(s: string): seq[string] =
 
 proc formatModels*(models: seq[string]): string = models.join(" ")
 
-proc expandEnvValue(s: string): string =
-  ## Expand a leading `$VAR` reference (after any surrounding whitespace) to
-  ## the value of the environment variable. Plain values pass through
-  ## unchanged.
-  let t = s.strip
-  if t.len > 1 and t[0] == '$':
-    return getEnv(t[1 .. ^1])
-  s
-
 func canonicalSettingsKey*(key: string): string =
   ## The one spelling per `[settings]` key: aliases (`sandbox_enabled`,
   ## `max-timeout`, the legacy `mode`) collapse onto the canonical form
@@ -423,13 +421,12 @@ proc applySettingsValue*(key, raw: string) =
   ## Apply one `[settings]` key/value to the process globals — the single
   ## dialect shared by `parseConfigFile`, the plugin-default bootstrap and
   ## the directory store overlay (`applyDirSettingsOverlay`), so every
-  ## source behaves identically. `raw` is the value as written (pre
-  ## env-expansion; `$VAR` references expand here). Two keys are owned
-  ## elsewhere and not handled here: `current` (a profile pointer each
+  ## source behaves identically. `raw` is the value as written. Two keys
+  ## are owned elsewhere and not handled here: `current` (a profile pointer each
   ## caller resolves its own way) and `dirconfig` (store placement is a
   ## user-config decision alone — a store can never relocate the stores,
   ## or it would grant itself authority).
-  let v = expandEnvValue(raw)
+  let v = raw
   case key
   of "notify":
     case v.toLowerAscii
@@ -536,9 +533,8 @@ proc applySettingsValue*(key, raw: string) =
   of "bash":
     bashSourcePref = v.strip.toLowerAscii
   of "user_agent", "user-agent":
-    # Raw `raw`, not the env-expanded `v`: the `$vars` in the template
-    # belong to modelUserAgent's expansion, not the environment, and a
-    # leading `$os/...` would otherwise be eaten by expandEnvValue.
+    # The `$vars` in the template belong to modelUserAgent's expansion,
+    # not to any environment lookup.
     userAgentTemplate = raw
   of "system-command-prefixes", "system_command_prefixes":
     # Each non-whitespace character is one prefix; assignment (not
@@ -558,17 +554,24 @@ proc applySettingsValue*(key, raw: string) =
     for part in v.split({',', ' ', '\t'}):
       let n = part.strip
       if n.len > 0: providerWhitelist.add n
+  of "allow_root", "trace_file", "debug_log", "force_sync_output",
+     "termdbg", "ask_timeout_ms", "google_project":
+    # Runtime knobs served by the runtime.nim store. Applied here, never
+    # recorded: only `parseConfigFile` captures the file's own line for
+    # the `writeConfigFile` round-trip, so a store overlay's value can
+    # cascade into the store without leaking into the user config.
+    runtime.put(key, v)
   else: discard
 
 type
   RawEntry* = tuple[section, key, value: string, line: int]
-    ## A key/value pair as written, before env expansion, with the line it
+    ## A key/value pair as written, with the line it
     ## appeared on. Collected during the streaming parse so `validateConfig`
     ## can report `path:line:` for a bad section/key/value without re-reading.
 
 const
   PermittedSections = ["settings", "search", "colors", "provider",
-                       "params", "shortcuts", "plugins"]
+                       "params", "shortcuts", "plugins", "test"]
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
@@ -583,7 +586,10 @@ const
                   "dirconfig",
                   "system-command-prefixes", "system_command_prefixes",
                   "limitproviders", "limit-providers",
-                  "limit_providers"]
+                  "limit_providers",
+                  "allow_root", "trace_file", "debug_log",
+                  "force_sync_output", "termdbg", "ask_timeout_ms",
+                  "google_project"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -595,7 +601,11 @@ const
                         "context-window", "context_window",
                         "allow-private", "allow_private", "vision"]
   ParamsScopeKeys = ["provider", "model"]
-  PluginKeys = ["disable", "tools", "debug", "lib"]
+  PluginKeys = ["disable", "tools", "debug", "lib", "sync_ms", "tool_ms"]
+  TestKeys = ["frame_fd", "frame_ack_fd", "ticker_fd", "ticker_ack_fd",
+              "api_continue_fd", "gui_live", "stub_responses",
+              "http_stub_responses", "stub_sandbox",
+              "stub_verify_delay_ms", "screenshot_src", "geometry_audit"]
   ThinkBackValues = ["none", "turn", "all"]
   SearchEngines = ["exa", "parallel", "brave"]
   # `light` is the canonical light-background value; `bright` is the
@@ -614,6 +624,7 @@ proc permittedKey(section, key: string): bool =
   of "provider": key in ProviderKeys
   of "params": key in ProviderParamsKeys or key in ParamsScopeKeys
   of "plugins": key in PluginKeys
+  of "test": key in TestKeys
   of "shortcuts": key in minline.ShortcutNames
   else: false
 
@@ -690,6 +701,11 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin DirConfigValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for 'dirconfig' " &
                "in [settings] (expected one of: project, user)"
+      if ent.key == "ask_timeout_ms":
+        try: discard parseInt(ent.value.strip)
+        except ValueError:
+          return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
+                 "(expected a whole number of milliseconds)"
     of "params":
       # `provider` and `model` are scope keys (plain strings, `model` may
       # be empty for a provider-wide entry); the rest carry typed values
@@ -824,6 +840,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   # set it (the overlay re-applies its own keys afterwards).
   providerWhitelist = @[]
   userSettingsRaw.clear()
+  activeExtraConf = @[]
   applyPluginConfigDefaults()
   let stream = newFileStream(path, fmRead)
   if stream == nil: raise newException(ValueError, "cannot open " & path)
@@ -870,7 +887,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
       if section == "params": inParams = true
     of cfgKeyValuePair, cfgOption:
       entries.add (section, e.key, e.value, p.getLine())
-      let v = expandEnvValue(e.value)
+      let v = e.value
       case section
       of "colors":
         colors[e.key] = v
@@ -893,6 +910,8 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           else: discard
         of "lib":
           pluginsLibOverride = v
+        of "sync_ms", "tool_ms":
+          stashRuntime("plugins", e.key, v)
         else: discard
       of "settings":
         # Shared dialect with the plugin defaults and the directory store
@@ -906,9 +925,20 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "dirconfig":
           let dv = v.strip.toLowerAscii
           if dv in DirConfigValues: dirsettings.dirConfigLocation = dv
+        # Runtime knobs ride the runtime.nim store; the file's own line
+        # is captured for the writeConfigFile round-trip (a store
+        # overlay's value cascades through applySettingsValue without
+        # being captured, so it never leaks into the user config).
+        of "allow_root", "trace_file", "debug_log", "force_sync_output",
+           "termdbg", "ask_timeout_ms", "google_project":
+          stashRuntime("settings", e.key, v)
         else:
           userSettingsRaw[canonicalSettingsKey(e.key)] = e.value
           applySettingsValue(e.key, e.value)
+      of "test":
+        # Harness hooks (see runtime.nim). Values ride verbatim: the fd
+        # keys are integers on POSIX and pipe names on Windows.
+        stashRuntime("test", e.key, v)
       of "search":
         case e.key
         of "exa-key": searchKeys["exa"] = v
@@ -1165,7 +1195,7 @@ proc userSettingBool(key: string; eff, default: bool): bool =
   ## default, exactly like the parse-time application.
   if canonicalSettingsKey(key) notin storeOverlayKeys: return eff
   let raw = userSettingsRaw.getOrDefault(canonicalSettingsKey(key), "")
-  case expandEnvValue(raw).strip.toLowerAscii
+  case raw.strip.toLowerAscii
   of "on", "true", "yes", "1": true
   of "off", "false", "no", "0": false
   else: default
@@ -1175,12 +1205,12 @@ proc userSettingInt(key: string; eff, default: int): int =
   ## default (schema validation already rejects them at parse time).
   if canonicalSettingsKey(key) notin storeOverlayKeys: return eff
   let raw = userSettingsRaw.getOrDefault(canonicalSettingsKey(key), "")
-  try: parseInt(expandEnvValue(raw).strip)
+  try: parseInt(raw.strip)
   except ValueError: default
 
 proc userSettingStr(key, eff, default: string): string =
-  ## String twin, deliberately without env expansion: the written line
-  ## round-trips the user's own spelling (including `$var` templates).
+  ## String twin: the written line round-trips the user's own spelling
+  ## (including `$var` templates).
   if canonicalSettingsKey(key) notin storeOverlayKeys: return eff
   let raw = userSettingsRaw.getOrDefault(canonicalSettingsKey(key), "")
   if raw.strip == "": default else: raw
@@ -1190,7 +1220,7 @@ proc userSettingTone(eff: ColorMode): ColorMode =
   ## slot (`userSettingsRaw` keys are canonical).
   if "tone" notin storeOverlayKeys: return eff
   let raw = userSettingsRaw.getOrDefault("tone", "")
-  case expandEnvValue(raw).strip.toLowerAscii
+  case raw.strip.toLowerAscii
   of "dark": cmDark
   of "light", "bright": cmLight
   else: cmAuto
@@ -1199,8 +1229,8 @@ proc userSettingPrefixes(eff: string): string =
   ## `system-command-prefixes` twin, normalized like the parse (each
   ## non-whitespace character one prefix).
   if "system-command-prefixes" notin storeOverlayKeys: return eff
-  let norm = normalizeCommandPrefixes(expandEnvValue(
-    userSettingsRaw.getOrDefault("system-command-prefixes", "")))
+  let norm = normalizeCommandPrefixes(
+    userSettingsRaw.getOrDefault("system-command-prefixes", ""))
   if norm != "": norm else: ":"
 
 proc writeConfigFile*(path: string, current: string,
@@ -1304,6 +1334,16 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "\n[shortcuts]\n"
     for cmd, spec in activeShortcuts:
       buf.add cmd & " = " & quoteVal(spec) & "\n"
+  # Round-trip the runtime-knob lines ([test] harness hooks, the
+  # [settings]/[plugins] keys runtime.nim serves) as written, so a
+  # mid-session save keeps the frame handshake alive.
+  if activeExtraConf.len > 0:
+    var lastSection = ""
+    for (sec, key, val) in activeExtraConf:
+      if sec != lastSection:
+        buf.add "\n[" & sec & "]\n"
+        lastSection = sec
+      buf.add key & " = " & quoteVal(val) & "\n"
   for pr in providers:
     buf.add "\n[provider]\n"
     buf.add "name = " & quoteVal(pr.name) & "\n"
@@ -1364,15 +1404,36 @@ proc configPath*(): string =
   else: userConfigRoot() / "config"
 
 proc resolveSearchKey*(engine: string; keys: Table[string, string]): string =
-  ## The engine-specific `[search] exa-key` / `brave-key` wins; otherwise the
-  ## env var for the active engine is consulted (`EXA_API_KEY` /
-  ## `BRAVE_API_KEY`). Returns "" when neither is set, which is fine for the
-  ## keyless engines (exa, parallel) and surfaces as a runtime error for brave.
-  if keys.hasKey(engine) and keys[engine] != "": return keys[engine]
-  for (name, envVar) in SearchEngineEnv:
-    if name == engine and existsEnv(envVar):
-      return getEnv(envVar)
-  ""
+  ## The engine-specific `[search] exa-key` / `brave-key`. Returns "" when
+  ## none is set, which is fine for the keyless engines (exa, parallel) and
+  ## surfaces as a runtime error for brave.
+  if keys.hasKey(engine): keys[engine]
+  else: ""
+
+proc startupTraceFileTarget*(): string =
+  ## The `[settings] trace_file` value from the resolved config path, for
+  ## -d:startupTrace builds whose first milestone fires before the full
+  ## config load. "" (stderr) when the file or the key is absent.
+  if not fileExists(configPath()): return ""
+  try:
+    let stream = newFileStream(configPath(), fmRead)
+    if stream == nil: return ""
+    var p: CfgParser
+    p.open(stream, configPath())
+    var section = ""
+    while true:
+      let e = p.next
+      case e.kind
+      of cfgEof: break
+      of cfgSectionStart: section = e.section
+      of cfgKeyValuePair, cfgOption:
+        if section == "settings" and e.key == "trace_file":
+          result = e.value.strip
+          break
+      else: discard
+    p.close()
+  except CatchableError:
+    result = ""
 
 proc applyEarlySandboxSettings*(path: string) =
   ## Apply only the two `[settings]` sandbox switches (`sandbox`,
@@ -1398,7 +1459,7 @@ proc applyEarlySandboxSettings*(path: string) =
     of cfgSectionStart: section = e.section
     of cfgKeyValuePair, cfgOption:
       if section != "settings": continue
-      let v = expandEnvValue(e.value).toLowerAscii
+      let v = e.value.toLowerAscii
       if e.key == "dirconfig" and v in DirConfigValues:
         dirsettings.dirConfigLocation = v
         continue

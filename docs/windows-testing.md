@@ -42,7 +42,7 @@ probed on beck; `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` requires `TRUE` and
 cannot rescue it), so handle values cannot be inherited the way fds are
 on POSIX. The harness instead creates the five IPC pipes as named pipes
 (`\\.\pipe\threecode-tty-<pid>-<seq>-*`), passes their **names** in the
-`THREECODE_TEST_*` env vars, and the child connects by name
+child's `[test]` config section, and the child connects by name
 (`types.openTestPipe`, one shared client connection per pipe). Both sides
 block on the handshake, so the child's renders are paced and serialized
 the same way the POSIX path paces them.
@@ -194,8 +194,8 @@ on Windows:
    program through the harness: captured when it sleeps ~20ms before
    returning, empty without the sleep, and `fflush` / `WriteConsole` do not
    help. `die()` now flushes stderr and, only under the tty harness
-   (`THREECODE_TEST_FRAME_FD` set), sleeps a bounded 200ms before quitting so
-   the relay lands. Real consoles keep their host alive and need no delay.
+   (the `[test] frame_fd` key set), sleeps a bounded 200ms before
+   quitting so the relay lands. Real consoles keep their host alive and need no delay.
 
 ## Options to re-enable the tty suite (historical)
 
@@ -217,8 +217,8 @@ modern, supported equivalent of `openpty`:
 
 This is a real port of one file (`tty_expect.nim`), behind `when defined(...)`.
 The `TtySession` record and the public `expect*` API stay identical, so the
-test bodies need no changes. The IPC pipe wiring (`THREECODE_TEST_FRAME_FD`
-etc.) is already pipe-based and works on both platforms.
+test bodies need no changes. The IPC pipe wiring (the `[test] frame_fd`
+channel) is already pipe-based and works on both platforms.
 
 Caveat: the tests are timing-sensitive (they assert on streaming behavior with
 real delays). ConPTY's scheduling differs slightly from a Linux PTY, so some

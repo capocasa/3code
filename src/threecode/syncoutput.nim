@@ -15,24 +15,24 @@
 ## fast enough that an unsynced frame does not visibly tear, and every
 ## terminal applies an unsynced erase the same way.
 ##
-## Sync output is therefore OFF by default everywhere. Set
-## `THREECODE_FORCE_SYNC_OUTPUT=1` to re-enable it (tear-free frames on
-## terminals whose 2026 handling is correct). `THREECODE_DISABLE_SYNC_OUTPUT`
-## is accepted as a no-op alias for documentation muscle-memory.
+## Sync output is therefore OFF by default everywhere. `[settings]
+## force_sync_output = on` re-enables it (tear-free frames on terminals
+## whose 2026 handling is correct).
 ##
 ## Leaf module (no imports from the renderer) so both `terminal.nim` and
 ## `minline.nim` can use it without an import cycle.
 
 import std/os
+import runtime
 
 const
   SyncBeginSeq* = "\x1b[?2026h"
   SyncEndSeq* = "\x1b[?2026l"
 
 proc syncOutputEnabled*(): bool =
-  ## False by default (see module doc). FORCE re-enables sync.
-  if getEnv("THREECODE_FORCE_SYNC_OUTPUT") == "1": return true
-  false
+  ## False by default (see module doc). `[settings] force_sync_output`
+  ## re-enables sync.
+  runtime.on("force_sync_output")
 
 proc SyncBegin*(): string =
   if syncOutputEnabled(): SyncBeginSeq else: ""

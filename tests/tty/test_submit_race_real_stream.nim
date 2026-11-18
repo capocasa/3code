@@ -76,7 +76,7 @@ proc env(root: string): seq[EnvVar] =
     # Plain-file debug sink: the stuck-dump reads its tail to see the
     # app's last debug trace before the stall, without ANSI garbage in
     # the grid.
-    (key: "THREECODE_DEBUG_LOG", val: root / "debug.log"),
+    (key: "settings.debug_log", val: root / "debug.log"),
   ]
 
 proc ensureRealBinary(): string =

@@ -31,6 +31,7 @@ when not defined(windows):
 import std/exitprocs
 when defined(posix):
   import std/posix
+import threecode/runtime
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
@@ -61,17 +62,24 @@ when defined(startupTrace):
   # Runtime-initialized at module load so the baseline is process start;
   # const would demand a compile-time epochTime (fails on Windows cross).
   let StartupT0 = epochTime()
-  # When THREECODE_TRACE_FILE is set, milestones append there instead of
+  # When [settings] trace_file is set, milestones append there instead of
   # stderr, so timing is captured even when stderr is a console that the
   # caller can't easily scrape (e.g. a manual launch in Windows Terminal).
-  let StartupTraceFile = getEnv("THREECODE_TRACE_FILE")
+  # Resolved lazily on the first milestone: the flag fires before the full
+  # config load, so the probe reads the key itself from the resolved
+  # config path (-c honored).
+  var startupTraceFile = ""
+  var startupTraceResolved = false
   template startupTrace(label: string) =
     ## stderr timing probe, compiled in only with -d:startupTrace.
     let line = "[trace] " & label & " " &
       formatFloat(epochTime() - StartupT0, ffDecimal, 3) & "\n"
-    if StartupTraceFile.len > 0:
+    if not startupTraceResolved:
+      startupTraceResolved = true
+      startupTraceFile = startupTraceFileTarget()
+    if startupTraceFile.len > 0:
       try:
-        let f = open(StartupTraceFile, fmAppend)
+        let f = open(startupTraceFile, fmAppend)
         f.write(line)
         f.close()
       except CatchableError: discard
@@ -180,9 +188,9 @@ proc refuseRoot() =
   ## a normal `curl | sh` user shouldn't ever see this; it's the safety
   ## net for `sudo 3code`, root containers, etc.
   when defined(posix):
-    if geteuid() == 0 and getEnv("THREECODE_ALLOW_ROOT").len == 0:
+    if geteuid() == 0 and not runtime.on("allow_root"):
       stderr.writeLine "3code: refusing to run as root. " &
-        "Run as your normal user. (override: THREECODE_ALLOW_ROOT=1)"
+        "Run as your normal user. (override: [settings] allow_root = on)"
       quit ExitUsage
 
 proc warnNoBash() =
@@ -229,11 +237,11 @@ proc initSandbox(cwd: string) =
   # tests drive REPL rendering, not enforcement, and `active=true` plus the
   # startup probe shift the wall-clock timing the spinner/SIGWINCH
   # assertions depend on. Enforcement is covered by the cli_args `box`
-  # suite and by production. THREECODE_STUB_SANDBOX=1 opts a stub run back
-  # in (the sandbox-ask tty tests need a live policy with the harness's
-  # deterministic timing).
+  # suite and by production. The [test] stub_sandbox = on key opts a stub
+  # run back in (the sandbox-ask tty tests need a live policy with the
+  # harness's deterministic timing).
   when defined(providerStub):
-    if getEnv("THREECODE_STUB_SANDBOX") != "1":
+    if not runtime.on("stub_sandbox"):
       return
   if not sandboxEnabled:
     return
@@ -416,16 +424,10 @@ proc main() =
     if a in ["-v", "--version"]: echo Version; return
   # Root blast radius: plugins are native code loaded before argv is
   # parsed now (their subcommands and options must be known up front),
-  # so the root refusal has to come first. -v above and the early
-  # subcommands above still answer as root on purpose.
-  refuseRoot()
-  # Plugins register their CLI surface (subcommands, options) at load,
-  # so they load before argv is parsed — much earlier than their hooks
-  # used to fire. A tolerant config read first so `[plugins] disable`
-  # and `lib` gate this load exactly as the late one did; the full
-  # (dying) config parse still runs later at its old spot. The `-c`
-  # pre-scan honors an explicit config file for that gating; the
-  # provider block and the main parser re-read and re-verify it.
+  # so the root refusal has to come before their load. -v above and the
+  # early subcommands above still answer as root on purpose. The config
+  # is read (tolerantly) first so `[settings] allow_root` is honored; the
+  # full (dying) config parse still runs later at its old spot.
   block:
     var i = 0
     while i < rawParams.len:
@@ -439,7 +441,12 @@ proc main() =
           configPathOverride = rawParams[i][9 ..^ 1]
       inc i
     discard tryLoadStateOrEmpty(configPath())
-    pluginsDiscoverAndLoad()
+  refuseRoot()
+  # Plugins register their CLI surface (subcommands, options) at load,
+  # so they load before argv is parsed — much earlier than their hooks
+  # used to fire. The tolerant config read above already gated this load
+  # (`[plugins] disable` and `lib`) exactly as the late one did.
+  pluginsDiscoverAndLoad()
   # Headless frontends: `--headless` runs turns with zero output,
   # `--gui` keeps the process alive for a plugin's in-process GUI
   # (both see headless.nim). Dispatched here, after the load above: a

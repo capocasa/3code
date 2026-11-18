@@ -633,20 +633,32 @@ when defined(posix):
           (sandboxEnabled, sandbox.active, sandbox.procboxExe,
               sandbox.current) = saved
           removeDir(dir)
-        let body = "(exit 3) | cat\n" &
-          "echo \"pipestatus=${PIPESTATUS[0]}-${PIPESTATUS[1]}\"\n" &
-          "read -r got <<'EOF'\nheredoc payload\nEOF\n" &
-          "echo \"heredoc=$got\"\n"
-        let act = Action(kind: akBash, body: body)
-        let (boxed, codeBoxed, _) = runStreamingBash(act, nil, nil)
-        # Unconfined leg: the setsid path a sandbox-off run takes.
-        sandbox.active = false
-        let (plain, codePlain, _) = runStreamingBash(act, nil, nil)
-        check codeBoxed == 0
-        check codePlain == 0
-        check boxed == plain
-        check "pipestatus=3-0" in boxed
-        check "heredoc=heredoc payload" in boxed
+        # Byte parity needs a fence that engages cleanly: kernels (or
+        # container sandboxes) that deny unprivileged user namespaces
+        # print a degrade notice into every restricted run — noise that
+        # has nothing to do with the interpreter under test. Probe over
+        # the exact restricted-bash path the parity legs take and skip
+        # where the fence cannot engage, the same posture as the netns
+        # e2e in tests/core/test_wall_bash.
+        let (probeOut, probeCode, _) =
+          runStreamingBash(Action(kind: akBash, body: "true\n"), nil, nil)
+        if probeCode != 0 or "unshare" in probeOut:
+          skip()
+        else:
+          let body = "(exit 3) | cat\n" &
+            "echo \"pipestatus=${PIPESTATUS[0]}-${PIPESTATUS[1]}\"\n" &
+            "read -r got <<'EOF'\nheredoc payload\nEOF\n" &
+            "echo \"heredoc=$got\"\n"
+          let act = Action(kind: akBash, body: body)
+          let (boxed, codeBoxed, _) = runStreamingBash(act, nil, nil)
+          # Unconfined leg: the setsid path a sandbox-off run takes.
+          sandbox.active = false
+          let (plain, codePlain, _) = runStreamingBash(act, nil, nil)
+          check codeBoxed == 0
+          check codePlain == 0
+          check boxed == plain
+          check "pipestatus=3-0" in boxed
+          check "heredoc=heredoc payload" in boxed
 
     test "a deny already covered by a denied root stays silent and unreachable":
       # Integration regression: the authority denies ride every fenced

@@ -43,8 +43,7 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "XDG_CACHE_HOME", val: root / "xdg" / "cache"),
     (key: "TMPDIR", val: root / "tmp"),
     (key: "HOME", val: root),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
-    (key: "THREECODE_STUB_STREAM", val: "1"),
+    (key: "test.stub_responses", val: responsesPath),
   ]
 
 proc assistantReply(text: string): JsonNode =

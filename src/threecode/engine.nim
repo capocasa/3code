@@ -34,6 +34,7 @@
 import std/terminal
 import std/os
 import std/strutils except toUpperAscii, toLowerAscii
+import runtime
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
@@ -194,8 +195,8 @@ var geometryAuditInit {.threadvar.}: bool
 proc geometryAuditActive(): bool =
   if not geometryAuditInit:
     geometryAuditInit = true
-    if getEnv("THREECODE_TEST_FRAME_FD").len > 0:
-      geometryAuditPath = getEnv("THREECODE_GEOMETRY_AUDIT")
+    if runtime.get("frame_fd").len > 0:
+      geometryAuditPath = runtime.get("geometry_audit")
   geometryAuditPath.len > 0
 
 proc geometryAudit(tag: string; rows: int) =

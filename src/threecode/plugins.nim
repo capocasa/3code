@@ -23,6 +23,7 @@
 
 import std/[algorithm, atomics, dynlib, json, locks, os, strformat,
            strutils, tables, times]
+import runtime
 import types, util, pluginabi
 
 # -- config surface ([plugins] section, :plugin command) ------------
@@ -52,14 +53,11 @@ const
   TraceDiffLines = 40
 
 proc syncTimeoutMs(): int =
-  try: parseInt(getEnv("THREECODE_PLUGIN_SYNC_MS"))
-  except CatchableError: DefaultSyncMs
+  runtime.num("plugin_sync_ms", DefaultSyncMs)
 
 proc toolExecTimeoutMs(declared: int32): int =
   if declared > 0: declared.int
-  else:
-    try: parseInt(getEnv("THREECODE_PLUGIN_TOOL_MS"))
-    except CatchableError: DefaultToolExecMs
+  else: runtime.num("plugin_tool_ms", DefaultToolExecMs)
 
 var pluginInterruptedProbe*: proc (): bool {.gcsafe.}
   ## Set by api.nim to `isInterrupted`; the sync wait loop polls it and

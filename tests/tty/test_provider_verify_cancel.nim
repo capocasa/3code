@@ -45,11 +45,10 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "XDG_CACHE_HOME", val: root / "xdg" / "cache"),
     (key: "TMPDIR", val: root / "tmp"),
     (key: "HOME", val: root),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
-    (key: "THREECODE_STUB_STREAM", val: "1"),
+    (key: "test.stub_responses", val: responsesPath),
     # Stretch the verification probe so the ESC below lands while the
     # wizard is still inside `verifying...`.
-    (key: "THREECODE_STUB_VERIFY_DELAY_MS", val: "3000"),
+    (key: "test.stub_verify_delay_ms", val: "3000"),
   ]
 
 suite "provider verification cancel":

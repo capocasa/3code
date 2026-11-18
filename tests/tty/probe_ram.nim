@@ -87,7 +87,7 @@ proc startSession(bin, root: string; resume: bool): TtySession =
             (key: "TMPDIR", val: root / "tmp"),
             (key: "XDG_CONFIG_HOME", val: root / "xdg"),
             (key: "XDG_DATA_HOME", val: root / "data"),
-            (key: "THREECODE_STUB_RESPONSES",
+            (key: "test.stub_responses",
              val: root / "run" / "stub_responses.json")],
     cols = 119, rows = 40)
 

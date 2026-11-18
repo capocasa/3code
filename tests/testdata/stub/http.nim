@@ -4,9 +4,10 @@
 ## `hookProgress`, etc.) so the stub returns the same shape the real
 ## `callHttp` builds, without touching a socket.
 ##
-## Resolution: a JSON array of response objects is read from
-## ``THREECODE_HTTP_STUB_RESPONSES`` (or ``http_stub_responses.json`` in the
-## cwd). Each element is one `callHttp` result, consumed in order:
+## Resolution: a JSON array of response objects is read from the
+## ``[test] http_stub_responses`` config key (or
+## ``http_stub_responses.json`` in the cwd). Each element is one `callHttp`
+## result, consumed in order:
 ##
 ##   { "choices": [{"message": {"content": "hi", "reasoning_content": "..."}}],
 ##     "usage": {...} }
@@ -34,7 +35,7 @@ var lastHttpStubBody* = ""
 
 proc loadHttpStubResponses(): seq[JsonNode] =
   let path = block:
-    let override = getEnv("THREECODE_HTTP_STUB_RESPONSES")
+    let override = runtime.get("http_stub_responses")
     if override.len > 0: override else: "http_stub_responses.json"
   if not fileExists(path):
     stderr.writeLine "3code: http stub: " & path & " not found"

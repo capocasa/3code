@@ -11,7 +11,7 @@ discard """
 
 import std/[json, os, strutils, unittest]
 import ../plugin_helpers
-import threecode/library
+import threecode/[library, runtime]
 
 suite "plugins: full turn":
   when defined(providerStub):
@@ -47,8 +47,8 @@ debug = "on"
         putEnv("XDG_DATA_HOME", root / "data")
         putEnv("TMPDIR", root / "tmp")
         putEnv("TC_FIXTURE_LOG", logPath)
-        putEnv("THREECODE_PLUGIN_SYNC_MS", "3000")
-        putEnv("THREECODE_DEBUG_LOG", root / "dbg.log")
+        runtime.put("plugin_sync_ms", "3000")
+        runtime.put("debug_log", root / "dbg.log")
 
     test "veto pairs, plugin tool executes, prompt mutates, events fire":
       putEnv("TC_FIXTURE_MODE", "veto")
@@ -69,7 +69,7 @@ debug = "on"
                         "arguments": $(%*{"text": "hi"})}}]},
         {"content": "all done"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
 
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))

@@ -61,7 +61,7 @@ proc stubEnv(root: string): seq[EnvVar] =
     (key: "TMPDIR", val: root / "tmp"),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
-    (key: "THREECODE_STUB_RESPONSES", val: root / "run" / "stub_responses.json"),
+    (key: "test.stub_responses", val: root / "run" / "stub_responses.json"),
   ]
 
 proc startApp(root: string; args: openArray[string];

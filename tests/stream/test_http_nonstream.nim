@@ -12,7 +12,7 @@
 ## (`-d:providerStub`) covers everything else; sum = full coverage.
 
 import std/[json, os, strutils, times, unittest]
-import threecode/[api, types]
+import threecode/[api, types, runtime]
 
 suite "non-streaming body reconstruction (buildBatchAssistantMsg)":
   test "returns nil for a genuinely empty completion":
@@ -52,7 +52,7 @@ suite "non-streaming callModel via httpStub":
   proc writeResponses(name, json: string) =
     let path = getTempDir() / name
     writeFile(path, json)
-    putEnv("THREECODE_HTTP_STUB_RESPONSES", path)
+    runtime.put("http_stub_responses", path)
 
   proc glmProfile(): Profile =
     Profile(name: "zai.glm-4.7", url: "https://api.z.ai/api/paas/v4",
@@ -314,7 +314,7 @@ suite "non-streaming xml tool_call promotion":
   proc writeResponses(name, json: string) =
     let path = getTempDir() / name
     writeFile(path, json)
-    putEnv("THREECODE_HTTP_STUB_RESPONSES", path)
+    runtime.put("http_stub_responses", path)
 
   test "leaked <tool_call> in content is promoted on the non-streaming path":
     writeResponses("tc_http_xml.json", """[{
@@ -363,7 +363,7 @@ suite "retry-now through the shared retry block":
   proc writeResponses(name, json: string) =
     let path = getTempDir() / name
     writeFile(path, json)
-    putEnv("THREECODE_HTTP_STUB_RESPONSES", path)
+    runtime.put("http_stub_responses", path)
 
   proc glmProfile(): Profile =
     Profile(name: "zai.glm-4.7", url: "https://api.z.ai/api/paas/v4",

@@ -17,6 +17,7 @@ proc epochTime(): float =
   getMonoTime().ticks.float / 1_000_000_000.0
 import ttty/grid
 import frame_artifact
+import stub_helpers
 export frame_artifact
 
 when defined(windows):
@@ -60,6 +61,8 @@ when defined(windows):
     ## Session ordinal for the per-session unique IPC pipe names.
 else:
   import posix
+  var gIpcSessionSeq = 0
+    ## Same ordinal on POSIX: names the session-local fallback config.
   import posix/termios
 
 # Platform-conditional fd-like type so the TtySession fields have one name
@@ -692,8 +695,28 @@ proc resizeMainThread*(s: TtySession; cols, rows: int): bool {.discardable.} =
     if result and s.pid > 0 and not s.exited:
       discard syscall(SYS_tgkill, s.pid, s.pid, SigWinch)
 
+proc sessionConfigFile(args: seq[string]; env: openArray[EnvVar]): string =
+  ## The config file the spawned child will read: a `-c/--config` argument
+  ## when given, else `<XDG_CONFIG_HOME>/3code/config` from the child env.
+  ## The harness merges the [test] channel keys into that file (the old
+  ## old env-var channel); a test that redirects neither gets a
+  ## session-local config injected via -c so the real user config is never
+  ## touched.
+  var i = 0
+  while i < args.len:
+    if args[i] in ["-c", "--config"] and i + 1 < args.len:
+      return absolutePath(args[i + 1])
+    if args[i].startsWith("--config="):
+      return absolutePath(args[i][9 ..^ 1])
+    inc i
+  for item in env:
+    if item.key == "XDG_CONFIG_HOME" and item.val.len > 0:
+      return item.val / "3code" / "config"
+  ""
+
 proc newTtySession*(bin: string; args: openArray[string] = [];
                     cwd = ""; env: openArray[EnvVar] = [];
+                    conf: openArray[ConfPair] = [];
                     cols = DefaultTtyCols; rows = DefaultTtyRows;
                     keepHistory = true; slaveNoOpost = false): TtySession =
   ## Start `bin` under a real PTY (POSIX) or Pseudo Console (Windows) with an
@@ -701,7 +724,41 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
   ##
   ## `env` is the complete child environment, except TERM is defaulted to
   ## xterm-256color when not provided. Pass an absolute `bin` path unless the
-  ## supplied env intentionally includes PATH for execv callers.
+  ## supplied env intentionally includes PATH for execv callers. Entries
+  ## whose key carries a section prefix — `test.stub_responses`,
+  ## `settings.debug_log`, `plugins.sync_ms` — are NOT environment: they
+  ## merge into the child's config file (the former env-var knobs
+  ## travel this way now).
+  ##
+  ## `conf` is the same mechanism for callers that prefer it explicitly.
+  inc gIpcSessionSeq
+  var envVars: seq[EnvVar] = @[]
+  var testConf: seq[ConfPair] = @conf
+  var settingsConf: seq[ConfPair] = @[]
+  var pluginsConf: seq[ConfPair] = @[]
+  for item in env:
+    # A dotted key with an empty value means unset (the env-list
+    # semantics these entries came from); the config schema rejects
+    # empty values, so skip them. Plain env vars may legitimately be "".
+    if item.val == "" and item.key.find('.') >= 0:
+      continue
+    if item.key.startsWith("test."):
+      testConf.add (item.key[5 ..^ 1], item.val)
+    elif item.key.startsWith("settings."):
+      settingsConf.add (item.key[9 ..^ 1], item.val)
+    elif item.key.startsWith("plugins."):
+      pluginsConf.add (item.key[8 ..^ 1], item.val)
+    else:
+      envVars.add item
+  var childArgs: seq[string] = @args
+  var cfgPath = sessionConfigFile(childArgs, envVars)
+  if cfgPath == "":
+    # Neither -c nor an XDG redirect: never touch the real user config —
+    # spin a session-local one carrying only the [test] channel and pass
+    # it via -c (appended: `--headless`/`--gui` must stay the first arg).
+    cfgPath = getTempDir() / "3code-tty-conf" /
+      ($getCurrentProcessId() & "-" & $gIpcSessionSeq) / "config"
+    childArgs.add @["-c", cfgPath]
   when defined(windows):
     # Five IPC pipes mirroring the POSIX pipe pairs, as NAMED pipes:
     #   frame            : child writes 'f' to signal a render boundary
@@ -832,9 +889,9 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # IPC FD vars are skipped). Otherwise build a double-null-terminated
     # UTF-16 block from `env` plus inherited system vars and the IPC FDs.
     var envBlock = ""
-    if env.len > 0:
+    if envVars.len > 0:
       var hasTerm = false
-      for item in env:
+      for item in envVars:
         if item.key == "TERM":
           hasTerm = true
         envBlock.add item.key & "=" & item.val & "\0"
@@ -847,7 +904,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
                      "PATHEXT", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
                      "USERPROFILE"]:
         var present = false
-        for item in env:
+        for item in envVars:
           if item.key.cmpIgnoreCase(sysKey) == 0:
             present = true
             break
@@ -858,19 +915,23 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       # PATH must be present for the child to resolve DLLs via the standard
       # search path; inherit it unless the caller explicitly set one.
       var hasPath = false
-      for item in env:
+      for item in envVars:
         if item.key.cmpIgnoreCase("PATH") == 0:
           hasPath = true
           break
       if not hasPath and getEnv("PATH").len > 0:
         envBlock.add "PATH=" & getEnv("PATH") & "\0"
-      # Windows IPC values are pipe NAMES (the child connects by name); the
-      # POSIX fork path puts fd numbers in the same vars.
-      envBlock.add "THREECODE_TEST_FRAME_FD=" & frameName & "\0"
-      envBlock.add "THREECODE_TEST_FRAME_ACK_FD=" & ackName & "\0"
-      envBlock.add "THREECODE_TEST_TICKER_FD=" & tickName & "\0"
-      envBlock.add "THREECODE_TEST_TICKER_ACK_FD=" & tickackName & "\0"
-      envBlock.add "THREECODE_TEST_API_CONTINUE_FD=" & apicName & "\0\0"
+      envBlock.add "\0"
+
+    # The IPC channel ids (pipe names here, fd numbers on POSIX) reach the
+    # child through the [test] config section, not the environment.
+    testConf.add ("frame_fd", frameName)
+    testConf.add ("frame_ack_fd", ackName)
+    testConf.add ("ticker_fd", tickName)
+    testConf.add ("ticker_ack_fd", tickackName)
+    testConf.add ("api_continue_fd", apicName)
+    mergeChildConf(cfgPath, test = testConf,
+                   settings = settingsConf, plugins = pluginsConf)
 
     var pi: PROCESS_INFORMATION
     # Pass lpApplicationName=NULL and put the full program path as the first
@@ -880,7 +941,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # (the harness saw only conhost mode-set bytes, never the child's own
     # output); NULL + cmdline-only makes conhost relay the child's stdout.
     var cmd = bin.quoteShell()
-    for a in args:
+    for a in childArgs:
       cmd.add " " & a.quoteShell()
     let cmdW = newWideCString(cmd)
     # Keep the wide objects alive across the createProcessW call.
@@ -948,6 +1009,17 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     doAssert pipe(apiContinuePipe) == 0
     discard fcntl(apiContinuePipe[0], F_SETFD, 0)
 
+    # The IPC channel ids reach the child through the [test] config
+    # section (fd numbers here, pipe names on Windows), written before
+    # the fork so the child's first config read already sees them.
+    testConf.add ("frame_fd", $framePipe[1])
+    testConf.add ("frame_ack_fd", $ackPipe[0])
+    testConf.add ("ticker_fd", $tickerPipe[0])
+    testConf.add ("ticker_ack_fd", $tickerAckPipe[1])
+    testConf.add ("api_continue_fd", $apiContinuePipe[0])
+    mergeChildConf(cfgPath, test = testConf,
+                   settings = settingsConf, plugins = pluginsConf)
+
     result = TtySession(
       masterFd: masterFd,
       frameEventFd: framePipe[0],
@@ -991,15 +1063,10 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
         putEnv(item.key, item.val)
       if not hasTerm:
         putEnv("TERM", "xterm-256color")
-      putEnv("THREECODE_TEST_FRAME_FD", $framePipe[1])
-      putEnv("THREECODE_TEST_FRAME_ACK_FD", $ackPipe[0])
-      putEnv("THREECODE_TEST_TICKER_FD", $tickerPipe[0])
-      putEnv("THREECODE_TEST_TICKER_ACK_FD", $tickerAckPipe[1])
-      putEnv("THREECODE_TEST_API_CONTINUE_FD", $apiContinuePipe[0])
       if cwd.len > 0:
         setCurrentDir(cwd)
 
-      let argv = argvArray(bin, args)
+      let argv = argvArray(bin, childArgs)
       discard execv(bin.cstring, argv)
       quit 127
 

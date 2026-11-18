@@ -2,7 +2,7 @@
 ## the prompt; never on the first prompt."
 ##
 ## Drives the stub binary through several submits with the LIVE gui thread
-## (THREECODE_TEST_GUI_LIVE=1) and tracks, for every committed marker line
+## (test.gui_live=1) and tracks, for every committed marker line
 ## (echoes, answers, receipts), whether it survives on screen from the
 ## moment it appeared until session end. A marker that disappears while the
 ## screen never scrolled (banner still on row 1) was erased in place: the
@@ -58,10 +58,10 @@ proc stubEnv(root, responsesPath: string; guiLive: bool): seq[EnvVar] =
     (key: "TMPDIR", val: root / "tmp"),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
+    (key: "test.stub_responses", val: responsesPath),
   ]
   if guiLive:
-    result.add (key: "THREECODE_TEST_GUI_LIVE", val: "1")
+    result.add (key: "test.gui_live", val: "1")
 
 proc rawSend(s: TtySession; text: string) =
   for ch in text:
@@ -128,7 +128,7 @@ proc realEnv(root: string; guiLive: bool): seq[EnvVar] =
     (key: "XDG_CACHE_HOME", val: root / "xdg" / "cache"),
   ]
   if guiLive:
-    result.add (key: "THREECODE_TEST_GUI_LIVE", val: "1")
+    result.add (key: "test.gui_live", val: "1")
 
 proc separatorCheck(tty: TtySession; turnsDone: int): string =
   ## On a settled screen, every committed echo row (a row starting with the

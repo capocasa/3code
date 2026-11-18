@@ -26,6 +26,7 @@ when defined(windows):
       importc: "SetConsoleCtrlHandler".}
   proc conioKbhit(): cint {.header: "<conio.h>", importc: "_kbhit".}
   proc c_isatty(fd: cint): cint {.header: "<io.h>", importc: "_isatty".}
+import ../runtime
 import ../types, ../util, ../compact, ../display, ../minline,
   ../signals, ../terminal as termui, ../session
 import ../tabtitle
@@ -295,8 +296,8 @@ var inputThreadRunning* = false
 # (broad), n / Enter / Ctrl-C = deny. No second reader of stdin
 # ever exists, so nothing races. While armed the gate is modal: it
 # consumes every byte, so stray typing never lands in the prompt draft.
-# The controller waits with a timeout (default 60s, override with
-# THREECODE_ASK_TIMEOUT_MS) and treats silence as deny.
+# The controller waits with a timeout (default 60s, override with the
+# [settings] ask_timeout_ms config key) and treats silence as deny.
 var
   askGatePending: Atomic[bool]
   askGateAnswer: Atomic[int]
@@ -306,11 +307,8 @@ const DefaultAskTimeoutMs = 60_000
 
 proc askTimeoutMs*(): int =
   ## The ask-gate wait cap, overridable for tests and trials.
-  try:
-    let v = parseInt(getEnv("THREECODE_ASK_TIMEOUT_MS"))
-    if v > 0: v else: DefaultAskTimeoutMs
-  except ValueError:
-    DefaultAskTimeoutMs
+  let v = runtime.num("ask_timeout_ms", 0)
+  if v > 0: v else: DefaultAskTimeoutMs
 
 proc askGateAvailable*(): bool =
   ## Whether an ask can be answered in this session: the input thread
@@ -655,13 +653,12 @@ proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
 proc testFrameMode(): bool =
   ## Deterministic test mode gates the free-running gui thread behind a
   ## frame-request handshake so the tty harness captures stable frames.
-  ## `THREECODE_TEST_GUI_LIVE=1` opts back out: the frame event channel stays
-  ## up (so the harness still synchronizes on commits) but the gui thread runs
-  ## its real 80ms cadence. Race-hunting tests (submit/stream repaint
-  ## interleaves) need the live thread; the handshake disables the very
-  ## concurrency they exercise.
-  getEnv("THREECODE_TEST_FRAME_FD").len > 0 and
-    getEnv("THREECODE_TEST_GUI_LIVE") != "1"
+  ## The `[test] gui_live = on` key opts back out: the frame event channel
+  ## stays up (so the harness still synchronizes on commits) but the gui
+  ## thread runs its real 80ms cadence. Race-hunting tests (submit/stream
+  ## repaint interleaves) need the live thread; the handshake disables the
+  ## very concurrency they exercise.
+  runtime.get("frame_fd").len > 0 and not runtime.on("gui_live")
 
 proc requestTestSpinnerFrame() =
   if not testFrameMode() or not guiRunning:
@@ -685,8 +682,8 @@ proc requestViewportPaint*() =
 
 proc testTickerControlLoop() {.thread.} =
   when defined(posix):
-    let fdText = getEnv("THREECODE_TEST_TICKER_FD")
-    let ackText = getEnv("THREECODE_TEST_TICKER_ACK_FD")
+    let fdText = runtime.get("ticker_fd")
+    let ackText = runtime.get("ticker_ack_fd")
     if fdText.len == 0:
       return
     let fd = try: cint(parseInt(fdText)) except CatchableError: return
@@ -706,11 +703,11 @@ proc testTickerControlLoop() {.thread.} =
         var ack = 'a'
         discard posix.write(ackFd, addr ack, 1)
   elif defined(windows):
-    # Same command loop on inherited pipe HANDLEs; see turns.nim's frame
-    # hook. A blocking readFile breaks out when the harness closes the
-    # command pipe (ERROR_BROKEN_PIPE), like the POSIX EOF break.
-    let hText = getEnv("THREECODE_TEST_TICKER_FD")
-    let ackText = getEnv("THREECODE_TEST_TICKER_ACK_FD")
+    # Same command loop on named pipes; see turns.nim's frame hook. A
+    # blocking readFile breaks out when the harness closes the command
+    # pipe (ERROR_BROKEN_PIPE), like the POSIX EOF break.
+    let hText = runtime.get("ticker_fd")
+    let ackText = runtime.get("ticker_ack_fd")
     if hText.len == 0:
       return
     let h = openTestPipe(hText, childWrites = false)
@@ -3527,13 +3524,13 @@ proc emitTestTurnStateEvent*(idle: bool) =
   ## no-op unless the harness armed it. Blocks on the harness ack like
   ## `emitTestFrameEvent`, so the state is ordered before later output.
   when defined(posix):
-    let fdText = getEnv("THREECODE_TEST_FRAME_FD")
+    let fdText = runtime.get("frame_fd")
     if fdText.len > 0:
       try:
         let fd = cint(parseInt(fdText))
         var ch = if idle: 'i' else: 'b'
         discard posix.write(fd, addr ch, 1)
-        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        let ackText = runtime.get("frame_ack_fd")
         if ackText.len > 0:
           let ackFd = cint(parseInt(ackText))
           var ack: array[1, char]
@@ -3541,15 +3538,15 @@ proc emitTestTurnStateEvent*(idle: bool) =
       except CatchableError:
         discard
   elif defined(windows):
-    # Same handshake on inherited pipe HANDLEs; see turns.nim's twin.
-    let hText = getEnv("THREECODE_TEST_FRAME_FD")
+    # Same handshake on named pipes; see turns.nim's twin.
+    let hText = runtime.get("frame_fd")
     if hText.len > 0:
       try:
         let h = openTestPipe(hText, childWrites = true)
         var ch = if idle: 'i' else: 'b'
         var written: int32 = 0
         discard writeFile(h, addr ch, 1, addr written, nil)
-        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        let ackText = runtime.get("frame_ack_fd")
         if ackText.len > 0:
           let ackH = openTestPipe(ackText, childWrites = false)
           var ack: array[1, char]

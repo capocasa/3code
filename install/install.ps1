@@ -9,12 +9,18 @@
 # Versioned here; the site deploy (3code.capocasa.dev, rsynced by its
 # publish.nims) serves the copy at https://3code.capocasa.dev/install.ps1.
 
+param(
+  [string]$InstallDir = "",
+  [string]$ReleaseBase = "",
+  [switch]$AllowUnverified
+)
+if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA "3code\bin" }
+
 $ErrorActionPreference = "Stop"
 
 $Repo       = "capocasa/3code"
 $BinName    = "3code.exe"
 $Asset      = "3code-windows-amd64.zip"
-$InstallDir = if ($env:THREECODE_INSTALL_DIR) { $env:THREECODE_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "3code\bin" }
 
 function Info($m) { Write-Host "==> $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "warning: $m" -ForegroundColor Yellow }
@@ -24,13 +30,13 @@ if ([Environment]::Is64BitOperatingSystem -ne $true) {
   Die "only 64-bit Windows is supported"
 }
 
-# THREECODE_RELEASE_BASE overrides the release download base (mirrors,
-# offline installs, the test suite); it must hold the archive and
-# SHASUMS256.txt side by side and skips the GitHub tag resolution.
-if ($env:THREECODE_RELEASE_BASE) {
+# -ReleaseBase overrides the release download base (mirrors, offline
+# installs, the test suite); it must hold the archive and SHASUMS256.txt
+# side by side and skips the GitHub tag resolution.
+if ($ReleaseBase) {
   $tag = "release"
-  $url = "$env:THREECODE_RELEASE_BASE/$Asset"
-  $sumsUrl = "$env:THREECODE_RELEASE_BASE/SHASUMS256.txt"
+  $url = "$ReleaseBase/$Asset"
+  $sumsUrl = "$ReleaseBase/SHASUMS256.txt"
 } else {
   Info "resolving latest release"
   try {
@@ -78,11 +84,11 @@ try {
     $got = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
     if ($got -ne $want.ToLower()) { Die "checksum mismatch for ${Asset}: expected $want, got $got" }
     Info "checksum verified"
-  } elseif ($env:THREECODE_ALLOW_UNVERIFIED -eq "1") {
-    Warn "no SHASUMS256.txt published for $tag; installing unverified (THREECODE_ALLOW_UNVERIFIED=1)"
+  } elseif ($AllowUnverified) {
+    Warn "no SHASUMS256.txt published for $tag; installing unverified (-AllowUnverified)"
   } else {
     Die ("no SHASUMS256.txt published for $tag (the release predates published checksums)." +
-         " set THREECODE_ALLOW_UNVERIFIED=1 to install anyway")
+         " run with -AllowUnverified to install anyway")
   }
 
   Info "extracting"

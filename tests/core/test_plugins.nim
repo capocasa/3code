@@ -11,7 +11,7 @@ discard """
 
 import std/[json, os, sequtils, strutils, times, unittest]
 import ../plugin_helpers
-import threecode/[plugins, pluginabi, config, types]
+import threecode/[plugins, pluginabi, config, types, runtime]
 
 var
   root: string
@@ -32,8 +32,8 @@ suite "plugin host":
       buildPluginFixtures(root / "share")
       putEnv("XDG_DATA_HOME", root / "share")
       putEnv("TC_FIXTURE_LOG", logPath)
-      putEnv("THREECODE_DEBUG_LOG", dbgPath)
-      putEnv("THREECODE_PLUGIN_SYNC_MS", "3000")
+      runtime.put("debug_log", dbgPath)
+      runtime.put("plugin_sync_ms", "3000")
       pluginsToolsEnabled = true
       pluginTraceOn = true
       pluginsDiscoverAndLoad()
@@ -244,10 +244,10 @@ suite "plugin host":
 
   test "timeout: default outcome, strikes, then demotion":
     putEnv("TC_FIXTURE_MODE", "hang")
-    putEnv("THREECODE_PLUGIN_SYNC_MS", "150")
+    runtime.put("plugin_sync_ms", "150")
     defer:
       putEnv("TC_FIXTURE_MODE", "mutate")
-      putEnv("THREECODE_PLUGIN_SYNC_MS", "3000")
+      runtime.put("plugin_sync_ms", "3000")
     # three slow calls: each returns the original text, one strike each
     for i in 1..3:
       var text = "orig" & $i

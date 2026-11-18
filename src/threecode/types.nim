@@ -9,6 +9,7 @@ when defined(windows):
   # os is needed only by the ConPTY relay window in `exitWith`; locks by
   # the shared test-pipe connection cache
   import std/[os, locks, winlean]
+import runtime
 import images
 
 when defined(windows):
@@ -28,7 +29,7 @@ when defined(windows):
     ## bInheritHandles=FALSE is the only spawn a pseudoconsole child
     ## survives, so handle values cannot cross it; the harness instead
     ## creates the five IPC pipes as named pipes and passes their names in
-    ## the THREECODE_TEST_* env vars. Runs on the frame, turn-state and
+    ## the [test] config keys. Runs on the frame, turn-state and
     ## ticker threads concurrently; the shared handle and the lock mirror
     ## the POSIX layout, where all threads share one fd.
     gTestPipeLock.acquire()
@@ -556,6 +557,6 @@ proc die*(msg: string, code = 1) {.noreturn.} =
     # `fputs+return`: captured when it sleeps ~20ms first, lost otherwise).
     # Give the relay a bounded window so the harness sees the diagnostic.
     # Only under the test harness; a real console keeps the host alive.
-    if getEnv("THREECODE_TEST_FRAME_FD").len > 0:
+    if runtime.get("frame_fd").len > 0:
       sleep(200)
   quit code

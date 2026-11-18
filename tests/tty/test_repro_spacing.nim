@@ -63,7 +63,7 @@ when isMainModule:
                             (key: "HOME", val: root),
                             (key: "XDG_CONFIG_HOME", val: root / "xdg"),
                             (key: "XDG_DATA_HOME", val: root / "data"),
-                            (key: "THREECODE_STUB_RESPONSES", val: respPath),
+                            (key: "test.stub_responses", val: respPath),
                           ], cwd = root / "run")
   discard tty.waitForOutput(8000)
   tty.drain(300)

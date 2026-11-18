@@ -6,12 +6,12 @@ discard """
 ## arms it, the first turn probes the backend and appends the activation
 ## note, the scripted model calls `screenshot`, and the follow-up user
 ## message carries the image as a content block while the tool result
-## stays a text receipt. The capture is faked via THREECODE_SCREENSHOT_SRC
+## stays a text receipt. The capture is faked via the `[test] screenshot_src` runtime key
 ## so no real screen content is needed; the activation probe still checks
 ## the live X11 environment and skips headless.
 
 import std/[base64, json, os, sequtils, strutils, unittest]
-import threecode/[actions, api, library, prompts, screen, session, types]
+import threecode/[actions, api, library, prompts, screen, session, types, runtime]
 
 const stubbed = defined(providerStub)
 
@@ -104,7 +104,7 @@ else:
     teardown:
       computerUseEnabled = false
       screen.shotHomeDir = ""
-      putEnv("THREECODE_SCREENSHOT_SRC", "")
+      runtime.put("screenshot_src", "")
 
     test "model screenshot -> receipt + image block on the next message":
       # skip() only marks the test; the body must live under the
@@ -117,7 +117,7 @@ else:
         writeConfig(root)
         isolateEnv(root)
         copyFile("testdata/images/tiny.png", root / "run" / "tiny.png")
-        putEnv("THREECODE_SCREENSHOT_SRC", root / "run" / "tiny.png")
+        runtime.put("screenshot_src", root / "run" / "tiny.png")
         writeFile(root / "run" / "stub_responses.json", $(%*[
           %*{"content": "", "tool_calls": [{
             "id": "call_1",
@@ -125,7 +125,7 @@ else:
             "function": {"name": "screenshot", "arguments": "{}"}}]},
           %*{"content": "screen seen"}
         ]))
-        putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+        runtime.put("stub_responses", root / "run" / "stub_responses.json")
         resetStubResponses()
 
         # Config `computer = on` only arms a -d:computerUse build now; arm
@@ -192,7 +192,7 @@ else:
         writeConfig(root)
         isolateEnv(root)
         copyFile("testdata/images/tiny.png", root / "run" / "tiny.png")
-        putEnv("THREECODE_SCREENSHOT_SRC", root / "run" / "tiny.png")
+        runtime.put("screenshot_src", root / "run" / "tiny.png")
         # Varying args keep the flail identical-repeat signal out of the
         # way; the cap is the turn-scoped consecutive counter.
         proc shotCall(n: int): JsonNode =
@@ -205,7 +205,7 @@ else:
           shotCall(1), shotCall(2), shotCall(3), shotCall(4),
           %*{"content": "capped"}
         ]))
-        putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+        runtime.put("stub_responses", root / "run" / "stub_responses.json")
         resetStubResponses()
 
         computerUseEnabled = true

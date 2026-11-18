@@ -43,13 +43,13 @@ proc stubEnv(root, responsesPath, editor: string;
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
     (key: "VISUAL", val: editor),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
+    (key: "test.stub_responses", val: responsesPath),
   ]
   # The stub skips sandbox init by default (REPL legs want the
   # pre-sandbox timing); the :sandbox legs need the policy actually
   # loaded, like the ask suite.
   if sandboxOn:
-    result.add (key: "THREECODE_STUB_SANDBOX", val: "1")
+    result.add (key: "test.stub_sandbox", val: "1")
 
 proc writeStubResponses(root: string) =
   writeFile(root / "run" / "stub_responses.json", $(%*[

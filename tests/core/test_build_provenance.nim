@@ -69,7 +69,5 @@ echo data, " ", part, " ", dep.dep, " ", configured, " ", option
     check output() == "two include-two dep-two cfg-two default"
     check not fileExists(binary & ".pending")
     createDir(binary & ".build-lock")
-    putEnv("THREECODE_BUILD_LOCK_TIMEOUT", "1")
-    defer: delEnv("THREECODE_BUILD_LOCK_TIMEOUT")
-    check execCmdEx(cmd).exitCode != 0
+    check execCmdEx(cmd & " --lock-timeout=1").exitCode != 0
     check output() == "two include-two dep-two cfg-two default"

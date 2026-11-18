@@ -65,17 +65,16 @@ models = "stub-model"
 """)
   writeFile(result / "data" / "stub_responses.json", StubResponses)
 
-proc stubEnv(root, responsesPath: string): seq[EnvVar] =
+proc stubEnv(root, responsesPath: string): StringTableRef =
   createDir(root / "tmp")
-  @[
-    (key: "XDG_DATA_HOME", val: root / "xdg"),
-    (key: "XDG_CONFIG_HOME", val: root / "xdg"),
-    (key: "XDG_CACHE_HOME", val: root / "xdg" / "cache"),
-    (key: "TMPDIR", val: root / "tmp"),
-    (key: "HOME", val: root),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
-    (key: "THREECODE_STUB_STREAM", val: "1"),
-  ]
+  result = newStringTable()
+  result["XDG_DATA_HOME"] = root / "xdg"
+  result["XDG_CONFIG_HOME"] = root / "xdg"
+  result["XDG_CACHE_HOME"] = root / "xdg" / "cache"
+  result["TMPDIR"] = root / "tmp"
+  result["HOME"] = root
+  mergeChildConf(childConfigFile(result),
+    test = [("stub_responses", responsesPath)])
 
 let stubBin = ensureStubBinary()
 
@@ -100,7 +99,7 @@ suite "silent exit on broken stdout mid-turn":
     let (outp, exitCode) = execCmdEx(
       cmd,
       {poStdErrToStdOut, poUsePath, poDaemon},
-      env = stubEnv(root, responsesPath).newStringTable,
+      env = stubEnv(root, responsesPath),
       workingDir = root / "run")
     # execCmdEx blocks until the pipeline finishes, so 3code has already hit
     # the broken pipe and exited by now.

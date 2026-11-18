@@ -11,7 +11,7 @@ discard """
 ## through the real discovery path inside initAgentSession.
 
 import std/[json, os, strutils, times, unittest]
-import threecode/[plugins, pluginagent, pluginabi]
+import threecode/[plugins, pluginagent, pluginabi, runtime]
 
 const stubbed = defined(providerStub)
 
@@ -57,7 +57,7 @@ models = "stub-model"
     for r in ["first reply", "second reply", "third reply", "fourth"]:
       arr.add %*{"content": r}
     writeFile(root / "run" / "stub_responses.json", $arr)
-    putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+    runtime.put("stub_responses", root / "run" / "stub_responses.json")
 
   proc pollUntil(maxMs: int; pred: proc (): bool): bool =
     let deadline = epochTime() + maxMs.float / 1000.0

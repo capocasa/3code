@@ -466,27 +466,25 @@ models = "gpt-oss-120b llama-4"
     check provs[0].models == @["openai/gpt-oss-120b", "openai/llama-4"]
     check provs[0].modelPrefix == ""  # expanded away
 
-suite "config: parseConfigFile env expansion":
+suite "config: parseConfigFile values are verbatim":
   var tmp = ""
 
   setup:
-    tmp = getTempDir() / "3code-test-env.ini"
+    tmp = getTempDir() / "3code-test-verbatim.ini"
 
   teardown:
     removeFile(tmp)
 
-  test "expands $VAR in key field":
-    putEnv("THREECODE_TEST_KEY", "sk-from-env-123")
+  test "a $VAR-looking value stays literal (no environment expansion)":
     writeFile(tmp, """
 [provider]
 name = "test"
 url = "https://api.test.com"
-key = "$THREECODE_TEST_KEY"
+key = "$API_KEY"
 models = "model-a"
 """)
     let (_, provs, _, _, _, _) = parseConfigFile(tmp)
-    check provs[0].key == "sk-from-env-123"
-    delEnv("THREECODE_TEST_KEY")
+    check provs[0].key == "$API_KEY"
 
 suite "config: splitModels / formatModels":
   test "splitModels handles comma-separated":

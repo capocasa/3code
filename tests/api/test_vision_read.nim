@@ -10,7 +10,7 @@ discard """
 ## e2e needs the stub).
 
 import std/[base64, json, os, strutils, unittest]
-import threecode/[api, actions, library, session, types]
+import threecode/[api, actions, library, session, types, runtime]
 
 const stubbed = defined(providerStub)
 
@@ -77,7 +77,7 @@ else:
         parseJson(readCallJson(root / "run" / "tiny.png")),
         %*{"content": "a tiny 16x12 image"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
 
       let s = initAgentSession(AgentOptions(cwd: root / "run",
@@ -124,7 +124,7 @@ else:
       copyFile("testdata/images/tiny.png", root / "run" / "tiny.png")
       writeFile(root / "run" / "stub_responses.json",
         $(%*[{"content": "a tiny image, 16x12"}]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
 
       let s = initAgentSession(AgentOptions(cwd: root / "run",
@@ -160,7 +160,7 @@ else:
         {"content": "first reply"},
         {"content": "second reply"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
 
       let s1 = initAgentSession(AgentOptions(cwd: root / "run",
@@ -198,7 +198,7 @@ else:
         parseJson(readCallJson(root / "run" / "tiny.png")),
         %*{"content": "cannot see it"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
 
       let s = initAgentSession(AgentOptions(cwd: root / "run",

@@ -4,6 +4,14 @@
 set -eu
 [ "$#" -ge 2 ] || { echo 'usage: build_binary.sh OUTPUT SOURCE [nim flags...]' >&2; exit 2; }
 out=$1; source=$2; shift 2
+# --lock-timeout=N: seconds to wait for a foreign build lock (default 180).
+lock_timeout=180
+for arg in "$@"; do
+  case $arg in
+    --lock-timeout=*) lock_timeout=${arg#--lock-timeout=} ;;
+  esac
+done
+set -- $(printf '%s\n' "$@" | grep -v '^--lock-timeout=')
 # Git-bash callers pass Windows paths (`D:\a\...\out`). dirname/mv/nim want
 # `/` separators, and a `D:` drive must not be mistaken for a relative path
 # (that doubled it into `$PWD/D:\...`).
@@ -18,7 +26,7 @@ lock="$out.build-lock"
 waited=0
 until mkdir "$lock" 2>/dev/null; do
   waited=$((waited + 1))
-  if [ "$waited" -ge "${THREECODE_BUILD_LOCK_TIMEOUT:-180}" ]; then
+  if [ "$waited" -ge "$lock_timeout" ]; then
     echo "Timed out waiting for $lock; check its owner before removing a stale lock" >&2
     exit 1
   fi

@@ -2,7 +2,7 @@ discard """
   ## The ask gate's one-key answers are diverted from the input thread
   ## on a real tty (posix PTY or Windows ConPTY). The stub binary
   ## normally skips sandbox init (REPL tests want the pre-sandbox
-  ## timing); THREECODE_STUB_SANDBOX=1 opts this suite back in so the
+  ## timing); test.stub_sandbox=1 opts this suite back in so the
   ## ask rules are enforced for real. `:! CMD` rides the same
   ## runBashWithViewport ask gate a model bash call takes, without
   ## stubbing the model turn; the write-tool tests pin the file-tool
@@ -50,11 +50,11 @@ proc askEnv(root: string; askTimeoutMs: int; responses = ""): seq[EnvVar] =
     (key: "TMPDIR", val: root / "tmp"),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
-    (key: "THREECODE_STUB_SANDBOX", val: "1"),
-    (key: "THREECODE_ASK_TIMEOUT_MS", val: $askTimeoutMs),
+    (key: "test.stub_sandbox", val: "1"),
+    (key: "settings.ask_timeout_ms", val: $askTimeoutMs),
   ]
   if responses.len > 0:
-    result.add (key: "THREECODE_STUB_RESPONSES", val: responses)
+    result.add (key: "test.stub_responses", val: responses)
 
 proc writeTurnResponses(root: string; path, body: string) =
   ## A one-write model turn: the first stub response issues the write

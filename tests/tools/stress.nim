@@ -14,8 +14,9 @@
 ## Usage:
 ##   nim c -r tools/stress.nim tests/tty/test_429_typing_during_backoff.nim --times:30
 ##   nim c -r tools/stress.nim tests/tty/test_tty_functional.nim --times:20 --under-load
-##   # isolate a subtest of test_tty_functional via THREECODE_TTY_ONLY:
-##   THREECODE_TTY_ONLY=resume_full_scrollback nim c -r tools/stress.nim \
+##   # isolate a subtest of test_tty_functional via the scenario arg:
+##   # (build tests/testdata/output/tty-functional, then run it with one
+##   # scenario name) see tests/tools/tty_scenarios.sh \
 ##     tests/tty/test_tty_functional.nim --times:30
 import std/[os, strutils, strformat, times as timeslib, osproc, parseopt, terminal]
 
