@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **Bash children inherit the full 3code environment, and that is now
+  policy, not accident.** Nothing filters variable names: anything the
+  launching shell exported (`PASSWORD_STORE_DIR`, `DISPLAY`, tokens)
+  reaches the command unchanged, and a test asserting that
+  credential-shaped names pass through makes any future scrub a
+  deliberate, visible change. The wrapper's fixed hygiene overrides
+  (`PAGER=cat`, `TERM=dumb`, `NO_COLOR=1`, friends) are unchanged. The
+  manual's sandbox chapter documents the boundary: the fence covers files
+  and network, never the environment, and prompt-shaped tools still have
+  no terminal (`export GPG_TTY=$(tty)` in the shell that starts 3code
+  routes gpg-agent prompts to your terminal).
 - **The bash tool runs in the shell 3code was started in, and never
   falls back to sh.** POSIX resolution was bash-only: `shPath()` picked
   `bash` from PATH or the standard locations and never looked at the
