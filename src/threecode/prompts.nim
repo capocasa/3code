@@ -474,7 +474,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("openrouter", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("nebius", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
-    ("relace", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("relace", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, true),
+    # k3.1-pro is in their live /v1/models catalog though the docs table
+    # omits it; same multimodal K3.1 weights the other hosts serve.
+    ("relace", "moonshotai/kimi-k3.1-pro", "kimi", "3.1", "pro", "on", -1.0, 8192, tbAllTurns, false, 1_000_000, false, true),
 
     # longcat
     ("longcat", "LongCat-2.0", "longcat", "2", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),

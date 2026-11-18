@@ -421,7 +421,7 @@ login that rides on `anthropic`.
 | friendli | US | Korean-founded inference cloud |
 | perplexity | US | |
 | neuralwatt | US and EU (multi-region) | energy-metered vLLM fleet: per-request Wh and CO2 on every response, pay-per-kWh or token pricing; one graded reasoning knob across families |
-| relace | US | Relace hosts their open-weight coding line (GLM, DeepSeek, Kimi, all 1M context) behind one `rlc-` key at aggressive prices; their purpose-built apply/search models live on separate endpoints 3code does not use |
+| relace | US | Relace hosts their open-weight coding line (GLM, DeepSeek, Kimi, all 1M context) behind one `rlc-` key at aggressive prices; **quantized** (fp4 weights, per their /models catalog); their purpose-built apply/search models live on separate endpoints 3code does not use |
 
 ### EU providers
 
