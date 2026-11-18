@@ -44,7 +44,7 @@ when defined(posix):
         let dir = getTempDir() / ("3code-sshshim-" & $getCurrentProcessId())
         createDir(dir)
         defer: removeDir(dir)
-        let shimDir = sb.installSshShim(dir, "/x/3code")
+        let shimDir = sb.installSshShim(dir, "/x/3code", proxied = true)
         check shimDir == dir / "wallbin"
         let shim = readFile(shimDir / "ssh")
         check shim.startsWith("#!/bin/sh")
@@ -70,6 +70,27 @@ when defined(posix):
         let v = execCmdEx((shimDir / "ssh").quoteShell & " -V")
         check v.exitCode == 0
         check "OpenSSH" in v.output
+
+    test "unproxied fence still repairs ssh pw_dir defaults":
+      # Regression: a policy with no host rules leaves the network
+      # open, so no proxy and no ProxyCommand - but the fenced uid
+      # is still 65534, whose passwd home is /, and ssh without the
+      # -F config looks under /.ssh (no aliases, keys, known_hosts).
+      # The shim must install for every fenced launch, tunnel or not.
+      if findExe("ssh") == "":
+        skip()
+      else:
+        let dir = getTempDir() / ("3code-sshshim-open-" & $getCurrentProcessId())
+        createDir(dir)
+        defer: removeDir(dir)
+        let shimDir = sb.installSshShim(dir, "/x/3code", proxied = false)
+        check shimDir == dir / "wallbin"
+        let cfg = readFile(shimDir / "ssh_config")
+        check "wall connect" notin cfg
+        check "IdentityFile " in cfg
+        check "UserKnownHostsFile " in cfg
+        if fileExists(getHomeDir() / ".ssh/config"):
+          check "~/" notin cfg
 
 suite "wall proxy lifecycle":
   test "proxy starts on host rules, reloads on policy rewrite":
@@ -278,7 +299,7 @@ when defined(linux):
           unixSockPath = dir / "proxy.sock")
         defer: sw.stopWallProxy(proxy)
         let port = $int(proxy.port)
-        let shimDir = sb.installSshShim(dir, binPath())
+        let shimDir = sb.installSshShim(dir, binPath(), proxied = true)
         var fenceEnv = {"WALL_PROXY_PORT": port,
           "WALL_PROXY_SOCK": dir / "proxy.sock",
           "PATH": shimDir & ":" & getEnv("PATH")}.newStringTable

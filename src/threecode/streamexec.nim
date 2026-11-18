@@ -777,7 +777,8 @@ export DEBIAN_FRONTEND=noninteractive
         var env: StringTableRef = nil
         when defined(posix):
           sandbox.moveWallSock(tmp)
-          if sandbox.ensureWallProxy(getCurrentDir()):
+          let proxied = sandbox.ensureWallProxy(getCurrentDir())
+          if proxied:
             # box args: swap the --ro tmp for a writable tmp so the
             # bridge can connect() the unix socket inside the netns.
             args = @[]
@@ -797,11 +798,16 @@ export DEBIAN_FRONTEND=noninteractive
                 $int(sandbox.wallProxyPort()), sandbox.proxySockPath(),
                 getEnv("GIT_SSH_COMMAND", "")):
               env[k] = v
-            # ssh ignores the proxy env vars; give the child an ssh
-            # that tunnels through the wall (see installSshShim).
-            let shimDir = sandbox.installSshShim(tmp, sandbox.procboxExe)
-            if shimDir.len > 0:
-              env["PATH"] = shimDir & ":" & env.getOrDefault("PATH")
+          else:
+            env = newStringTable()
+            for k, v in envPairs(): env[k] = v
+          # ssh ignores the proxy env vars; give the child an ssh that
+          # tunnels through the wall when proxied, and in any case the
+          # -F config that repairs the pw_dir defaults uid 65534
+          # breaks (aliases, keys, known_hosts; see installSshShim).
+          let shimDir = sandbox.installSshShim(tmp, sandbox.procboxExe, proxied)
+          if shimDir.len > 0:
+            env["PATH"] = shimDir & ":" & env.getOrDefault("PATH")
         when defined(macosx):
           # Children inherit TMPDIR=$DARWIN_USER_TEMP_DIR (/var/folders),
           # which the policy leaves unwritable; every compiler temp

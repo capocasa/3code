@@ -347,15 +347,17 @@ proc wallEnv*(selfExe, port, sockPath: string;
         "ssh -o ProxyCommand=\"" & selfExe & " wall connect %h %p\"")
 
 when defined(posix):
-  proc wallSshConfig*(dir, selfExe: string): string =
+  proc wallSshConfig*(dir, selfExe: string; proxied: bool): string =
     ## The ssh config the fence hands to OpenSSH, written to
     ## `dir/wallbin/ssh_config`. Two jobs in one file:
     ##
-    ## * route every connection through the wall proxy. OpenSSH
-    ##   ignores the proxy env vars, so the shim passes this file with
-    ##   -F: `wall connect %h %p` is the same tunnel GIT_SSH_COMMAND
-    ##   gives git, the proxy resolves the name, and the allowlist
-    ##   decides, loopback and remote targets alike.
+    ## * when `proxied`, route every connection through the wall
+    ##   proxy. OpenSSH ignores the proxy env vars, so the shim passes
+    ##   this file with -F: `wall connect %h %p` is the same tunnel
+    ##   GIT_SSH_COMMAND gives git, the proxy resolves the name, and
+    ##   the allowlist decides, loopback and remote targets alike.
+    ##   Without host rules the network is open and no tunnel is
+    ##   needed, but the pw_dir repair below still is.
     ##
     ## * repair the defaults that break under the fence. The fenced
     ##   child runs as uid 65534 (nobody), whose passwd home is /, so
@@ -408,11 +410,12 @@ when defined(posix):
     for id in ["id_ed25519", "id_ecdsa", "id_rsa",
                "id_ecdsa_sk", "id_ed25519_sk"]:
       text.add "  IdentityFile " & home & ".ssh/" & id & "\n"
-    text.add "  ProxyCommand " & selfExe & " wall connect %h %p\n"
+    if proxied:
+      text.add "  ProxyCommand " & selfExe & " wall connect %h %p\n"
     writeFile(cfgPath, text)
     cfgPath
 
-  proc installSshShim*(dir, selfExe: string): string =
+  proc installSshShim*(dir, selfExe: string; proxied: bool): string =
     ## Write an `ssh` wrapper into `dir/wallbin`, first on the fenced
     ## child's PATH, for clients that find ssh through PATH (plain
     ## ssh, rsync, everything scripting `ssh ...`). It execs the real
@@ -421,7 +424,7 @@ when defined(posix):
     ## fence. Returns the shim dir, or "" when there is no ssh on PATH
     ## to wrap.
     let ssh = findExe("ssh")
-    let cfg = wallSshConfig(dir, selfExe)
+    let cfg = wallSshConfig(dir, selfExe, proxied)
     if ssh.len == 0 or cfg.len == 0: return ""
     let shimDir = dir / "wallbin"
     let shim = shimDir / "ssh"

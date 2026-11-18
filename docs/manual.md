@@ -1886,7 +1886,11 @@ The wrapper also points ssh at a copy of ``~/.ssh/config`` (with ``~``
 rewritten to absolute paths) and at your real keys and ``known_hosts``:
 the fenced child runs as uid 65534, whose passwd home is ``/``, so ssh's
 own defaults would look under ``/.ssh`` and every login would die at
-host-key or auth.
+host-key or auth. This repair applies to every fenced launch, not only
+the proxied ones: a policy without host rules leaves the network open,
+but the child still runs as uid 65534, so the wrapper installs with the
+tunnel line omitted and the config, keys, and ``known_hosts`` repair
+kept.
 
 ``scp`` and ``sftp`` are the exception: their binaries exec ``/usr/bin/ssh``
 by absolute path (OpenSSH 9.8+), where no PATH wrapper or environment
