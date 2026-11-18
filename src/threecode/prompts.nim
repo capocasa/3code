@@ -243,6 +243,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false, true),
     ("openai", "gpt-6.1-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("openai", "gpt-6.1-terra", "gpt", "", "6.1-terra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    # GPT-6.2 Astra (Nov 17, 2026): the 6.1-Astra line finally shipped
+    # after its safety-cancelled predecessor. Same 1.05M context, 128k
+    # output cap and text+image surface; still rejects effort `none`.
+    # First-party row table-verified against the model page this round
+    # (no API key here); the chatgpt twin live-tested on the Codex
+    # backend (see the changelog).
+    ("openai", "gpt-6.2-astra", "gpt", "", "6.2-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
 
     # deepseek. V4.1 Flash (2026-09-10): first-party canonical id is
     # `deepseek-flash` (the v4-flash / v4-flash-vision-exp ids now route
@@ -1083,6 +1090,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "mistralai/mistral-large-2407", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "openai/gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("openrouter", "openai/gpt-6-astra-pro", "gpt", "", "6-astra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    # GPT-6.2 Astra day-one rows, table-verified against the public
+    # catalog (text+image -> text, 1.05M context, 128k top_provider
+    # completion cap); no key here to ping one-token completions.
+    ("openrouter", "openai/gpt-6.2-astra", "gpt", "", "6.2-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("openrouter", "openai/gpt-6.2-astra-pro", "gpt", "", "6.2-astra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("openrouter", "poolside/laguna-s-2.1:free", "laguna", "2", "s-free", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("openrouter", "qwen/qwen-plus", "qwen", "3", "plus", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "qwen/qwen3.8-max-0902", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -1163,6 +1175,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "mistralai/mistral-medium-3.5", "mistral", "", "medium", "high", 0.7, 32768, tbNone, false, 262_144, false, false),
     ("nanogpt", "openai/gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("nanogpt", "openai/gpt-6-astra-pro", "gpt", "", "6-astra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    # 6.2 Astra base + pro, table-verified against nano-gpt's public
+    # /models listing (same ids as OpenRouter).
+    ("nanogpt", "openai/gpt-6.2-astra", "gpt", "", "6.2-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
+    ("nanogpt", "openai/gpt-6.2-astra-pro", "gpt", "", "6.2-astra-pro", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("nanogpt", "openai/gpt-6-sol", "gpt", "", "6-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
     ("nanogpt", "openai/gpt-6-luna", "gpt", "", "6-luna", "medium", 0.2, 4096, tbNone, false, 1_050_000, false, true),
     ("nanogpt", "openai/gpt-6.1-sol", "gpt", "", "6.1-sol", "medium", 0.2, 8192, tbNone, false, 1_050_000, false, true),
@@ -4422,7 +4438,8 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         if combo.variant == "5.5-pro": return @["medium", "high", "xhigh"]
         if combo.variant == "5.3-codex": return @["low", "medium", "high", "xhigh"]
         if combo.variant in ["5.6-sol-pro", "5.6-terra-pro", "5.6-luna-pro",
-                             "6-astra-pro", "6.1-sol-pro", "6.1-terra-pro"]:
+                             "6-astra-pro", "6.1-sol-pro", "6.1-terra-pro",
+                             "6.2-astra-pro"]:
           # The 5.6/6 pro tiers select `reasoning.mode`, not a different
           # model; effort still applies inside pro mode (medium default),
           # but `none` is off that ladder.
@@ -4431,7 +4448,8 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
           return @["none", "low", "medium", "high", "xhigh", "max"]
         # 6.1 Sol always thinks like Astra; 6.1 Terra keeps a true off
         # (effort none verified live on cheaperinference and venice).
-        if combo.variant == "6-astra" or combo.variant == "6.1-sol":
+        # 6.2 Astra keeps rejecting `none` (per its model page).
+        if combo.variant in ["6-astra", "6.1-sol", "6.2-astra"]:
           return @["low", "medium", "high", "xhigh", "max"]
         if combo.variant in ["6-sol", "6-luna", "6.1-terra"]:
           return @["none", "low", "medium", "high", "xhigh", "max"]

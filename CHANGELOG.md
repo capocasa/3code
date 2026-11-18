@@ -2,6 +2,23 @@ Changelog
 
 Unreleased
 
+- **GPT-6.2 Astra is known-good, live-tested through the ChatGPT
+  backend.** The safety-cancelled 6.1-Astra line's successor shipped
+  Nov 17: same 1.05M context, 128k output cap and text+image surface as
+  the gen-6 line, and still rejects effort `none` — the ladder is
+  low/medium/high/xhigh/max, base and pro alike. Rows: first-party
+  `openai` (table-verified against the model page), OpenRouter and
+  nano-gpt base + pro (both in their public /models catalogs; Venice and
+  Cheaperinference have not listed it yet). The `chatgpt` twin resolves
+  through the openai catalog and was verified live: a headless run
+  against chatgpt.com/backend-api/codex streamed a real answer from
+  `gpt-6.2-astra` at the table's medium effort (2k fresh tokens) — the
+  slug serves even though the backend's /models listing still shows
+  only 6.0/5.6. Wire shapes are shared with 6-astra: /responses with
+  `reasoning.effort` and no temperature, `max_completion_tokens` on
+  completions (`tests/api/test_api.nim`, `tests/api/test_prompts_compact.nim`,
+  `tests/config/test_modelname.nim`, `tests/config/test_vision.nim`).
+
 - **Command prefixes are configurable: `system-command-prefixes`.** The
   hardcoded `/help` synonym is gone, replaced by a general mechanism:
   `[settings] system-command-prefixes = ": /"` makes every listed
