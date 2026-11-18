@@ -1,0 +1,111 @@
+most-used default + cascading resolution — test record
+========================================================
+commit a18a8e4 (worktree default, uncommitted diff on top), machine lucien
+nim 2.4.0, linux/amd64
+
+Change under test
+-----------------
+- src/threecode/config.nim: usage ledger (usageLedgerPath,
+  readProviderUsage, bumpProviderUsage, mostUsedCurrent) and
+  resolveDefaultCurrent, the startup provider ladder in one proc:
+  directory `.3code/config` store cascade (nearest ancestor wins, when
+  it resolves) > config `current` (verbatim) > most-used ledger entry
+  that still resolves > "" (buildProfile's first-[provider]-section
+  floor).
+- src/threecode.nim, src/threecode/library.nim: both startup sites call
+  resolveDefaultCurrent; every session start bumps the profile it
+  resolved onto the ledger (~/.local/share/3code/provider-usage).
+
+Unit / suite runs (tests/tools/test_dispatch.sh files ...)
+----------------------------------------------------------
+PASS: tests/config/test_config.nim c                       (16.97 sec)
+PASS: tests/config/test_config_extra.nim c                 (29.59 sec)
+PASS: tests/config/test_config_pipeline.nim c              (16.11 sec)
+PASS: tests/config/test_config_validation.nim c            (12.90 sec)
+PASS: tests/config/test_dir_current.nim c                  (13.43 sec)
+PASS: tests/config/test_dirsettings.nim c                  (12.05 sec)
+PASS: tests/config/test_most_used.nim c                    (10.91 sec)
+
+tests/config/test_most_used.nim detail: 16/16 OK
+  ledger: empty reads empty; bump counts up; most-used beats the first
+  provider section; stale provider skipped; stale model on a live
+  provider skipped; picked default resolves through buildProfile; ties
+  keep prior order; malformed lines skipped; empty current never bumps
+  ladder: empty floor when nothing names a default; most-used when only
+  the ledger has an opinion; config current beats the ledger; a parent
+  store cascades into subdirectories (the goal's
+  ~/p/3code/.3code/config -> ~/p/3code/foo example); nearest store beats
+  a farther parent; stale store current falls through to config current;
+  stale config current passed through untouched
+
+tests/config/test_dir_current.nim detail: 10/10 OK (2026-11-18 run)
+  unset directory reads empty; save then load round-trips per directory;
+  the store's config carries the current entry; A PARENT'S CURRENT
+  CASCADES INTO SUBDIRECTORIES; the nearest directory wins over a
+  farther parent; save preserves other lines in the store config;
+  legacy .current file still reads as fallback; distinct directories
+  never share a slot; blank entry reads empty; dirconfig = user stores
+  under the config root
+
+Full-suite note: the 2026-11-18 run of tests/tools/ci_tests.sh on this
+tree passed 107, failed 3 (tests/api/test_api.nim,
+tests/core/test_build_provenance.nim,
+tests/core/test_example_webserve.nim). All three fail identically on a
+clean stash of this diff (verified by stash/run/pop): pre-existing
+`cannot open file: streamhttp` dependency-path and provenance issues in
+this environment, unrelated to the change.
+
+Live binary checks (build_binary.sh output, XDG roots redirected to a
+fixture: two providers aaa/zzz, aaa first in the config)
+--------------------------------------------------------
+2026-11-18 16:11 rebuild of src/threecode.nim, ANSI stripped, welcome
+screen's provider block quoted verbatim.
+
+fixture
+  config: two [provider] sections (aaa first), NO [settings] current
+  ledger: "zzz.glm-5.3 4 / aaa.glm-5.2 1"
+  proj/.3code/config: [settings] current = "zzz.glm-5.3" (the goal's
+  ~/p/3code/.3code/config example, zaicode-class names swapped for the
+  fixture's)
+
+1) cascade, own directory (3code in proj):
+
+  provider  zzz
+  model     glm-5.3
+
+2) cascade, SUBDIRECTORY INHERITANCE (3code in proj/sub — the goal's
+   ~/p/3code/foo case; first section aaa and the ledger floor both
+   exist, the parent store wins):
+
+  provider  zzz
+  model     glm-5.3
+
+3) cascade, deeper (3code in proj/sub/deeper, same parent store):
+
+  provider  zzz
+  model     glm-5.3
+
+4) store removed (most-used floor must beat the first [provider]
+   section aaa; ledger leader is zzz):
+
+  provider  zzz
+  model     glm-5.3
+
+5) ledger after the runs (each start bumped the profile it ran on):
+
+  zzz.glm-5.3 8
+  aaa.glm-5.2 1
+
+Earlier fixture run on the same binary additionally showed the config
+`current` rung: with `[settings] current = "aaa.glm-5.2"` and no
+stores, a fresh directory booted aaa.glm-5.2 — an explicit config pick
+beats the ledger leader.
+
+Why the old "always baseten glm-5.2 high" was seen
+--------------------------------------------------
+Not a system default: ~/p/3code/.3code/config held
+`current = "baseten.zai-org/GLM-5.2"` (written by an earlier session's
+:provider/:model switch there), and the store cascade propagated it to
+every ~/p/3code subdirectory. "high" is glm-5.2's curated default
+reasoning level. The no-pick floor used to be the first [provider]
+section — file order, not usage; that floor is now the most-used ledger.

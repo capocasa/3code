@@ -843,17 +843,12 @@ proc main() =
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
   # Re-apply the directory overlay after the full parse (it re-applies
   # the user config's own switches, which would otherwise undo a
-  # directory's `sandbox = off`), then the per-directory sticky current:
-  # the nearest store with a `current` entry wins (this directory or
-  # any parent), so a provider choice made at a project root sticks in
-  # every subdirectory instead of falling back to the global `current`
-  # and from there to the first [provider] section.
+  # directory's `sandbox = off`). The default-provider ladder (directory
+  # store cascade, config current, most-used ledger, first section)
+  # lives in config.resolveDefaultCurrent.
   dirsettings.applyDirConfig(safeCwd())
-  block:
-    let dirCurrent = loadDirCurrent(safeCwd())
-    if dirCurrent != "" and
-       buildProfile(dirCurrent, activeProviders, "").name.len > 0:
-      activeCurrent = dirCurrent
+  activeCurrent = resolveDefaultCurrent(safeCwd(), activeCurrent,
+                                       activeProviders)
   if activeProviders.len == 0 and activeCurrent != "":
     # A config that sets `current` but has no [provider] section used to
     # fall through to the first-run wizard, which then refused every name
@@ -879,6 +874,8 @@ proc main() =
     elif resume and session.profileName != "": session.profileName
     else: ""
   var prof = resolveSessionProfile(wantedProfile, session.profileName)
+  if prof.name.len > 0:
+    bumpProviderUsage(prof.name)
   var editor = welcome(prof)
   startupTrace("welcome")
   # Terminal, session lock, and thread cleanup all funnel through a single
