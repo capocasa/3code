@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **Backspace at column 0 of a multiline draft no longer leaves the
+  rows below the caret in the wrong place.** The editor's row-diff
+  painter paired rows by the caret's row movement, but the repaint is
+  anchored at the block top; joining two lines (backspace with the
+  caret at column 0) raises every row below the caret by one, and the
+  risen row's text matched the vacated row below it, so the diff
+  skipped repainting it, leaving the stale un-joined line on screen
+  while the shrink cleanup erased the row that held the moved text.
+  The diff now pairs rows by absolute block row, matching where the
+  repaint actually paints them (`src/threecode/engine.nim`
+  `paintVolatileRegion`, regression test in
+  `tests/tty/test_tty_functional.nim`).
 - **`:btw` never blocks the prompt anymore.** The side question fired
   its meta-call synchronously, freezing the UI for the whole round
   trip. It runs on a worker thread now (`btwthread.nim`): the command
