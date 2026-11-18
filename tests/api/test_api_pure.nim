@@ -312,6 +312,64 @@ suite "api: applyReasoning — neuralwatt":
       check body{"reasoning_effort"}.getStr == "none"
       check not body.hasKey("thinking")
 
+suite "api: applyReasoning — relace":
+  # Open schema (additionalProperties pass through), so the generic
+  # hosted-stack branches apply unchanged: glm-5.3 takes the top-level
+  # effort knob, deepseek low maps to none, kimi rides the vLLM
+  # enable_thinking bool, glm-5.2 sends nothing (server default).
+  test "glm-5.3 takes the top-level effort knob":
+    for level in ["low", "high", "max"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "relace.z-ai/glm-5.3", family: "glm",
+                      model: "z-ai/glm-5.3", version: "5", variant: "3",
+                      reasoning: level)
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == level
+      check not body.hasKey("thinking")
+
+  test "glm-5.2 sends no reasoning param (server default)":
+    for level in ["off", "high", "max"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "relace.z-ai/glm-5.2", family: "glm",
+                      model: "z-ai/glm-5.2", version: "5", variant: "2",
+                      reasoning: level)
+      applyReasoning(p, body)
+      check not body.hasKey("reasoning_effort")
+      check not body.hasKey("thinking")
+      check not body.hasKey("chat_template_kwargs")
+
+  test "deepseek low maps to none, high passes through":
+    block low:
+      var body = %*{"stream": true}
+      let p = Profile(name: "relace.deepseek-ai/DeepSeek-V4.1-Flash",
+                      family: "deepseek",
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+                      reasoning: "low")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "none"
+      check not body.hasKey("thinking")
+    block high:
+      var body = %*{"stream": true}
+      let p = Profile(name: "relace.deepseek-ai/DeepSeek-V4.1-Flash",
+                      family: "deepseek",
+                      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+                      reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+
+  test "kimi k3 on rides the vLLM enable_thinking bool":
+    var body = %*{"stream": true}
+    let p = Profile(name: "relace.moonshotai/kimi-k3", family: "kimi",
+                    model: "moonshotai/kimi-k3", reasoning: "on")
+    applyReasoning(p, body)
+    check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == true
+
+  test "generation defaults and max_tokens field ride the table":
+    let d = knownGoodGeneration("relace", "z-ai/glm-5.3")
+    check d.temperature == 0.2
+    check d.maxTokens == 65536
+    check maxTokensField(Profile(family: "glm")) == "max_tokens"
+
 suite "api: applyReasoning — qwen4":
   # qwen4-max is a graded-reasoning hybrid, unlike the binary qwen3.x
   # line: DashScope takes a top-level reasoning_effort (low/high/xhigh)

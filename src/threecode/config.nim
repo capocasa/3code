@@ -1655,6 +1655,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("qwen",        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
   ("qwen-cn",     "https://dashscope.aliyuncs.com/compatible-mode/v1"),
   ("qwen-us",     "https://dashscope-us.aliyuncs.com/compatible-mode/v1"),
+  ("relace",      "https://models.relace.ai/v1"),
   ("sambanova",   "https://api.sambanova.ai/v1"),
   ("scaleway",    "https://api.scaleway.ai/v1"),
   ("tencent",     "https://tokenhub-intl.tencentcloudmaas.com/v1"),
@@ -1699,6 +1700,7 @@ const KeyPrefixCatalog*: seq[(string, string)] = @[
   ("ir_live_", "cheaperinference"),
   ("tl_live_", "tesseracted"),
   ("tgp_",     "together"),
+  ("rlc-",     "relace"),
   ("AIza",     "google"),
   ("VENICE_",  "venice"),
 ]

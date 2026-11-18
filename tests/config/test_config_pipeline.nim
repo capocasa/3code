@@ -82,6 +82,9 @@ suite "config: inferProvider":
   test "recognizes tl_live_ as tesseracted":
     check inferProvider("tl_live_cc0c1429xxx") == "tesseracted"
 
+  test "recognizes rlc- as relace":
+    check inferProvider("rlc-0123456789abcdef0123456789abcdef") == "relace"
+
   test "recognizes vck_ as vercel":
     check inferProvider("vck_xxxxxxxxxxxx") == "vercel"
 
@@ -138,6 +141,7 @@ suite "config: catalog urls":
     check catalogUrl("engy") == "https://api.engy.ai/v1"
     check catalogUrl("aihubmix") == "https://aihubmix.com/v1"
     check catalogUrl("cortecs") == "https://api.cortecs.ai/v1"
+    check catalogUrl("relace") == "https://models.relace.ai/v1"
 
 suite "config: new known-good providers":
   test "glm rows ride the glm family":
@@ -168,6 +172,20 @@ suite "config: new known-good providers":
       "zai/glm-5.3-flash"
     check knownGoodWireModel("engy", "glm-5.3-flash-260828") ==
       "glm-5.3-flash"
+
+  test "relace rows ride the hosted families":
+    check knownGoodFamily("relace", "z-ai/glm-5.3") == "glm"
+    check knownGoodFamily("relace", "moonshotai/kimi-k3") == "kimi"
+    check knownGoodTags("relace", "deepseek-ai/DeepSeek-V4.1-Flash") ==
+      ("deepseek", "4.1", "flash")
+
+  test "relace wire repair restores the namespaced ids":
+    check knownGoodWireModel("relace", "glm-5.3") == "z-ai/glm-5.3"
+    check knownGoodWireModel("relace", "glm-5.3-flash") ==
+      "z-ai/glm-5.3-flash"
+    check knownGoodWireModel("relace", "deepseek-4.1-flash") ==
+      "deepseek-ai/DeepSeek-V4.1-Flash"
+    check knownGoodWireModel("relace", "kimi-k3") == "moonshotai/kimi-k3"
 
   test "engy carries the fleet's own context cap":
     check contextWindowFor("glm-5.3") == 1_000_000
