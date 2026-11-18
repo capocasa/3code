@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **The provider default, when nothing else names one, is the most used
+  provider.** A config without `current` (fresh installs, a removed line)
+  used to fall to the first `[provider]` section's first model — an
+  accident of file order that read as a mystery "system default". Every
+  start now counts in a tiny ledger (`~/.local/share/3code/provider-usage`,
+  one `provider.model count` line per current, highest first) and the
+  no-`current` floor picks the ledger's top entry that still resolves:
+  the provider you actually run, and never a provider since deleted.
+  Nothing changes when `current` is set or a directory's `.3code/config`
+  store cascades one down — explicit picks keep winning, and a start on
+  any of them counts toward its next default (`tests/config/test_most_used.nim`).
 - **`:retry` no longer deletes the error it answers.** The retry notice
   (the error detail plus the countdown) lives on the volatile notice
   row, and a `:retry` that cut the wait erased it as the next attempt
