@@ -2079,6 +2079,24 @@ stronger boundary, so commands are re-executed through:
 restriction. The sandbox process reads the policy afresh, so an edit applies to
 the next Bash launch.
 
+### The environment is not fenced
+
+Bash children inherit the full 3code environment. Everything your launching
+shell exported rides along, `PASSWORD_STORE_DIR`, `DISPLAY`, tokens, all of
+it. The wrapper force-overrides only a hygiene set (`PAGER`, `GIT_PAGER`,
+`PSQL_PAGER` and `MYSQL_PAGER` to `cat`, `LESS=`, `TERM=dumb`, `CI=1`,
+`NO_COLOR=1`, `GIT_TERMINAL_PROMPT=0`, `DEBIAN_FRONTEND=noninteractive`) so
+tools page and paint instead of waiting on a terminal that is not there.
+Nothing filters variable names, and nothing is planned to: a name filter
+guesses wrong in both directions, while the fence already governs the files
+and network those variables point at. Secret protection belongs at the output
+boundary, not the spawn.
+
+One consequence: anything prompt-shaped still has no terminal, because Bash
+runs on pipes. `export GPG_TTY=$(tty)` in the shell that starts 3code routes
+gpg-agent passphrase prompts to your terminal; the display recovers when the
+command finishes.
+
 ### Platform behavior and fallback
 
 The Bash backend uses Landlock on Linux, Seatbelt on macOS, and restricted

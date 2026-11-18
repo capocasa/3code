@@ -133,6 +133,24 @@ suite "streamexec: env vars":
     check code == 0
     check rawOut.strip == "1"
 
+  test "environment variables from the 3code process reach the child":
+    # Full passthrough is the design: the child inherits the parent
+    # environment unchanged, the wrapper only overrides the hygiene set.
+    putEnv("THREECODE_ENV_PROBE", "sentinel")
+    let act = Action(kind: akBash, body: "echo $THREECODE_ENV_PROBE")
+    let (rawOut, code, _) = runStreamingBash(act, nil, nil)
+    check code == 0
+    check rawOut.strip == "sentinel"
+
+  test "credential-shaped variable names pass through unfiltered":
+    # Decision record: the fence covers files and network, never the
+    # environment. A scrub or name filter must break this test on purpose.
+    putEnv("THREECODE_ENV_PROBE_API_KEY", "not-filtered")
+    let act = Action(kind: akBash, body: "echo $THREECODE_ENV_PROBE_API_KEY")
+    let (rawOut, code, _) = runStreamingBash(act, nil, nil)
+    check code == 0
+    check rawOut.strip == "not-filtered"
+
 suite "streamexec: multi-line output":
   test "streams many lines":
     var lines: seq[string]
