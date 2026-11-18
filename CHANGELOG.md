@@ -2,6 +2,34 @@ Changelog
 
 Unreleased
 
+- **Every `[settings]` key cascades now, and there is a provider
+  whitelist: `limitproviders`.** The resolution ladder for any setting
+  is: the compiled default, then the user config
+  (`~/.config/3code/config`), then the nearest directory store
+  (`./.3code/config`, or its twin under `~/.config/3code/dirs/` when
+  the user config says `dirconfig = "user"`) — previously only the
+  sandbox switches and `current` cascaded; every other key ignored the
+  stores. The exceptions stay deliberate: `dirconfig` is read from the
+  user config alone (a store can never relocate the stores, or it
+  would grant itself authority), and the two sandbox switches keep
+  their one-way clamp (a project store may tighten, never weaken).
+  The one dialect is factored into `applySettingsValue`, shared by the
+  config parse, plugin defaults and the new `applyDirSettingsOverlay`,
+  so a store line behaves exactly like a user-config line. Config
+  writes never leak a store's value into the user config: while a
+  store overlay is in effect `writeConfigFile` serializes the user
+  config's own line (or omits it at the default), and an in-session
+  toggle (`:streaming off`, `:verifier on`, ...) claims its key so the
+  user's explicit choice persists. The new `limitproviders` setting
+  (default empty = no restriction) whitelists providers for a
+  session: profile resolution, `:provider`/`:model` picks, completion
+  and the verifier pool offer only allowed providers, a configured
+  `current` outside the list falls back to the first allowed one, and
+  provider management (`:provider add/edit/rm`, the CLI) keeps the
+  full list so a limited directory never loses the providers it
+  cannot run (`src/threecode/config.nim`, `src/threecode/dirsettings.nim`,
+  tests in `tests/config/test_dirsettings.nim`,
+  `tests/config/test_limitproviders.nim`).
 - **The provider default, when nothing else names one, is the most used
   provider.** A config without `current` (fresh installs, a removed line)
   used to fall to the first `[provider]` section's first model — an
