@@ -120,7 +120,8 @@ const ShortcutNames* = [
   "char-search",
   "char-search-backward",
   "delete-horizontal-space",
-  "tab-insert"
+  "tab-insert",
+  "retry"
 ]
 
 type KeySpec* = tuple[keys: seq[string], times: int]
@@ -3039,7 +3040,12 @@ var
     "char-search": "Ctrl]",
     "char-search-backward": "",
     "delete-horizontal-space": "",
-    "tab-insert": ""
+    "tab-insert": "",
+    # The browser hard-reload analogue: retry the in-flight request now.
+    # Distinct from Ctrl+R (isearch) only on terminals that report the
+    # kitty keyboard protocol; legacy terminals send both as 0x12 and
+    # the press stays history search. The app installs the handler.
+    "retry": "CtrlShiftR"
   }.toTable
 
 var CommandProcs*: Table[string, KeyCallback]
@@ -3140,6 +3146,11 @@ proc normalizeKeyToken(token: string): string =
   if t == "cmdend" or t == "superend": return "cmd+end"
   if t == "cmddelete" or t == "superdelete": return "cmd+delete"
   if t == "cmdbackspace" or t == "superbackspace": return "cmd+backspace"
+  # Ctrl+Shift+letter: distinct from Ctrl+letter under the kitty
+  # keyboard protocol (legacy terminals collapse both to one byte).
+  for l in 'a' .. 'z':
+    if t == "ctrlshift" & l:
+      return "ctrl+shift+" & l
   if t == "ctrlshiftleft": return "ctrl+shift+left"
   if t == "ctrlshiftright": return "ctrl+shift+right"
   if t == "ctrlshiftup": return "ctrl+shift+up"
@@ -3906,7 +3917,7 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   of 64: base = "@"
   of 62: base = ">"
   of 95: base = "_"
-  of 97..122: base = $key.char  # shift is dropped: ctrl+shift+e == ctrl+e
+  of 97..122: base = $key.char
   else: return                  # F-keys, keypad, keypad-enter: nothing bound
   var prefix = ""
   if (bits and 4) != 0: prefix.add "ctrl+"
@@ -3914,7 +3925,16 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   if (bits and 8) != 0: prefix.add "cmd+"
   if prefix.len == 0 and (bits and 1) != 0:
     prefix = "shift+"          # shift+delete and friends
-  let name = prefix & base
+  var name = prefix & base
+  if (bits and 4) != 0 and (bits and 1) != 0 and (bits and 2) == 0 and
+      (bits and 8) == 0:
+    # ctrl+shift+letter is a distinct key under this protocol (retry
+    # lives on Ctrl+Shift+R). When nothing binds the distinct name, the
+    # shift bit drops and the press keeps its readline ctrl+letter
+    # meaning, so C-S-e still ends the line on a kitty-protocol terminal.
+    if dispatchKeyName(ed, "ctrl+shift+" & base):
+      return
+    name = "ctrl+" & base
   # Same dispatch + KEYMAP fallback the legacy control-byte path uses:
   # a binding that lives only in KEYMAP (never registered as a command)
   # must not silently die under the kitty protocol. This exact hole is

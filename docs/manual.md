@@ -500,6 +500,7 @@ The daily keys:
 | Up / Down | history |
 | Ctrl+Arrow | move by word |
 | Ctrl+R / Ctrl+S | search history as you type |
+| Ctrl+Shift+R | retry now: cut a backoff wait or resend a data-less in-flight request (needs a kitty-protocol terminal; see below) |
 | Alt+E | edit the input in $VISUAL/$EDITOR |
 | Ctrl+C or Esc | clear input; cancel the turn when it is empty |
 | Ctrl+D | exit |
@@ -602,7 +603,16 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `nonincremental-search-backward`, `nonincremental-search-forward`,
 `history-begin`, `history-end`, `set-mark`, `exchange-point-and-mark`,
 `quoted-insert`, `char-search`, `char-search-backward`,
-`delete-horizontal-space`, `tab-insert`.
+`delete-horizontal-space`, `tab-insert`, `retry`.
+
+`retry` is the browser hard-reload analogue for `:retry`: it cuts a
+retry backoff wait short (the curve resets) or resends a data-less
+in-flight request, with the same `instant retry requested` line the
+command prints. It defaults to Ctrl+Shift+R because Ctrl+R is history
+search, and a terminal can only tell the two apart when it speaks the
+kitty keyboard protocol (kitty, ghostty, foot, WezTerm, recent xterm).
+Elsewhere the terminal sends one byte for both and the press stays
+history search — the same readline behavior as before.
 
 Keys joined by `>` form a chord: pressed in sequence, they run the
 command once. The default `edit-in-editor` binding is exactly that:

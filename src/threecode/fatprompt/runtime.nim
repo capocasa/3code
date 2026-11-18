@@ -4,8 +4,8 @@
 ## turn is running. The turn controller calls these helpers directly and also
 ## registers them as API stream hooks. `api.nim` must not import this module.
 
-import std/[atomics, json, locks, os, osproc, strformat, strutils, terminal,
-  times, unicode]
+import std/[atomics, json, locks, os, osproc, strformat, strutils, tables,
+  terminal, times, unicode]
 when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
@@ -3005,6 +3005,19 @@ proc inputThreadProc() {.thread.} =
         inputIdleLinePending.store(true, moRelease)
       ed.renderSuffix = ""
       ed.renderSuffixCursor = false
+    # Ctrl+Shift+R (kitty keyboard protocol; `retry` in DefaultShortcuts,
+    # rebindable via [shortcuts]): the `:retry` command as a key — same
+    # flag, same hint line. Unlike a submitted command the draft in the
+    # buffer survives, so the commit must not clear the editor, and a
+    # modal wizard owns the keys, so the press is inert there.
+    let retryKey: minline.KeyCallback = proc(ed: var minline.LineEditor) =
+      {.cast(gcsafe).}:
+        if inputModalActive.load(moAcquire): return
+        requestTurnRetry("ctrl+shift+r")
+        commitTranscriptBytes(hintLnS("instant retry requested; takes " &
+          "effect if a request is in flight or a backoff is running"),
+          restoreEditor = true, reserveFooter = true)
+    minline.CommandProcs["retry"] = retryKey
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].painter = proc(ed: var minline.LineEditor) =

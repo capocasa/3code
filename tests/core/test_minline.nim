@@ -1795,6 +1795,58 @@ suite "minline editor: kitty keyboard protocol":
       discard d.run(ed, prompt = "> ")
       check minline.CommandProcsAll.hasKey("suspend")
 
+  test "CSI u ctrl+shift+letter is a bindable key":
+    # CSI 107;6 u = ctrl+shift+k. The distinct ctrl+shift name must reach
+    # a command bound to it (delete-to-eol here); the buffer survives
+    # when nothing is bound (next test).
+    var ed = initEditor()
+    let d = newDriver()
+    minline.configuredShortcuts = {"delete-to-eol": "CtrlShiftK"}.toTable
+    d.pushString "one two"
+    d.push CtrlA  # cursor home: delete-to-eol must empty the line
+    d.push @[27, 91, 49, 48, 55, 59, 54, 117]
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+    minline.configuredShortcuts = initTable[string, string]()
+
+  test "CSI u ctrl+shift+letter falls back to the ctrl+letter meaning":
+    # CSI 101;6 u = ctrl+shift+e. Nothing binds ctrl+shift+e, so the
+    # shift bit drops and the press keeps its readline meaning (C-e:
+    # end of line) instead of dying as an unbound key.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push @[27, 91, 49, 48, 49, 59, 54, 117]
+    d.pushString "Y"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abY"
+
+  test "CSI u ctrl+shift+r is the retry key by default":
+    # CSI 114;6 u. DefaultShortcuts binds "retry" to CtrlShiftR; with no
+    # retry handler installed (minline alone never installs one) the
+    # fallback rule applies and the press opens isearch like Ctrl+R.
+    var ed = initEditor()
+    let d = newDriver()
+    ed.history.entries.addLast "older entry"
+    d.push @[27, 91, 49, 49, 52, 59, 54, 117]
+    d.pushString "older"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "older entry"
+    # Same press with a handler installed runs the handler instead.
+    var fired = false
+    let retryKey: minline.KeyCallback = proc(ed: var minline.LineEditor) =
+      fired = true
+    minline.CommandProcs["retry"] = retryKey
+    minline.CommandProcsAll["retry"] = retryKey
+    var ed2 = initEditor()
+    let d2 = newDriver()
+    d2.push @[27, 91, 49, 49, 52, 59, 54, 117]
+    d2.push Enter
+    discard d2.run(ed2, prompt = "> ")
+    check fired
+    minline.CommandProcs.del("retry")
+    minline.CommandProcsAll.del("retry")
+
 # ---------------- Driver: selection ----------------
 
 const

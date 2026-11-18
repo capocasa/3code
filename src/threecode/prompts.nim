@@ -3927,6 +3927,7 @@ commands:
   :verifier on|off    toggle the verifier without losing the selection
   :retry              retry now: cut a backoff wait (the curve resets) or
                       resend a data-less in-flight request
+                      (also ctrl+shift+r on kitty-protocol terminals)
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :private            show private mode (off by default; on = allow-private only)
@@ -4021,6 +4022,9 @@ input:
   ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  ctrl+shift+r  retry now: cut a backoff wait or resend a data-less
+                in-flight request (kitty-protocol terminals; elsewhere
+                ctrl+shift+r reports as ctrl+r)
   alt+p / n     history search completed at enter
   alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names

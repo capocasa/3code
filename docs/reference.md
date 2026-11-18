@@ -139,6 +139,7 @@ Default keys at the prompt. `:help` prints the ones in effect;
 | Ctrl+] | jump to the next occurrence of the next typed character |
 | Ctrl+@ or Alt+Space | set the mark (binds `exchange-point-and-mark` to swap back) |
 | Ctrl+R / Ctrl+S | incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts |
+| Ctrl+Shift+R | retry now: cut a backoff wait (the curve resets) or resend a data-less in-flight request; the `retry` shortcut, distinct from Ctrl+R only on kitty-protocol terminals |
 | Alt+P / Alt+N | history search completed at Enter |
 | Alt+< / Alt+> | jump to the oldest entry / back to the draft |
 | Ctrl+L | clear the screen |
