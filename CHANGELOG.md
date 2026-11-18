@@ -2,6 +2,35 @@ Changelog
 
 Unreleased
 
+- **Environment variables are gone: every runtime knob lives in the
+  config file.** Every project-prefixed env variable (`ALLOW_ROOT`,
+  `DEBUG_LOG`, `TRACE_FILE`, `TERMDBG`, `FORCE_SYNC_OUTPUT`,
+  `ASK_TIMEOUT_MS`, `SCREENSHOT_SRC`, `GEOMETRY_AUDIT`,
+  `PLUGIN_SYNC_MS`, `PLUGIN_TOOL_MS`, `STUB_*`, the harness channel),
+  the loopback-proxy handoff between the sandbox parent and the
+  `sandbox restrict` / `wall connect` children (now an internal
+  `[wall]` file passed as `--config`), the search-engine-key
+  env fallback, and `$VAR` expansion of config values are
+  replaced by config keys (full variable-by-variable record:
+  `docs/env-to-config.md`): user knobs in `[settings]` (`allow_root`,
+  `debug_log`, `trace_file`, `termdbg`, `force_sync_output`,
+  `ask_timeout_ms`, `google_project`), plugin tuning in `[plugins]`
+  (`sync_ms`, `tool_ms`), harness hooks in a new `[test]` section, all
+  served through the new `src/threecode/runtime.nim` store and
+  cascading from the nearest directory store like every other
+  `[settings]` key (see `docs/reference.md` "Runtime knobs"). No env
+  fallback, no migration.
+  The tty test harness merges the `[test]` channel (fd/pipe ids) into
+  the child's config file; test-runner controls that were env switches
+  (the tty-scenario filter, golden regeneration, build lock timeout,
+  prebuilt-stub handoff) became CLI arguments or small config files,
+  as did the installers' knobs (`sh install --dir=… --allow-root`,
+  `install.ps1 -InstallDir …`) — they pass through the pipe via
+  `sh -s --` / scriptblock parameters, so no pre-config env channel is
+  left either. What stays env, deliberately: OS-standard variables the
+  binary consumes (`XDG_CONFIG_HOME`/`XDG_DATA_HOME` — config
+  discovery — `PATH`, `HOME`, `TERM`, `DISPLAY`, proxy vars for
+  sandboxed grandchildren).
 - **Goal mode's post-bash tree fold no longer hangs on a FIFO left in
   the project.** The fold reads back every path the manifest walk
   recorded, and Nim's `walkDir` reports a FIFO as a plain file, so a
