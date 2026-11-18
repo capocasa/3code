@@ -292,13 +292,12 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   # tighten the security switches, so whatever the arm below sees is
   # the user's choice or stricter.
   dirsettings.applyDirConfig(cwd)
-  # Per-directory sticky current, same resolution as the CLI main: this
-  # directory's last `:provider` / `:model` wins when it still resolves.
-  block:
-    let dirCurrent = loadDirCurrent(cwd)
-    if dirCurrent != "" and
-       buildProfile(dirCurrent, activeProviders, "").name.len > 0:
-      activeCurrent = dirCurrent
+  # Default-provider ladder, same as the CLI main: the directory store
+  # cascade first (this directory's or the nearest ancestor's
+  # `:provider` / `:model` pick, when it still resolves), then the
+  # config `current`, then the most-used ledger, then the first
+  # [provider] section (inside buildProfile).
+  activeCurrent = resolveDefaultCurrent(cwd, activeCurrent, activeProviders)
   if sandboxEnabled:
     sandbox.arm(cwd)
 
@@ -330,6 +329,7 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
     raise newException(AgentError,
       "no provider configured. Create one with the 3code CLI (:provider add) " &
       "or pass a model in AgentOptions.")
+  bumpProviderUsage(prof.name)
   s.profile = prof
   s.state.profileName = prof.name
 

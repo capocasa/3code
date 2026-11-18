@@ -1467,6 +1467,109 @@ proc availableVerifiers*(providers: seq[ProviderRec]): seq[string] =
       if canonicalKnownGoodProvider(pr.name) == c.provider.toLowerAscii:
         result.add pr.name & "." & c.model
 
+# ---------------------------------------------------------------------------
+# Most-used provider: the usage ledger
+# ---------------------------------------------------------------------------
+
+proc usageLedgerPath*(): string =
+  ## The provider-usage ledger: one `provider.model count` line per
+  ## distinct current, highest count first. A heuristic that feeds the
+  ## no-`current` default (see `mostUsedCurrent`), never a gate: a
+  ## missing or corrupt file reads empty and the fallback chain simply
+  ## continues.
+  userDataRoot() / "provider-usage"
+
+proc readProviderUsage*(): seq[(string, int)] =
+  ## Ledger entries in file order (highest count first as written).
+  ## Malformed lines are skipped, not fatal — the file is app-managed
+  ## state, and a bad line must not take the default down with it.
+  let path = usageLedgerPath()
+  if not fileExists(path): return
+  for line in readFile(path).splitLines:
+    let t = line.strip
+    if t.len == 0: continue
+    let sp = t.rfind(' ')
+    if sp <= 0 or sp == t.len - 1: continue
+    try:
+      result.add (t[0 ..< sp], parseInt(t[sp + 1 .. ^1]))
+    except ValueError: continue
+
+proc bumpProviderUsage*(current: string) =
+  ## Count one session started on `current`. Read-modify-write with a
+  ## tmp+rename: two instances bumping at once can lose a count, which
+  ## costs nothing — the ledger only ranks. The rewrite keeps entries
+  ## ordered by count, ties keeping their prior order, so an entry only
+  ## moves up by being used MORE, and `mostUsedCurrent` is a straight
+  ## first-resolvable-wins scan over the file.
+  if current == "": return
+  var entries = readProviderUsage()
+  var bumped = false
+  for i, e in entries:
+    if e[0] == current:
+      entries[i][1] += 1
+      bumped = true
+      break
+  if not bumped:
+    entries.add (current, 1)
+  # Stable insertion sort by count, descending. The ledger is small
+  # (distinct currents actually run, dozens at most), and staying
+  # import-free beats pulling in algorithm for one sort.
+  for i in 1 ..< entries.len:
+    let e = entries[i]
+    var j = i - 1
+    while j >= 0 and entries[j][1] < e[1]:
+      entries[j + 1] = entries[j]
+      dec j
+    entries[j + 1] = e
+  try:
+    createDir(usageLedgerPath().parentDir)
+    var outText = ""
+    for e in entries:
+      outText.add e[0] & " " & $e[1] & "\n"
+    let tmp = usageLedgerPath() & ".tmp"
+    writeFile(tmp, outText)
+    moveFile(tmp, usageLedgerPath())
+  except CatchableError: discard
+
+proc mostUsedCurrent*(providers: seq[ProviderRec]): string =
+  ## The default for a config that sets no `current` (and a directory
+  ## with no store entry): the ledger's highest-count entry that still
+  ## resolves against `providers` — the provider the user actually
+  ## runs, ahead of the first `[provider]` section's first model.
+  ## Stale entries (provider removed, model gone from its list) are
+  ## skipped, so deleting a provider demotes it from the default too.
+  ## "" when the ledger is empty or nothing in it resolves; callers
+  ## then keep the first-section floor.
+  for e in readProviderUsage():
+    if buildProfile(e[0], providers, "").name.len > 0:
+      return e[0]
+  ""
+
+proc resolveDefaultCurrent*(cwd, configCurrent: string;
+                            providers: seq[ProviderRec]): string =
+  ## The startup provider ladder in one place, shared by the CLI main
+  ## and library session init:
+  ##
+  ## 1. the directory cascade — the nearest `.3code/config` store from
+  ##    `cwd` up that sets `current` (so a project root's pick holds in
+  ##    every subdirectory), when it still resolves;
+  ## 2. the config file's own `current`, verbatim (a stale value is the
+  ##    caller's diagnosis to make, not this ladder's to rewrite);
+  ## 3. the usage ledger's most-used provider (`mostUsedCurrent`), the
+  ##    smarter floor for a config that names nothing;
+  ## 4. "" — buildProfile's first-[provider]-section floor.
+  ##
+  ## `configCurrent` is what the loaded config said; the return value is
+  ## what the session should run on. Explicit beats automatic at every
+  ## rung: a store entry or a config line always wins over the ledger.
+  let dirCurrent = dirsettings.dirCurrentFor(cwd)
+  if dirCurrent != "" and
+     buildProfile(dirCurrent, providers, "").name.len > 0:
+    return dirCurrent
+  if configCurrent == "" and providers.len > 0:
+    return mostUsedCurrent(providers)
+  configCurrent
+
 proc buildVerifierProfile*(spec: string,
     providers: seq[ProviderRec]): tuple[prof: Profile, err: string] =
   ## Resolve a `provider.model` verifier spec into a Profile for the

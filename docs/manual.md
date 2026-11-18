@@ -228,6 +228,15 @@ keep the global config default. All of this lives in the config file; see
 [config file in the reference](reference.html#config-file) for every key
 (`-c FILE` points a single run at a different one).
 
+Which provider a fresh start runs on follows a fixed ladder: the `-m` flag,
+then the directory's sticky pick (its own `.3code/config` or the nearest
+parent's), then the config's `current`. When none of those name a provider —
+a new install, or a config whose `current` was removed — the default is the
+**most used** provider: every start counts in a small ledger
+(`~/.local/share/3code/provider-usage`), and its highest-count entry that
+still resolves wins, ahead of the first `[provider]` section. Providers you
+removed from the config fall out of the running automatically.
+
 ```
 :provider nvidia
 :model gpt-oss-20b
