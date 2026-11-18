@@ -873,3 +873,45 @@ suite "cli provider subcommand":
     let r = runP(["-h"])
     check r.code == 2
     check "3code provider add" in r.o
+
+suite "deleted working directory":
+  # Repro of the unhandled getCurrentDir OSError at startup: a terminal
+  # left in a deleted directory (rebuilt clone, tmpclean sweep). A launch
+  # must refuse at the startup gate with the cwd message and ExitConfig —
+  # not stack-trace mid-startup, and not silently re-root the session at
+  # "/" (safeCwd's fallback). POSIX only: Windows refuses to delete a
+  # process's current directory, so the scenario cannot be built there.
+  proc runFromGoneCwd(extra: string): tuple[o: string, code: int] =
+    var tmp = getTempDir() / ("3code-cwd-gone-" & $getCurrentProcessId())
+    createDir(tmp)
+    defer:
+      if dirExists(tmp): removeDir(tmp)
+    # cd in, delete the dir from under the shell, then exec: the child
+    # starts with a cwd the filesystem no longer names. Deterministic —
+    # no spawn/delete race. env REPLACES the environment, so PATH and
+    # TMPDIR ride along (same reason as the dir-lock tests above).
+    var env = newStringTable({"XDG_DATA_HOME": tmp, "XDG_CONFIG_HOME": tmp,
+                              "PATH": getEnv("PATH")})
+    if getEnv("TMPDIR").len > 0: env["TMPDIR"] = getEnv("TMPDIR")
+    let (outp, code) = execCmdEx(
+      "cd " & tmp.quoteShell & " && rmdir " & tmp.quoteShell &
+        " && exec " & binPath().quoteShell & " " & extra,
+      {poStdErrToStdOut, poUsePath, poDaemon}, env)
+    result = (outp, code)
+
+  test "interactive launch dies with a straight error":
+    when defined(posix):
+      let (outp, code) = runFromGoneCwd("")
+      check code == 3
+      check "the working directory no longer exists" in outp
+      check "unhandled exception" notin outp
+    else:
+      skip()
+
+  test "headless launch exits 3 with no output":
+    when defined(posix):
+      let (outp, code) = runFromGoneCwd("--headless gone-cwd")
+      check code == 3
+      check outp.strip() == ""
+    else:
+      skip()

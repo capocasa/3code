@@ -158,7 +158,7 @@ proc openSession(st: RpcState; dir: string) =
   let old = st.s
   st.s = nil
   st.sessionId = ""
-  let wanted = if dir.len > 0: dir else: getCurrentDir()
+  let wanted = if dir.len > 0: dir else: safeCwd()
   try:
     if old != nil: old.close()
     st.s = initAgentSession(AgentOptions(
@@ -406,13 +406,16 @@ proc rpcMain*(args: seq[string]): int =
         return 2
       of cmdEnd: discard
 
+  # The first session roots at the process cwd; a deleted one must
+  # refuse here, not crash on getcwd below or serve "/"-rooted sessions.
+  requireLiveCwd()
   let st = RpcState(model: model, debug: debug)
   initLock(st.gate)
   try:
     openSession(st, "")
   except AgentError as e:
     st.initError = e.msg
-  if st.cwd.len == 0: st.cwd = getCurrentDir()
+  if st.cwd.len == 0: st.cwd = safeCwd()
 
   sweepStaleRpcEntries()
   let server = newAsyncHttpServer()
@@ -424,7 +427,7 @@ proc rpcMain*(args: seq[string]): int =
   boundPort = server.getPort().int
   writeRegistry(boundPort, st.cwd)
   echo &"3code rpc listening on 127.0.0.1:{boundPort} " &
-       &"cwd={getCurrentDir()}" &
+       &"cwd={safeCwd()}" &
        (if st.s == nil: " (no session: " & st.initError & ")" else: "")
 
   proc cb(req: Request) {.async, gcsafe.} = await handle(st, req)

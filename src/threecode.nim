@@ -671,6 +671,14 @@ proc main() =
     of "good": printKnownGood(); return
     else: discard
 
+  # Everything below roots a session at the process cwd: sandbox policy,
+  # dir settings, session files, locks. With that directory deleted the
+  # launch must refuse here rather than crash on getcwd mid-startup or
+  # run the whole session against "/" (safeCwd's fallback). The fast
+  # exits above (-v, -h, -l, -f, good, provider, plugins) never needed a
+  # cwd and still answer from a deleted one.
+  requireLiveCwd()
+
   # Validate --resume targets before side-effecting startup work so a
   # bogus id fails fast (no skill extraction, no lock) the same way a
   # usage error does. A prompt alongside --resume is now legitimate
@@ -1255,7 +1263,7 @@ proc main() =
     # The startup paint is a render boundary the tty harness synchronizes
     # on: without the frame event the first captured frame can predate the
     # chrome (or miss it entirely when the PTY burst is coalesced).
-    tabtitle.setTabTitleLabel(getCurrentDir())
+    tabtitle.setTabTitleLabel(safeCwd())
     tabtitle.paintTabTitleIdle()
     emitTestFrameEvent()
     startupTrace("first-prompt-painted")
