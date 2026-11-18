@@ -2,6 +2,14 @@ Changelog
 
 Unreleased
 
+- **Ctrl+R recall accepts on arrow keys, like the command line.** An
+  incremental search ended by any key it does not own (Right, Left,
+  Home, C-a, ...) used to abort back to the latest prompt, dropping
+  the match you had found. Those keys now end the search keeping the
+  shown match loaded for editing and then act on it, the way
+  readline's ENDSRCH_CHAR termination does (C-g still aborts and
+  restores the pre-search buffer).
+
 - **Environment variables are gone: every runtime knob lives in the
   config file.** Every project-prefixed env variable (`ALLOW_ROOT`,
   `DEBUG_LOG`, `TRACE_FILE`, `TERMDBG`, `FORCE_SYNC_OUTPUT`,
