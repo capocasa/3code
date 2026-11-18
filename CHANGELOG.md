@@ -2,6 +2,28 @@ Changelog
 
 Unreleased
 
+- **`:retry` no longer deletes the error it answers.** The retry notice
+  (the error detail plus the countdown) lives on the volatile notice
+  row, and a `:retry` that cut the wait erased it as the next attempt
+  started - a resend that then succeeded left no trace of what went
+  wrong. The cut now commits the error detail to scrollback first (the
+  new `retryCut` stream hook; the normal full backoff keeps the
+  ephemeral-notice design).
+- **System commands are prompt-log content now.** Commands submitted
+  while a turn runs (`:retry`, `:model x`, ...) never reached the
+  history file: the command hook's commit cleared the editor before
+  readLineWith's own historyAdd ran, so the line could not be recalled
+  with Up or Ctrl+R. Every submitted command is recorded at submit
+  time now, exactly like a typed prompt (the idle path records before
+  the controller's echo commit can race it).
+- **Ctrl+Shift+R retries now.** The browser hard-reload analogue of
+  `:retry`: cuts a backoff wait (the curve resets) or resends a
+  data-less in-flight request, printing the same `instant retry
+  requested` line. Ctrl+R stays history search; the two are only
+  distinguishable on terminals that speak the kitty keyboard protocol
+  (the CSI-u decoder now keeps ctrl+shift+letter a distinct key,
+  falling back to the readline ctrl+letter meaning when nothing binds
+  it). Rebindable as `retry` in `[shortcuts]`.
 - **GPT-6.2 Astra is known-good, live-tested through the ChatGPT
   backend.** The safety-cancelled 6.1-Astra line's successor shipped
   Nov 17: same 1.05M context, 128k output cap and text+image surface as
