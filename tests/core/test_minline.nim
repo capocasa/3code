@@ -2531,16 +2531,63 @@ suite "minline editor: history search":
     d.push Enter
     check d.run(ed, prompt = "> ") == "Hello World"
 
-  test "an unowned key aborts the search and then acts":
+  test "an unowned key accepts the search and then acts":
     var ed = initEditor()
     seedHistory(ed, @["stash me"])
     let d = newDriver()
     d.pushString "typed"
     d.push CtrlR
     d.pushString "stash"  # match replaces the buffer
-    d.push CtrlA          # not a search key: abort, restore, then move
+    d.push CtrlA          # not a search key: accept, keep the match, then move
     d.push Enter
-    check d.run(ed, prompt = "> ") == "typed"
+    check d.run(ed, prompt = "> ") == "stash me"
+
+  test "right during ctrl+r accepts the match for editing":
+    var ed = initEditor()
+    seedHistory(ed, @["apple pie", "banana split"])
+    let d = newDriver()
+    d.pushString "draft words"
+    d.push CtrlR
+    d.pushString "banana"  # the match loads over the draft
+    d.push Right           # accept and edit: like the command line
+    d.push CtrlE           # jump to the end of the recalled match
+    d.pushString " today"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "banana split today"
+
+  test "left during ctrl+r accepts the match for editing":
+    var ed = initEditor()
+    seedHistory(ed, @["abcdef"])
+    let d = newDriver()
+    d.pushString "draft"
+    d.push CtrlR
+    d.pushString "cd"     # the cursor sits on the match (offset 2)
+    d.push Left            # accept, then move back one
+    d.pushString "X"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "aXbcdef"
+
+  test "right during a failed ctrl+r keeps the last match":
+    var ed = initEditor()
+    seedHistory(ed, @["apple pie", "banana split"])
+    let d = newDriver()
+    d.pushString "draft"
+    d.push CtrlR
+    d.pushString "banana"  # match found
+    d.pushString "zzz"    # query now fails; the last match stays shown
+    d.push Right
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "banana split"
+
+  test "right with no match yet leaves the draft":
+    var ed = initEditor()
+    seedHistory(ed, @["apple pie"])
+    let d = newDriver()
+    d.pushString "draft"
+    d.push CtrlR           # empty query, nothing matched yet
+    d.push Right
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "draft"
 
   test "alt+p jumps non-incrementally at enter":
     var ed = initEditor()
