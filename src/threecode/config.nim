@@ -379,7 +379,8 @@ const
                   "allow-empty-prompt", "allow_empty_prompt",
                   "verifier", "verifier_model", "verifier-model",
                   "computer", "user_agent", "user-agent",
-                  "dirconfig"]
+                  "dirconfig",
+                  "system-command-prefixes", "system_command_prefixes"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -801,6 +802,14 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           # environment, and a leading `$os/...` would otherwise be eaten
           # by expandEnvValue.
           userAgentTemplate = e.value
+        of "system-command-prefixes", "system_command_prefixes":
+          # Each non-whitespace character is one prefix; assignment (not
+          # accumulation), so a later line replaces the inherited set.
+          # An empty value is a schema error validateConfig reports with
+          # path:line; keep the last good set here so a broken line
+          # cannot strip command entry mid-parse.
+          let norm = normalizeCommandPrefixes(v)
+          if norm != "": commandPrefixes = norm
         else: discard
       of "search":
         case e.key
@@ -944,12 +953,12 @@ proc mergeForeignEdits(path: string; current: var string,
        savedWallWarn, savedMaxTimeout, savedForceTimeout, savedColorMode,
        savedBash, savedBashSrc, savedTabTitle, savedVerifierOn,
        savedVerifierSpec, savedUserAgent, savedBannerLines,
-       savedDirConfig) =
+       savedDirConfig, savedCommandPrefixes) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
      sandboxWallWarn, maxTimeoutSetting, forceTimeoutSetting, colorModePref,
      bashPathOverride, bashSourcePref, tabTitleEnabled, verifierEnabled,
      verifierModelSpec, userAgentTemplate, bannerLinesSetting,
-     dirsettings.dirConfigLocation)
+     dirsettings.dirConfigLocation, commandPrefixes)
   let savedParams = activeParams
   let savedWarnings = activeConfigWarnings
   let (diskCurrent, diskProviders, _, _, _, _) =
@@ -975,6 +984,7 @@ proc mergeForeignEdits(path: string; current: var string,
   verifierModelSpec = savedVerifierSpec
   userAgentTemplate = savedUserAgent
   dirsettings.dirConfigLocation = savedDirConfig
+  commandPrefixes = savedCommandPrefixes
   activeParams = savedParams
   activeConfigWarnings = savedWarnings
   var diskByName: Table[string, ProviderRec]
@@ -1101,6 +1111,10 @@ proc writeConfigFile*(path: string, current: string,
   # is not the default so a re-written config keeps the user's choice.
   if dirsettings.dirConfigLocation != "project":
     buf.add "dirconfig = " & quoteVal(dirsettings.dirConfigLocation) & "\n"
+  # Same non-default rule for the command prefix set: a rewrite must not
+  # silently strip the characters that introduce commands.
+  if commandPrefixes != ":":
+    buf.add "system-command-prefixes = " & quoteVal(commandPrefixes) & "\n"
   # Bare number, not a quoted literal: the reader parseInts the raw value.
   if maxTimeoutSetting > 0 and maxTimeoutSetting != MaxBashTimeout:
     buf.add "max_timeout = " & $maxTimeoutSetting & "\n"

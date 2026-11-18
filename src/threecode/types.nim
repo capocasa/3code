@@ -88,6 +88,14 @@ var notifyEnabled*: bool = true
   ## When true, a native desktop notification fires when a turn ends.
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
   ## `[settings]`; an explicit `off` opts out.
+var commandPrefixes*: string = ":"
+  ## Every character in this string introduces a command (`[settings]`
+  ## `system-command-prefixes`; each non-whitespace character of the
+  ## value is one prefix, duplicates collapse, a later line replaces the
+  ## set). Default `:` only: slash-prefixed input stays ordinary prompt
+  ## text, so paths like `/usr/bin` never risk command interpretation.
+  ## Recognition, dispatch and completion all consult this one set via
+  ## `util.isCommandPrefix` / `util.colonForm`.
 var verifierEnabled*: bool = false
   ## When true, goal mode's end-of-turn satisfaction check runs on the
   ## dedicated verifier model named by `verifierModelSpec` instead of the

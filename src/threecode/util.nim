@@ -701,18 +701,37 @@ proc resolvePath*(path: string): string =
   if p.startsWith("~"): p = expandTilde(p)
   try: absolutePath(p) except CatchableError: p
 
-proc isSlashHelp*(cmd: string): bool =
-  ## True when `cmd` is the `/help` synonym for `:help`: the exact token,
-  ## optionally followed by whitespace. New users reach for the slash form
-  ## before learning the colon convention; anything looser (`/helpful,` in a
-  ## sentence) must stay a model prompt, not become a command.
-  let c = cmd.strip
-  c == "/help" or c.startsWith("/help ") or c.startsWith("/help\t")
+proc isCommandPrefix*(c: char): bool =
+  ## True when `c` is one of the configured command prefix characters
+  ## (`[settings] system-command-prefixes`, default `:`).
+  c in commandPrefixes
+
+func normalizeCommandPrefixes*(v: string): string =
+  ## The prefix set as a compact string: every non-whitespace character
+  ## of `v`, first occurrence only, in typed order — `": /"` and `":/"`
+  ## both yield `":/"`. Empty input yields empty output; the config
+  ## schema rejects that before any caller reads it.
+  for c in v:
+    if c.isSpaceAscii: continue
+    if c notin result: result.add c
+
+proc startsWithCommandPrefix*(text: string): bool =
+  ## True when `text` begins at byte 0 (no strip) with a configured
+  ## command prefix. The submit gate uses this unstripped form so a
+  ## leading space keeps a line a prompt mid-turn, exactly as a
+  ## space-prefixed `:cmd` already did.
+  text.len > 0 and isCommandPrefix(text[0])
 
 proc colonForm*(cmd: string): string =
-  ## `cmd` with a leading `/help` token rewritten to `:help` (see
-  ## `isSlashHelp`); unchanged when it is not the synonym.
-  if isSlashHelp(cmd): ":help" & cmd.strip[5 .. ^1] else: cmd
+  ## `cmd` stripped, with a leading configured command prefix rewritten
+  ## to `:`, the canonical spelling every command table and dispatch site
+  ## uses. Any other first character means ordinary prompt text: returned
+  ## stripped, for the caller's `c[0] != ':'` command test to reject.
+  let s = cmd.strip
+  if s.len > 0 and isCommandPrefix(s[0]) and s[0] != ':':
+    ":" & s[1 .. ^1]
+  else:
+    s
 
 proc safeCwd*(): string =
   ## The current working directory, or ``/`` when the process's cwd has

@@ -275,9 +275,16 @@ proc appendSessionIndex*(cwd, id: string): bool {.discardable.} =
 # Both are plain UTF-8 written atomically (temp + rename) on a debounce while
 # editing, and removed when the prompt is committed.
 
-const QuitLineCommands* = ["exit", "quit", ":q", ":quit", ":exit"]
-  ## Lines that end the REPL instead of reaching the model. Shared with the
+proc isQuitLine*(line: string): bool =
+  ## Lines that end the REPL instead of reaching the model: the bare words
+  ## `exit`/`quit`, or `q`/`quit`/`exit` behind any configured command
+  ## prefix (`/quit` quits once `/` is enabled; under the default it is
+  ## ordinary input, like every other slash-prefixed line). Shared with the
   ## REPL's submit check so a draft can never hold text that quits on submit.
+  let t = line.strip
+  if t in ["exit", "quit"]: return true
+  if not startsWithCommandPrefix(t): return false
+  colonForm(t) in [":q", ":quit", ":exit"]
 
 proc draftDir*(): string =
   userDataRoot() / "drafts"
@@ -1565,7 +1572,7 @@ proc saveDraft*(session: Session, text: string) =
   # editor before teardown, and restoring ":q" would prefill the prompt with
   # a command that exits on submit. Persist "" so the sidecar is removed,
   # exactly like an idle editor.
-  let draft = if text.strip in QuitLineCommands: "" else: text
+  let draft = if isQuitLine(text): "" else: text
   if draft.len == 0:
     removeIfExists(path)
     return
@@ -1641,7 +1648,7 @@ proc sweepQuitDrafts*() =
     for kind, path in walkDir(dir):
       if kind != pcFile or not path.endsWith(".prompt"): continue
       let content = try: readFile(path) except CatchableError: ""
-      if content.strip in QuitLineCommands:
+      if isQuitLine(content):
         removeIfExists(path)
 
 proc clearPendingDraft*(cwd: string) =

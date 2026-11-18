@@ -250,8 +250,17 @@ proc providerIndex(target: string): int =
     if pr.name == target: return i
   -1
 
+func commandNamesTypedWith(prefix: char): seq[string] =
+  ## CommandNames under the prefix the user typed: `/he` completes to
+  ## `/help`, never `:help` — minline replaces the typed word with the
+  ## match, so the match must carry the same prefix character or the
+  ## completion would swap the user's prefix for the canonical one.
+  if prefix == ':': return @CommandNames
+  for n in CommandNames:
+    result.add prefix & n[1 .. ^1]
+
 proc completionFor*(line: string): seq[string] =
-  let words = line.split(' ')
+  var words = line.split(' ')
   if words.len == 0: return
   let last = words[^1]
   if last.startsWith('@'):
@@ -260,9 +269,15 @@ proc completionFor*(line: string): seq[string] =
       result.add '@' & p
     return
   if words.len == 1:
-    if last == "" or last.startsWith(":"):
+    if last == "":
       return @CommandNames
+    if last.len > 0 and isCommandPrefix(last[0]):
+      return commandNamesTypedWith(last[0])
     return
+  # Past the command word: subcommand slots compare against the
+  # canonical colon spelling, whatever prefix the user typed.
+  if words[0].len > 0 and isCommandPrefix(words[0][0]) and words[0][0] != ':':
+    words[0] = ":" & words[0][1 .. ^1]
   if words[0] == ":provider":
     if words.len == 2:
       # Verbs before names: the grammar slots a user is typing into

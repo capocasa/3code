@@ -37,6 +37,11 @@ current = "ollama.qwen3-coder:480b"
 ; user_agent = "3code $version ($os $arch)" ; User-Agent header sent on model requests. Variables: $version (full build version), $branch (-main), $commit / $hash (-a1b2c3d4), $stage (-unstaged when sources differed from HEAD; each empty when not applicable), $os, $arch, $$ (literal $). Unknown $names pass through. Default: "3code $version"
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: force a bash path (MSYS2 and Git for Windows are auto-detected)
 ; bash = auto  ; which bash to use: auto (default, normal detection order) or a full path to the shell (any OS)
+; system-command-prefixes = ":" ; characters that introduce commands; whitespace between them is optional.
+;   Each non-whitespace character is one prefix, duplicates are ignored, and a later line replaces
+;   the set. Default ":" leaves slash-prefixed paths (/usr/bin, URLs) available as ordinary input;
+;   opt in with ": /" to make /start a command exactly like :start — every enabled prefix recognizes,
+;   dispatches and completes identically (: stays canonical in help and docs)
 ;
 ; [shortcuts] remaps editor commands. Value is a space-separated list of
 ; keys; empty string unbinds. Defaults match today's hardcoded behaviour.

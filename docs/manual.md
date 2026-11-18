@@ -469,7 +469,13 @@ and Xiaomi MiMo. Add those by hand as custom providers when wanted.
 
 At the interactive prompt, describe the result you want or enter a command
 beginning with `:`. Tab completes commands, provider names, model names, and
-paths where supported.
+paths where supported. The `:` is configurable: `[settings]
+system-command-prefixes = ": /"` makes `/` introduce commands exactly like
+`:` does — same recognition, dispatch and completion, with tab completion
+keeping the prefix you typed (`/he` → `/help`). The default `:` leaves
+slash-prefixed input (`/usr/bin`, URLs) as ordinary prompts; enabling `/`
+subjects it to command interpretation instead. `:` stays canonical in help
+and documentation either way.
 
 3code loads `3CODE.md` and `AGENTS.md` from the project directory and its
 parents. These are good homes for project rules, build commands, and style
