@@ -64,6 +64,24 @@ Unreleased
   (docs/dev.md): a system command must never block - its work happens
   on a separate thread and the result is delivered async, like a
   normal one.
+- **A stream cut mid-reply retries instead of ending the turn.** A
+  200 OK whose SSE body dies after partial deltas - no `finish_reason`,
+  no `[DONE]`, no usage - used to be handed back as a complete
+  assistant turn: half a sentence hit the scrollback ("Booting.
+  Polling until the guest agent"), the `· Xs` bullet vanished, and the
+  prompt returned as if the model had finished, no error, no token
+  line. The truncation guard flags the cut as a retryable transport
+  error so the request resends through the normal backoff curve (the
+  patient curve rides out provider blips for hours); if every attempt
+  dies, the turn ends with the network error committed to scrollback
+  instead of a silent half answer. Same fix on the /responses path:
+  EOF before `response.completed` no longer builds a partial message
+  from the accumulator. The guard is armed again after its June-2026
+  disable (the phantom-EOF TLS bug in streamhttp that starved it is
+  fixed, `>= 0.2.0`), with one refinement: a stream that delivered
+  `usage` counts as complete, so gateways that close after the final
+  usage chunk without `[DONE]`/`finish_reason` never trip it.
+
 - **Relace is a provider, live-tested on every model.** Relace's hosted
   open-weight coding line (GLM 5.2/5.3/5.3-flash, six DeepSeek V4/V4.1
   ids, Kimi K3 and K3.1 Pro) sits behind one `rlc-` key at

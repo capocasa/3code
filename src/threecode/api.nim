@@ -1579,12 +1579,22 @@ proc streamHttp(url: string, headers: seq[(string, string)],
   # the caller a half-formed assistant turn (would otherwise show as a lone
   # `· Xs` line with no token bar and no tool_calls, prompting the user as
   # if the model had simply stopped).
-  #let gotAnyDelta = accContent.len > 0 or accTools.len > 0 or accReasoning.len > 0
-  #if result.statusCode == 200 and gotAnyDelta and
-  #   not sawDone and not sawFinish:
-  #  closeCachedStreamConn()
-  #  result.errMsg = "stream truncated before completion"
-  #  return
+  #
+  # The guard was disabled in June 2026 because the then-current streamhttp
+  # turned zero-length TLS recvs into phantom clean EOFs, so healthy streams
+  # tripped it constantly. That transport bug is fixed (streamhttp >= 0.2.0;
+  # we now require >= 0.5.0), so the guard is safe again. One refinement
+  # since the original: a stream that DID deliver `usage` counts as
+  # complete. Some gateways close without `[DONE]`/`finish_reason` after
+  # the final usage chunk; billing data is a completion signal the phantom
+  # EOF cannot forge.
+  let gotAnyDelta = accContent.len > 0 or accTools.len > 0 or
+    accReasoning.len > 0
+  if result.statusCode == 200 and gotAnyDelta and
+      not sawDone and not sawFinish and result.usage.totalTokens == 0:
+    closeCachedStreamConn()
+    result.errMsg = "stream truncated before completion"
+    return
 
   result.finishReason = finishReason
   # Build assistant message. A stream with usage and/or a finish_reason but
@@ -2065,9 +2075,16 @@ proc streamResponses(url: string, headers: seq[(string, string)],
       result.assistantMsg = buildStreamAssistantMsg(accContent, "",
         accTools, result.usage, isInterrupted())
   elif accTools.len > 0 or accContent.len > 0:
-    # EOF before response.completed: interrupted-stream fallback.
-    result.assistantMsg = buildStreamAssistantMsg(accContent, "",
-      accTools, result.usage, false)
+    # EOF before response.completed/incomplete: the upstream socket closed
+    # mid-response (keepalive timeout, LB drop). Deltas were already
+    # accumulated, so without this check the partial reply would be handed
+    # back as a complete turn and the user silently dropped to the prompt
+    # with half an answer. Surface as a retryable transport error instead
+    # (assistantMsg stays nil, so callModel promotes the 200 to a
+    # NetworkHealthError and resends after backoff).
+    closeCachedStreamConn()
+    result.errMsg = "stream truncated before completion"
+    return
   if result.assistantMsg == nil:
     result.errBody = nonSSE.join("\n")
     result.errMsg = EmptyReplyMsg
