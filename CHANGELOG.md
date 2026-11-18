@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **`:btw` never blocks the prompt anymore.** The side question fired
+  its meta-call synchronously, freezing the UI for the whole round
+  trip. It runs on a worker thread now (`btwthread.nim`): the command
+  answers with a `💬` receipt at once, the answer lands asynchronously
+  as a dim `💬 │` quote block whenever it arrives, and its burned
+  tokens are added to the session ledger and onto the token bar as the
+  sum of both requests (the goal-check accounting generalized into
+  `accountSideCallUsage`). Added a dev-guidelines rule while at it
+  (docs/dev.md): a system command must never block - its work happens
+  on a separate thread and the result is delivered async, like a
+  normal one.
 - **Relace is a provider, live-tested on every model.** Relace's hosted
   open-weight coding line (GLM 5.2/5.3/5.3-flash, six DeepSeek V4/V4.1
   ids, Kimi K3 and K3.1 Pro) sits behind one `rlc-` key at
