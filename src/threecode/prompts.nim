@@ -185,15 +185,21 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("relace", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("relace", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
 
-    # darkbloom (api.darkbloom.dev/v1): Eigen Labs' network of owned
-    # Apple-silicon Macs serving MLX builds, hardware-attested per
-    # request, behind one `sk-db-` key. GET /v1/models is the
-    # authoritative catalog (database-driven aliases); the curated rows
-    # carry its exact ids, including the `EigenLabs/` builds. Contexts
-    # and output caps below are the live catalog's numbers, not the
+    # darkbloom (api.darkbloom.dev/v1): Eigen Labs' network of
+    # people-owned Apple-silicon Macs serving MLX builds, hardware-
+    # attested per request, behind one `sk-db-` key. GET /v1/models is
+    # the authoritative catalog (database-driven aliases; it moved twice
+    # on launch day, so rows pin what answered a live turn); the curated
+    # ids are its exact spellings, including the `EigenLabs/` build.
+    # Contexts and output caps are the live catalog's numbers, not the
     # upstream weights': glm-5.3-flash serves a 262,144 enforced window
-    # here (1M elsewhere). The gemma / ternary-bonsai / flint catalog
-    # entries have no family and stay experimental.
+    # here (1M elsewhere), mimo its full 1M. Reasoning knobs verified
+    # live: glm-5.3 takes top-level reasoning_effort (thinking is
+    # forced; chat_template_kwargs is inert), the binary thinkers ride
+    # the vLLM enable_thinking bool, gpt-oss passes effort through.
+    # reasoning_content replays in history without complaint. The gemma
+    # and ternary-bonsai builds (reasoning + tools + images, the most
+    # capable line there) have no family and stay experimental.
     ("darkbloom", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 262_144, false, true),
 
     # gpt-oss
@@ -670,8 +676,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "xiaomi/mimo-v2.6-pro-ultraspeed", "mimo", "2.6", "pro-us", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     ("openrouter", "xiaomi/mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false, true),
     # darkbloom's flash build carries their -mopd suffix (multi-output
-    # prediction depth); same V2.6 flash weights, MLX-quantized.
-    ("darkbloom", "mimo-v2.6-flash-mopd", "mimo", "2.6", "flash-mopd", "on", 0.2, 8192, tbNone, false, 262_144, false, true),
+    # prediction depth); same V2.6 flash weights, MLX-quantized. The
+    # build is text-only on the fleet (input_modalities says so) unlike
+    # the first-party flash, and keeps the full 1M window.
+    ("darkbloom", "mimo-v2.6-flash-mopd", "mimo", "2.6", "flash-mopd", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("openrouter", "xiaomi/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("openrouter", "xiaomi/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("tencent", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
@@ -882,15 +890,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("together", "Qwen/Qwen3.7-Plus", "qwen", "3.7", "plus", "on", 0.2, 8192, tbNone, false, 262_144, true, false),
     # hetzner (Hetzner Inference Experiments; vLLM, OpenAI-compatible)
     ("hetzner", "Qwen/Qwen3.6-35B-A3B-FP8", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
-    # darkbloom's qwen line: six catalog builds across the 3.x line,
-    # MLX-quantized (the 27B is their 4bit-mtp build, the 3.6 MoE a
-    # vision -vl-mtp-mxfp8 one; qwen3-vl and 3.6-vl carry vision).
-    ("darkbloom", "qwen3.5-35b-a3b", "qwen", "3.5", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
-    ("darkbloom", "Qwen3.5-9B", "qwen", "3.5", "9b", "on", 0.2, 4096, tbNone, false, 262_144, false, false),
+    # darkbloom's qwen line: four catalog builds (the 27B is their
+    # 4bit-mtp build), MLX-quantized. All four are image-capable on the
+    # fleet (input_modalities and a live image probe agree).
+    ("darkbloom", "qwen3.5-35b-a3b", "qwen", "3.5", "35b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, true),
+    ("darkbloom", "Qwen3.5-9B", "qwen", "3.5", "9b", "on", 0.2, 4096, tbNone, false, 262_144, false, true),
     ("darkbloom", "qwen3.6-35b-a3b-vl-mtp-mxfp8", "qwen", "3.6", "35b-a3b-vl", "on", 0.2, 8192, tbNone, false, 262_144, false, true),
-    ("darkbloom", "qwen3.8-flash-next", "qwen", "3.8", "flash-next", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
-    ("darkbloom", "qwen3-vl-30b-a3b-instruct", "qwen", "3", "vl-30b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false, true),
-    ("darkbloom", "EigenLabs/Qwen3.8-27B-4bit-mtp", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
+    ("darkbloom", "EigenLabs/Qwen3.8-27B-4bit-mtp", "qwen", "3.8", "27b", "on", 0.2, 8192, tbNone, false, 262_144, false, true),
     # greenpt (GreenPT, EU-hosted; OpenAI-compatible). Only the catalog ids
     # that are known-good elsewhere get entries; qwen3.5-397b, the
     # mistral/gemma/llama chat lineup, and the green-* branded ids are
@@ -967,10 +973,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "longcat-2.5-preview", "longcat", "2.5", "preview", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
     ("nanogpt", "nvidia/nemotron-3.5-lightning", "nemotron", "3.5", "lightning", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("nanogpt", "nvidia/nemotron-3.5-super-vl", "nemotron", "3.5", "super-vl", "on", 0.2, 8192, tbNone, false, 1_048_576, false, true),
-    # darkbloom serves both 3.5 lines; the super build is the plain
-    # text one (no -vl suffix on the wire).
+    # darkbloom serves both 3.5 lines; the `super` id is the VL build
+    # (hf id NVIDIA-Nemotron-3.5-Super-VL; a live image probe read the
+    # picture) and keeps vision.
     ("darkbloom", "nvidia-nemotron-3.5-lightning", "nemotron", "3.5", "lightning", "on", 0.2, 8192, tbNone, false, 262_144, false, false),
-    ("darkbloom", "nvidia-nemotron-3.5-super", "nemotron", "3.5", "super", "on", 0.2, 8192, tbNone, false, 1_048_576, false, false),
+    ("darkbloom", "nvidia-nemotron-3.5-super", "nemotron", "3.5", "super", "on", 0.2, 8192, tbNone, false, 262_144, false, true),
     ("opencodego", "longcat-2.0", "longcat", "2", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("nanogpt", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false, false),
     ("nanogpt", "minimax/minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false, false),
