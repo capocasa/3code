@@ -104,6 +104,14 @@ var baselineProviders*: seq[ProviderRec]
   ## Same startup snapshot for the provider list. A provider that differs
   ## from BOTH this baseline and the in-memory list was edited by another
   ## 3code instance since startup; `writeConfigFile` keeps the disk version.
+var providerOrigins*: Table[string, string]
+  ## Provider name -> the layer file that defined the version in
+  ## `activeProviders`. `writeConfigFile` consults this so a definition
+  ## that came from a non-target layer (a lower `-c` file, the project
+  ## layer) is never copied into the write target; names missing from
+  ## the table are in-session additions and always persist. Populated by
+  ## the layered read (`tryLoadStateLayers`); empty in single-file loads,
+  ## which therefore filter nothing.
 var activeParams*: seq[ParamsRec]
   ## Every `[params]` section from the active config, in file order. Kept
   ## so `writeConfigFile` can persist them and `buildProfile` can resolve
@@ -1063,11 +1071,34 @@ proc writeConfigFile*(path: string, current: string,
   # `qwen-3.6:latest`), and with no table entry nothing maps it back,
   # so the mangled id would go on the wire and 404.
   var providers = providers
+  # Layer-origin filter: only the write target's own definitions and
+  # in-session additions persist. A definition that came from another
+  # layer (a lower `-c` file, the project `.3code/config`) stays in that
+  # layer's file — copying it into the target would fork the definition
+  # and, for the project layer, leak repo-pinned settings into the user
+  # config. The layer files themselves are never written by this path.
+  var persisted: seq[ProviderRec]
+  for pr in providers:
+    if providerOrigins.getOrDefault(pr.name, path) == path:
+      persisted.add pr
+  providers = persisted
   for pr in providers.mitems:
     pr.models = dedupModels(pr.models.mapIt(
       if knownGoodWireModel(pr.name, it) != "": normalizeModelName(it) else: it))
   var current = current
   if not mergeForeignEdits(path, current, providers): return
+  # A current naming a provider that is not being persisted (it lives in
+  # another layer) must not land in the target: it would never resolve
+  # there and the next layer-less start would fall into the wizard.
+  # Empty is safe — resolution falls back to the first provider. Only a
+  # genuinely layered session (some provider came from another file)
+  # rewrites it away; single-file sessions keep the old verbatim write.
+  var foreignLayer = false
+  for _, o in providerOrigins:
+    if o != path: foreignLayer = true
+  if foreignLayer and current != "" and
+      buildProfile(current, providers, "").name == "":
+    current = ""
   let cur = normalizedCurrent(current, providers)
   var buf = "[settings]\n"
   buf.add "current = " & quoteVal(cur) & "\n"
@@ -1429,26 +1460,92 @@ var currentOriginLayer* = ""
   ## The file that contributed the active `current`, for diagnostics
   ## that must name a layer (the "current but no [provider]" die names
   ## the offending file, not the write target).
+proc patchParams(dst: var ModelParams, src: ModelParams)
+  ## Forward decl: the layered read merges `[params]` scopes with the
+  ## same per-field patch the profile resolver uses (definition below).
+
+proc tryLoadStateLayers*(paths: seq[string]): tuple[current: string,
+    providers: seq[ProviderRec], colors: Table[string, string], err: string] =
+  ## Layered read of `paths`, lowest first. Merge rules, later layer
+  ## winning per key:
+  ## - `[settings]` scalars: applied per key by the sequential parses
+  ##   (`parseConfigFile` only touches keys a file sets).
+  ## - `current`: the highest layer that sets it.
+  ## - `[provider]` blocks: by name; a later same-name block replaces the
+  ##   earlier one EXCEPT that a missing `key`/`url` is inherited from the
+  ##   namesake below — API keys stay out of committed project files
+  ##   without duplicating provider definitions.
+  ## - `[params]`: by (provider, model) scope, per key.
+  ## - `[search]` / `[colors]` / `[shortcuts]`: per key.
+  ## Each file runs the full `validateConfig`, so a malformed layer dies
+  ## (or returns err here) naming its own `path:line`. Missing files are
+  ## skipped, not layers that blank out the ones below them.
+  var current = ""
+  var providers: seq[ProviderRec]
+  var colors: Table[string, string]
+  var searchKeys: Table[string, string]
+  var searchEngine = ""
+  var shortcuts: Table[string, string]
+  var params: seq[ParamsRec]
+  var origins: Table[string, string]
+  var warnings: seq[string]
+  currentOriginLayer = ""
+  for p in paths:
+    if not fileExists(p): continue
+    let (cur, provs, cols, skeys, sengine, scuts) =
+      try: parseConfigFile(p)
+      except CatchableError as e:
+        return ("", @[], initTable[string, string](), e.msg)
+    if cur != "":
+      current = cur
+      currentOriginLayer = p
+    var fresh: seq[ProviderRec]
+    for np in provs:
+      origins[np.name] = p
+      block merge:
+        for i in 0 ..< providers.len:
+          if providers[i].name != np.name: continue
+          var m = np
+          if m.url == "": m.url = providers[i].url
+          if m.key == "" and m.auth != "oauth": m.key = providers[i].key
+          providers[i] = m
+          break merge
+        fresh.add np
+    providers.add fresh
+    for k, v in cols: colors[k] = v
+    for k, v in skeys: searchKeys[k] = v
+    if sengine != "": searchEngine = sengine
+    for k, v in scuts: shortcuts[k] = v
+    for e in activeParams:
+      block paramsMerge:
+        for i in 0 ..< params.len:
+          if params[i].provider == e.provider and params[i].model == e.model:
+            patchParams(params[i].params, e.params)
+            break paramsMerge
+        params.add e
+    warnings.add activeConfigWarnings
+  activeConfigWarnings = warnings
+  baselineCurrent = current
+  baselineProviders = providers
+  providerOrigins = origins
+  activeCurrent = current
+  activeProviders = providers
+  if searchEngine != "": activeSearchEngine = searchEngine
+  activeSearchKeys = searchKeys
+  activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
+  activeShortcuts = shortcuts
+  minline.configuredShortcuts = activeShortcuts
+  activeParams = params
+  (current, providers, colors, "")
 
 proc tryLoadStackOrEmpty*(): tuple[current: string,
     providers: seq[ProviderRec], colors: Table[string, string], err: string] =
-  ## Tolerant stack read: every file in `configReadPaths()` in order,
-  ## later existing file winning wholesale for the returned values (the
-  ## `[settings]` globals merge per key — `parseConfigFile` only touches
-  ## keys the file sets). Missing files are skipped, not layers that
-  ## blank out the ones below them.
-  currentOriginLayer = ""
-  var warnings: seq[string]
-  for p in configReadPaths():
-    if not fileExists(p): continue
-    result = tryLoadStateOrEmpty(p)
-    if result.current != "": currentOriginLayer = p
-    warnings.add activeConfigWarnings
-  activeConfigWarnings = warnings
+  ## The startup stack read: `tryLoadStateLayers` over `configReadPaths()`.
+  tryLoadStateLayers(configReadPaths())
 
 proc loadStackOrEmpty*(): (string, seq[ProviderRec], Table[string, string]) =
   ## Dying twin of `tryLoadStackOrEmpty` for the full startup read; same
-  ## per-file semantics as `loadStateOrEmpty` (a malformed file dies with
+  ## per-file semantics as `loadStateOrEmpty` (a malformed layer dies with
   ## its own `path:line` message; every layer's warnings print once).
   let (current, providers, colors, err) = tryLoadStackOrEmpty()
   if err != "": die err, ExitConfig
