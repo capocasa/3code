@@ -146,8 +146,9 @@ var activeShortcuts*: Table[string, string]
 var bashPathOverride*: string
   ## Windows-only. `[settings]` `bash_path = "..."` overrides bash
   ## detection in `streamexec.resolveBash` for users with bash at a
-  ## non-standard location. Empty on POSIX (where `bash` from PATH or
-  ## the standard locations is used, sh as the last resort).
+  ## non-standard location. Empty on POSIX (where the login shell,
+  ## then bash, then zsh is used; there is no sh fallback — shPath
+  ## halts when none is found).
 
 var bashSourcePref*: string
   ## All OS. `[settings]` `bash = "..."`: "auto" (default) keeps

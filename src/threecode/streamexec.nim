@@ -20,16 +20,51 @@ when defined(windows):
 
 var wallWarnShown = false  ## one Windows wall warning per run
 
-proc shPath(): string =
+var cachedPosixShell* {.threadvar.}: string
+  ## Memoized ambient POSIX-shell resolution (the part of shPath below
+  ## the config overrides). Tests reset it to pin `$SHELL`.
+
+const NonPosixShells = ["fish", "nu", "nushell", "elvish", "xonsh",
+                        "csh", "tcsh", "powershell", "pwsh", "sh",
+                        "dash", "ash", "busybox", "ksh", "mksh"]
+  ## `sh`/`dash`/`ash`/`busybox` are excluded even as `$SHELL`: the
+  ## tool's contract is bash, and they drop the bash-only constructs
+  ## models write. `ksh`/`mksh` are POSIX-but-not-bash-compatible
+  ## (no `PIPESTATUS`, no `&>`, different `[[ ]]` semantics).
+
+proc shellUsable(path: string): bool =
+  ## The interpreter must exist and actually run a POSIX one-liner:
+  ## `$SHELL` can name a login shell whose binary is gone (a chsh
+  ## without install, a removed brew formula), and a shell that cannot
+  ## parse `echo` would fail every bash call in confusing ways.
+  if path.len == 0 or not fileExists(path): return false
+  try:
+    let (outp, code) = execCmdEx(quoteShell(path) & " -c 'echo 3code-shell-ok'")
+    result = code == 0 and outp.strip == "3code-shell-ok"
+  except CatchableError:
+    result = false
+
+proc posixShellFamily(path: string): bool =
+  ## `$SHELL` names the shell 3code was started in, but the tool's
+  ## contract is bash: fish, nushell, elvish, xonsh, the csh family,
+  ## and the plain-POSIX shells (sh/dash/ash/ksh) parse a different
+  ## or reduced language, so they are skipped in favor of the
+  ## bash/zsh fallback instead of breaking every command.
+  result = path.lastPathPart.toLowerAscii notin NonPosixShells
+
+proc shPath*(): string =
   ## POSIX interpreter for the bash tool. A `bash_path` or `bash`
   ## config value that names an existing file wins, so the same
-  ## setting works on every OS. Otherwise a real bash: the tool's
-  ## contract (and every prompt) says bash, while /bin/sh is dash on
+  ## setting works on every OS. Otherwise the shell 3code was started
+  ## in (`$SHELL`, the login shell) when it is a working
+  ## bash-compatible shell, then bash, then zsh: the tool's contract
+  ## (and every prompt) says bash, while /bin/sh is dash on
   ## Debian/Ubuntu, which drops the bash-only constructs models write
   ## (`PIPESTATUS`, `[[ ]]`, multiline heredocs) in confusing ways
-  ## (community thread 15). Last resort is sh: Termux has no /bin/sh
-  ## ($PREFIX/bin/sh is the interactive shell, and bash may be
-  ## unbundled), and Alpine's busybox sh is the only shell there is.
+  ## (community thread 15). There is no sh fallback: silently
+  ## running a shell that rejects the language the prompts teach is
+  ## the bug this order exists to prevent, so a host with no
+  ## bash-compatible shell halts with an error instead of degrading.
   when declared(bashPathOverride):
     if bashPathOverride.len > 0 and fileExists(bashPathOverride):
       return bashPathOverride
@@ -37,16 +72,31 @@ proc shPath(): string =
     if bashSourcePref.len > 0 and bashSourcePref != "auto" and
         fileExists(bashSourcePref):
       return bashSourcePref
+  if cachedPosixShell.len > 0: return cachedPosixShell
+  result = ""
   block:
+    let login = getEnv("SHELL")
+    if posixShellFamily(login) and shellUsable(login):
+      result = login
+  if result.len == 0:
     let exe = findExe("bash")
-    if exe.len > 0: return exe
-  for cand in ["/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash",
-               "/opt/homebrew/bin/bash"]:
-    if fileExists(cand): return cand
-  when defined(android):
-    getEnv("PREFIX", "/data/data/com.termux/files/usr") & "/bin/sh"
-  else:
-    "/bin/sh"
+    if exe.len > 0: result = exe
+  if result.len == 0:
+    for cand in ["/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash",
+                 "/opt/homebrew/bin/bash"]:
+      if fileExists(cand): result = cand; break
+  if result.len == 0:
+    let exe = findExe("zsh")
+    if exe.len > 0: result = exe
+  if result.len == 0:
+    for cand in ["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh",
+                 "/opt/homebrew/bin/zsh"]:
+      if fileExists(cand): result = cand; break
+  if result.len == 0:
+    die "no bash-compatible shell found (looked for $SHELL, bash, zsh). " &
+        "Install bash (e.g. 'pkg install bash' on Termux, 'apk add bash' " &
+        "on Alpine) or set 'bash = <path>' in the config."
+  cachedPosixShell = result
 
 when defined(windows):
   var cachedBash* {.threadvar.}: string
