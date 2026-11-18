@@ -47,7 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 335
+    check visionRows == 341
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
@@ -56,6 +56,14 @@ suite "vision: known-good curation":
   test "third-party hostings of vision models are curated too":
     check knownGoodVision("openrouter", "z-ai/glm-5.3-flash")
     check knownGoodVision("novita", "zai-org/glm-5.3-flash")
+    # darkbloom's MLX builds of the multimodal lineups (glm flash,
+    # qwen, nemotron super-vl) carry vision like every other hosting
+    # of the weights; the mimo flash build is text-only there.
+    check knownGoodVision("darkbloom", "glm-5.3-flash")
+    check knownGoodVision("darkbloom", "qwen3.6-35b-a3b-vl-mtp-mxfp8")
+    check knownGoodVision("darkbloom", "EigenLabs/Qwen3.8-27B-4bit-mtp")
+    check knownGoodVision("darkbloom", "nvidia-nemotron-3.5-super")
+    check not knownGoodVision("darkbloom", "mimo-v2.6-flash-mopd")
     check knownGoodVision("xai", "grok-4.7")
     check knownGoodVision("google", "gemini-3.8-flash")
     check knownGoodVision("openai", "gpt-5.4")

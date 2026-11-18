@@ -370,6 +370,57 @@ suite "api: applyReasoning — relace":
     check d.maxTokens == 65536
     check maxTokensField(Profile(family: "glm")) == "max_tokens"
 
+suite "api: applyReasoning — darkbloom":
+  # Eigen Labs' MLX Mac fleet, OpenAI-compatible surface. The hosted-stack
+  # generic branches apply: glm-5.3 rides the top-level effort knob, qwen
+  # and nemotron the vLLM enable_thinking bool, gpt-oss reasoning_effort,
+  # mimo-on sends nothing (server default, thinking is on unless disabled).
+  test "glm-5.3-flash takes the top-level effort knob":
+    for level in ["low", "high", "max"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "darkbloom.glm-5.3-flash", family: "glm",
+                      model: "glm-5.3-flash", version: "5",
+                      variant: "3-flash", reasoning: level)
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == level
+      check not body.hasKey("thinking")
+
+  test "qwen on rides the vLLM enable_thinking bool":
+    var body = %*{"stream": true}
+    let p = Profile(name: "darkbloom.qwen3.5-35b-a3b", family: "qwen",
+                    model: "qwen3.5-35b-a3b", reasoning: "on")
+    applyReasoning(p, body)
+    check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == true
+
+  test "gpt-oss passes reasoning_effort through":
+    var body = %*{"stream": true}
+    let p = Profile(name: "darkbloom.gpt-oss-20b", family: "gpt-oss",
+                    model: "gpt-oss-20b", reasoning: "medium")
+    applyReasoning(p, body)
+    check body{"reasoning_effort"}.getStr == "medium"
+
+  test "mimo on sends nothing (server default)":
+    var body = %*{"stream": true}
+    let p = Profile(name: "darkbloom.mimo-v2.6-flash-mopd", family: "mimo",
+                    model: "mimo-v2.6-flash-mopd", reasoning: "on")
+    applyReasoning(p, body)
+    check not body.hasKey("chat_template_kwargs")
+    check not body.hasKey("reasoning_effort")
+
+  test "nemotron on rides the vLLM enable_thinking bool":
+    var body = %*{"stream": true}
+    let p = Profile(name: "darkbloom.nvidia-nemotron-3.5-lightning",
+                    family: "nemotron",
+                    model: "nvidia-nemotron-3.5-lightning", reasoning: "on")
+    applyReasoning(p, body)
+    check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == true
+
+  test "generation defaults and max_tokens field ride the table":
+    let d = knownGoodGeneration("darkbloom", "glm-5.3-flash")
+    check d.temperature == 0.2
+    check d.maxTokens == 65536
+    check maxTokensField(Profile(family: "glm")) == "max_tokens"
+
 suite "api: applyReasoning — qwen4":
   # qwen4-max is a graded-reasoning hybrid, unlike the binary qwen3.x
   # line: DashScope takes a top-level reasoning_effort (low/high/xhigh)

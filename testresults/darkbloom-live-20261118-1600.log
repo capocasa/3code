@@ -1,0 +1,106 @@
+# Darkbloom provider live test — 2026-11-18 16:00 +0100
+
+Binary: 3code @ 7a8693b4+ (darkbloom branch), debug build via nim c
+Backend: api.darkbloom.dev/v1 (sk-db- key, isolated XDG root under /tmp/dblive)
+Verification surface: real headless 3code turns (transcripts under
+/tmp/dblive/data/3code/sessions/), raw curl probes against the same endpoint,
+authenticated /v1/models harvest.
+
+==================================================================
+[1] live catalog (GET /v1/models, 2026-11-18 ~15:55) — 12 models
+==================================================================
+model                              ctx      maxout   modalities        features
+EigenLabs/Qwen3.8-27B-4bit-mtp     262144   131072   text,image        tools
+EigenLabs/Ternary-Bonsai-2-9B-…    262144    65536   text,image        reasoning,tools
+Qwen3.5-9B                         262144    65536   text,image        tools
+gemma-4-26b                        131072   131072   text,image,video  json_mode,reasoning,tools
+glm-5.3-flash                      262144    65536   text,image,video  logprobs,reasoning,tools
+gpt-oss-20b                        131072   131072   text              (none listed)
+mimo-v2.6-flash-mopd              1048576   131072   text              reasoning,tools
+nvidia-nemotron-3.5-lightning      262144    65536   text              reasoning,tools
+nvidia-nemotron-3.5-super          262144   131072   text,image,video  json_mode,logprobs,reasoning,structured_outputs,tools
+qwen3.5-35b-a3b                    262144   131072   text,image        tools
+qwen3.6-35b-a3b-vl-mtp-mxfp8       262144    65536   text,image        tools
+ternary-bonsai-2-27b               262144    32768   text,image        reasoning,tools
+
+Catalog drift on launch day: /v1/pricing (public cache) still listed 17 ids —
+qwen3.8-flash-next, qwen3-vl-30b-a3b-instruct, RecursiveSI/flint-int4,
+gemma-4-26b-8bit, gemma-4-26b-qat-4bit were gone from the live /v1/models.
+The two curated rows for the departed qwens were dropped.
+supported_sampling_parameters is uniform (temperature, top_p, top_k,
+frequency_penalty, presence_penalty, repetition_penalty, stop, seed,
+max_tokens) — no reasoning param listed anywhere, but the reasoning knobs
+work anyway (see [2]); the field list under-reports.
+
+==================================================================
+[2] wire probes (raw curl, non-streaming)
+==================================================================
+glm-5.3-flash
+  plain:         stop, DBPROBE-OK, reasoning_content len 213, 48 reasoning tok
+  effort low:    stop, DBPROBE-OK, reasoning_content len 24, 5 reasoning tok
+  ctk on:        stop, DBPROBE-OK, reasoning_content len 327, 75 reasoning tok
+  => top-level reasoning_effort honored (forced thinking; the vLLM
+     chat_template_kwargs bool is accepted but inert)
+qwen3.5-35b-a3b
+  plain:         stop, 489 reasoning tokens (thinks by default)
+  ctk off:       stop, no reasoning_content (bool honored)
+  effort low:    stop, 484 reasoning tokens (reasoning_effort ignored)
+  tools:         finish=tool_calls, get_weather({"city":"Berlin"}) with id
+qwen3.5-35b-a3b image (image_url part, generated 64x64 four-square PNG):
+                 "4 squares, blue" — image content served
+gpt-oss-20b
+  tools:         finish=tool_calls, get_weather with id (features list says
+                 none; tools work anyway)
+  effort low:    stop, DBPROBE-OK, 7 reasoning tokens
+mimo-v2.6-flash-mopd
+  plain:         stop, 15 reasoning tokens; ctk off: stop, none — bool honored
+nvidia-nemotron-3.5-lightning
+  plain:         stop, 320 reasoning tokens; ctk off: stop, none — bool honored
+glm reasoning_content replay (tbAllTurns path): assistant history message
+  with reasoning_content accepted (no 400), model recalled the secret word.
+
+Image probes on every vision-flagged row (same PNG, enable_thinking off):
+  qwen3.5-35b-a3b                "4 squares, blue"
+  Qwen3.5-9B                     "four squares … top-right blue"
+  EigenLabs/Qwen3.8-27B-4bit-mtp "5 squares … blue" (miscounted 4->5,
+                                 read the color; int4 27B accuracy quirk,
+                                 it does see the image)
+  qwen3.6-35b-a3b-vl-mtp-mxfp8   "4 squares … blue"
+  glm-5.3-flash                  "Four squares; the top-right one is blue."
+  nvidia-nemotron-3.5-super      "4 squares, top-right is blue."
+  (first attempt used a corrupt 4x4 png -> "invalid media input"; real
+   image served everywhere after)
+
+==================================================================
+[3] 3code headless turns (real binary, real key, one per curated row)
+==================================================================
+$ cd /tmp/dblive && XDG_DATA_HOME=… 3code --headless -c config \
+    -m darkbloom.<model> "Reply with exactly this token and nothing else: DBLIVE-OK"
+
+  qwen3.5-35b-a3b                 exit=0  "DBLIVE-OK"
+  Qwen3.5-9B                      exit=0  "DBLIVE-OK" (clean cwd; from the
+                                  messy /tmp/dblive cwd it looped read/bash
+                                  tool calls instead — tool streaming works)
+  qwen3.6-35b-a3b-vl-mtp-mxfp8    exit=0  "DBLIVE-OK"
+  EigenLabs/Qwen3.8-27B-4bit-mtp  exit=0  "DBLIVE-OK"
+  glm-5.3-flash                   exit=0  "DBLIVE-OK"
+  gpt-oss-20b                     exit=0  "DBLIVE-OK"
+  mimo-v2.6-flash-mopd            exit=0  "DBLIVE-OK"
+  nvidia-nemotron-3.5-lightning   exit=0  "DBLIVE-OK"
+  nvidia-nemotron-3.5-super       exit=0  "DBLIVE-OK"
+
+All 9 curated rows answered a real headless turn through the app
+(transcripts: /tmp/dblive/data/3code/sessions/2026111[68]T16*.3log, 11
+darkbloom sessions incl. the tool-loop run). The Qwen3.5-9B tool session
+exercised the full tool loop: streamed tool_calls (read ×2, bash), local
+execution, results fed back, finish.
+
+Curated-vs-live corrections made after this run:
+  - dropped qwen3.8-flash-next, qwen3-vl-30b-a3b-instruct (left the catalog)
+  - vision=true added: Qwen3.5-9B, qwen3.5-35b-a3b,
+    EigenLabs/Qwen3.8-27B-4bit-mtp, nvidia-nemotron-3.5-super (all probed)
+  - vision=false corrected: mimo-v2.6-flash-mopd (text-only on the fleet,
+    unlike the first-party flash)
+  - mimo context 262144 -> 1048576 (live catalog)
+  - nemotron-super is the Super-VL build under the plain id (hf id says so,
+    image probe reads); context 262144 there, not the 1M other hosts give
