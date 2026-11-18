@@ -2400,6 +2400,18 @@ proc apiRetryNotice*(msg: string) =
   ## receive the notice event.
   discard msg
 
+proc apiRetryCut*(label: string) =
+  ## `:retry` cut the backoff short. The error that justified the wait
+  ## lives on the volatile notice row, which the next attempt erases —
+  ## without this commit the message would simply vanish, and a resend
+  ## that succeeds leaves no trace of what went wrong. Journaled like
+  ## every other scrollback-only line so the rebreak window can replay
+  ## it; no bar repaint (the spinner owns the footer mid-turn).
+  let bytes = errLnS(label)
+  termengine.noteNonMessageTail(bytes, journalAnchorMessagesLen)
+  commitTranscriptBytes(bytes, restoreEditor = true,
+                        reserveFooter = true)
+
 proc installApiStreamHooks*() =
   setApiStreamHooks(ApiStreamHooks(
     beforeCall: apiBeforeCall,
@@ -2422,7 +2434,8 @@ proc installApiStreamHooks*() =
     retryWaitTick: proc(remainingS: int) =
       setAnimRetryRemaining(remainingS),
     retryWaitClear: proc() =
-      clearAnimRetryWait()))
+      clearAnimRetryWait(),
+    retryCut: apiRetryCut))
 
 # ---------- Headless (library) stream hooks ----------
 #

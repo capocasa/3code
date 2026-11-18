@@ -209,6 +209,10 @@ type
       ## Update just the countdown seconds.
     retryWaitClear*: proc() {.closure.}
       ## Leave the countdown: the next HTTP attempt is starting.
+    retryCut*: proc(label: string) {.closure.}
+      ## The backoff was cut short by `:retry`. The error that justified
+      ## the wait is about to leave the live notice row; the frontend
+      ## commits it to scrollback here so the record survives the retry.
 
 var apiStreamHooks*: ApiStreamHooks
 
@@ -300,6 +304,8 @@ proc hookRetryWaitTick(remainingS: int) =
 proc hookRetryWaitClear() =
   if apiStreamHooks.retryWaitClear != nil: apiStreamHooks.retryWaitClear()
 
+proc hookRetryCut(label: string) =
+  if apiStreamHooks.retryCut != nil: apiStreamHooks.retryCut(label)
 
 proc parseUsage*(u: JsonNode): Usage =
   ## Parses an OpenAI-compatible `usage` object. Cached-token accounting
@@ -4024,7 +4030,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           # for a fresh attempt, so the curve resets instead of aging:
           # skipRetryLevelInc makes the inc below a zeroing (both
           # categories), and the next failure backs off from the short
-          # end again.
+          # end again. The error itself is committed first (hookRetryCut):
+          # the notice row is volatile and the next attempt erases it, so
+          # without the commit the message that justified the retry would
+          # just vanish (a successful resend left no trace of what went
+          # wrong).
+          hookRetryCut(detail)
           skipRetryLevelInc = true
           clearRetryNow()
           break wait
