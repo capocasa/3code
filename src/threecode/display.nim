@@ -22,11 +22,12 @@
 ## since it drops below readable contrast on light backgrounds and has no
 ## clean mode switch.
 
-import std/[critbits, exitprocs, json, os, strformat, strutils, tables, terminal]
+import std/[critbits, exitprocs, json, os, strformat, strutils, tables, terminal, unicode]
 import types, util, config, prompts, session, search, actions, minline,
   toolstream, images, screen
 import goal
 import terminal as termui
+import unicodewidth
 
 # `osc8Link`/`fileUrl` moved to `util` so `actions` (which cannot import
 # `display` — display imports it) can hyperlink banner paths too.
@@ -1037,6 +1038,40 @@ proc goalStepBytes*(step: GoalStep): string =
         first = false
       else:
         result.add "  "
+      result.add GreyFg & "│ " & chunk & Reset & "\r\n"
+
+const BtwIcon* = "💬"
+  ## The aside's own marker: a speech balloon, the one glyph in the set
+  ## that reads as "a remark next to the conversation" rather than part
+  ## of it. Double-width in most terminals; `btwAnswerBytes` measures it
+  ## so the quote rule stays aligned.
+
+proc btwAnswerBytes*(answer: string): string =
+  ## A `:btw` side answer in scrollback: the aside's own `💬` icon in the
+  ## dim tier leading a dim quote block - the same shape as a verifier
+  ## step (`goalStepBytes`) but all-dim, because the aside is not a reply,
+  ## never enters the context, and lands whenever its worker finishes:
+  ##
+  ##   💬 │ the model's
+  ##      │ side answer
+  ##
+  ## The icon is double-width, so continuation rows pad to its measured
+  ## cell width plus the one separating space before the rule.
+  if answer.strip.len == 0: return
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - 6)
+  var iconW = 1
+  for r in BtwIcon.runes: iconW = max(iconW, runeCellWidth(r))
+  let pad = spaces(iconW + 1)
+  var first = true
+  for line in answer.strip.splitLines:
+    if line.strip.len == 0: continue
+    for chunk in wrapAnsi(line, bodyW):
+      if first:
+        result.add GreyFg & BtwIcon & Reset & " "
+        first = false
+      else:
+        result.add pad
       result.add GreyFg & "│ " & chunk & Reset & "\r\n"
 
 proc receiptBytes*(label: string): string =

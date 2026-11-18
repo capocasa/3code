@@ -459,7 +459,7 @@ suite "verifier token accounting":
       {"role": "assistant", "content": "done",
        "usage": {"promptTokens": 100, "completionTokens": 20,
                   "totalTokens": 120, "cachedTokens": 0}}]
-    accountVerifierUsage(session, messages,
+    accountSideCallUsage(session, messages,
       Usage(promptTokens: 30, completionTokens: 5, totalTokens: 35), 1_000)
     # The ledger gets the same += a main call's usage gets.
     check session.usage.promptTokens == 130
@@ -482,7 +482,7 @@ suite "verifier token accounting":
       "usage": {"promptTokens": 100, "completionTokens": 20,
                  "totalTokens": 120}}]
     emitFatPromptEvent setBarEvent("○ 10%")
-    accountVerifierUsage(session, messages, Usage(), 1_000)
+    accountSideCallUsage(session, messages, Usage(), 1_000)
     check session.usage.totalTokens == 120
     check fatPromptState.footer.barLabel == "○ 10%"
 
@@ -491,7 +491,7 @@ suite "verifier token accounting":
     session.savePath = ""
     var messages = %*[{"role": "user", "content": "go"}]
     emitFatPromptEvent clearBarEvent()
-    accountVerifierUsage(session, messages,
+    accountSideCallUsage(session, messages,
       Usage(promptTokens: 30, completionTokens: 5, totalTokens: 35), 1_000)
     check session.usage.totalTokens == 35
     check fatPromptState.footer.barLabel == ""

@@ -94,7 +94,7 @@ names, model names, and paths where supported.
 | `:session` | show this session's ID (for `--resume=ID`) |
 | `:resume` | list this directory's sessions; `:resume ID` swaps the running 3code onto that session |
 | `:summarize` | collapse old turns into a synthetic recap |
-| `:btw Q` | ask the model a side question about the conversation; answer shown in the terminal, never enters the context |
+| `:btw Q` | ask the model a side question about the conversation; answered async under a dim `💬` block, never enters the context, its tokens added to the bar |
 | `:version` | show the running 3code version |
 | `:sandbox` / `:sb` | the sandbox state line, then the active rules when it enforces (`:sandbox show` is the same dump) |
 | `:sandbox on/off` | toggle sandbox enforcement |

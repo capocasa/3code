@@ -35,6 +35,10 @@
 <li><a href="#introduction">Introduction</a></li>
 <li><a href="#embedding">Embedding</a></li>
 <li><a href="#module-tour">Module tour</a></li>
+<li><a href="#development-guidelines">Development guidelines</a><ul>
+<li><a href="#a-system-command-must-never-block">A system command must never block</a></li>
+</ul>
+</li>
 <li><a href="#regenerating">Regenerating</a></li>
 </ul>
 </div>
@@ -58,6 +62,7 @@
 <table border="1" class="docutils"><tr><th>module</th><th>what lives there</th></tr>
 <tr><td><a class="reference external" href="dev/threecode/turns.html">turns</a></td><td>turn lifecycle orchestration</td></tr>
 <tr><td><a class="reference external" href="dev/threecode/actions.html">actions</a></td><td>tool dispatch: model tool_call JSON into Actions, then execute</td></tr>
+<tr><td><a class="reference external" href="dev/threecode/snap.html">snap</a></td><td>goal-mode tree manifest: arm at the mode, re-walk after bash, fold shell mutations into the change log</td></tr>
 <tr><td><a class="reference external" href="dev/threecode/api.html">api</a></td><td>HTTP client and SSE parsing</td></tr>
 <tr><td><a class="reference external" href="dev/threecode/session.html">session</a></td><td>session persistence in the <tt class="docutils literal"><span class="pre">.3log</span></tt> format</td></tr>
 <tr><td><a class="reference external" href="dev/threecode/config.html">config</a></td><td>config file parsing and provider/profile resolution</td></tr>
@@ -67,6 +72,11 @@
 <tr><td><a class="reference external" href="dev/threecode/display.html">display</a></td><td>transcript formatting: markdown, receipts, banners</td></tr>
 <tr><td><a class="reference external" href="dev/threecode/web.html">web</a></td><td>fetch and search helpers exposed as native tools</td></tr>
 </table><p>The root module's list also carries the newer surfaces (<tt class="docutils literal"><span class="pre">library</span></tt> for embedding, the plugin ABI, the sandbox and ACP frontends) and the long tail of wire translations, auth flows, and terminal internals.</p>
+
+<h2 id="development-guidelines">Development guidelines</h2><p>Rules that keep the interactive front ends responsive. They bind every change that adds or touches a <tt class="docutils literal"><span class="pre">:</span></tt> command.</p>
+
+<h3 id="a-system-command-must-never-block">A system command must never block</h3><p>A <tt class="docutils literal"><span class="pre">:</span></tt> command runs while the user waits at the prompt (or queued behind a running turn), so it must return immediately — no network call, no model call, no long local work on the controller or input thread. Anything slower than a file read or a config write runs on a separate thread, and its result is delivered asynchronously afterwards, exactly like a normal one: the answer is committed to scrollback whenever it lands, and the tokens it burned are added to the session ledger and the token bar (the sum of both requests), not dropped because the call was async.</p>
+<p><tt class="docutils literal"><span class="pre">:btw</span></tt> is the pattern (see <tt class="docutils literal"><span class="pre">btwthread.nim</span></tt>): the command builds its request from the live history on the controller thread (the only place the history is stable), hands plain strings to a worker, and answers with a receipt. The controller polls the job from its input wait (<tt class="docutils literal"><span class="pre">ui.deliverFinishedBtw</span></tt>) and commits the answer — dim, under the aside's own icon — between keystrokes. Synchronous-by-contract surfaces (the library's <tt class="docutils literal"><span class="pre">command()</span></tt>) are the one exception: they join the worker and fold the answer into their return value, because their whole API blocks by design.</p>
 
 <h2 id="regenerating">Regenerating</h2><p>These pages are generated, never hand edited. The doc comment in the source is the text; <tt class="docutils literal"><span class="pre">nimble devdocs</span></tt> rewrites <tt class="docutils literal"><span class="pre">docs/dev/</span></tt> from <tt class="docutils literal"><span class="pre">src/</span></tt>:</p>
 <p><pre class="listing">nimble devdocs</pre></p>
@@ -80,7 +90,7 @@ The API here is internal. It serves readers of the source and embedders who acce
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-10 12:45:28 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-18 14:34:18 UTC</small>
       </div>
     </div>
   </div>

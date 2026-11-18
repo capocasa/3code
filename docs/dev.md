@@ -55,6 +55,32 @@ The root module's list also carries the newer surfaces (`library` for
 embedding, the plugin ABI, the sandbox and ACP frontends) and the long tail
 of wire translations, auth flows, and terminal internals.
 
+## Development guidelines
+
+Rules that keep the interactive front ends responsive. They bind every
+change that adds or touches a `:` command.
+
+### A system command must never block
+
+A `:` command runs while the user waits at the prompt (or queued behind a
+running turn), so it must return immediately — no network call, no model
+call, no long local work on the controller or input thread. Anything
+slower than a file read or a config write runs on a separate thread, and
+its result is delivered asynchronously afterwards, exactly like a normal
+one: the answer is committed to scrollback whenever it lands, and the
+tokens it burned are added to the session ledger and the token bar (the
+sum of both requests), not dropped because the call was async.
+
+`:btw` is the pattern (see `btwthread.nim`): the command builds its
+request from the live history on the controller thread (the only place
+the history is stable), hands plain strings to a worker, and answers with
+a receipt. The controller polls the job from its input wait
+(`ui.deliverFinishedBtw`) and commits the answer — dim, under the aside's
+own icon — between keystrokes. Synchronous-by-contract surfaces (the
+library's `command()`) are the one exception: they join the worker and
+fold the answer into their return value, because their whole API blocks
+by design.
+
 ## Regenerating
 
 These pages are generated, never hand edited. The doc comment in the source

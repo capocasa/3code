@@ -4011,7 +4011,8 @@ commands:
                       (ID is an id, a unique id prefix, or a session name)
   :summarize          collapse old turns into a synthetic recap (meta model call)
   :btw QUESTION       ask the model a side question about this conversation;
-                      the answer shows here and never enters the context
+                      returns at once, the 💬 answer lands async and never
+                      enters the context (its tokens join the bar)
   :version            show the running 3code version
   :sandbox (:sb)      show whether the sandbox is on (adds the active
                       policy file when it enforces)

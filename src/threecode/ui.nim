@@ -13,7 +13,7 @@ import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
   auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins,
-  images, goal, screen, dirsettings
+  images, goal, screen, dirsettings, btwthread
 
 # `:computer` stays out of the list in undocumented builds so tab
 # completion, prefix resolution and typo suggestions do not advertise
@@ -2119,6 +2119,38 @@ proc imageAttachEcho*(): string =
   ## tokens attached: `@mockup.png rebuild this [image attached]`.
   if lastImageAttachments.len == 0: "" else: " [image attached]"
 
+proc deliverFinishedBtw*() =
+  ## Commit finished `:btw` side answers to scrollback. Runs on the
+  ## controller thread only, from `readInput`'s input wait — the one
+  ## window where the session state is stable (a `:btw` spawned at a
+  ## post-turn drain waits here until the running turn parks) — so the
+  ## usage accounting below can never race a live turn. A wizard modal
+  ## that owns the screen waits the answer out; the next park delivers.
+  ## Each answer
+  ## lands as its own dim 💬 quote block, and its burned tokens are
+  ## ledgered and summed onto the token bar exactly like a verifier
+  ## check's.
+  if btwJobsLive() == 0: return
+  if inputModalActive.load(moAcquire): return
+  if inputMessages == nil or inputSession == nil or inputProfile == nil:
+    return
+  var replies: seq[MetaReply]
+  pollBtw(replies)
+  for r in replies:
+    {.cast(gcsafe).}:
+      if r.answer.strip.len == 0:
+        let errBytes = errLnS(
+          "btw: no answer (the side-question call failed; see stderr)")
+        termengine.noteNonMessageTail(errBytes, inputMessages[].len)
+        commitTranscriptBytes(errBytes, restoreEditor = true)
+        continue
+      accountSideCallUsage(inputSession[], inputMessages[], r.usage,
+                           contextWindowFor(inputProfile[]))
+      let bytes = btwAnswerBytes(r.answer)
+      termengine.noteNonMessageTail(bytes, inputMessages[].len)
+      commitTranscriptBytes(bytes, restoreEditor = true,
+                            reserveFooter = true)
+
 proc readInput*(editor: var minline.LineEditor, done: var bool,
                  emptySubmit: var bool): string =
   ## Read a line submitted by the persistent input thread. The same
@@ -2132,6 +2164,10 @@ proc readInput*(editor: var minline.LineEditor, done: var bool,
   # that window already cancelled its turn and must not also quit here.
   clearSigintIdleExit()
   while true:
+    # The wait is also the delivery window for async side questions: a
+    # finished `:btw` worker lands its answer here, between keystrokes,
+    # without the prompt ever having blocked for it.
+    deliverFinishedBtw()
     if not inputThreadRunning and inputEditor != nil:
       ensureInputThreadStarted()
     var line = ""
@@ -2783,23 +2819,25 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             # The recap exists in memory; only the commit failed.
             respErr e.msg
     of ":btw":
-      # Side question about the conversation: one meta-call over the live
-      # history, answer shown here. Neither the question nor the answer
-      # enters `messages`, so the next real turn starts as if it never
-      # happened.
+      # Side question about the conversation: one meta-call over a
+      # snapshot of the live history, answered on a worker thread so the
+      # command itself returns at once — a system command never blocks
+      # the prompt. `deliverFinishedBtw` (polled from the input wait)
+      # commits the answer to scrollback under the 💬 icon and adds its
+      # burned tokens to the session and the bar. Neither the question
+      # nor the answer enters `messages`, so the next real turn starts as
+      # if it never happened.
       if arg.strip.len == 0:
         ok = false
         respErr "usage: :btw <question>"
       elif prof.name == "":
         ok = false
         respErr "no provider configured. use :provider add"
+      elif not startBtw(arg, messages, prof):
+        ok = false
+        respErr "could not start the side question"
       else:
-        let answer = askBtw(arg, messages, prof)
-        if answer.strip.len == 0:
-          ok = false
-          respErr "no answer (the side-question call failed; see stderr)"
-        else:
-          resp answer
+        resp BtwIcon & "  asked — the answer lands below when it arrives"
     else:
       ok = false
       let suggestion = nearestCommand(name)

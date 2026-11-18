@@ -2,10 +2,16 @@
 ## meta-call over the live history, the answer displayed to the user only.
 ## Neither the question nor the answer may enter `messages` — that is the
 ## whole feature — so these tests pin the payload shape, the untouched
-## history, and the command wiring against a local HTTP server.
+## history, and the command wiring against a local HTTP server. The call
+## runs on a worker thread (a system command never blocks the prompt), so
+## the tests also pin the async contract: the command returns a receipt
+## while the answer is still in flight, and the reply (answer plus burned
+## tokens) is drained from the job.
 import std/[json, strutils, unittest]
 import std/net except send
-import threecode/[compact, minline, types, ui]
+import std/atomics
+import threecode/[btwthread, compact, display, fatprompt, minline, turns,
+                  types, ui, util]
 
 when defined(posix):
   import std/posix except SocketHandle
@@ -14,6 +20,7 @@ type
   BtwSrv = ref object
     listener: Socket
     stop: bool
+    gate: Atomic[bool]  # false holds every response until the test flips it
     payloads: seq[string]  # request bodies, in arrival order
     thread: Thread[BtwSrv]  # inside the ref: the OS trampoline keeps a
                            # pointer to this object, so it must not move
@@ -56,7 +63,14 @@ proc serve(s: BtwSrv) {.thread.} =
           body.add chunk
         if body.len == 0: continue
         s.payloads.add body
-        let reply = """{"choices":[{"message":{"role":"assistant","content":"SIDE ANSWER"}}]}"""
+        # Gate: the test releases the response to observe the command
+        # returning while the answer is still in flight. Bounded so a
+        # forgotten flip cannot wedge the suite.
+        var waited = 0
+        while not s.gate.load(moAcquire) and waited < 10_000:
+          discard sleep(5)  # posix sleep (re-exported here) returns cint
+          inc waited, 5
+        let reply = """{"choices":[{"message":{"role":"assistant","content":"SIDE ANSWER"}}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"""
         send(client, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
           "Content-Length: " & $reply.len & "\r\nConnection: close\r\n\r\n" &
           reply)
@@ -69,6 +83,7 @@ type BtwHarness = tuple[srv: BtwSrv, prof: Profile]
 
 proc startBtwSrv(): BtwHarness =
   let s = BtwSrv(listener: newSocket())
+  s.gate.store(true, moRelease)
   s.listener.setSockOpt(OptReuseAddr, true)
   s.listener.bindAddr(Port(0), "127.0.0.1")
   s.listener.listen()
@@ -117,14 +132,19 @@ suite ":btw side questions":
     let r = handleCommandResult(":btw why?", messages, session, prof, editor)
     check r.recognized and not r.ok
     check "no provider configured" in r.body
+    check btwJobsLive() == 0
 
   test "askBtw payload: aside prompt, live history, trailing question":
     let h = startBtwSrv()
     defer: stopBtwSrv(h)
     var messages = history()
     let before = $messages
-    let answer = askBtw("what did foo.nim have?", messages, h.prof)
-    check answer == "SIDE ANSWER"
+    let reply = askBtw("what did foo.nim have?", messages, h.prof)
+    check reply.answer == "SIDE ANSWER"
+    # The burned tokens come back with the answer for the session ledger.
+    check reply.usage.promptTokens == 11
+    check reply.usage.completionTokens == 7
+    check reply.usage.totalTokens == 18
     # The live conversation is the caller's, byte for byte.
     check $messages == before
     check h.srv.payloads.len == 1
@@ -159,9 +179,13 @@ suite ":btw side questions":
     let sent = parseJson(h.srv.payloads[0])
     check sent{"reasoning_effort"}.getStr == "high"
 
-  test "command path answers without touching messages":
+  test "command returns at once; the answer arrives when the worker lands":
+    # The dev-guidelines contract: a system command never blocks. The
+    # server holds its response; the command must already have returned
+    # its receipt, with the question in flight on a worker thread.
     let h = startBtwSrv()
     defer: stopBtwSrv(h)
+    h.srv.gate.store(false, moRelease)
     var messages = history()
     var session = Session()
     var prof = h.prof
@@ -170,8 +194,18 @@ suite ":btw side questions":
                                 session, prof, editor)
     check r.recognized and r.ok
     check r.name == "btw"
-    check "SIDE ANSWER" in r.body
-    # The contract: no question, no answer, nothing new in the context.
+    check "SIDE ANSWER" notin r.body
+    check BtwIcon in r.body
+    check btwJobsLive() == 1
+    h.srv.gate.store(true, moRelease)
+    var replies: seq[MetaReply]
+    waitBtw(replies, 10_000)
+    check btwJobsLive() == 0
+    check replies.len == 1
+    check replies[0].answer == "SIDE ANSWER"
+    check replies[0].usage.totalTokens == 18
+    # The contract: no question, no answer, nothing new in the context —
+    # before and after delivery alike.
     check messages.len == 3
     check messages[0]{"content"}.getStr == "sysprompt"
     check messages[^1]{"content"}.getStr == "foo.nim has 3 procs"
@@ -180,3 +214,34 @@ suite ":btw side questions":
     let sent = parseJson(h.srv.payloads[0])
     check sent["messages"].len == 4
     check sent["messages"][^1]{"content"}.getStr == "what did foo.nim have?"
+
+  test "the aside's tokens land on the session and the summed bar":
+    # The turn's own call spent 100/20 (already ledgered, carried inline
+    # by the last assistant message); the aside spends 11/7 more. The bar
+    # the session rests on is the SUM of both requests, not the aside's
+    # numbers in place of the turn's.
+    var session: Session
+    session.savePath = ""
+    session.usage = Usage(promptTokens: 100, completionTokens: 20,
+      totalTokens: 120, cachedTokens: 0)
+    var messages = %*[
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "done",
+       "usage": {"promptTokens": 100, "completionTokens": 20,
+                  "totalTokens": 120, "cachedTokens": 0}}]
+    accountSideCallUsage(session, messages,
+      Usage(promptTokens: 11, completionTokens: 7, totalTokens: 18), 1_000)
+    check session.usage.promptTokens == 111
+    check session.usage.completionTokens == 27
+    check session.usage.totalTokens == 138
+    check fatPromptState.footer.barLabel ==
+      contextLabel(111, 1_000) & "  ↑111  ↓27"
+    check fatPromptState.footer.restingLabel == contextLabel(111, 1_000)
+
+  test "the answer renders as a dim icon-led quote block":
+    let bytes = btwAnswerBytes("first line\nsecond line")
+    check bytes.contains(BtwIcon)
+    check bytes.contains(GreyFg)
+    check "first line" in bytes
+    check "second line" in bytes
+    check btwAnswerBytes("   ") == ""
