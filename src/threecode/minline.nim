@@ -2619,7 +2619,7 @@ proc isearchAccept(ed: var LineEditor) =
 
 proc isearchAbort(ed: var LineEditor) =
   ## End the search restoring the exact pre-search buffer, cursor, and
-  ## history view (readline C-g, or any key the search does not own).
+  ## history view (readline C-g).
   ed.isearchActive = false
   ed.line.text = ed.isearchSavedText
   ed.line.position = ed.isearchSavedPos
@@ -4269,9 +4269,11 @@ proc handleIsearchKey(ed: var LineEditor; c1: int): bool =
     ed.isearchQuery.add buf
     isearchQueryChanged(ed)
     return true
-  # Anything else ends the search (restoring the pre-search state) and
-  # then acts on the buffer itself.
-  isearchAbort(ed)
+  # Anything else ends the search keeping the shown match, then acts
+  # on the buffer itself: readline terminates on any unowned control
+  # key (ENDSRCH_CHAR) and re-executes it, so Right/Left recall the
+  # match for editing instead of snapping back to the draft.
+  isearchAccept(ed)
   return false
 
 proc readLineWith*(ed: var LineEditor, prompt: string,
