@@ -5,6 +5,8 @@
 ## patch, apply_patch, bash) with a ReadCache, like the live turn loop.
 
 import std/[json, os, sets, strutils, tables, tempfiles, times, unittest]
+when defined(posix):
+  import std/posix
 import threecode/[types, actions]
 import threecode/goal except Usage
 import threecode/snap
@@ -240,6 +242,25 @@ suite "working-tree manifest (goal-mode COW snapshot)":
       discard runAction(act(akBash,
         cmd = "bash -c 'echo y > node_modules/pkg/junk.js'"), cache)
       check cache.changes.len == 0
+
+  test "specials never enter the manifest: a leftover fifo cannot hang the fold":
+    ## A fifo in the tree is ordinary debris (the still repo's own test
+    ## suite leaves one in build/tests). The fold reads what the walk
+    ## records, and opening a fifo read-only blocks until a writer
+    ## appears - a recorded fifo bricks the session with no cancel
+    ## watcher in sight, so specials must stay out of the walk entirely.
+    when defined(posix):
+      withLogDir proc (dir: string) =
+        writeFile("f.txt", "x\n")
+        doAssert posix.mkfifo("pre.pipe".cstring, Mode(0o644)) == 0
+        let cache = newReadCache()
+        check armManifest(cache, ".")
+        check "pre.pipe".absolutePath notin cache.manifest
+        discard runAction(act(akBash, cmd = "bash -c 'mkfifo pipe'"), cache)
+        check "pipe".absolutePath notin cache.manifest
+        check cache.changes.len == 0
+    else:
+      skip()
 
   test "syncManifest arms with the mode and disarms without it":
     withLogDir proc (dir: string) =
