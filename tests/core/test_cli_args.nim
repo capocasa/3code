@@ -421,6 +421,93 @@ suite "cli --config switch":
     let r = run(["-h"])
     check r.code == 2
     check "--config FILE" in r.o
+    check "--config-clear" in r.o
+
+suite "cli config layer stack":
+  # Repeatable -c and the -C clear. Same observable as the --config
+  # suite: a layer that sets `current` without a [provider] section
+  # dies naming the file that contributed it, which only happens when
+  # the file was actually read. The isolated XDG root carries a user
+  # config with a current of its own, so a run that ignores it (a
+  # missing -c layer, or the empty -C stack) reaches the wizard
+  # instead of dying — the suppression side of each rule.
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-cli-stack-" & $getCurrentProcessId() & "deny" &
+                          $epochTime().int64)
+    createDir(tmp / "xdg" / "3code")
+    writeFile(tmp / "xdg" / "3code" / "config",
+      "[settings]\ncurrent = \"user.pin\"\n")
+
+  teardown:
+    if dirExists(tmp): removeDir(tmp)
+
+  proc runIn(flags: string): tuple[o: string, code: int] =
+    let env = newStringTable({"XDG_DATA_HOME": tmp,
+                               "XDG_CONFIG_HOME": tmp / "xdg"})
+    let (outp, code) = execCmdEx(binPath().quoteShell & " " & flags,
+                                 {poStdErrToStdOut, poUsePath, poDaemon},
+                                 env, tmp)
+    result = (outp.strip(), code)
+
+  proc layer(name, current: string) =
+    writeFile(tmp / name, "[settings]\ncurrent = \"" & current & "\"\n")
+
+  test "-c twice: the later file wins":
+    layer("a", "a.m")
+    layer("b", "b.m")
+    let r = runIn("-c " & (tmp / "a").quoteShell &
+                  " -c " & (tmp / "b").quoteShell)
+    check r.code == 3
+    check (tmp / "b") in r.o
+    check (tmp / "a") notin r.o
+
+  test "-C resets: -c a -C b reads only b":
+    layer("a", "a.m")
+    layer("b", "b.m")
+    let r = runIn("-c " & (tmp / "a").quoteShell &
+                  " -C " & (tmp / "b").quoteShell)
+    check r.code == 3
+    check (tmp / "b") in r.o
+    check (tmp / "a") notin r.o
+
+  test "-C a -c b keeps both layers":
+    layer("a", "a.m")
+    layer("b", "b.m")
+    let r = runIn("-C " & (tmp / "a").quoteShell &
+                  " -c " & (tmp / "b").quoteShell)
+    check r.code == 3
+    check (tmp / "b") in r.o
+
+  test "a missing later layer falls back to the earlier one":
+    layer("a", "a.m")
+    let r = runIn("-c " & (tmp / "a").quoteShell &
+                  " -c " & (tmp / "gone").quoteShell)
+    check r.code == 3
+    check (tmp / "a") in r.o
+
+  test "bare -C is the first-run state":
+    let r = runIn("-C")
+    check r.code == 3
+    check "no [provider] section" notin r.o
+
+  test "-C also drops the user global":
+    layer("a", "a.m")
+    let r = runIn("-C " & (tmp / "a").quoteShell)
+    check r.code == 3
+    check (tmp / "a") in r.o
+    check "user.pin" notin r.o
+
+  test "--config-clear=FILE form works":
+    layer("a", "a.m")
+    let r = runIn("--config-clear=" & (tmp / "a").quoteShell)
+    check r.code == 3
+    check (tmp / "a") in r.o
+
+  test "a bare -C before the prompt is not a usage error":
+    let r = runIn("-C")
+    check r.code != 2
 
 suite "cli syntax errors do no startup work":
   # All argument parsing and syntax validation must complete and bail before

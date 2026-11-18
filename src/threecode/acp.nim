@@ -361,7 +361,9 @@ proc acpMain*(args: seq[string]): int =
       of cmdLongOption, cmdShortOption:
         case key
         of "model", "m": model = val
-        of "config", "c": configPathOverride = val
+        # Config flags were applied to the stack by the main entry's
+        # applyConfigFlags before dispatch; accept and ignore here.
+        of "config", "c", "config-clear", "C": discard
         of "debug": debug = true
         of "experimental": types.experimentalEnabled = true
         else:

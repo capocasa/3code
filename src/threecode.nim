@@ -93,7 +93,7 @@ proc expandAttachedValues(args: seq[string]): seq[string] =
   ## listed with a value belongs in `valueOpts`, plus the short forms of
   ## value-taking options registered by plugins (known by the time this
   ## runs: plugins register their CLI surface before argv is parsed).
-  let valueOpts = {'m', 's', 'c', 'r'} + pluginCliValueShorts()
+  let valueOpts = {'m', 's', 'c', 'C', 'r'} + pluginCliValueShorts()
   for a in args:
     var expanded = false
     if a.len > 2 and a[0] == '-' and a[1] != '-':
@@ -121,8 +121,12 @@ proc usage() {.noreturn.} =
                                   # (--headless/--gui must be the first argument)
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
-  -c, --config FILE    read providers and settings from FILE
-                      (default: the config: path shown below)
+  -c, --config FILE    read providers and settings from FILE instead of
+                      the user config; repeatable, later files win per key
+  -C, --config-clear [FILE]
+                      clear the config stack (user config and project
+                      .3code/config are not read), then read FILE if given;
+                      later -c layers stack on top of it
   -r, --resume[=ID]    resume latest session from this directory, or one by
                       id, unique id prefix, or name (set with :rename)
                       (value options take -r ID | -rID | -r=ID | -r:ID | --resume=ID;
@@ -369,6 +373,12 @@ proc main() =
   # confined child. `box` stays as a hidden alias for binaries already
   # running under the old name.
   let rawParams = commandLineParams()
+  # The config layer stack (-c / -C) is applied from the raw argv once,
+  # before any dispatch: every subcommand, frontend, and parser below
+  # (provider, --headless, --rpc, --acp, the main getopt loop) consumes
+  # the tokens without touching the state, so they can never disagree
+  # about the stack the way the old first-vs-last pre-scans did.
+  applyConfigFlags(rawParams)
   # All the early-dispatch subcommands below run with redirected or
   # piped stdio (box children, the stdio relay, elevated setup); their
   # exit procs must not splice terminal-restore escapes into the stream.
@@ -421,25 +431,11 @@ proc main() =
   refuseRoot()
   # Plugins register their CLI surface (subcommands, options) at load,
   # so they load before argv is parsed — much earlier than their hooks
-  # used to fire. A tolerant config read first so `[plugins] disable`
+  # used to fire. A tolerant stack read first so `[plugins] disable`
   # and `lib` gate this load exactly as the late one did; the full
-  # (dying) config parse still runs later at its old spot. The `-c`
-  # pre-scan honors an explicit config file for that gating; the
-  # provider block and the main parser re-read and re-verify it.
-  block:
-    var i = 0
-    while i < rawParams.len:
-      case rawParams[i]
-      of "-c", "--config":
-        if i + 1 < rawParams.len:
-          if configPathOverride == "": configPathOverride = rawParams[i + 1]
-          inc i
-      else:
-        if rawParams[i].startsWith("--config=") and configPathOverride == "":
-          configPathOverride = rawParams[i][9 ..^ 1]
-      inc i
-    discard tryLoadStateOrEmpty(configPath())
-    pluginsDiscoverAndLoad()
+  # (dying) config parse still runs later at its old spot.
+  discard tryLoadStackOrEmpty()
+  pluginsDiscoverAndLoad()
   # Headless frontends: `--headless` runs turns with zero output,
   # `--gui` keeps the process alive for a plugin's in-process GUI
   # (both see headless.nim). Dispatched here, after the load above: a
@@ -461,11 +457,12 @@ proc main() =
     while i < rawParams.len:
       case rawParams[i]
       of "-c", "--config":
+        # Already applied to the stack by applyConfigFlags; skip the
+        # pair so the operand never reaches providerMain as a word.
         if i + 1 >= rawParams.len:
           if rawParams[0] == "provider":
             die("option " & rawParams[i] & " requires a value", ExitUsage)
           break
-        configPathOverride = rawParams[i + 1]
         inc i
       of "-x", "--experimental":
         experimentalEnabled = true
@@ -481,8 +478,7 @@ proc main() =
       inc i
     if isProvider:
       var colorKeys: Table[string, string]
-      (activeCurrent, activeProviders, colorKeys) =
-        loadStateOrEmpty(configPath())
+      (activeCurrent, activeProviders, colorKeys) = loadStackOrEmpty()
       quit(providerMain(rest))
 
   startupTrace("early-dispatch-done")
@@ -539,8 +535,13 @@ proc main() =
         if v != "": sessionOut = v
         else: pending = "session"
       of "c", "config":
-        if v != "": configPathOverride = v
-        else: pending = "config"
+        # Stack applied up front by applyConfigFlags; the token only
+        # keeps its operand out of the prompt words.
+        if v == "": pending = "config"
+      of "C", "config-clear":
+        # Optional operand: an unconsumed pending at the end is a bare
+        # clear, not a usage error (same tolerance as -r).
+        if v == "": pending = "config-clear"
       of "r", "resume":
         resume = true
         if v != "": resumeId = v
@@ -582,8 +583,7 @@ proc main() =
       elif pending == "session":
         sessionOut = k
         pending = ""
-      elif pending == "config":
-        configPathOverride = k
+      elif pending == "config" or pending == "config-clear":
         pending = ""
       elif pending == "page":
         pageOpt = k
@@ -613,7 +613,7 @@ proc main() =
   # usage error.
   if pending.startsWith("plugin:"):
     die("option --" & pending[7 ..^ 1] & " requires a value", ExitUsage)
-  if pending != "" and pending != "resume":
+  if pending != "" and pending != "resume" and pending != "config-clear":
     die("option --" & pending & " requires a value", ExitUsage)
   if pageOpt != "":
     try: page = parseInt(pageOpt)
@@ -748,7 +748,8 @@ proc main() =
   # parse (which happens after the locks); pull the two switches they
   # consult forward so `sandbox_wall_warn = off` works on the first
   # print. The full parse re-applies them unchanged.
-  applyEarlySandboxSettings(configPath())
+  for layerPath in configReadPaths():
+    applyEarlySandboxSettings(layerPath)
   # Directory-specific settings overlay: a `.3code/config` in the
   # session dir (or any parent, nearest wins) may tighten the sandbox
   # switches (an off sandbox can be turned on) but never weaken them,
@@ -840,7 +841,7 @@ proc main() =
   api.extraHeadersHook = extraHeadersFor
 
   var activeColorKeys: Table[string, string]
-  (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
+  (activeCurrent, activeProviders, activeColorKeys) = loadStackOrEmpty()
   # Re-apply the directory overlay after the full parse (it re-applies
   # the user config's own switches, which would otherwise undo a
   # directory's `sandbox = off`), then the per-directory sticky current:
@@ -860,7 +861,8 @@ proc main() =
     # with "already configured" (the wizard's ledger check reads the same
     # `current`). Diagnose the config instead of pretending it's a first
     # run.
-    die(configPath() & ": no [provider] section; add one or remove " &
+    let origin = if currentOriginLayer != "": currentOriginLayer else: configPath()
+    die(origin & ": no [provider] section; add one or remove " &
         "'current' from [settings]", ExitConfig)
   # Resolve the real mode now that `[settings] mode` has been read: detect
   # the terminal background unless the config pinned a palette. The palette

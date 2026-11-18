@@ -281,11 +281,11 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   # then tc_register_config defaults are in the table by the time the
   # real parse below applies them. In a CLI/headless run the load
   # already happened at argv time and both calls are no-ops.
-  discard tryLoadStateOrEmpty(configPath())
+  discard tryLoadStackOrEmpty()
   pluginsDiscoverAndLoad()
 
   var colorKeys: Table[string, string]
-  (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
+  (activeCurrent, activeProviders, colorKeys) = loadStackOrEmpty()
   # Directory-specific overlay (`.3code/config` in the session dir or
   # any parent, nearest wins) — applied after the full parse so the
   # user config's own switches land first. Project stores may only

@@ -12,20 +12,23 @@ proc withVerifierState(body: proc ()) =
   ## The verifier knobs and the provider list are process globals; pin
   ## them for the test and put the default back whatever the body did.
   let (savedOn, savedSpec, savedProviders, savedCurrent,
-       savedOverride) = (verifierEnabled, verifierModelSpec,
-    activeProviders, activeCurrent, configPathOverride)
+       savedLayers, savedCleared) = (verifierEnabled, verifierModelSpec,
+    activeProviders, activeCurrent, configLayers, configCleared)
   verifierEnabled = false
   verifierModelSpec = ""
   activeProviders = @[]
   activeCurrent = ""
-  configPathOverride = getTempDir() / "3code-test-verifier.ini"
-  removeFile(configPathOverride)
+  # Isolate the write target like the old configPathOverride pin did:
+  # a bare clear plus one layer reads and writes exactly this file.
+  clearConfigLayers(getTempDir() / "3code-test-verifier.ini")
+  removeFile(configPath())
   body()
   verifierEnabled = savedOn
   verifierModelSpec = savedSpec
   activeProviders = savedProviders
   activeCurrent = savedCurrent
-  configPathOverride = savedOverride
+  configLayers = savedLayers
+  configCleared = savedCleared
   removeFile(getTempDir() / "3code-test-verifier.ini")
 
 let OpenRouter = ProviderRec(name: "openrouter",
