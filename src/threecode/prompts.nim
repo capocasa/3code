@@ -172,6 +172,19 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("neuralwatt", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("neuralwatt", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
 
+    # relace (models.relace.ai/v1): Relace hosts their preferred
+    # open-weight coding line (GLM, DeepSeek, Kimi) behind one key, all
+    # 1M context, with openrouter-style namespaced ids (`z-ai/glm-5.3`).
+    # The request schema is open (additionalProperties pass through),
+    # so the generic hosted-stack reasoning knobs apply: 5.3 and
+    # 5.3-flash take top-level reasoning_effort, 5.2 rides the server
+    # default with no wire param. Their purpose-built apply/search/
+    # compact models live on separate endpoints, not chat, so only the
+    # hosted open weights are curated here.
+    ("relace", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("relace", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("relace", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
+
     # gpt-oss
     ("baseten", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
     ("cerebras", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false, false),
@@ -291,6 +304,16 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "deepseek/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
     ("openrouter", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("openrouter", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
+    # relace serves the dated V4 snapshots in both flash and pro lines;
+    # the 0423 pro id carries no date on the wire (it is the preview
+    # build). V4.1-Flash keeps vision (the weights are multimodal);
+    # the -1017 snapshot stays unmarked like the other dated gateways.
+    ("relace", "deepseek-ai/DeepSeek-V4-Flash-0423", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("relace", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
+    ("relace", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("relace", "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
+    ("relace", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
+    ("relace", "deepseek-ai/DeepSeek-V4.1-Flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("together", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true, false),
 
     # gemini (Google first-party; bare model ids on the OpenAI-compatible
@@ -451,6 +474,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("openrouter", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
     ("nebius", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false, false),
+    ("relace", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false, false),
 
     # longcat
     ("longcat", "LongCat-2.0", "longcat", "2", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false, false),
