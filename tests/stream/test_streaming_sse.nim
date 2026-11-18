@@ -118,6 +118,24 @@ proc makeSseMidStreamError(message, id: string; code = 502): string =
     "error":{"code":code,"message":message},
     "choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]} & "\n\n"
 
+proc makeSseTruncatedContent(text, id: string): string =
+  ## Content deltas, then the server just closes: NO finish_reason, NO
+  ## [DONE], NO usage. The exact shape of a proxy/LB cutting a healthy
+  ## reply mid-sentence (seen live: half a sentence painted, then the
+  ## turn ended and the prompt came back as if the model had finished).
+  result = "data: " & $ %*{"choices":[{"index":0,"delta":{"content":text}}],"id":id} & "\n\n"
+  # NO finish_reason, NO [DONE], NO usage — truncated
+
+proc makeSseContentUsageNoFinish(text, id: string): string =
+  ## Content delta, then a usage chunk, then clean EOF: NO finish_reason
+  ## and NO [DONE]. Some gateways end exactly this way after billing —
+  ## usage delivered means the turn completed, so the truncation guard
+  ## must NOT flag it (the false-positive class that got the original
+  ## May-2026 guard disabled).
+  result = "data: " & $ %*{"choices":[{"index":0,"delta":{"content":text}}],"id":id} & "\n\n"
+  result.add("data: " & $ %*{"choices":[],"id":id,
+    "usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}} & "\n\n")
+
 proc makeSseMidStreamErrorAfterContent(content, message, id: string; code = 502): string =
   ## Mid-stream error after some content was already streamed: a content
   ## delta, then the error chunk. The partial content must NOT be returned
@@ -369,6 +387,30 @@ proc serveRetryable(server: SseServer) {.thread.} =
       discard  # dead re-dialing client (the RST race): serve its re-dial
     client.close()
 
+proc serveRetrySecondResponse(server: SseServer) {.thread.} =
+  ## Connection 1 gets `response`, every later connection gets
+  ## `secondResponse` until the test flips `done`: the wire shape of a
+  ## truncated-then-retried stream — first attempt cut mid-response, the
+  ## resend answered in full.
+  var round = 0
+  while true:
+    var client: Socket
+    if not server.acceptUntilDone(client): return
+    let contentLength = client.readRequestHead()
+    let body = if round == 0: server.response else: server.secondResponse
+    let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+    try:
+      client.send(resp)
+      let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
+      client.send(chunk)
+      client.send("0\r\n\r\n")
+      discard client.drainRequestBody(contentLength)
+      server.served.store(round + 1, moRelease)
+    except CatchableError:
+      discard  # dead re-dialing client (the RST race)
+    client.close()
+    inc round
+
 proc url(server: SseServer): string =
   # Bare endpoint like production provider urls; the transport appends
   # /chat/completions (or /responses) itself.
@@ -397,18 +439,73 @@ suite "streaming SSE tool-call accumulation":
     server.socket.close()
     closeCachedStreamConn()
 
-  test "truncated tool_call mid-stream (no finish_reason)":
+  test "truncated tool_call mid-stream (no finish_reason) retries, returns the complete call":
+    # First connection cuts the tool_call arguments mid-stream (no
+    # finish_reason, no [DONE], no usage); the resend answers in full.
+    # The truncation guard must flag attempt 1 as a retryable transport
+    # error so callModel resends instead of executing a tool with partial
+    # JSON arguments (the June-2026 silent-partial regression).
+    resetRetryLevels()
+    patientRetryEnabled = false
+    defer: patientRetryEnabled = true
     let server = newSseServer(makeSseTruncatedToolDelta("echo TRUNCATED", "id-2", cutAfter = 12))
+    server.secondResponse = makeSseToolDeltas("echo COMPLETE_ARGS", "id-2b")
+    var srv: Thread[SseServer]
+    createThread(srv, serveRetrySecondResponse, server)
+    var usage = Usage()
+    let result = callModel(testProfile(server), %*[{"role": "user", "content": "run echo TRUNCATED"}], usage, 0)
+    check result != nil
+    check result{"tool_calls"}.len == 1
+    let args = result{"tool_calls"}[0]{"function"}{"arguments"}.getStr()
+    check args == "{\"command\":\"echo COMPLETE_ARGS\"}"
+    check server.served.load(moAcquire) >= 2  # truncated attempt + resend
+    server.done.store(true, moRelease)
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "truncated plain content retries, returns the complete reply":
+    # The observed live failure: a text reply cut mid-sentence (no
+    # finish_reason, no [DONE], no usage) used to come back as a complete
+    # assistant turn — half an answer, then the prompt. Now it retries and
+    # the user gets the whole reply.
+    resetRetryLevels()
+    patientRetryEnabled = false
+    defer: patientRetryEnabled = true
+    let server = newSseServer(makeSseTruncatedContent(
+      "Booting. Polling until the guest agent", "id-tr-1"))
+    server.secondResponse = makeSseCompleteContent(
+      "Booting. Polling until the guest agent answers: done.", "id-tr-2")
+    var srv: Thread[SseServer]
+    createThread(srv, serveRetrySecondResponse, server)
+    var usage = Usage()
+    let result = callModel(testProfile(server), %*[{"role": "user", "content": "poll"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr() ==
+      "Booting. Polling until the guest agent answers: done."
+    check server.served.load(moAcquire) >= 2
+    server.done.store(true, moRelease)
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "usage without [DONE]/finish_reason counts as complete":
+    # Guard against the false-positive class that got the original guard
+    # disabled: a gateway that closes after the usage chunk, never sending
+    # finish_reason or [DONE]. Usage delivered = turn complete; the reply
+    # must come through on the first attempt, no retry.
+    resetRetryLevels()
+    patientRetryEnabled = false
+    defer: patientRetryEnabled = true
+    let server = newSseServer(makeSseContentUsageNoFinish(
+      "complete via usage", "id-u1"))
     var srv: Thread[SseServer]
     createThread(srv, serveThread, server)
     var usage = Usage()
-    let result = callModel(testProfile(server), %*[{"role": "user", "content": "run echo TRUNCATED"}], usage, 0)
-    # With the truncation guard disabled, the partial arguments survive into
-    # the assistant message. We assert they are partial (documents current
-    # behavior so a regression to silent-empty is caught).
-    if result != nil and result{"tool_calls"}.len > 0:
-      let args = result{"tool_calls"}[0]{"function"}{"arguments"}.getStr()
-      check args.len < "{\"command\":\"echo TRUNCATED\"}".len
+    let result = callModel(testProfile(server), %*[{"role": "user", "content": "hi"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr() == "complete via usage"
+    check usage.totalTokens == 7
     joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
@@ -1083,6 +1180,43 @@ suite "request headers (OpenCode Zen/Go contract)":
     check "\"prompt_cache_key\":\"20260903T101415\"" in server.capturedBody
     check "session_id:" notin server.capturedHeaders.join("\n")
     check usage.cachedTokens == 6
+    closeCachedStreamConn()
+
+  test "responses stream cut before response.completed retries, returns the complete reply":
+    # /responses twin of the chat-completions truncation bug: deltas
+    # arrived, then the socket died with no response.completed. The old
+    # fallback built an assistant message from the partial accumulator —
+    # half a reply handed back as finished. The transport must flag it
+    # and callModel must resend.
+    resetRetryLevels()
+    patientRetryEnabled = false
+    defer: patientRetryEnabled = true
+    let truncated = "event: response.output_text.delta\n\ndata: " &
+      $(%*{"type": "response.output_text.delta", "delta": "Half an answer"}) & "\n\n"
+    let done = "event: response.output_text.delta\n\ndata: " &
+      $(%*{"type": "response.output_text.delta", "delta": "ignored"}) & "\n\n" &
+      "event: response.completed\n\ndata: " & $(%*{
+        "type": "response.completed",
+        "response": {"status": "completed",
+          "output": [{"type": "message",
+            "content": [{"type": "output_text", "text": "The whole answer"}]}],
+          "usage": {"input_tokens": 10, "output_tokens": 2,
+            "total_tokens": 12}}}) & "\n\n" &
+      "data: [DONE]\n\n"
+    let server = newSseServer(truncated)
+    server.secondResponse = done
+    var srv: Thread[SseServer]
+    createThread(srv, serveRetrySecondResponse, server)
+    var usage: Usage
+    let p = Profile(name: "openai.gpt-5.6", url: server.url,
+                    key: "test-key", model: "gpt-5.6", family: "gpt")
+    let result = callModel(p, %*[{"role": "user", "content": "hi"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr() == "The whole answer"
+    check server.served.load(moAcquire) >= 2
+    server.done.store(true, moRelease)
+    joinThread(srv)
+    server.socket.close()
     closeCachedStreamConn()
 
 # ---------------------------------------------------------------------------
