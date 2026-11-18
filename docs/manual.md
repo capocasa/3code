@@ -1291,10 +1291,13 @@ context:
 :btw why did we skip the cache in that last change?
 ```
 
-The question and its answer are printed to your terminal only. Neither
-becomes a message: the next turn the model sees is exactly the conversation
-you had before asking, so a `:btw` costs no context window (only the one
-meta-call it took to answer).
+The command returns at once — the answer runs on a background request and
+lands under a dim `💬` block as soon as it arrives, so the prompt never
+waits for it. The question and its answer are printed to your terminal
+only. Neither becomes a message: the next turn the model sees is exactly
+the conversation you had before asking, so a `:btw` costs no context window
+— but its burned tokens are real spend: they are added to the session and
+the token bar shows the sum of both requests.
 
 ## Chunked mode
 

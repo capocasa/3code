@@ -217,15 +217,29 @@ const
   BtwMaxTokens* = 8192
   BtwSystemPrompt* = """You are answering a side question ("btw") about an ongoing coding session. The messages below are the conversation so far, followed by the user's question as the final user message. Answer that question from the conversation's content. Be brief and direct; no filler, no follow-up questions. This exchange is a private aside: it never enters the conversation, so the next real turn will not have seen it."""
 
-proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
-                  trailingUser: string, maxTokens: int,
-                  label: string): string =
-  ## Fires a single non-streaming meta-call to the model with a dedicated
-  ## system prompt and no tools, over the live history plus an optional
-  ## trailing user message. `messages` is read-only here: the payload is
-  ## a copy, so the call leaves the live conversation untouched. Returns
-  ## "" on any failure.
-  if p.name == "" or p.url == "" or p.key == "" or p.model == "": return ""
+type
+  MetaRequest* = object
+    ## One meta-call reduced to plain strings: everything the wire step
+    ## needs and nothing that carries a GC'd ref across a thread. Built on
+    ## the caller's thread (where the live history is readable); the POST
+    ## itself may then run anywhere — the synchronous summarizer path runs
+    ## it inline, `:btw` hands it to a worker (see btwthread.nim).
+    endpoint*: string
+    body*: string          ## serialized request body
+    authKey*: string
+    sessionHeader*: string  ## x-opencode-session value; "" sends none
+    responses*: bool       ## parse shape: output[] (Responses) vs choices[]
+  MetaReply* = tuple[answer: string, usage: Usage]
+
+proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
+                       trailingUser: string, maxTokens: int): MetaRequest =
+  ## Assembles the payload and wire shape of a single non-streaming
+  ## meta-call with a dedicated system prompt and no tools, over the live
+  ## history plus an optional trailing user message. `messages` is
+  ## read-only here: the payload is a copy, so the build leaves the live
+  ## conversation untouched. Returns `endpoint == ""` when the profile is
+  ## not usable (no provider/model configured).
+  if p.name == "" or p.url == "" or p.key == "" or p.model == "": return
   # Build a trimmed payload: the meta prompt + every non-system message
   # from the live conversation (+ the trailing question). Tool_call
   # messages are allowed — most OpenAI-compatible providers accept them
@@ -241,8 +255,6 @@ proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
       payload.add m
   if trailingUser.len > 0:
     payload.add %*{"role": "user", "content": trailingUser}
-  when defined(providerStub):
-    return stubNextSummarizerReply(payload)
   # Copy before mutation: `messages` is the live history; payload entries
   # share its JsonNode refs, so deleting fields below must not hit it.
   var payload2 = newJArray()
@@ -277,7 +289,6 @@ proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
   # which is why a stuck session could not even be summarized manually.
   clipSummarizerPayload(payload)
   var body: JsonNode
-  var endpoint: string
   # Same pro-slug translation as the main turn path (api.nim): the
   # first-party /responses endpoint has no gpt-5.6/6 `-pro` model ids.
   # The chatgpt twin keeps its slug (the Codex backend serves it
@@ -288,7 +299,7 @@ proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
   if useResponses:
     # Responses API (first-party openai): same role/content messages in
     # `input` (system is accepted), `max_output_tokens` budget, summary
-    # text extracted from output[] below.
+    # text extracted from output[] in `runMetaRequest`.
     body = %*{
       "model": (if proBase != "": proBase else: p.model),
       "input": payload,
@@ -298,7 +309,7 @@ proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
     # Same reasoning-effort shape responsesBody sends on the main path.
     if p.reasoning.len > 0:
       body["reasoning"] = %*{"effort": %p.reasoning}
-    endpoint = p.url & "/responses"
+    result.endpoint = p.url & "/responses"
   else:
     body = %*{
       "model": p.model,
@@ -310,7 +321,33 @@ proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
     # it a forced-thinking model (GLM-5.3 et al.) burns the meta-call's
     # whole token budget on reasoning and returns an empty answer.
     applyReasoning(p, body)
-    endpoint = p.url & "/chat/completions"
+    result.endpoint = p.url & "/chat/completions"
+  result.responses = useResponses
+  result.body = $body
+  result.authKey = p.key
+  # Same Zen/Go contract as the main transport: the summarizer is a
+  # mid-conversation call, so it rides the conversation's session id
+  # (runTurns published it); without one it mints a per-call id.
+  if providerOf(p) in ["opencode", "opencodego"]:
+    result.sessionHeader =
+      if conversationId != "": conversationId else: oneShotSessionId()
+
+proc runMetaRequest*(req: ptr MetaRequest; label: string): MetaReply =
+  ## Fires one prebuilt meta-request and parses the reply. Every input is
+  ## read through `req` (never copied into a ref the caller owns), every
+  ## allocation it makes dies on the calling thread, so this runs safely
+  ## on a worker. Returns ("", zeroed usage) on any failure; the reason
+  ## goes to stderr under `label`.
+  when defined(providerStub):
+    # Test stub: the canned-response queue serves the meta-call itself;
+    # the payload is re-parsed from the serialized body ("messages" for
+    # chat completions, "input" for Responses). The stub hands back the
+    # entry's usage with the answer so an aside's spend is accountable.
+    var stubUsage: Usage
+    let b = parseJson(req.body)
+    let payload = if b{"messages"} != nil: b{"messages"} else: b{"input"}
+    let answer = stubNextSummarizerReply(payload, stubUsage)
+    return (answer, stubUsage)
   var status = 0
   var respBody = ""
   try:
@@ -318,48 +355,57 @@ proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
                                userAgent = modelUserAgent(),
                                sslContext = bundledSslContext())
     defer: client.close()
-    client.headers["Authorization"] = "Bearer " & p.key
+    client.headers["Authorization"] = "Bearer " & req.authKey
     client.headers["Content-Type"] = "application/json"
-    # Same Zen/Go contract as the main transport: the summarizer is a
-    # mid-conversation call, so it rides the conversation's session id
-    # (runTurns published it); without one it mints a per-call id.
-    if providerOf(p) in ["opencode", "opencodego"]:
-      client.headers["x-opencode-session"] =
-        if conversationId != "": conversationId else: oneShotSessionId()
-    let resp = guardedHttp(client.request(endpoint, httpMethod = HttpPost,
-                               body = sanitizeUtf8($body)),
-                           IOError, "fetching " & endpoint)
+    if req.sessionHeader.len > 0:
+      client.headers["x-opencode-session"] = req.sessionHeader
+    let resp = guardedHttp(client.request(req.endpoint, httpMethod = HttpPost,
+                               body = sanitizeUtf8(req.body)),
+                           IOError, "fetching " & req.endpoint)
     status = resp.code.int
     respBody = resp.body
   except CatchableError as e:
     stderr.writeLine "3code: " & label & ": " & e.msg
-    return ""
+    return ("", Usage())
   if status != 200:
     stderr.writeLine "3code: " & label & ": api " & $status
-    return ""
+    return ("", Usage())
   let j = try: parseJson(respBody)
           except CatchableError as e:
             stderr.writeLine "3code: " & label & ": " & e.msg
-            return ""
+            return ("", Usage())
   if "error" in j:
     stderr.writeLine "3code: " & label & ": " & $j["error"]
-    return ""
-  if useResponses:
+    return ("", Usage())
+  if j{"usage"} != nil:
+    result.usage =
+      if req.responses: responsesUsage(j{"usage"}) else: parseUsage(j{"usage"})
+  if req.responses:
     let output = j{"output"}
-    if output == nil or output.kind != JArray: return ""
+    if output == nil or output.kind != JArray: return
     for item in output:
       if item{"type"}.getStr != "message": continue
       let parts = item{"content"}
       if parts == nil or parts.kind != JArray: continue
       for c in parts:
         if c{"type"}.getStr == "output_text":
-          result &= c{"text"}.getStr("")
+          result.answer &= c{"text"}.getStr("")
     return
   let choices = j{"choices"}
-  if choices == nil or choices.kind != JArray or choices.len == 0: return ""
+  if choices == nil or choices.kind != JArray or choices.len == 0: return
   let msg = choices[0]{"message"}
-  if msg == nil or msg.kind != JObject: return ""
-  msg{"content"}.getStr("")
+  if msg == nil or msg.kind != JObject: return
+  result.answer = msg{"content"}.getStr("")
+
+proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
+                  trailingUser: string, maxTokens: int,
+                  label: string): string =
+  ## Synchronous one-shot meta-call (the summarizer path): build on this
+  ## thread, run inline. Returns "" on any failure.
+  let req = buildMetaRequest(p, messages, systemPrompt, trailingUser,
+                             maxTokens)
+  if req.endpoint == "": return ""
+  runMetaRequest(addr req, label).answer
 
 type
   ContextAction* = enum
@@ -379,12 +425,16 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   metaCallOnce(p, messages, SummarizerSystemPrompt, "", SummarizeMaxTokens,
                "summarize")
 
-proc askBtw*(question: string, messages: JsonNode, p: Profile): string =
+proc askBtw*(question: string, messages: JsonNode, p: Profile): MetaReply =
   ## Side-channel question about the conversation: one meta-call with the
   ## live history as read-only context and the question as the final user
-  ## message. The answer comes back for display only — callers must not
-  ## append it (or the question) to `messages`.
-  metaCallOnce(p, messages, BtwSystemPrompt, question, BtwMaxTokens, "btw")
+  ## message. The answer (and the call's usage) comes back for display
+  ## only — callers must not append it (or the question) to `messages`.
+  ## `answer` is "" on any failure; `usage` is zeroed with it.
+  let req = buildMetaRequest(p, messages, BtwSystemPrompt, question,
+                             BtwMaxTokens)
+  if req.endpoint == "": return ("", Usage())
+  runMetaRequest(addr req, "btw")
 
 proc summarizeHistory*(messages: JsonNode, p: Profile,
                       keepRecent = SummarizeKeepRecent): int =

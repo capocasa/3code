@@ -153,14 +153,53 @@ suite "library: AgentSession":
 
       s.close()
 
+    test "a :btw command folds its async answer and tokens into the reply":
+      let root = newFixture("btw")
+      writeConfig(root)
+      isolateEnv(root)
+      # Two pads: the process-global stub index sits after the prompt
+      # test's two replies. Entry 2 answers the prompt (100/20), entry 3
+      # the aside (11/7, delayed 300ms so the command provably waits for
+      # its worker instead of racing it).
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "pad"}, {"content": "pad"},
+        {"content": "main reply",
+         "usage": {"promptTokens": 100, "completionTokens": 20,
+                    "totalTokens": 120, "cachedTokens": 0}},
+        {"content": "a side answer", "preStreamDelayMs": 300,
+         "usage": {"promptTokens": 11, "completionTokens": 7,
+                    "totalTokens": 18, "cachedTokens": 0}}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      check s.prompt("go") == "main reply"
+      check s.usage.totalTokens == 120
+      let spentBefore = s.usage.totalTokens
+
+      # The REPL fires this on a worker; the synchronous library contract
+      # joins it, folds the answer (icon and all) into the body, and the
+      # aside's burned tokens land on the session ledger like a main
+      # call's.
+      let body = s.command(":btw what did I say?")
+      check "asked" in body
+      check "a side answer" in body
+      check "💬" in body
+      check s.usage.totalTokens == spentBefore + 18
+      check s.usage.promptTokens == 111
+      check s.usage.completionTokens == 27
+      s.close()
+
     test "close persists a resumable session":
       let root = newFixture("resume")
       writeConfig(root)
       isolateEnv(root)
       # The stub provider's response index is process-global; pad the file
-      # with the two entries the first test consumed so the pointer lands
-      # on this test's replies.
+      # with the entries the earlier tests consumed (the prompt test's two,
+      # the aside test's two) so the pointer lands on this test's replies.
       writeFile(root / "run" / "stub_responses.json", $(%*[
+        {"content": "pad"}, {"content": "pad"},
         {"content": "pad"}, {"content": "pad"},
         {"content": "first reply"}
       ]))
@@ -175,6 +214,7 @@ suite "library: AgentSession":
 
       writeFile(root / "run" / "stub_responses.json", $(%*[
         {"content": "pad"}, {"content": "pad"}, {"content": "pad"},
+        {"content": "pad"}, {"content": "pad"},
         {"content": "second reply"}
       ]))
       let s2 = initAgentSession(AgentOptions(cwd: root / "run", resume: true,

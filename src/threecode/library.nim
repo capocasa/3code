@@ -39,8 +39,10 @@
 ## and rolls back every resource it acquired when it fails.
 
 import std/[json, os, strutils, tables, times, atomics, locks]
-import types, util, prompts, session, config, actions, api, display, ui, plugins,
-       auth_xai, auth_openai, auth_google, sandbox, minline, transcript, turns
+import types, util, prompts, session, config, actions, api, compact, display,
+       ui, plugins, auth_xai, auth_openai, auth_google, sandbox, minline,
+       transcript, turns
+import btwthread
 import dirsettings
 import fatprompt as fatruntime
 import engine as termengine
@@ -524,7 +526,22 @@ proc command*(s: AgentSession; cmd: string): string =
   let res = handleCommandResult(cmd, s.messages, s.state, s.profile, s.editor)
   if not res.recognized:
     return "unknown command: " & cmd.strip & "  (try :help)"
-  normalizeItem(res.body)
+  result = normalizeItem(res.body)
+  # A `:btw` fires on a worker thread (the REPL command never blocks);
+  # this API is synchronous by contract, so the answer is joined and
+  # folded into the returned body instead of being dropped. Its tokens
+  # are ledgered and summed onto the bar exactly as the REPL's delivery
+  # path does.
+  if btwJobsLive() > 0:
+    var replies: seq[MetaReply]
+    waitBtw(replies)
+    for r in replies:
+      if r.answer.strip.len == 0:
+        result.add "\n\nbtw: no answer (the side-question call failed)"
+        continue
+      accountSideCallUsage(s.state, s.messages, r.usage,
+                           contextWindowFor(s.profile))
+      result.add "\n\n" & normalizeItem(btwAnswerBytes(r.answer))
 
 proc interrupt*(s: AgentSession) =
   ## Cancel the in-flight turn (same mechanism as Ctrl-C in the CLI).

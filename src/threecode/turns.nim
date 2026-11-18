@@ -898,18 +898,19 @@ proc clearSubmittedReceiptState() =
   if restingLabel.len > 0:
     emitFatPromptEvent setBarEvent(restingLabel)
 
-proc accountVerifierUsage*(session: var Session; messages: JsonNode;
-                           usage: Usage; window: int) =
-  ## The verifier side call's tokens are the session's spend: account
-  ## for them exactly like a main call's — the same `+=` the turn loop
-  ## runs per model call, persisted with the session — then add them
-  ## onto the token bar's total on top of the turn's own last call, so
-  ## the bar the turn rests on includes the check instead of being
-  ## replaced by the check's own numbers (the side call paints no bar;
-  ## see hookFinalUsage's sideCallMode gate). A check that spent nothing
-  ## (failed call, test seam) changes nothing, and the check's prompt
-  ## size never reaches `lastPromptTokens`: its conversation is not the
-  ## session's, so the next main call's context gauge stays honest.
+proc accountSideCallUsage*(session: var Session; messages: JsonNode;
+                          usage: Usage; window: int) =
+  ## A side call's tokens are the session's spend (the goal-mode verifier
+  ## check, a `:btw` aside): account for them exactly like a main call's —
+  ## the same `+=` the turn loop runs per model call, persisted with the
+  ## session — then add them onto the token bar's total on top of the
+  ## turn's own last call, so the bar the session rests on is the SUM of
+  ## both requests instead of being replaced by the side call's own
+  ## numbers (the side call paints no bar; see hookFinalUsage's
+  ## sideCallMode gate). A side call that spent nothing (failed call,
+  ## test seam) changes nothing, and a side call's prompt size never
+  ## reaches `lastPromptTokens`: its conversation is not the session's,
+  ## so the next main call's context gauge stays honest.
   if usage.totalTokens <= 0: return
   session.usage.promptTokens += usage.promptTokens
   session.usage.completionTokens += usage.completionTokens
@@ -2031,7 +2032,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # ledger them and add them onto the token bar's total — the bar
       # must never end up holding the check's numbers in place of the
       # turn's.
-      accountVerifierUsage(session, messages, check.usage,
+      accountSideCallUsage(session, messages, check.usage,
                            contextWindowFor(p))
       if isInterrupted():
         onTurnInterrupted()
