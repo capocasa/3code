@@ -2942,6 +2942,12 @@ proc inputThreadProc() {.thread.} =
       if turnActive and hasText and not modal and
           (ed.line.text.startsWith(":") or isSlashHelp(ed.line.text)):
         let cmd = ed.line.text
+        # System commands are prompt-log content like any typed line:
+        # record the text now, before the command hook's commit clears
+        # the editor out from under readLineWith's own historyAdd (which
+        # then sees an empty buffer and skips). `:retry` and friends stay
+        # recallable via Up / Ctrl+R.
+        ed.historyAdd()
         pushInputEvent(InputEvent(kind: ieCommand, text: cmd))
         # Leave the editor's row model intact: whichever way the hook goes
         # (run inline now, or queue for the drain via commitQueuedEcho),
@@ -2974,6 +2980,12 @@ proc inputThreadProc() {.thread.} =
           pushInputEvent(InputEvent(kind: ieLine, text: ed.line.text))
           commitQueuedEcho(ed.line.text)
         else:
+          # Record before the push for the same reason as commands above:
+          # once the event is visible the controller's echo commit may
+          # clear the editor concurrently with readLineWith's own later
+          # historyAdd. The later add dedupes (same text) or no-ops (the
+          # buffer is clear by then), so this never double-records.
+          ed.historyAdd()
           let rows = minline.totalRows(ed.line.text, ed.promptW,
                                        ed.contPromptW, max(2, ed.width))
           pushInputEvent(InputEvent(kind: ieLine, text: ed.line.text,
