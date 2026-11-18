@@ -97,6 +97,10 @@ proc headlessMain*(args: seq[string]): int =
   privateMode = o.privateRun
   debugEnabled = o.debug
   if o.noSandbox: sandboxEnabled = false
+  # The session roots at the process cwd; a deleted one exits 3 here
+  # instead of running the agent against "/" (die is silent in headless
+  # mode — the exit code is the report).
+  requireLiveCwd()
   installInterruptHook()
 
   if o.gui:

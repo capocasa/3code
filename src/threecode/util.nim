@@ -746,6 +746,27 @@ proc safeCwd*(): string =
   try: getCurrentDir()
   except OSError: "/"
 
+proc requireLiveCwd*() =
+  ## Startup gate for every frontend that roots its session at the process
+  ## working directory (the TUI, oneshot prompts, `--headless`, `--rpc`'s
+  ## first session). When that directory was deleted or renamed away — a
+  ## terminal left in a rebuilt clone, a tmpclean sweep — Nim's
+  ## ``getCurrentDir`` raises ``OSError`` (Linux ``getcwd`` returns
+  ## ``ENOENT``), so a launch would either die mid-startup with a bare
+  ## stack trace or, via ``safeCwd``, silently re-root the session at ``/``
+  ## with the sandbox policy, dir settings and session files following the
+  ## wrong directory. Refuse with a straight message instead. The shell's
+  ## ``$PWD`` still names the vanished path, so the message can point at it
+  ## (only when that path is itself gone — a live ``$PWD`` names some other
+  ## directory and would mislead).
+  try: discard getCurrentDir()
+  except OSError:
+    let gone = getEnv("PWD")
+    die("the working directory no longer exists" &
+        (if gone.len > 0 and not dirExists(gone): " (" & gone & ")" else: "") &
+        " — change to an existing directory and start 3code again",
+        ExitConfig)
+
 func utf8ByteCut*(s: string, n: int): string =
   ## Slice `s` to at most `n` bytes, backing up to a UTF-8 codepoint
   ## boundary so the result is valid UTF-8. Strings in JSON request bodies
