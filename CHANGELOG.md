@@ -2,6 +2,22 @@ Changelog
 
 Unreleased
 
+- **Command prefixes are configurable: `system-command-prefixes`.** The
+  hardcoded `/help` synonym is gone, replaced by a general mechanism:
+  `[settings] system-command-prefixes = ": /"` makes every listed
+  character introduce commands exactly like `:` — same recognition,
+  dispatch, tab completion (the typed prefix is kept: `/he` completes to
+  `/help`, never `:help`) and unknown-command errors. Each non-whitespace
+  character of the value is one prefix, whitespace between them is
+  optional (`:/` ≡ `: /`), duplicates are ignored, and a later line
+  replaces the set; an empty value is a config error. The default `:`
+  keeps existing sessions byte-identical in behavior except one thing:
+  `/help` is no longer a built-in synonym — under the default it is
+  ordinary prompt text, like `/foo` always was, so slash-prefixed paths
+  and URLs never risk command interpretation. Users who want the slash
+  form enable `system-command-prefixes = ": /"` (`src/threecode/util.nim`
+  `colonForm` centralizes recognition; `tests/core/test_command_prefixes.nim`,
+  `tests/config/test_command_prefixes.nim`).
 - **The goal-mode snapshot landed: a cross-platform, filesystem-independent
   copy-on-write manifest replaces every git call.** The satisfaction
   check's second input used to shell out to `git status` / `git diff
