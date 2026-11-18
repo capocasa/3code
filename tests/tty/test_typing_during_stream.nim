@@ -47,11 +47,11 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "TMPDIR", val: root / "tmp"),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
+    (key: "test.stub_responses", val: responsesPath),
     # Keep the gui thread's real 80ms cadence and turn clock: the frame
     # channel stays up, but test-frame mode would freeze the elapsed
     # counter at 0, hiding exactly the stale-elapsed flicker under test.
-    (key: "THREECODE_TEST_GUI_LIVE", val: "1"),
+    (key: "test.gui_live", val: "1"),
   ]
 
 proc rawSend(s: TtySession; text: string) =

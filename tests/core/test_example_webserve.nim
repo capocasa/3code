@@ -94,13 +94,15 @@ suite "example: webserve":
     let bin = buildExample()
     let root = newFixture()
     let webPort = freePort()
+    let env = newStringTable({
+      "XDG_CONFIG_HOME": root / "xdg",
+      "XDG_DATA_HOME": root / "data",
+    })
+    mergeChildConf(childConfigFile(env),
+      test = [("stub_responses", root / "run" / "stub_responses.json")])
     var p = startProcess(bin, workingDir = root / "run",
       args = ["--port", $webPort, "-x"],
-      env = newStringTable({
-        "XDG_CONFIG_HOME": root / "xdg",
-        "XDG_DATA_HOME": root / "data",
-        "THREECODE_STUB_RESPONSES": root / "run" / "stub_responses.json",
-      }),
+      env = env,
       options = {poStdErrToStdOut, poUsePath})
     defer:
       if p.running: p.terminate()

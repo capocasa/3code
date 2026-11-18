@@ -27,6 +27,7 @@
 ## responsibility.
 
 import std/[atomics, httpclient, json, os, posix, strutils, times]
+import runtime
 import oauth, util
 
 const
@@ -125,12 +126,12 @@ proc storeProjectId*(id: string) =
     discard chmod(path.cstring, 0o600)
 
 proc projectId*(token = ""): string {.gcsafe.} =
-  ## The Code Assist project for the logged-in account: env override,
-  ## then the persisted discovery result, then a live
-  ## loadCodeAssist/onboardUser round (persisted). "" when logged out
-  ## and undiscoverable.
-  let envProject = getEnv("GOOGLE_CLOUD_PROJECT")
-  if envProject != "": return envProject
+  ## The Code Assist project for the logged-in account: the
+  ## `[settings] google_project` override, then the persisted discovery
+  ## result, then a live loadCodeAssist/onboardUser round (persisted).
+  ## "" when logged out and undiscoverable.
+  let confProject = runtime.get("google_project")
+  if confProject != "": return confProject
   let path = projectPath()
   if fileExists(path):
     let id = readFile(path).strip
@@ -186,20 +187,20 @@ proc resolveProjectId*(token: string): string {.gcsafe.} =
   client.headers = newHttpHeaders({
     "Authorization": "Bearer " & token,
     "Content-Type": "application/json"})
-  let envProject = getEnv("GOOGLE_CLOUD_PROJECT")
+  let confProject = runtime.get("google_project")
   let loadBody = %*{
-    "cloudaicompanionProject": (if envProject != "": %envProject else: newJNull()),
+    "cloudaicompanionProject": (if confProject != "": %confProject else: newJNull()),
     "metadata": {
       "ideType": "IDE_UNSPECIFIED",
       "platform": "PLATFORM_UNSPECIFIED",
       "pluginType": "GEMINI"}}
   let resp = client.post(CloudCodeApiUrl & "/v1internal:loadCodeAssist",
                          body = $loadBody)
-  if resp.code.int != 200: return envProject
-  let j = try: parseJson(resp.body) except CatchableError: return envProject
+  if resp.code.int != 200: return confProject
+  let j = try: parseJson(resp.body) except CatchableError: return confProject
   let existing = j{"cloudaicompanionProject"}.getStr("")
   if existing != "": return existing
-  if envProject != "": return envProject
+  if confProject != "": return confProject
   # No project bound: provision the free tier. onboardUser is long-running;
   # poll until done (gemini-cli waits ~5s per poll).
   let tier =

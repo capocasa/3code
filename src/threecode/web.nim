@@ -357,7 +357,7 @@ proc webSearchBrave(query: string; key: string): seq[SearchHit] =
   ## `IOError` on non-2xx.
   if key.len == 0:
     raise newException(IOError, "brave search requires a key " &
-      "(set [search] key or BRAVE_API_KEY)")
+      "(set [search] brave-key)")
   let url = "https://api.search.brave.com/res/v1/web/search?q=" &
             encodeUrl(query) & "&count=" & $SearchResultCap
   let client = newHttpClient(timeout = 30_000, userAgent = UserAgent,

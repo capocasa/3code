@@ -39,8 +39,8 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "TMPDIR", val: root / "tmp"),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
-    (key: "THREECODE_GEOMETRY_AUDIT", val: getEnv("THREECODE_GEOMETRY_AUDIT", "")),
+    (key: "test.stub_responses", val: responsesPath),
+    (key: "test.geometry_audit", val: getEnv("test.geometry_audit", "")),
   ]
 
 proc main() =

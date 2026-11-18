@@ -104,7 +104,7 @@ names, model names, and paths where supported.
 | `:sandbox ask P` | deny P, but offer a one-key approval (`f` file / `d` dir / `n` no) when a sandboxed command or a `read`/`write`/`patch`/`apply_patch` call is blocked on P |
 | `:sandbox edit` | open the policy file in `$VISUAL`/`$EDITOR`, reload on quit |
 | `:plugins` | list loaded plugin libraries, hooks, call counts, registered tools |
-| `:plugin debug on/off` | trace every plugin call to `THREECODE_DEBUG_LOG` (or stderr) |
+| `:plugin debug on/off` | trace every plugin call to `[settings] debug_log` (or stderr) |
 | `:! CMD` | run a shell command yourself, output streamed live to scrollback only |
 | `:quit` / `:q` / `:exit` | leave |
 
@@ -246,8 +246,8 @@ The `[search]` section configures the `web_search` tool.
 | key | values | meaning |
 | --- | --- | --- |
 | `engine` | `exa`/`parallel`/`brave` (default exa) | search backend. No automatic failover: the chosen engine is used as-is |
-| `exa-key` | string | Exa paid tier (Exa runs keyless otherwise); also read from `EXA_API_KEY` |
-| `brave-key` | string | required for the brave engine; also read from `BRAVE_API_KEY` |
+| `exa-key` | string | Exa paid tier (Exa runs keyless otherwise) |
+| `brave-key` | string | required for the brave engine |
 | `key` | string | legacy bare key, filed under the active engine |
 
 ### colors
@@ -288,28 +288,42 @@ in [plugins](plugins.html).
 | `debug` | `"on"` traces every plugin call with mutation diffs |
 | `lib` | extra plugin discovery directory, scanned before the defaults |
 
+### Runtime knobs in the config file
+
+3code keeps every runtime knob in the config file — it reads no
+environment variables of its own. The `[settings]` section carries the
+user-facing switches, `[plugins]` the plugin tuning:
+
+| key | section | effect |
+| --- | --- | --- |
+| `allow_root` | `[settings]` | `on` allows running as root (POSIX; refused otherwise) |
+| `debug_log` | `[settings]` | append the `-D` debug trace to this path (POSIX) |
+| `trace_file` | `[settings]` | write startup timing milestones here (startup-trace builds) |
+| `termdbg` | `[settings]` | arm terminal-model probes, logged to this path, for rendering bug reports |
+| `force_sync_output` | `[settings]` | `on` re-enables DEC 2026 synchronized repaints (off by default) |
+| `ask_timeout_ms` | `[settings]` | ask-gate wait cap in ms (default 60000) |
+| `google_project` | `[settings]` | Code Assist project id override for `geminicli`/`google` |
+| `sync_ms` | `[plugins]` | sync-hook deadline override in ms (default 2000) |
+| `tool_ms` | `[plugins]` | plugin tool-exec default timeout in ms (default 120000) |
+
+A `[test]` section exists for the test harness (stub responses, the frame
+channel ids); it changes without notice and belongs in throwaway configs,
+not a user config. The full audit of what replaced each removed
+environment variable — including the installers' and the test tooling's
+former knobs — is recorded in [env-to-config](env-to-config.html).
+
 ## Environment variables
+
+3code reads no environment variables of its own. The OS-standard ones it
+consumes:
 
 | variable | effect |
 | --- | --- |
 | `XDG_CONFIG_HOME` | relocates the config root: config file, user skills, global prompts |
 | `XDG_DATA_HOME` | relocates the data root: sessions, history, auth tokens, builtin skills |
-| `THREECODE_ALLOW_ROOT` | set to 1 to allow running as root (POSIX; refused otherwise) |
-| `THREECODE_PLUGIN_SYNC_MS` | sync-hook deadline override in ms (default 2000) |
-| `THREECODE_PLUGIN_TOOL_MS` | plugin tool-exec default timeout in ms (default 120000) |
 
 Both XDG variables work on every platform, including Windows, and expect
 absolute paths. They exist so tests and isolated setups can redirect all of
-3code's state; the platform defaults apply when they are unset.
-
-Diagnostics, useful when reporting a bug:
-
-| variable | effect |
-| --- | --- |
-| `THREECODE_DEBUG_LOG` | append the `-D` debug trace to this path (POSIX) |
-| `THREECODE_TRACE_FILE` | write startup timing milestones here (startup-trace builds) |
-| `THREECODE_TERMDBG` | arm terminal-model probes, logged to this path, for rendering bug reports |
-| `THREECODE_FORCE_SYNC_OUTPUT` | set to 1 to re-enable DEC 2026 synchronized repaints (off by default) |
-
-Variables starting with `THREECODE_TEST_` belong to the test harness and
-change without notice.
+3code's state; the platform defaults apply when they are unset. Everything
+else (PATH, HOME, TERM, DISPLAY, proxy variables for sandboxed child
+processes) is OS plumbing, not 3code configuration.

@@ -11,11 +11,20 @@ proc binPath(): string = getCurrentDir() / binName
 
 suite "wall env helper":
   test "wallEnv carries proxy vars and conditional GIT_SSH_COMMAND":
-    let e = sb.wallEnv("/x/3code", "12345", "/tmp/sock", "")
+    let dir = getTempDir() / ("3code-wallconf-" & $getCurrentProcessId())
+    createDir(dir)
+    defer: removeDir(dir)
+    let conf = sb.writeWallConf(dir, "12345", "/tmp/sock")
+    check conf == dir / "wall.conf"
+    let text = readFile(conf)
+    check "[wall]" in text
+    check "port = 12345" in text
+    check "/tmp/sock" in text
+    let e = sb.wallEnv("/x/3code", "12345", "", conf)
     var t = newStringTable()
     for (k, v) in e: t[k] = v
-    check t["WALL_PROXY_PORT"] == "12345"
-    check t["WALL_PROXY_SOCK"] == "/tmp/sock"
+    # the wall coordinates live in the [wall] file, never the env
+    for k in t.keys: check not k.startsWith("WALL_")
     check t["http_proxy"] == "http://127.0.0.1:12345"
     check t["https_proxy"] == "http://127.0.0.1:12345"
     check t["HTTP_PROXY"] == "http://127.0.0.1:12345"
@@ -28,12 +37,15 @@ suite "wall env helper":
       check t["NO_PROXY"] == ""
     else:
       check "127.0.0.1" in t["NO_PROXY"]
-    check t["GIT_SSH_COMMAND"].contains("wall connect %h %p")
+    check t["GIT_SSH_COMMAND"].contains("wall --config " & conf)
+    check t["GIT_SSH_COMMAND"].contains("connect %h %p")
     check t["GIT_SSH_COMMAND"].contains("/x/3code")
     # user-set GIT_SSH_COMMAND wins
-    let e2 = sb.wallEnv("/x/3code", "12345", "", "ssh -i /key")
+    let e2 = sb.wallEnv("/x/3code", "12345", "ssh -i /key", conf)
     for (k, v) in e2: check k != "GIT_SSH_COMMAND"
-    for (k, v) in e2: check k != "WALL_PROXY_SOCK"  # no sock on macOS shape
+    # no sock path: the conf carries the port only (macOS shape)
+    let conf2 = sb.writeWallConf(dir, "12346", "")
+    check "sock" notin readFile(conf2)
 
 when defined(posix):
   suite "wall ssh shim":
@@ -44,7 +56,9 @@ when defined(posix):
         let dir = getTempDir() / ("3code-sshshim-" & $getCurrentProcessId())
         createDir(dir)
         defer: removeDir(dir)
-        let shimDir = sb.installSshShim(dir, "/x/3code", proxied = true)
+        let wallConf = sb.writeWallConf(dir, "12345", "")
+        let shimDir = sb.installSshShim(dir, "/x/3code", proxied = true,
+                                        wallConf = wallConf)
         check shimDir == dir / "wallbin"
         let shim = readFile(shimDir / "ssh")
         check shim.startsWith("#!/bin/sh")
@@ -53,7 +67,8 @@ when defined(posix):
         # the wall config carries the tunnel plus the pw_dir repairs
         # (fence uid is 65534; see wallSshConfig)
         let cfg = readFile(shimDir / "ssh_config")
-        check "/x/3code wall connect %h %p" in cfg
+        check "/x/3code wall --config " & wallConf in cfg
+        check "connect %h %p" in cfg
         check "IdentityFile " in cfg
         check "UserKnownHostsFile " in cfg
         if fileExists(getHomeDir() / ".ssh/config"):
@@ -189,11 +204,12 @@ when defined(linux):
         unixSockPath = dir / "proxy.sock")
       defer: sw.stopWallProxy(proxy)
       let port = $int(proxy.port)
+      # the box child reads the proxy coordinates from the [wall] file
+      let wallConf = sb.writeWallConf(dir, port, dir / "proxy.sock")
       # probe: fenced `true` succeeds only when netns works
-      let probeEnv = {"WALL_PROXY_PORT": port,
-        "WALL_PROXY_SOCK": dir / "proxy.sock"}.newStringTable
-      let probe = startProcess(binPath(), args = ["sandbox", "--policy", pol,
-        "restrict", "--", "true"], env = probeEnv,
+      let probe = startProcess(binPath(), args = ["sandbox", "--config",
+        wallConf, "--policy", pol,
+        "restrict", "--", "true"],
         options = {poStdErrToStdOut})
       let probeOk = probe.waitForExit(15_000) == 0
       probe.close()
@@ -204,10 +220,11 @@ when defined(linux):
         # 1. direct TCP from inside the netns to the host echo server
         # must fail: the netns loopback has no echo server.
         # bash, not sh: /dev/tcp is a bashism (dash on CI lacks it).
-        let r1 = execCmdEx(binPath() & " sandbox --policy " & pol.quoteShell &
+        let r1 = execCmdEx(binPath() & " sandbox --config " &
+          wallConf.quoteShell & " --policy " & pol.quoteShell &
           " restrict -- bash -c " &
           "'exec 3<>/dev/tcp/127.0.0.1/" & $int(echoPort) & "' </dev/null",
-          env = probeEnv, options = {poDaemon})
+          options = {poDaemon})
         check r1.exitCode != 0
         # 2. the proxy bridge port answers inside the netns and the
         # allowlist tunnels: CONNECT via the bridge to the echo server.
@@ -220,12 +237,13 @@ when defined(linux):
         # poDaemon: the bridge inherits the box stdout pipe, so
         # execCmdEx would wait for pipe EOF (bridge exit) after sh is
         # done; poDaemon detaches the grandchildren instead.
-        let p2 = startProcess(binPath(), args = ["sandbox", "--policy", pol,
+        let p2 = startProcess(binPath(), args = ["sandbox", "--config",
+          wallConf, "--policy", pol,
           "restrict", "--", "bash", "-c",
           "exec 3<>/dev/tcp/127.0.0.1/" & port &
           "; printf \"CONNECT 127.0.0.1:" & $int(echoPort) &
           " HTTP/1.1\\r\\n\\r\\n\" >&3; head -c 20 <&3"],
-          env = probeEnv, options = {poStdErrToStdOut})
+          options = {poStdErrToStdOut})
         var buf = newString(4096)
         var out2 = ""
         var drained = false
@@ -267,8 +285,9 @@ when defined(linux):
         let script3 = "'exec 3<>/dev/tcp/127.0.0.1/" & port &
           "; printf \"CONNECT denied.example:443 HTTP/1.1\\r\\n\\r\\n\" >&3" &
           "; head -c 20 <&3'"
-        let r3 = execCmdEx(binPath() & " sandbox --policy " & pol.quoteShell &
-          " restrict -- bash -c " & script3 & " </dev/null", env = probeEnv,
+        let r3 = execCmdEx(binPath() & " sandbox --config " &
+          wallConf.quoteShell & " --policy " & pol.quoteShell &
+          " restrict -- bash -c " & script3 & " </dev/null",
           options = {poDaemon})
         check "403" in r3.output
 
@@ -299,12 +318,13 @@ when defined(linux):
           unixSockPath = dir / "proxy.sock")
         defer: sw.stopWallProxy(proxy)
         let port = $int(proxy.port)
-        let shimDir = sb.installSshShim(dir, binPath(), proxied = true)
-        var fenceEnv = {"WALL_PROXY_PORT": port,
-          "WALL_PROXY_SOCK": dir / "proxy.sock",
-          "PATH": shimDir & ":" & getEnv("PATH")}.newStringTable
+        let wallConf = sb.writeWallConf(dir, port, dir / "proxy.sock")
+        let shimDir = sb.installSshShim(dir, binPath(), proxied = true,
+                                        wallConf = wallConf)
+        var fenceEnv = {"PATH": shimDir & ":" & getEnv("PATH")}.newStringTable
         # netns probe first: skip (don't fail) without userns+netns
-        let probe = startProcess(binPath(), args = ["sandbox", "--policy",
+        let probe = startProcess(binPath(), args = ["sandbox", "--config",
+          wallConf, "--policy",
           pol, "restrict", "--", "true"], env = fenceEnv,
           options = {poStdErrToStdOut})
         let probeOk = probe.waitForExit(15_000) == 0
@@ -314,7 +334,8 @@ when defined(linux):
         else:
           # 1. allowed: the shim's tunnel must carry ssh's banner to
           # the reader on host loopback (proxy resolves/dials for us)
-          let p1 = startProcess(binPath(), args = ["sandbox", "--policy",
+          let p1 = startProcess(binPath(), args = ["sandbox", "--config",
+            wallConf, "--policy",
             pol, "restrict", "--", "ssh", "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=6",
             "-p", $srvPort, "127.0.0.1"], env = fenceEnv,
@@ -348,7 +369,8 @@ when defined(linux):
           p1.close()
           # 2. denied: the proxy refuses the SOCKS5 request and ssh
           # dies without reaching anything
-          let r2 = execCmdEx(binPath() & " sandbox --policy " &
+          let r2 = execCmdEx(binPath() & " sandbox --config " &
+            wallConf.quoteShell & " --policy " &
             pol.quoteShell & " restrict -- ssh -o StrictHostKeyChecking=no" &
             " -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 " &
             "denied.example </dev/null", env = fenceEnv,
@@ -377,7 +399,20 @@ when defined(posix):
         # default's `allow /tmp` and nothing would be fenced; the real
         # home is the one place the default leaves closed apart from
         # its named rules. Dot-prefixed and removed in the defer.
-        let base = getHomeDir() / (".3code-gitdef-" & $getCurrentProcessId())
+        # Some CI/sandbox runners mount $HOME read-only — there, fall
+        # back to a scratch tree under /tmp with the two absolute temp
+        # allows redirected into a scratch temp dir, so the home stays
+        # outside every writable root while every other default line
+        # (the `readonly ~/.gitconfig` grant and the `ask /` floor this
+        # test pins) stays verbatim.
+        var base = getHomeDir() / (".3code-gitdef-" & $getCurrentProcessId())
+        var scratchTmp = ""
+        try:
+          createDir(base)
+        except OSError:
+          base = getTempDir() / ("3code-gitdef-" & $getCurrentProcessId())
+          scratchTmp = base / "tmp"
+          createDir(scratchTmp)
         let home = base / "home"
         let proj = base / "proj"
         createDir(home)
@@ -385,12 +420,17 @@ when defined(posix):
         defer: removeDir(base)
         writeFile(home / ".gitconfig", "[user]\n\tname = T\n\temail = t@t\n")
         let pol = proj / "policy"
-        writeFile(pol, sb.defaultPolicyText())
+        var polText = sb.defaultPolicyText()
+        if scratchTmp.len > 0:
+          polText = polText.replace("allow /tmp\n", "allow " & scratchTmp & "\n")
+          polText = polText.replace("allow /var/tmp\n", "")
+        writeFile(pol, polText)
         discard execCmdEx("git -C " & proj.quoteShell & " init -q")
         writeFile(proj / "f.txt", "hi")
         var env = newStringTable()
         for k, v in envPairs(): env[k] = v
         env["HOME"] = home
+        if scratchTmp.len > 0: env["TMPDIR"] = scratchTmp
         # `allow *` is a host rule, so the box fences; skip where the
         # kernel cannot (same posture as the netns e2e above).
         let probe = startProcess(binPath(), args = ["sandbox", "--policy",

@@ -140,17 +140,17 @@ jobs:
           sleep 2
           PORT=$(awk '{print $2}' /tmp/wallport.txt)
           [ -n "$PORT" ] || fail "wall proxy did not start"
-          export WALL_PROXY_PORT="$PORT"
+          printf '[wall]\nport = %s\n' "$PORT" > wall.conf
           export http_proxy="http://127.0.0.1:$PORT" https_proxy="http://127.0.0.1:$PORT"
 
-          code=$("$BIN" sandbox --policy .sandbox restrict -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 https://www.google.com) \
+          code=$("$BIN" sandbox --config wall.conf --policy .sandbox restrict -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 https://www.google.com) \
             || fail "curl google.com through the wall proxy"
           [ "$code" = 200 ] || fail "google.com expected 200, got $code"
 
           # 2. denied host: the proxy must refuse 1.1.1.1. For a plain
           # http:// URL the 403 arrives as a regular response, so curl
           # exits 0; only the status code tells the deny.
-          out=$("$BIN" sandbox --policy .sandbox restrict -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 http://1.1.1.1) \
+          out=$("$BIN" sandbox --config wall.conf --policy .sandbox restrict -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 http://1.1.1.1) \
             || fail "curl 1.1.1.1 through the wall proxy errored"
           [ "$out" = 403 ] || fail "1.1.1.1 expected 403, got $out"
 
@@ -272,13 +272,14 @@ jobs:
         # same class as 1800->2400, the per-test bump keeps a legitimate
         # slow test from being killed as a hang.
         if: github.event_name != 'workflow_dispatch' || inputs.run-tests
-        # OPENSSL_STATIC + THREECODE_TEST_NIMFLAGS make the test-rebuilt
+        # OPENSSL_STATIC + build/test-nimflags make the test-rebuilt
         # 3code binary statically linked too, so spawned test children
         # need no dylibs and TLS works against the stub provider.
         env:
           OPENSSL_STATIC: ${{ github.workspace }}/openssl-static/darwin64-arm64
-          THREECODE_TEST_NIMFLAGS: -d:staticSsl
-        run: PER_TEST_SECS=720 sh tests/tools/ci_tests.sh 3600
+        run: >-
+          mkdir -p build && printf '%s\n' '-d:staticSsl' > build/test-nimflags &&
+          PER_TEST_SECS=720 sh tests/tools/ci_tests.sh 3600
         timeout-minutes: 65
 
       - name: Package

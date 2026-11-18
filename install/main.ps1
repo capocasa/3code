@@ -5,12 +5,17 @@
 # Versioned here; the site deploy (3code.capocasa.dev, rsynced by its
 # publish.nims) serves the copy at https://3code.capocasa.dev/install.ps1.
 
+param(
+  [string]$InstallDir = "",
+  [string]$ReleaseBase = ""
+)
+if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA "3code\bin" }
+
 $ErrorActionPreference = "Stop"
 
 $BinName    = "3code.exe"
 $Asset      = "3code-windows-amd64.zip"
 $BaseUrl    = "https://3code.capocasa.dev/main/builds"
-$InstallDir = if ($env:THREECODE_INSTALL_DIR) { $env:THREECODE_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "3code\bin" }
 
 function Info($m) { Write-Host "==> $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "warning: $m" -ForegroundColor Yellow }

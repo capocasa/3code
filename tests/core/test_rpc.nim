@@ -47,7 +47,7 @@ proc spawnRpc(bin, root, workDir: string; responses: string): RpcProc =
   env["TMPDIR"] = root / "tmp"
   env["HOME"] = root
   env["PATH"] = getEnv("PATH")
-  env["THREECODE_STUB_RESPONSES"] = responses
+  mergeChildConf(childConfigFile(env), test = [("stub_responses", responses)])
   new(result)
   result.p = startProcess(bin, workingDir = workDir, args = ["--rpc=0"],
                           env = env, options = {})

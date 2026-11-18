@@ -12,7 +12,29 @@ set -eu
 
 REPO="capocasa/3code"
 BIN_NAME="3code"
-INSTALL_DIR="${THREECODE_INSTALL_DIR:-$HOME/.local/bin}"
+# Flags (they travel through the pipe as `curl ... | sh -s -- --dir=/x`);
+# the first bare argument is the first prompt. No environment knobs.
+INSTALL_DIR_OPT="$HOME/.local/bin"
+ALLOW_ROOT=0
+RELEASE_BASE=""
+ALLOW_UNVERIFIED=0
+PROMPT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dir=*)            INSTALL_DIR_OPT=${1#--dir=} ;;
+    --release-base=*)   RELEASE_BASE=${1#--release-base=} ;;
+    --allow-root)       ALLOW_ROOT=1 ;;
+    --allow-unverified) ALLOW_UNVERIFIED=1 ;;
+    -h|--help)
+      say "usage: sh install [--dir=DIR] [--release-base=URL] [--allow-root] [--allow-unverified] [first prompt]"
+      exit 0 ;;
+    -*) die "unknown option: $1 (supported: --dir=DIR --release-base=URL --allow-root --allow-unverified)" ;;
+    *) [ -z "$PROMPT" ] && PROMPT=$1 ;;
+  esac
+  shift
+done
+INSTALL_DIR="$INSTALL_DIR_OPT"
+
 
 c_red=""; c_green=""; c_yellow=""; c_dim=""; c_off=""
 if [ -t 1 ] && command -v tput >/dev/null 2>&1 && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
@@ -26,9 +48,9 @@ die()  { printf '%serror:%s %s\n' "$c_red" "$c_off" "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-if [ "${THREECODE_ALLOW_ROOT:-}" = "" ] && [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
+if [ "$ALLOW_ROOT" != "1" ] && [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
   die "don't install 3code as root. Run this as your normal user.
-       (if you really mean it: THREECODE_ALLOW_ROOT=1 sh install)"
+       (if you really mean it: sh install --allow-root)"
 fi
 
 os_name=$(uname -s 2>/dev/null || echo unknown)
@@ -63,13 +85,13 @@ else
   die "need curl or wget to download"
 fi
 
-# THREECODE_RELEASE_BASE overrides the release download base (mirrors,
+# --release-base=URL overrides the release download base (mirrors,
 # offline installs, the test suite); it must hold the archive and
 # SHASUMS256.txt side by side and skips the GitHub tag resolution.
-if [ -n "${THREECODE_RELEASE_BASE:-}" ]; then
+if [ -n "$RELEASE_BASE" ]; then
   tag="release"
-  url="$THREECODE_RELEASE_BASE/$asset"
-  sums_url="$THREECODE_RELEASE_BASE/SHASUMS256.txt"
+  url="$RELEASE_BASE/$asset"
+  sums_url="$RELEASE_BASE/SHASUMS256.txt"
 else
   # resolve tag from redirect - avoids the rate-limited GitHub API
   if have curl; then
@@ -109,11 +131,11 @@ if fetch "$sums_url" "$tmp/SHASUMS256.txt"; then
        expected $want
        got      $got"
   info "checksum verified"
-elif [ "${THREECODE_ALLOW_UNVERIFIED:-}" = "1" ]; then
-  warn "no SHASUMS256.txt published for $tag; installing unverified (THREECODE_ALLOW_UNVERIFIED=1)"
+elif [ "$ALLOW_UNVERIFIED" = "1" ]; then
+  warn "no SHASUMS256.txt published for $tag; installing unverified (--allow-unverified)"
 else
   die "no SHASUMS256.txt published for $tag (the release predates published checksums).
-       set THREECODE_ALLOW_UNVERIFIED=1 to install anyway"
+       run with --allow-unverified to install anyway"
 fi
 
 tar -xzf "$tmp/$asset" -C "$tmp"
@@ -144,11 +166,11 @@ if [ "$on_path" -eq 0 ]; then
   say
 fi
 
-if [ $# -gt 0 ] && [ -n "${1:-}" ]; then
-  info "running: $BIN_NAME --interactive $1"
+if [ -n "$PROMPT" ]; then
+  info "running: $BIN_NAME --interactive $PROMPT"
   if [ -t 0 ] || [ -e /dev/tty ]; then
-    exec </dev/tty "$dest" --interactive "$@"
+    exec </dev/tty "$dest" --interactive "$PROMPT"
   else
-    exec "$dest" --interactive "$@"
+    exec "$dest" --interactive "$PROMPT"
   fi
 fi

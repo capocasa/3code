@@ -69,7 +69,7 @@ proc spawnAcp(bin, root: string; responses: string): Session =
   env["HOME"] = root
   env["TERM"] = "dumb"
   env["PATH"] = getEnv("PATH")
-  env["THREECODE_STUB_RESPONSES"] = responses
+  mergeChildConf(childConfigFile(env), test = [("stub_responses", responses)])
   result.p = startProcess(bin, args = ["--acp"], env = env, options = {})
   result.sh = Shared()
   initLock(result.sh.gate)

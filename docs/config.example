@@ -13,8 +13,7 @@ current = "ollama.qwen3-coder:480b"
 ;   parallel  keyless MCP endpoint
 ;   brave     keyed REST endpoint; requires brave-key
 ; No automatic failover: the chosen engine is used as-is. Keys are
-; engine-specific (`exa-key`, `brave-key`) and also read from their env
-; vars (EXA_API_KEY, BRAVE_API_KEY).
+; engine-specific (`exa-key`, `brave-key`) and come only from here.
 ; [search]
 ; engine = "brave"
 ; exa-key = "..."

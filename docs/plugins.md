@@ -479,8 +479,8 @@ poll for interruption.
 
 ## Failure handling
 
-A sync hook has a deadline (2 s, or the tool-exec budget; the env vars
-`THREECODE_PLUGIN_SYNC_MS` and `THREECODE_PLUGIN_TOOL_MS` retune them).
+A sync hook has a deadline (2 s, or the tool-exec budget; the
+`[plugins]` keys `sync_ms` and `tool_ms` retune them).
 On timeout the default outcome applies without you: allow for verdicts,
 the original text for prompts and outputs, an error result for a
 plugin tool. The plugin takes a strike, the host flags `cancelled` so
@@ -501,8 +501,8 @@ tier, which is why the lib directories are yours, not the model's.
 
 `:plugins` (or `:plugin list`) reports loaded libraries, subscribed
 hooks, call counts, strikes, registered tools, and every load-time
-skip with its reason. `:plugin debug on` traces every call to
-`THREECODE_DEBUG_LOG` (or stderr): the hook, the plugin, elapsed
+skip with its reason. `:plugin debug on` traces every call to the
+`[settings] debug_log` path (or stderr): the hook, the plugin, elapsed
 milliseconds, verdicts, and a line diff of anything a plugin mutated,
 which is the fastest way to see your plugin actually doing something.
 

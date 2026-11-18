@@ -19,11 +19,12 @@
 ##   thread and captures DSR replies as they stream past the reader, so
 ##   they never reach the editor as phantom input.
 ## - `queryCursorPos` prefers a stashed reply over issuing a new query.
-## The whole thing is opt-in via `THREECODE_TERMDBG=<path>` and a no-op
+## The whole thing is opt-in via `[settings] termdbg = <path>` and a no-op
 ## otherwise, and dark under the PTY test harness.
 
 import std/[os, posix, strutils, times]
 import std/termios
+import runtime
 import ./types
 import ./minline
 import ./terminal as termio
@@ -71,9 +72,9 @@ proc termDbgEnabled*(): bool =
   ## bytes would pollute captured frames and the PTY doesn't answer DSR).
   if not dbgInit:
     dbgInit = true
-    dbgPath = getEnv("THREECODE_TERMDBG")
+    dbgPath = runtime.get("termdbg")
   if dbgPath.len == 0: return false
-  if getEnv("THREECODE_TEST_FRAME_FD").len > 0:
+  if runtime.get("frame_fd").len > 0:
     dbgLog("DISARMED: under PTY test harness")
     return false
   when defined(posix):

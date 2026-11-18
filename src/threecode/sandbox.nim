@@ -48,6 +48,7 @@ when defined(posix):
   from std/posix import kill, Pid
 import sandwall
 import sandwall/wall as sandwallWall
+import runtime
 import config
 import defaults
 import types
@@ -311,16 +312,27 @@ proc stopWall*() =
       except CatchableError: discard
       wallProxyDir = ""
 
-proc wallEnv*(selfExe, port, sockPath: string;
-              existingGitSsh: string): seq[(string, string)] =
-    ## Environment additions for a fenced bash launch: the WALL_* vars
-    ## box reads, the standard proxy vars pointing at the loopback
-    ## proxy (socks5h = remote DNS), and a ProxyCommand GIT_SSH_COMMAND
-    ## unless the user already set one. Pure helper; streamexec merges
-    ## the result into the child's env table.
-    result.add ("WALL_PROXY_PORT", port)
+proc writeWallConf*(dir, port, sockPath: string): string =
+    ## Write the internal `[wall]` config file (`port`, `sock`) the
+    ## sandbox parent hands to its `sandbox restrict` / `wall connect`
+    ## children instead of environment handoffs. Lives in the
+    ## bash launch's temp dir, which the fenced child can read.
+    let path = dir / "wall.conf"
+    var text = "[wall]\nport = " & port & "\n"
     if sockPath.len > 0:
-      result.add ("WALL_PROXY_SOCK", sockPath)
+      text.add "sock = " & sockPath.quoteShell & "\n"
+    writeFile(path, text)
+    path
+
+proc wallEnv*(selfExe, port: string;
+              existingGitSsh, wallConf: string): seq[(string, string)] =
+    ## Environment additions for a fenced bash launch: the standard
+    ## proxy vars pointing at the loopback proxy (socks5h = remote DNS)
+    ## and a ProxyCommand GIT_SSH_COMMAND unless the user already set
+    ## one. The 3code children on the other side (box, `wall connect`)
+    ## find the proxy through `wallConf` (see writeWallConf), not the
+    ## environment. Pure helper; streamexec merges the result into the
+    ## child's env table.
     let hp = "http://127.0.0.1:" & port
     let sp = "socks5h://127.0.0.1:" & port
     result.add ("http_proxy", hp)
@@ -344,10 +356,13 @@ proc wallEnv*(selfExe, port, sockPath: string;
       result.add ("no_proxy", "127.0.0.1,localhost")
     if existingGitSsh.len == 0:
       result.add ("GIT_SSH_COMMAND",
-        "ssh -o ProxyCommand=\"" & selfExe & " wall connect %h %p\"")
+        "ssh -o ProxyCommand=\"" & selfExe &
+        (if wallConf.len > 0: " wall --config " & wallConf else: "") &
+        " connect %h %p\"")
 
 when defined(posix):
-  proc wallSshConfig*(dir, selfExe: string; proxied: bool): string =
+  proc wallSshConfig*(dir, selfExe: string; proxied: bool;
+                      wallConf = ""): string =
     ## The ssh config the fence hands to OpenSSH, written to
     ## `dir/wallbin/ssh_config`. Two jobs in one file:
     ##
@@ -411,11 +426,14 @@ when defined(posix):
                "id_ecdsa_sk", "id_ed25519_sk"]:
       text.add "  IdentityFile " & home & ".ssh/" & id & "\n"
     if proxied:
-      text.add "  ProxyCommand " & selfExe & " wall connect %h %p\n"
+      text.add "  ProxyCommand " & selfExe &
+        (if wallConf.len > 0: " wall --config " & wallConf else: "") &
+        " connect %h %p\n"
     writeFile(cfgPath, text)
     cfgPath
 
-  proc installSshShim*(dir, selfExe: string; proxied: bool): string =
+  proc installSshShim*(dir, selfExe: string; proxied: bool;
+                       wallConf = ""): string =
     ## Write an `ssh` wrapper into `dir/wallbin`, first on the fenced
     ## child's PATH, for clients that find ssh through PATH (plain
     ## ssh, rsync, everything scripting `ssh ...`). It execs the real
@@ -424,7 +442,7 @@ when defined(posix):
     ## fence. Returns the shim dir, or "" when there is no ssh on PATH
     ## to wrap.
     let ssh = findExe("ssh")
-    let cfg = wallSshConfig(dir, selfExe, proxied)
+    let cfg = wallSshConfig(dir, selfExe, proxied, wallConf)
     if ssh.len == 0 or cfg.len == 0: return ""
     let shimDir = dir / "wallbin"
     let shim = shimDir / "ssh"
@@ -537,9 +555,10 @@ when defined(windows):
     ## token; a standard user falls back to the behavioral probe (this
     ## binary spawned as the sandwall user, one connect attempt), which
     ## a working fence blocks synchronously, so only a missing fence
-    ## ever waits out the connect timeout. The probe's cap is passed
-    ## through the environment; sandwall releases that predate the knob
-    ## keep their own default.
+    ## ever waits out the connect timeout. The probe waits out sandwall's
+    ## own default cap (5 s, once per process, only when the engine enum
+    ## is denied): the old environment override for a tighter cap is
+    ## gone with the rest of the environment knobs.
     if netFence != nfsUnknown: return netFence
     block resolve:
       try:
@@ -549,7 +568,6 @@ when defined(windows):
           break resolve
       except CatchableError:
         discard
-      putEnv("WALL_PROBE_TIMEOUT_MS", "1200")
       netFence =
         if sandwallWall.verifyFenceBehavioral(): nfsInstalled else: nfsMissing
     netFence

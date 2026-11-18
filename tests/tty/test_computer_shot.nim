@@ -3,7 +3,7 @@ discard """
 """
 ## Computer use through the real binary in a PTY: `:computer`-free config
 ## arming, a scripted `screenshot` call (capture faked via
-## THREECODE_SCREENSHOT_SRC), the `· shot` transcript banner, and the
+## test.screenshot_src), the `· shot` transcript banner, and the
 ## model driving the generated `shot` script through the bash tool — the
 ## real sandbox path, DISPLAY passthrough and all. The faked 16x12 frame
 ## can never match the real display geometry, so `shot` must answer with
@@ -48,9 +48,8 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "HOME", val: root),
     (key: "PATH", val: getEnv("PATH")),
     (key: "DISPLAY", val: getEnv("DISPLAY")),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
-    (key: "THREECODE_STUB_STREAM", val: "1"),
-    (key: "THREECODE_SCREENSHOT_SRC", val: getCurrentDir() / "testdata/images/tiny.png"),
+    (key: "test.stub_responses", val: responsesPath),
+    (key: "test.screenshot_src", val: getCurrentDir() / "testdata/images/tiny.png"),
   ]
 
 proc x11Ready(): bool =

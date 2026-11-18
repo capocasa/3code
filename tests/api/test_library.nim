@@ -12,7 +12,7 @@ discard """
 ## per-test fixture so nothing touches the developer's real 3code state.
 
 import std/[json, os, strutils, atomics, unittest]
-import threecode/[api, library, types, util, sandbox, dirsettings, session]
+import threecode/[api, library, types, util, sandbox, dirsettings, session, runtime]
 
 const stubbed = defined(providerStub)
 
@@ -118,7 +118,7 @@ suite "library: AgentSession":
         {"content": "tool says hello-from-tool",
          "contentChunks": ["tool says ", "hello-from-tool"]}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
 
       var deltas, tools, retries, notices: seq[string]
       var dones: seq[Usage]
@@ -164,7 +164,7 @@ suite "library: AgentSession":
         {"content": "pad"}, {"content": "pad"},
         {"content": "first reply"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
 
       let s1 = initAgentSession(AgentOptions(cwd: root / "run",
                                              experimental: true))
@@ -216,7 +216,7 @@ suite "library: AgentSession":
           {"role": "assistant", "content": "turn two live",
            "reasoning_content": ""}
         ]))
-        putEnv("THREECODE_STUB_RESPONSES", run / "stub_responses.json")
+        runtime.put("stub_responses", run / "stub_responses.json")
         let s = initAgentSession(AgentOptions(cwd: run,
                                               experimental: true))
         discard s.prompt("run a tool")
@@ -237,7 +237,7 @@ suite "library: AgentSession":
           {"role": "assistant", "content": "ran it",
            "reasoning_content": "thought briefly"}
         ]))
-        putEnv("THREECODE_STUB_RESPONSES", run / "stub_responses.json")
+        runtime.put("stub_responses", run / "stub_responses.json")
         let s1 = initAgentSession(AgentOptions(cwd: run,
                                                experimental: true))
         discard s1.prompt("run a tool")
@@ -265,7 +265,7 @@ suite "library: AgentSession":
       let root = newFixture("badmodel")
       writeConfig(root)
       isolateEnv(root)
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       expect AgentError:
         discard initAgentSession(AgentOptions(cwd: root / "run",
                                               model: "stub.nonexistent",
@@ -351,7 +351,7 @@ models = "stub-model"
         {"content": "first reply"},
         {"content": "continued reply"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
@@ -388,7 +388,7 @@ models = "stub-model"
       writeFile(root / "run" / "stub_responses.json", $(%*[
         {"content": "before close"}, {"content": "after close"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
@@ -419,7 +419,7 @@ models = "stub-model"
         {"content": "first", "preStreamDelayMs": 300},
         {"content": "second"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
@@ -453,7 +453,7 @@ models = "stub-model"
          "contentChunkDelayMs": 250},
         {"content": "after async"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
@@ -481,7 +481,7 @@ models = "stub-model"
       writeFile(root / "run" / "stub_responses.json", $(%*[
         {"content": "still running", "preStreamDelayMs": 300}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
@@ -509,7 +509,7 @@ models = "stub-model"
       writeFile(root / "run" / "stub_responses.json", $(%*[
         {"content": "kept"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
       let s = initAgentSession(AgentOptions(cwd: root / "run",
                                             experimental: true))
@@ -565,7 +565,7 @@ models = "stub-model"
       writeFile(root / "run" / "stub_responses.json", $(%*[
         {"content": "lost reply"}
       ]))
-      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      runtime.put("stub_responses", root / "run" / "stub_responses.json")
       resetStubResponses()
       let s = initAgentSession(AgentOptions(
         cwd: root / "run",

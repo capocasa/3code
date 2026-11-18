@@ -6,7 +6,7 @@ discard """
 ## server needed); the capture seam; receipt/banner round-trip.
 
 import std/[os, osproc, sequtils, strutils, unittest]
-import threecode/[images, screen, types]
+import threecode/[images, screen, types, runtime]
 
 const FakeDisplay = "1920 1080"   # what the stubbed xdotool reports
 
@@ -151,13 +151,13 @@ suite "screen capture (seam)":
       check err == ""
       check fileExists(screen.shotScriptPath("cap1"))
 
-  test "capture via THREECODE_SCREENSHOT_SRC delivers and binds state":
+  test "capture via screenshot_src delivers and binds state":
     if not x11Ready:
       skip()
     else:
       require screen.ensureComputerUse("cap1").ok
-      putEnv("THREECODE_SCREENSHOT_SRC", "testdata/images/tiny.png")
-      defer: putEnv("THREECODE_SCREENSHOT_SRC", "")
+      runtime.put("screenshot_src", "testdata/images/tiny.png")
+      defer: runtime.put("screenshot_src", "")
       let dest = work / "img"
       let (info, err) = captureScreenshot(dest)
       check err == ""
@@ -178,8 +178,8 @@ suite "screen capture (seam)":
       skip()
     else:
       require screen.ensureComputerUse("cap1").ok
-      putEnv("THREECODE_SCREENSHOT_SRC", "testdata/images/tiny.png")
-      defer: putEnv("THREECODE_SCREENSHOT_SRC", "")
+      runtime.put("screenshot_src", "testdata/images/tiny.png")
+      defer: runtime.put("screenshot_src", "")
       let (info, err) = captureScreenshot(work / "img2", fidelity = true)
       check err == ""
       check info.format == "png"

@@ -168,10 +168,14 @@ jobs:
           trap 'docker rm -f $CID >/dev/null 2>&1 || true' EXIT
           docker exec $CID mkdir -p /data/data/com.termux/files/usr/tmp
           docker cp 3code $CID:/data/data/com.termux/files/usr/tmp/3code
-          docker exec -t -e THREECODE_ALLOW_ROOT=1 $CID \
+          # qemu binfmt reports uid 0 to the binary: allow_root rides the
+          # container user's config file now, not the environment.
+          docker exec $CID sh -c \
+            'mkdir -p ~/.config/3code && printf "[settings]\nallow_root = on\n" > ~/.config/3code/config'
+          docker exec -t $CID \
             /data/data/com.termux/files/usr/tmp/3code --version
           # --help exits 2 (ExitUsage) by design; assert it runs at all.
-          docker exec -t -e THREECODE_ALLOW_ROOT=1 $CID sh -c \
+          docker exec -t $CID sh -c \
             '/data/data/com.termux/files/usr/tmp/3code --help > /dev/null; \
              test $? -eq 2'
           # TLS init is the fragile part on Termux: the openssl wrapper
@@ -245,8 +249,8 @@ jobs:
       - name: Cross-compile yrc stub + stress tests (arm64)
         # The stub and the tty stress tests are built for android/arm64
         # with --mm:yrc so they run under bionic in termux-docker. The
-        # stress tests drive the stub through a PTY, so THREECODE_TEST_STUB_BINARY
-        # points the test harness at the prebuilt arm64 stub (it can't run
+        # stress tests drive the stub through a PTY, so a build/prebuilt-stub
+        # marker points the test harness at the prebuilt arm64 stub (it can't run
         # `nim` at test time in the container).
         run: |
           set -e
@@ -272,9 +276,7 @@ jobs:
           docker cp build/test_spinner_race_stress_android $CID:$W/test_spinner_race_stress
           docker cp build/test_resize_ticker_android $CID:$W/test_resize_ticker
           docker cp build/test_gui_join_freeze_android $CID:$W/test_gui_join_freeze
+          docker exec $CID sh -c "cd $W && mkdir -p build && printf '%s\\n' $W/3code_stub > build/prebuilt-stub"
           for t in test_spinner_race_stress test_resize_ticker test_gui_join_freeze; do
-            docker exec -t \
-              -e THREECODE_TEST_STUB_BINARY=$W/3code_stub \
-              -e THREECODE_ALLOW_ROOT=1 \
-              $CID sh -c "cd $W && ./$t"
+            docker exec -t $CID sh -c "cd $W && ./$t"
           done

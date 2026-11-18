@@ -13,6 +13,7 @@ when defined(posix):
 else:
   import std/streams
 import types, util, shell, sandbox
+import runtime
 when defined(windows):
   import registry
   import sandwall
@@ -778,11 +779,17 @@ export DEBIAN_FRONTEND=noninteractive
         when defined(posix):
           sandbox.moveWallSock(tmp)
           let proxied = sandbox.ensureWallProxy(getCurrentDir())
+          var wallConf = ""
           if proxied:
             # box args: swap the --ro tmp for a writable tmp so the
             # bridge can connect() the unix socket inside the netns.
+            # The wall coordinates reach the box child and the ssh
+            # ProxyCommand through the [wall] config file, not env vars.
+            wallConf = sandbox.writeWallConf(tmp, $int(sandbox.wallProxyPort()),
+                                             sandbox.proxySockPath())
             args = @[]
             args.add "sandbox"
+            args.add ["--config", wallConf]
             args.add ["--policy", policy]
             args.add "restrict"
             args.add tmp
@@ -795,8 +802,8 @@ export DEBIAN_FRONTEND=noninteractive
             env = newStringTable()  # case-sensitive on posix; env names differ by case
             for k, v in envPairs(): env[k] = v
             for (k, v) in sandbox.wallEnv(sandbox.procboxExe,
-                $int(sandbox.wallProxyPort()), sandbox.proxySockPath(),
-                getEnv("GIT_SSH_COMMAND", "")):
+                $int(sandbox.wallProxyPort()),
+                getEnv("GIT_SSH_COMMAND", ""), wallConf):
               env[k] = v
           else:
             env = newStringTable()
@@ -805,7 +812,8 @@ export DEBIAN_FRONTEND=noninteractive
           # tunnels through the wall when proxied, and in any case the
           # -F config that repairs the pw_dir defaults uid 65534
           # breaks (aliases, keys, known_hosts; see installSshShim).
-          let shimDir = sandbox.installSshShim(tmp, sandbox.procboxExe, proxied)
+          let shimDir = sandbox.installSshShim(tmp, sandbox.procboxExe, proxied,
+                                               wallConf)
           if shimDir.len > 0:
             env["PATH"] = shimDir & ":" & env.getOrDefault("PATH")
         when defined(macosx):
@@ -931,9 +939,14 @@ export DEBIAN_FRONTEND=noninteractive
                 "present but the WFP fence is not installed. The child " &
                 "will have OPEN network access. Run '3code setup' once.")
           if fenced:
+            # box runs in-process here: hand it the wall coordinates
+            # through the runtime store directly (the POSIX child gets
+            # them via a [wall] config file). The proxy vars below are
+            # for the grandchildren (curl, git), not for 3code.
+            runtime.put("wall_port", $int(sandbox.wallProxyPort()))
             for (k, v) in sandbox.wallEnv(sandbox.procboxExe,
-                $int(sandbox.wallProxyPort()), "",
-                getEnv("GIT_SSH_COMMAND", "")):
+                $int(sandbox.wallProxyPort()),
+                getEnv("GIT_SSH_COMMAND", ""), ""):
               putenv(k, v)
           let resolved = sandbox.current.resolve()
           var writable = resolved.writable

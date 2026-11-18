@@ -4,11 +4,11 @@ discard """
 ## Basic end-to-end operation with the gui thread LIVE.
 ##
 ## Every other gui-facing test runs with the deterministic frame handshake
-## (`THREECODE_TEST_FRAME_FD`), which disables the free-running 80ms gui
+## (the `[test] frame_fd` config key), which disables the free-running 80ms gui
 ## thread. That thread is exactly what races the submit commit and the
 ## streaming repaints in production, so those tests structurally cannot
 ## reproduce the intermittent row loss on submit. This test sets
-## `THREECODE_TEST_GUI_LIVE=1` to keep the real gui cadence and exercises the
+## `test.gui_live=1` to keep the real gui cadence and exercises the
 ## basic flow — startup chrome, typing, first submit, streamed reply, second
 ## submit — asserting the committed layout stays correct:
 ##
@@ -67,10 +67,10 @@ proc one(iter: int; term: string): string =
                             (key: "TMPDIR", val: root / "tmp"),
                             (key: "XDG_CONFIG_HOME", val: root / "xdg"),
                             (key: "XDG_DATA_HOME", val: root / "data"),
-                            (key: "THREECODE_STUB_RESPONSES", val: root / "run" / "stub_responses.json"),
+                            (key: "test.stub_responses", val: root / "run" / "stub_responses.json"),
                             # The whole point: real 80ms gui thread, not the
                             # deterministic handshake.
-                            (key: "THREECODE_TEST_GUI_LIVE", val: "1"),
+                            (key: "test.gui_live", val: "1"),
                           ], cols = 119, rows = 40)
   defer:
     tty.writeFrameArtifact(root / "frames.txt")

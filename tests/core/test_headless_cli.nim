@@ -20,37 +20,34 @@ var
   built = false
 
 proc runIn(rootDir: string; args: openArray[string];
-           extraEnv: openArray[(string, string)] = @[]): tuple[o: string; code: int] =
+           extraConf: openArray[(string, string)] = @[]): tuple[o: string; code: int] =
   # execCmdEx defaults to poStdErrToStdOut, so `o` is EVERYTHING the
   # process printed on any stream — exactly what a silence contract
-  # wants to check. `extraEnv` carries one-call settings on top of the
-  # fixture (the stub's sandbox opt-in and friends).
-  var extra = ""
-  when defined(windows):
-    for (k, v) in extraEnv: extra.add "&& set " & k & "=" & v
-  else:
-    for (k, v) in extraEnv: extra.add " " & k & "=" & v.quoteShell
+  # wants to check. `extraConf` carries one-call [test] keys on top of
+  # the fixture (the stub's sandbox opt-in and friends); the stub
+  # responses ride the same config file.
   let quoted = args.toSeq.mapIt(it.quoteShell).join(" ")
   # The binary runs with cwd = <root>/run: a clean directory. The
   # project checkout itself carries a .3code goal store, and goal mode
   # would arm a kickoff turn (extra model calls the stub replies do not
   # cover) — the headless contract must be tested outside any of that.
   createDir(rootDir / "run")
+  mergeChildConf(rootDir / "cfg" / "3code" / "config",
+    test = (@[("stub_responses", root / "stub_responses.json")] &
+            extraConf.toSeq))
   when defined(windows):
     let cmd = "cmd /c cd /d " & (rootDir / "run") & "&& set XDG_DATA_HOME=" &
       (rootDir / "share") & "&& set " &
       "XDG_CONFIG_HOME=" & (rootDir / "cfg") & "&& set TMPDIR=" & (rootDir / "tmp") &
-      "&& set TC_FIXTURE_LOG=" & logPath & "&& set " &
-      "THREECODE_STUB_RESPONSES=" & (root / "stub_responses.json") &
-      " " & extra & "&& " & quoteShell(bin) & " " & quoted
+      "&& set TC_FIXTURE_LOG=" & logPath &
+      "&& " & quoteShell(bin) & " " & quoted
   else:
     let cmd = "cd " & (rootDir / "run").quoteShell & " && XDG_DATA_HOME=" &
       (rootDir / "share").quoteShell &
       " XDG_CONFIG_HOME=" & (rootDir / "cfg").quoteShell &
       " TMPDIR=" & (rootDir / "tmp").quoteShell &
       " TC_FIXTURE_LOG=" & logPath.quoteShell &
-      " THREECODE_STUB_RESPONSES=" & (root / "stub_responses.json").quoteShell &
-      extra & " " & quoteShell(bin) & " " & quoted
+      " " & quoteShell(bin) & " " & quoted
   let (outp, code) = execCmdEx(cmd)
   (outp, code)
 
@@ -210,7 +207,7 @@ suite "headless cli (binary)":
     writeFile(root / "run" / ".3code" / "config",
       "[settings]\nsandbox = \"off\"\n")
     let r = runIn(root, ["--headless", "save it"],
-                  [("THREECODE_STUB_SANDBOX", "1")])
+                  [("stub_sandbox", "1")])
     check r.code == 0
     check r.o.len == 0
     check not fileExists(root / "run" / "locked" / "out.txt")

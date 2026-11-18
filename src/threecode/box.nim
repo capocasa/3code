@@ -28,6 +28,7 @@
 when defined(posix):
   import std/posix except Time
 import std/[os, strutils]
+import runtime
 import sandwall
 import sandwall/baseline
 import sandbox
@@ -37,7 +38,7 @@ const usage = """
 3code sandbox - filesystem sandbox (Landlock/Seatbelt/ACL)
 
 Usage:
-  3code sandbox [--policy FILE ...] restrict [RWPATH ...] [--ro ROPATH ...] [--deny DENPATH ...] -- CMD [ARGS ...]
+  3code sandbox [--policy FILE ...] [--config WALL.CONF] restrict [RWPATH ...] [--ro ROPATH ...] [--deny DENPATH ...] -- CMD [ARGS ...]
 
   `3code sb` is a short alias for `3code sandbox`.
 
@@ -236,13 +237,14 @@ proc boxRestrict(args: seq[string]): int =
   # without listing them here.
   # Network wall: the first host rule in the policy fences egress.
   # The parent (streamexec) runs the wall proxy and tells box where it
-  # is via WALL_PROXY_PORT (loopback port) and WALL_PROXY_SOCK (its
-  # unix listener, the Linux netns bridge target). Standalone box with
-  # host rules but no proxy env fences with no egress at all - correct
-  # fail-closed behaviour.
-  let wallPort = try: uint16(parseInt(getEnv("WALL_PROXY_PORT", "0")))
+  # is via the `[wall]` config file passed as `--config` (loopback port
+  # plus its unix listener, the Linux netns bridge target); on Windows
+  # the in-process caller fills the same store directly. Standalone box
+  # with host rules but no wall config fences with no egress at all -
+  # correct fail-closed behaviour.
+  let wallPort = try: uint16(parseInt(runtime.get("wall_port")))
                  except ValueError: 0'u16
-  let wallSock = getEnv("WALL_PROXY_SOCK", "")
+  let wallSock = runtime.get("wall_sock")
 
   when defined(windows):
     # Windows cannot confine the current process; restrict() only
@@ -294,14 +296,23 @@ proc boxMain*(args: seq[string]): int =
   var rest = args
   # hoist leading global options
   var policies: seq[string]
+  var wallConf = ""
   var i = 0
   while i < rest.len:
     if rest[i] == "--policy" and i + 1 < rest.len:
       policies.add(rest[i + 1])
       rest.delete(i + 1)
       rest.delete(i)
+    elif rest[i] == "--config" and i + 1 < rest.len:
+      wallConf = rest[i + 1]
+      rest.delete(i + 1)
+      rest.delete(i)
     else:
       inc i
+  # The `[wall]` file the sandbox parent writes (loopback proxy port
+  # and unix listener). Absent for standalone use: no proxy, fail-closed.
+  if wallConf.len > 0:
+    discard runtime.loadWallConf(wallConf)
   if rest.len > 0 and rest[0] == "restrict":
     var forwarded: seq[string]
     for p in policies:

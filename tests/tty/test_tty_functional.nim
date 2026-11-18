@@ -25,6 +25,13 @@ import tty_expect
 import ttty/grid
 import stub_helpers
 
+proc scenarioOnly(): string =
+  ## Scenario filter for `tty_scenarios.sh` runs: the binary takes the
+  ## scenario name as its single argument (`tests/testdata/output/tty-
+  ## functional <name>`); empty means "run everything" (testament).
+  if paramCount() > 0: paramStr(1) else: ""
+
+
 const VisualOutputRoot = "tests/testdata" / "output" / "tty"
 const SimpleVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "simple.txt"
 const MultilineVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "multiline.txt"
@@ -182,7 +189,7 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "TMPDIR", val: root / "tmp"),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
-    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
+    (key: "test.stub_responses", val: responsesPath),
   ]
 
 proc startStub(root: string; args: openArray[string] = ["-x", "-i"];
@@ -263,8 +270,7 @@ suite "terminal visual contract":
     # Regression: resume used to show only the last user turn, dropping every
     # earlier turn from scrollback. A resumed session must drop the user back
     # into the whole prior conversation, reachable by scrolling up.
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "resume_full_scrollback":
+    if scenarioOnly() notin ["", "resume_full_scrollback"]:
       check true
     else:
       let root = newFixture("resume_full_scrollback")
@@ -565,8 +571,7 @@ suite "terminal visual contract":
     tty.expectExit(0, timeoutMs = 5000)
 
   test "harness commands are transcript items":
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "harness_commands":
+    if scenarioOnly() notin ["", "harness_commands"]:
       check true
     else:
       let root = newFixture("harness_commands")
@@ -720,8 +725,7 @@ suite "terminal visual contract":
     tty.expectExit(0, timeoutMs = 5000)
 
   test "rename names the session and the listings plus resume find it":
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "rename_command":
+    if scenarioOnly() notin ["", "rename_command"]:
       check true
     else:
       # #67: `:rename Feature xyz` labels the live session; the name rides
@@ -1410,8 +1414,7 @@ suite "terminal visual contract":
     # empty-reply steer, the flail detector's escalation note) live, the
     # persisted `+agent`/`+flail` marks, and the resumed replay painting
     # the same items (the flagged commands execute and replay as banners).
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "agent_autosend_items":
+    if scenarioOnly() notin ["", "agent_autosend_items"]:
       check true
     else:
       let root = newFixture("agent_autosend_items")
@@ -1634,8 +1637,7 @@ max-tokens = "8192"
     # the notice used to be `stderr.writeLine` from the transport layer
     # (api.nim), which bypassed fat-prompt preservation and landed on the
     # prompt row; before that it was a committed harness line per attempt.
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "api_retry_notice":
+    if scenarioOnly() notin ["", "api_retry_notice"]:
       check true
     else:
       let root = newFixture("api_retry_notice")
@@ -2152,8 +2154,7 @@ max-tokens = "8192"
     tty.expectAlive()
 
   test "nested TUI tool output paints clean rows, no cursor-escape corruption":
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "nested_tui_output":
+    if scenarioOnly() notin ["", "nested_tui_output"]:
       check true
     else:
       # Tool output that is itself terminal frames (a nested 3code retrying,
@@ -2672,8 +2673,7 @@ max-tokens = "8192"
     # hourglass rows, so the queue stays in sight until it runs. The
     # echo's committed position is where it runs (below the reply that
     # was streaming when it was queued), not where it was typed.
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "multiple_prompts_queue_in_order":
+    if scenarioOnly() notin ["", "multiple_prompts_queue_in_order"]:
       check true
     else:
       let root = newFixture("two_queued")
@@ -3000,8 +3000,7 @@ max-tokens = "8192"
     # and prepends its text to the draft, caret at the join, exactly like
     # deleting the newline between two lines of a file. The popped item's
     # hourglass rows leave the screen with it.
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "backspace_join_nonempty_draft":
+    if scenarioOnly() notin ["", "backspace_join_nonempty_draft"]:
       check true
     else:
       let root = newFixture("queued_prompt_pos0_join")
@@ -3443,8 +3442,7 @@ max-tokens = "8192"
     tty.expectCount("Reply to queued prompt.", 1, where = "screen")
 
   test "bash tool success and nonzero exit":
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "bash_tool_visual":
+    if scenarioOnly() notin ["", "bash_tool_visual"]:
       check true
     else:
       let root = newFixture("bash_tool_visual_test")
@@ -4244,8 +4242,7 @@ max-tokens = "8192"
       check ("❯ " & p) in finalScreen
 
   test "background and foreground restores raw mode and editor stays responsive":
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "bgfg_rawmode":
+    if scenarioOnly() notin ["", "bgfg_rawmode"]:
       check true
     else:
       # Regression: after Ctrl+Z (SIGTSTP) + fg (SIGCONT) the terminal was
@@ -4299,8 +4296,7 @@ max-tokens = "8192"
         tty.expect "still working"
 
   test "prompt repaints clean after bg/fg following a completed turn":
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "bgfg_after_turn":
+    if scenarioOnly() notin ["", "bgfg_after_turn"]:
       check true
     else:
       # Regression: the Ctrl-Z handler painted the prompt *before* the
@@ -4575,7 +4571,7 @@ max-tokens = "8192"
 when false:
   suite "disabled terminal visual contract tests":
     test "stub provider streams bash output without replaying it later":
-      if getEnv("THREECODE_TTY_ONLY") in ["", "stream_no_replay"]:
+      if scenarioOnly() in ["", "stream_no_replay"]:
         let root = newFixture("stream_no_replay")
         writeConfiguredProvider(root)
         writeStubResponses(root, %*[
@@ -4617,8 +4613,7 @@ when false:
       tty.expectExit 0
 
   test "resizing during a live stub stream does not truncate or retry":
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "resize_stream":
+    if scenarioOnly() notin ["", "resize_stream"]:
       check true
     else:
       let root = newFixture("resize_stream")
@@ -4770,7 +4765,7 @@ when false:
         check tty.drawnCaretCount(i) == 0
 
   test "resize at idle rewraps the editor prompt":
-    if getEnv("THREECODE_TTY_ONLY") notin ["", "resize_idle"]:
+    if scenarioOnly() notin ["", "resize_idle"]:
       check true
     else:
       let root = newFixture("resize_idle")
@@ -4816,8 +4811,7 @@ when false:
       check true
 
   test "main visual test":
-    if getEnv("THREECODE_TTY_ONLY").len > 0 and
-        getEnv("THREECODE_TTY_ONLY") != "main_visual_test":
+    if scenarioOnly() notin ["", "main_visual_test"]:
       check true
     else:
       let root = newFixture("main_visual_test")

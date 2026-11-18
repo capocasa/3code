@@ -99,7 +99,7 @@ jobs:
             command -v perl make
             bash -x tests/tools/fetch_openssl.sh 3.5 mingw64"
           echo "OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64")" >> "$GITHUB_ENV"
-          echo "THREECODE_TEST_NIMFLAGS=-d:staticSsl" >> "$GITHUB_ENV"
+          mkdir -p build && printf '%s\n' '-d:staticSsl' > build/test-nimflags
         # Bounds a stalled openssl build (msys2 make can wedge on the
         # jobserver); without it the job default is 360m.
         timeout-minutes: 90

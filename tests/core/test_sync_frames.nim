@@ -8,13 +8,13 @@
 ## ignores 2026, which is why it never showed there.
 
 import std/[os, strutils, unittest]
-import threecode/engine
+import threecode/[engine, runtime]
 import threecode/minline
 import threecode/fatprompt/rendering
 
 # Sync output is off by default now (see syncoutput.nim); the guard only
 # means something with 2026 emission live, so force it on for this suite.
-putEnv("THREECODE_FORCE_SYNC_OUTPUT", "1")
+runtime.put("force_sync_output", "1")
 
 proc count(s, sub: string): int =
   var i = 0
@@ -42,14 +42,14 @@ proc captureStdout(body: proc()): string =
 
 suite "engine transcript commits: balanced DEC 2026 frames":
   # Sync output is opt-in since the unconditional-2026-off change
-  # (THREECODE_FORCE_SYNC_OUTPUT=1 re-enables); the balance guard only
+  # (`force_sync_output = 1` re-enables); the balance guard only
   # means anything when it is on, so turn it on for these two tests.
   # putEnv at suite scope would leak into later suites in the same binary;
   # setup/teardown keeps it scoped.
   setup:
-    putEnv("THREECODE_FORCE_SYNC_OUTPUT", "1")
+    runtime.put("force_sync_output", "1")
   teardown:
-    putEnv("THREECODE_FORCE_SYNC_OUTPUT", "0")
+    runtime.put("force_sync_output", "0")
 
   test "liveAnchored commit emits exactly one sync frame":
     var e: TerminalEngine

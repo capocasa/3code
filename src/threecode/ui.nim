@@ -2525,7 +2525,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           case parts[1]
           of "on", "true", "1":
             setPluginTrace(true)
-            resp "plugin trace on (goes to THREECODE_DEBUG_LOG or stderr)"
+            resp "plugin trace on (goes to [settings] debug_log or stderr)"
           of "off", "false", "0":
             setPluginTrace(false)
             resp "plugin trace off"

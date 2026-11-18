@@ -47,7 +47,6 @@ CFG
 #!/bin/sh
 HOME="$ROOT" XDG_CONFIG_HOME="$ROOT/xdg" XDG_DATA_HOME="$ROOT/data" \\
 XDG_CACHE_HOME="$ROOT/xdg/cache" TMPDIR="$ROOT/tmp" \\
-THREECODE_WALKUP_LOG="$OUT/walkup$iter.log" \\
 script -q -f -c "$OUT/appbin -x -i" "$OUT/typescript$iter" 2>"$OUT/app$iter.err"
 echo "exit=$?" > "$OUT/exit$iter.txt"
 exec sleep 60

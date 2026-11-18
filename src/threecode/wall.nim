@@ -16,6 +16,7 @@
 when defined(posix):
   import std/posix except Time
 import std/[os, strutils]
+import runtime
 import sandwall, sandwall/wall
 when defined(windows):
   import sandwall/wall/stdio
@@ -186,9 +187,9 @@ Usage:
       foreground. --port 0 = ephemeral, printed to stdout as "port: N".
       --unix adds an AF_UNIX listener for netns-bridged children.
 
-  3code wall connect HOST PORT
+  3code wall [--config WALL.CONF] connect HOST PORT
       SOCKS5 client pump for git ProxyCommand: stdio <-> proxy at
-      127.0.0.1:$WALL_PROXY_PORT (default 1080) <-> HOST:PORT. Blocks.
+      127.0.0.1:<port from WALL.CONF, default 1080> <-> HOST:PORT. Blocks.
 
   3code wall wfp-probe
       (Windows only) Internal: run AS the sandwall user by the
@@ -250,7 +251,7 @@ when defined(posix):
       stderr.writeLine("Error: connect needs HOST PORT"); return 2
     let port = try: uint16(parseInt(args[1]))
                except ValueError: stderr.writeLine("Error: bad port"); return 2
-    let proxyPort = try: uint16(parseInt(getEnv("WALL_PROXY_PORT", "1080")))
+    let proxyPort = try: uint16(parseInt(runtime.get("wall_port")))
                     except ValueError: 1080'u16
     socksConnect(proxyPort, args[0], port)
 
@@ -326,10 +327,19 @@ proc unsetupMain*(args: seq[string]): int =
 
 proc wallMain*(args: seq[string]): int =
   ## Entry for the `3code wall` subcommand. `args` is the full argv
-  ## after `wall`.
+  ## after `wall`. A leading `--config FILE` loads the internal `[wall]`
+  ## proxy coordinates the sandbox parent writes; `connect` reads the
+  ## port from it.
   if args.len == 0 or args[0] == "-h" or args[0] == "--help":
     stdout.writeLine(usage)
     return 0
+  var args = args
+  if args.len >= 2 and args[0] == "--config":
+    discard runtime.loadWallConf(args[1])
+    args = args[2 .. ^1]
+    if args.len == 0:
+      stdout.writeLine(usage)
+      return 0
   case args[0]
   of "proxy":
     when defined(posix):

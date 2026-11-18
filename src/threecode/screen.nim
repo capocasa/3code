@@ -20,6 +20,7 @@
 ## a resumed session takes a fresh screenshot before acting.
 
 import std/[os, osproc, sequtils, strformat, strutils]
+import runtime
 import images
 
 const
@@ -187,10 +188,10 @@ proc captureScreenshot*(destDir: string,
   ## Capture the root window and encode it into `destDir` under the shared
   ## vision budget. The returned ImageInfo has `screenshot` set and
   ## `name` = `shot N` (N = the delivered file index). Errors are plain
-  ## strings. `THREECODE_SCREENSHOT_SRC` overrides the capture binaries
-  ## with a fixed image file — the test seam (also a recovery hatch for
-  ## headless runs).
-  var src = getEnv("THREECODE_SCREENSHOT_SRC")
+  ## strings. The `[test] screenshot_src` config key overrides the capture
+  ## binaries with a fixed image file — the test seam (also a recovery
+  ## hatch for headless runs).
+  var src = runtime.get("screenshot_src")
   if src.len > 0:
     if not fileExists(src):
       return (ImageInfo(), &"error: screenshot: {src} does not exist")

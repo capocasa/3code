@@ -17,6 +17,7 @@ when defined(posix):
 when defined(windows):
   import std/winlean
 import streamhttp
+import runtime
 import types, util, prompts, plugins, streamexec, netthread, auth_openai, auth_google,
        codeassist, anthropic, auth_anthropic, oauth
 
@@ -4160,10 +4161,9 @@ proc verifyProfile*(p: Profile): (bool, string) =
     return verifyProfileHook(p)
   when providerStub:
     if isStubUrl(p.url):
-      # Test hook: THREECODE_STUB_VERIFY_DELAY_MS stretches the probe so
-      # tty tests can drive the wizard's cancel path mid-verification.
-      let delayMs = try: parseInt(getEnv("THREECODE_STUB_VERIFY_DELAY_MS"))
-                    except ValueError: 0
+      # Test hook: the [test] stub_verify_delay_ms key stretches the probe
+      # so tty tests can drive the wizard's cancel path mid-verification.
+      let delayMs = runtime.num("stub_verify_delay_ms", 0)
       if delayMs > 0: sleep(delayMs)
       return (true, "")
   let body = verifyBody(p)

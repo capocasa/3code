@@ -393,7 +393,7 @@
                                       <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Resolve the run cap (seconds) from a model-requested value. Missing/zero/negative → default; any value above <tt class="docutils literal"><span class="pre"><span class="Identifier">MaxBashTimeout</span></span></tt> is clamped to it. Read at call time so <tt class="docutils literal"><span class="pre"><span class="Identifier">THREECODE_MAX_TIMEOUT</span></span></tt> can raise the ceiling at runtime without a rebuild.
+    Resolve the run cap (seconds) from a model-requested value. Missing/zero/negative → default; any value above <tt class="docutils literal"><span class="pre"><span class="Identifier">MaxBashTimeout</span></span></tt> is clamped to it. Read at call time so the <tt class="docutils literal"><span class="pre"><span class="Identifier">max_timeout</span></span></tt> setting can raise the ceiling at runtime without a rebuild.
     
   </dd>
 </div>

@@ -1213,7 +1213,7 @@ Session files are ordinary JSON under 3code's data directory and are
 created readable only by your user (mode 0600 on POSIX). Also note that
 3code refuses to run as root: it executes the shell commands the model
 proposes, and root blast radius is unacceptable. Run it as your normal
-user (`THREECODE_ALLOW_ROOT=1` overrides, for containers).
+user (`allow_root = on` in `[settings]` overrides, for containers).
 
 ### Session and directory locks
 
@@ -1701,7 +1701,8 @@ line is given when the paths move.
     `~/.m2` whole. The rule is inert until the directory exists:
     run the first build unfenced once, or `mkdir -p ~/.m2/repository`.
     Inside a fenced network, JVM tools ignore `http_proxy`; pass
-    `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=$WALL_PROXY_PORT`.
+    `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=<port>` with the port
+    from the `http_proxy` value 3code set for the fenced command.
 
 `gradle`::
 

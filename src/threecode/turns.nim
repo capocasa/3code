@@ -12,6 +12,7 @@ when defined(posix):
   import std/posix except Time
 when defined(windows):
   import std/winlean
+import runtime
 import types, util, prompts, session, compact, config, actions, api, plugins,
   display, fatprompt, streamexec, toolstream, transcript, images, screen
 from shell import bashMutationPath
@@ -486,13 +487,13 @@ proc flailEscalationMessage*(step: int): string =
 
 proc emitTestFrameEvent() =
   when defined(posix):
-    let fdText = getEnv("THREECODE_TEST_FRAME_FD")
+    let fdText = runtime.get("frame_fd")
     if fdText.len > 0:
       try:
         let fd = cint(parseInt(fdText))
         var ch = 'f'
         discard posix.write(fd, addr ch, 1)
-        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        let ackText = runtime.get("frame_ack_fd")
         if ackText.len > 0:
           let ackFd = cint(parseInt(ackText))
           var ack: array[1, char]
@@ -500,17 +501,16 @@ proc emitTestFrameEvent() =
       except CatchableError:
         discard
   elif defined(windows):
-    # Same handshake on inherited pipe HANDLEs (the harness hands them to
-    # the child via PROC_THREAD_ATTRIBUTE_HANDLE_LIST; an inherited handle
-    # keeps its numeric value, so the env numbers are live here).
-    let hText = getEnv("THREECODE_TEST_FRAME_FD")
+    # Same handshake on named pipes (the harness names them in the
+    # [test] config section; openTestPipe connects by name).
+    let hText = runtime.get("frame_fd")
     if hText.len > 0:
       try:
         let h = openTestPipe(hText, childWrites = true)
         var ch = 'f'
         var written: int32 = 0
         discard writeFile(h, addr ch, 1, addr written, nil)
-        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        let ackText = runtime.get("frame_ack_fd")
         if ackText.len > 0:
           let ackH = openTestPipe(ackText, childWrites = false)
           var ack: array[1, char]

@@ -8,7 +8,7 @@
 ## Compiled with `-d:httpStub` via test_http_nonstream.nims.
 
 import std/[json, os, strutils, unittest]
-import threecode/[api, types]
+import threecode/[api, types, runtime]
 
 suite "vision content on the wire (deepseek)":
 
@@ -28,7 +28,7 @@ suite "vision content on the wire (deepseek)":
         "finish_reason": "stop"}],
       "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}
     }]""")
-    putEnv("THREECODE_HTTP_STUB_RESPONSES", path)
+    runtime.put("http_stub_responses", path)
 
   let dataUri = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ"
 

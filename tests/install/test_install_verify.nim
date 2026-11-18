@@ -2,7 +2,7 @@ discard """
   disabled: "win"
   ## POSIX-only: it drives `install/install.sh` through a real shell and
   ## a local HTTP server. The PowerShell installer carries the same
-  ## THREECODE_RELEASE_BASE override and verification logic by symmetry.
+  ## -ReleaseBase override and verification logic by symmetry.
 """
 ## The two-step installer's checksum discipline (goal item 3): the
 ## script downloads the archive, verifies it against the release's
@@ -11,8 +11,8 @@ discard """
 ##
 ##   * matching checksum      -> installs, "checksum verified"
 ##   * mismatched checksum    -> refuses, nothing lands in the install dir
-##   * sums absent            -> refuses (THREECODE_ALLOW_UNVERIFIED=1
-##                               installs with a warning)
+##   * sums absent            -> refuses (--allow-unverified installs
+##                               with a warning)
 ##
 ## The same three paths run for `install/install.ps1` when a `pwsh` is on
 ## PATH (macOS runners ship one; the Linux CI images do not, so the leg
@@ -100,13 +100,13 @@ proc fakeAsset(): string =
   removeDir(dir)
   outPath
 
-proc runInstaller(base, home: string; extraEnv = ""): tuple[code: int,
+proc runInstaller(base, home: string; extraArgs = ""): tuple[code: int,
                                                              outp: string] =
-  let cmd = "THREECODE_RELEASE_BASE=" & quoteShell(base) &
-            " THREECODE_INSTALL_DIR=" & quoteShell(home / "bin") &
-            " HOME=" & quoteShell(home) &
-            (if extraEnv.len > 0: " " & extraEnv else: "") &
-            " sh " & quoteShell(getCurrentDir() / Script)
+  let cmd = "HOME=" & quoteShell(home) &
+            " sh " & quoteShell(getCurrentDir() / Script) &
+            " --release-base=" & quoteShell(base) &
+            " --dir=" & quoteShell(home / "bin") &
+            (if extraArgs.len > 0: " " & extraArgs else: "")
   let r = execCmdEx(cmd)
   (r.exitCode, r.output)
 
@@ -140,17 +140,17 @@ proc fakeZipAsset(): string =
   entries["3code.exe"] = "MZ fake 3code binary\r\n"
   writeFile(result, createZipArchive(entries))
 
-proc runInstallerPwsh(base, home: string; extraEnv = ""):
+proc runInstallerPwsh(base, home: string; extraArgs = ""):
     tuple[code: int, outp: string] =
   let pwsh = pwshExe()
   doAssert pwsh.len > 0, "pwsh leg must be guarded by pwshExe()"
-  let cmd = "THREECODE_RELEASE_BASE=" & quoteShell(base) &
-            " THREECODE_INSTALL_DIR=" & quoteShell(home / "bin") &
-            " HOME=" & quoteShell(home) &
+  let cmd = "HOME=" & quoteShell(home) &
             " LOCALAPPDATA=" & quoteShell(home) &
-            (if extraEnv.len > 0: " " & extraEnv else: "") &
             " " & quoteShell(pwsh) & " -NoProfile -File " &
-            quoteShell(getCurrentDir() / "install" / "install.ps1")
+            quoteShell(getCurrentDir() / "install" / "install.ps1") &
+            " -ReleaseBase " & quoteShell(base) &
+            " -InstallDir " & quoteShell(home / "bin") &
+            (if extraArgs.len > 0: " " & extraArgs else: "")
   let r = execCmdEx(cmd)
   (r.exitCode, r.output)
 
@@ -190,7 +190,7 @@ suite "installer checksum verification":
     check "checksum mismatch" in outp
     check not fileExists(home / "bin" / "3code")
 
-  test "missing sums refuse; THREECODE_ALLOW_UNVERIFIED=1 installs warned":
+  test "missing sums refuse; --allow-unverified installs warned":
     let root = getTempDir() / ("3code_inst_none_" & $getCurrentProcessId())
     removeDir(root)
     let (base, srv) = startFakeReleases(root)
@@ -203,8 +203,7 @@ suite "installer checksum verification":
     check code != 0
     check "no SHASUMS256.txt published" in outp
     check not fileExists(home / "bin" / "3code")
-    let (code2, outp2) = runInstaller(base, home,
-                                      "THREECODE_ALLOW_UNVERIFIED=1")
+    let (code2, outp2) = runInstaller(base, home, "--allow-unverified")
     checkpoint(outp2)
     check code2 == 0
     check "installing unverified" in outp2
@@ -249,8 +248,7 @@ suite "installer checksum verification (PowerShell)":
       checkpoint(outp)
       check code != 0
       check "no SHASUMS256.txt published" in outp
-      (code, outp) = runInstallerPwsh(base, home,
-                                      "THREECODE_ALLOW_UNVERIFIED=1")
+      (code, outp) = runInstallerPwsh(base, home, "-AllowUnverified")
       checkpoint(outp)
       check code == 0
       check "installing unverified" in outp

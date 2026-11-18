@@ -1,5 +1,6 @@
 import std/[json, hashes, locks, net, os, sequtils, strformat, strutils, tables, unicode, times]
 import streamhttp
+import runtime
 import types
 import threecode/unicodewidth
 when defined(posix):
@@ -230,10 +231,10 @@ proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
   ##
   ## Under the tty test harness the PTY doesn't answer OSC queries, so the
   ## query bytes would pollute captured frames; detection skips the query
-  ## there (signalled by `THREECODE_TEST_FRAME_FD`) and stays dark.
+  ## there (signalled by the `[test] frame_fd` config key) and stays dark.
   if force == cmDark: return cmDark
   if force == cmLight: return cmLight
-  if getEnv("THREECODE_TEST_FRAME_FD").len > 0: return cmDark
+  if runtime.get("frame_fd").len > 0: return cmDark
   when defined(posix):
     const FdStdin {.used.} = 0.cint
     if isatty(FdStdin) == 0: return cmDark
@@ -421,7 +422,7 @@ when defined(posix):
   proc debugLogLine(line: string) {.gcsafe.} =
     if debugLogFd == -2: return  # known-disabled sentinel
     if debugLogFd == -1:
-      let path = getEnv("THREECODE_DEBUG_LOG")
+      let path = runtime.get("debug_log")
       if path.len == 0:
         debugLogFd = -2
         return

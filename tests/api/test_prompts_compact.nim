@@ -767,12 +767,12 @@ suite "prompts: golden fixtures":
   # tool descriptions. Prompt text rides every request, so this locks
   # it against accidental drift. After a deliberate prompt change,
   # regenerate and review the diff like any source change:
-  #   THREECODE_REGEN_GOLDEN=1 <this test binary>
+  #   <this test binary> --regen-golden
   const GoldenDir = "tests/testdata/fixtures/prompts"
 
   test "every family prompt matches its golden fixture":
     createDir(GoldenDir)
-    let regen = getEnv("THREECODE_REGEN_GOLDEN") == "1"
+    let regen = commandLineParams().contains("--regen-golden")
     for fam in GoldenFamilies:
       let s = setup(Profile(name: fam & ".m", model: "m", family: fam))
       let snap = s.prompt

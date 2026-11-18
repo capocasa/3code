@@ -26,13 +26,13 @@ proc lastStubReasoningEffort*(): string = stubReasoningEffort
 
 proc emitTestFrameEvent() =
   when defined(posix):
-    let fdText = getEnv("THREECODE_TEST_FRAME_FD")
+    let fdText = runtime.get("frame_fd")
     if fdText.len > 0:
       try:
         let fd = cint(parseInt(fdText))
         var ch = 'f'
         discard posix.write(fd, addr ch, 1)
-        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        let ackText = runtime.get("frame_ack_fd")
         if ackText.len > 0:
           let ackFd = cint(parseInt(ackText))
           var ack: array[1, char]
@@ -40,15 +40,15 @@ proc emitTestFrameEvent() =
       except CatchableError:
         discard
   elif defined(windows):
-    # Same handshake on inherited pipe HANDLEs; see turns.nim's twin.
-    let hText = getEnv("THREECODE_TEST_FRAME_FD")
+    # Same handshake on named pipes; see turns.nim's twin.
+    let hText = runtime.get("frame_fd")
     if hText.len > 0:
       try:
         let h = openTestPipe(hText, childWrites = true)
         var ch = 'f'
         var written: int32 = 0
         discard writeFile(h, addr ch, 1, addr written, nil)
-        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        let ackText = runtime.get("frame_ack_fd")
         if ackText.len > 0:
           let ackH = openTestPipe(ackText, childWrites = false)
           var ack: array[1, char]
@@ -58,11 +58,11 @@ proc emitTestFrameEvent() =
         discard
 
 proc testFrameMode(): bool =
-  getEnv("THREECODE_TEST_FRAME_FD").len > 0
+  runtime.get("frame_fd").len > 0
 
 proc waitForTestContinue() =
   when defined(posix):
-    let fdText = getEnv("THREECODE_TEST_API_CONTINUE_FD")
+    let fdText = runtime.get("api_continue_fd")
     if fdText.len == 0:
       return
     let fd = try: cint(parseInt(fdText)) except CatchableError: return
@@ -78,10 +78,10 @@ proc waitForTestContinue() =
         if posix.read(fd, addr ch[0], 1) > 0:
           break
   elif defined(windows):
-    # Same bounded wait on an inherited pipe HANDLE: PeekNamedPipe in a
-    # 100ms poll loop, mirroring the POSIX poll cadence so interrupt
-    # checks stay responsive; the harness's continueStubApi writes 'c'.
-    let hText = getEnv("THREECODE_TEST_API_CONTINUE_FD")
+    # Same bounded wait on a named pipe: PeekNamedPipe in a 100ms poll
+    # loop, mirroring the POSIX poll cadence so interrupt checks stay
+    # responsive; the harness's continueStubApi writes 'c'.
+    let hText = runtime.get("api_continue_fd")
     if hText.len == 0:
       return
     let h = openTestPipe(hText, childWrites = false)
@@ -235,12 +235,12 @@ proc loadStubResponses(): seq[JsonNode] =
   ## flaky-network paths. Re-read on every call so edits take effect
   ## mid-session.
   ##
-  ## Resolution: an absolute path in ``THREECODE_STUB_RESPONSES`` wins,
-  ## otherwise the cwd-relative ``stub_responses.json``. The override lets
-  ## a test delete the process cwd (to reproduce a deleted-cwd crash) and
-  ## still serve responses from a stable path.
+  ## Resolution: an absolute path in the ``[test] stub_responses`` config
+  ## key wins, otherwise the cwd-relative ``stub_responses.json``. The
+  ## override lets a test delete the process cwd (to reproduce a
+  ## deleted-cwd crash) and still serve responses from a stable path.
   let path = block:
-    let override = getEnv("THREECODE_STUB_RESPONSES")
+    let override = runtime.get("stub_responses")
     if override.len > 0: override else: "stub_responses.json"
   if not fileExists(path):
     stderr.writeLine "3code: stub: " & path & " not found"
