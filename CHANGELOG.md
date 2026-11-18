@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **Goal mode's post-bash tree fold no longer hangs on a FIFO left in
+  the project.** The fold reads back every path the manifest walk
+  recorded, and Nim's `walkDir` reports a FIFO as a plain file, so a
+  command that leaves one behind (a test suite's `mkfifo` fixture in
+  `build/tests`) made the next fold `readFile` it: opening a FIFO
+  read-only blocks until a writer appears, and none ever does. The
+  session froze outside every cancel window (the bash timeout and the
+  Ctrl-C/Esc watchers were already torn down; a resumed session in a
+  repo whose tests leave such a fixture sat 25 hours in `fifo_open`,
+  dead to Ctrl-C and Esc). The walk now passes `skipSpecial`, so FIFOs
+  and device nodes never enter the manifest, and a special file that
+  disappears later folds as a name-only deletion
+  (`src/threecode/snap.nim`, test in `tests/core/test_session_diff.nim`).
 - **Every `[settings]` key cascades now, and there is a provider
   whitelist: `limitproviders`.** The resolution ladder for any setting
   is: the compiled default, then the user config
