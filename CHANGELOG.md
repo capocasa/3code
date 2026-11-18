@@ -2,6 +2,21 @@ Changelog
 
 Unreleased
 
+- **Launching from a deleted working directory refuses with a straight
+  error.** A terminal left in a directory that was deleted or renamed
+  away (a rebuilt clone, a tmpclean sweep) crashed 3code at startup with
+  an unhandled `getCurrentDir` OSError - a bare stack trace painted over
+  the splash. Every frontend that roots its session at the process cwd
+  (the TUI, oneshot prompts, `--headless`, `--gui`, `--rpc`) now checks
+  the cwd up front (`requireLiveCwd`) and exits with
+  `the working directory no longer exists (/vanished/path) — change to
+  an existing directory and start 3code again` (exit 3; headless stays
+  silent, the exit code reports). Without the gate the session would
+  have silently re-rooted at `/` via `safeCwd`, pointing the sandbox
+  policy, dir settings and session files at the wrong directory. Cwdless
+  fast exits (`-v`, `-h`, `-l`, `-f`, `provider`, plugin subcommands)
+  still answer from a deleted one, and `--acp` is exempt because its
+  sessions root at the client-supplied cwd, not the process's.
 - **`:btw` never blocks the prompt anymore.** The side question fired
   its meta-call synchronously, freezing the UI for the whole round
   trip. It runs on a worker thread now (`btwthread.nim`): the command
