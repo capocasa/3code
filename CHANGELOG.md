@@ -2,6 +2,18 @@ Changelog
 
 Unreleased
 
+- **Relace is a provider, live-tested on every model.** Relace's hosted
+  open-weight coding line (GLM 5.2/5.3/5.3-flash, six DeepSeek V4/V4.1
+  ids, Kimi K3 and K3.1 Pro) sits behind one `rlc-` key at
+  `models.relace.ai/v1` - `:provider add` infers the provider from the
+  key prefix alone. Eleven known-good rows, all 1M context; every one
+  answered a real headless turn. The weights are fp4-quantized (per
+  their /models catalog, noted in the manual), and kimi-k3.1-pro is in
+  the live catalog though their docs table omits it. GLM-5.3 and the
+  deepseeks ride the generic hosted-stack `reasoning_effort` knob,
+  kimi takes the vLLM `enable_thinking` bool; their purpose-built
+  apply/search models are separate non-chat endpoints and stay off
+  the table.
 - **`:retry` no longer deletes the error it answers.** The retry notice
   (the error detail plus the countdown) lives on the volatile notice
   row, and a `:retry` that cut the wait erased it as the next attempt
