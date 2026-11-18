@@ -434,7 +434,11 @@ proc promptBody(s: AgentSession; text: string): string =
     s.messages.add %*{"role": "user",
                       "content": buildUserMessage(s.messages, promptText,
                         s.state.cwd, s.profile.vision,
-                        sessionImageDir(s.state.savePath))}
+                        sessionImageDir(s.state.savePath),
+                        lastBash = lastBashInclude(s.state.toolLog),
+                        lastPrompt = s.state.lastPrompt)}
+    if text.strip.len > 0:
+      s.state.lastPrompt = text
     refreshSystemPrompt(s.messages, s.profile, s.state.promptState)
     clearDraft(s.state)
   let interrupted = runTurnsInteractive(s.profile, s.messages, s.state)

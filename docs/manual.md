@@ -488,6 +488,11 @@ requirements. To include a file directly in a prompt, prefix its path with
 Review @src/parser.nim and add tests for malformed input.
 ```
 
+`@path` reads a file, `@*` shows the last result, `@+` repeats your last
+prompt. The latter two splice in place of the token: `:!` output never
+reaches the model otherwise, and `@+` is the cheap way to iterate on the
+same instruction.
+
 To run a shell command yourself without sending anything to the model,
 prefix it with `:!`:
 

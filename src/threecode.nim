@@ -1100,7 +1100,11 @@ proc main() =
         messages.add %*{"role": "user",
                         "content": buildUserMessage(messages, promptText,
                           vision = prof.vision,
-                          imgDir = sessionImageDir(session.savePath))}
+                          imgDir = sessionImageDir(session.savePath),
+                          lastBash = lastBashInclude(session.toolLog),
+                          lastPrompt = session.lastPrompt)}
+        if ev.text.strip.len > 0:
+          session.lastPrompt = ev.text
         refreshSystemPrompt(messages, prof, session.promptState)
         saveSessionReporting(session, messages)
         if ev.echoed:
@@ -1194,7 +1198,11 @@ proc main() =
     var text = textIn
     pluginOnPrompt(text, session.savePath, prof.name, prof.model)
     messages.add %*{"role": "user", "content": buildUserMessage(messages, text,
-      vision = prof.vision, imgDir = sessionImageDir(session.savePath))}
+      vision = prof.vision, imgDir = sessionImageDir(session.savePath),
+      lastBash = lastBashInclude(session.toolLog),
+      lastPrompt = session.lastPrompt)}
+    if textIn.strip.len > 0:
+      session.lastPrompt = textIn
     refreshSystemPrompt(messages, prof, session.promptState)
     # Persist before the turn starts: a kill during the first model call
     # (job teardown of a detached oneshot, power loss) otherwise loses the
@@ -1411,9 +1419,14 @@ proc main() =
         commitTranscriptBytes(noProvider, true)
         releaseIdleSubmittedInput()
         continue
+      let rawLine = line
       pluginOnPrompt(line, session.savePath, prof.name, prof.model)
       messages.add %*{"role": "user", "content": buildUserMessage(messages, line,
-        vision = prof.vision, imgDir = sessionImageDir(session.savePath))}
+        vision = prof.vision, imgDir = sessionImageDir(session.savePath),
+        lastBash = lastBashInclude(session.toolLog),
+        lastPrompt = session.lastPrompt)}
+      if rawLine.strip.len > 0:
+        session.lastPrompt = rawLine
       refreshSystemPrompt(messages, prof, session.promptState)
       # Same mid-turn-kill window as runInitialPrompt: the draft sidecar
       # is cleared below, so without this save the typed prompt only
