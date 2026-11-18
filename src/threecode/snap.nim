@@ -61,7 +61,12 @@ proc walkTree(root: string): Table[string, (Time, int)] =
   var stack = @[root]
   while stack.len > 0:
     let d = stack.pop()
-    for kind, p in walkDir(d, checkDir = false):
+    # skipSpecial: fifos and device nodes must never enter the manifest,
+    # because the fold reads what the walk records and opening a fifo
+    # read-only blocks until a writer appears - test debris (the still
+    # repo's suite leaves one in build/tests) would brick the session
+    # with no cancel watcher in sight.
+    for kind, p in walkDir(d, checkDir = false, skipSpecial = true):
       if result.len >= ManifestMaxEntries: return
       case kind
       of pcDir:
@@ -70,7 +75,7 @@ proc walkTree(root: string): Table[string, (Time, int)] =
       of pcFile:
         let sig = localSig(p)
         if sig[1] >= 0: result[p] = sig
-      else: discard  # symlinks and specials: never followed or recorded
+      else: discard  # symlinks: never followed or recorded
 
 proc armManifest*(cache: ReadCache; root: string): bool =
   ## The snapshot: one stat walk of `root`, stored as the fold baseline.
