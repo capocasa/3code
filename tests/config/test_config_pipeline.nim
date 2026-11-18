@@ -85,6 +85,9 @@ suite "config: inferProvider":
   test "recognizes rlc- as relace":
     check inferProvider("rlc-0123456789abcdef0123456789abcdef") == "relace"
 
+  test "recognizes sk-db- as darkbloom":
+    check inferProvider("sk-db-0123456789abcdef") == "darkbloom"
+
   test "recognizes vck_ as vercel":
     check inferProvider("vck_xxxxxxxxxxxx") == "vercel"
 
@@ -142,6 +145,7 @@ suite "config: catalog urls":
     check catalogUrl("aihubmix") == "https://aihubmix.com/v1"
     check catalogUrl("cortecs") == "https://api.cortecs.ai/v1"
     check catalogUrl("relace") == "https://models.relace.ai/v1"
+    check catalogUrl("darkbloom") == "https://api.darkbloom.dev/v1"
 
 suite "config: new known-good providers":
   test "glm rows ride the glm family":
@@ -186,6 +190,24 @@ suite "config: new known-good providers":
     check knownGoodWireModel("relace", "deepseek-4.1-flash") ==
       "deepseek-ai/DeepSeek-V4.1-Flash"
     check knownGoodWireModel("relace", "kimi-k3") == "moonshotai/kimi-k3"
+
+  test "darkbloom rows ride the hosted families":
+    check knownGoodFamily("darkbloom", "glm-5.3-flash") == "glm"
+    check knownGoodFamily("darkbloom", "EigenLabs/Qwen3.8-27B-4bit-mtp") == "qwen"
+    check knownGoodTags("darkbloom", "nvidia-nemotron-3.5-lightning") ==
+      ("nemotron", "3.5", "lightning")
+    check knownGoodTags("darkbloom", "mimo-v2.6-flash-mopd") ==
+      ("mimo", "2.6", "flash-mopd")
+
+  test "darkbloom wire repair restores the catalog ids":
+    # Mixed-case catalog ids, and the EigenLabs build id whose prefix
+    # normalization strips.
+    check knownGoodWireModel("darkbloom", "glm-5.3-flash") == "glm-5.3-flash"
+    check knownGoodWireModel("darkbloom", "qwen-3.5-9b") == "Qwen3.5-9B"
+    check knownGoodWireModel("darkbloom", "qwen-3.8-27b-4bit-mtp") ==
+      "EigenLabs/Qwen3.8-27B-4bit-mtp"
+    check knownGoodWireModel("darkbloom", "nemotron-3.5-super") ==
+      "nvidia-nemotron-3.5-super"
 
   test "engy carries the fleet's own context cap":
     check contextWindowFor("glm-5.3") == 1_000_000

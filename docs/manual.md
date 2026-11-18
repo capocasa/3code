@@ -422,6 +422,7 @@ login that rides on `anthropic`.
 | perplexity | US | |
 | neuralwatt | US and EU (multi-region) | energy-metered vLLM fleet: per-request Wh and CO2 on every response, pay-per-kWh or token pricing; one graded reasoning knob across families |
 | relace | US | Relace hosts their open-weight coding line (GLM, DeepSeek, Kimi, all 1M context) behind one `rlc-` key at aggressive prices; **quantized** (fp4 weights, per their /models catalog); their purpose-built apply/search models live on separate endpoints 3code does not use |
+| darkbloom | varies (provider Macs worldwide) | Eigen Labs' network of people-owned Apple-silicon Macs serving **quantized** MLX builds with per-request hardware attestation; one `sk-db-` key, `/v1/models` is the authoritative catalog (glm-5.3-flash serves a 262k window there, not 1M); gemma/ternary-bonsai/flint builds stay experimental |
 
 ### EU providers
 
