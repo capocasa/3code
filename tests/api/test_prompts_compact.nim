@@ -210,6 +210,13 @@ suite "prompts: defaultReasoningsFor":
       @["low", "medium", "high", "xhigh", "max"]
     check defaultReasoningsFor("openai", "gpt-6-astra", "gpt") ==
       @["low", "medium", "high", "xhigh", "max"]
+    # 6.2 Astra: same always-on ladder base and pro alike.
+    check defaultReasoningsFor("openai", "gpt-6.2-astra", "gpt") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("openrouter", "openai/gpt-6.2-astra", "gpt") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check defaultReasoningsFor("nanogpt", "openai/gpt-6.2-astra-pro", "gpt") ==
+      @["low", "medium", "high", "xhigh", "max"]
 
   test "level-based families still use ReasoningLevels":
     check defaultReasoningsFor("openai", "gpt-oss-1", "gpt-oss") ==
@@ -266,7 +273,7 @@ suite "prompts: setup — gpt":
   test "older and current GPT models share the verification contract":
     let shared = setup(Profile(family: "gpt", model: "gpt-4o-mini"))
     for model in ["gpt-5.6", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-astra",
-                   "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"]:
+                   "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6.2-astra"]:
       let current = setup(Profile(family: "gpt", model: model))
       check current.prompt == shared.prompt
       check current.tools == shared.tools
@@ -556,7 +563,7 @@ suite "compact: contextWindowFor":
     check contextWindowFor("gpt-6-astra") == 1_050_000
 
   test "gpt-6 family returns 1050000":
-    for m in ["gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"]:
+    for m in ["gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6.2-astra"]:
       check contextWindowFor(m) == 1_050_000
 
   test "gpt-4 returns 128000":

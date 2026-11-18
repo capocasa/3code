@@ -90,6 +90,11 @@ suite "modelname: normalizeModelName":
       "mimo-2.6-flash"
     check normalizeModelName("xiaomi-mimo-v2-6-flash") == "mimo-2.6-flash"
 
+  test "gpt 6.2 spellings":
+    check normalizeModelName("gpt-6.2-astra") == "gpt-6.2-astra"
+    check normalizeModelName("openai/gpt-6.2-astra") == "gpt-6.2-astra"
+    check normalizeModelName("openai/gpt-6.2-astra-pro") == "gpt-6.2-astra-pro"
+
   test "gpt 6.1 spellings":
     check normalizeModelName("gpt-6.1-terra") == "gpt-6.1-terra"
     check normalizeModelName("openai/gpt-6.1-sol-pro") == "gpt-6.1-sol-pro"

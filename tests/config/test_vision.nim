@@ -47,7 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 326
+    check visionRows == 331
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
@@ -95,6 +95,14 @@ suite "vision: known-good curation":
     check knownGoodVision("venice", "openai-gpt-6-astra-pro")
     check knownGoodVision("openrouter", "openai/gpt-6-astra-pro")
     check knownGoodVision("nanogpt", "openai/gpt-6-astra-pro")
+    # 6.2 Astra accepts text+image input per its model page; the
+    # day-one rows carry the mark.
+    check knownGoodVision("openai", "gpt-6.2-astra")
+    check knownGoodVision("chatgpt", "gpt-6.2-astra")
+    check knownGoodVision("openrouter", "openai/gpt-6.2-astra")
+    check knownGoodVision("openrouter", "openai/gpt-6.2-astra-pro")
+    check knownGoodVision("nanogpt", "openai/gpt-6.2-astra")
+    check knownGoodVision("nanogpt", "openai/gpt-6.2-astra-pro")
     check not knownGoodVision("nebius", "zai-org/GLM-5.3-Flash")
     check not knownGoodVision("nebius", "deepseek-ai/DeepSeek-V4.1-Flash")
     check not knownGoodVision("nebius", "nvidia/Nemotron-3.5-Super-VL")

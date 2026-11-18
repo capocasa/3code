@@ -690,6 +690,14 @@ suite "api request shaping":
       @["low", "medium", "high", "xhigh", "max"]
     check knownGoodReasonings("chatgpt", "gpt-6.1-sol") ==
       @["low", "medium", "high", "xhigh", "max"]
+    # 6.2 Astra keeps the astra contract: no `none`, low..max; the
+    # pro tier rides the same pro-mode ladder as 6.1's.
+    check knownGoodReasonings("openai", "gpt-6.2-astra") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check knownGoodReasonings("chatgpt", "gpt-6.2-astra") ==
+      @["low", "medium", "high", "xhigh", "max"]
+    check knownGoodReasonings("openrouter", "openai/gpt-6.2-astra-pro") ==
+      @["low", "medium", "high", "xhigh", "max"]
 
   test "openai chat body sends reasoning_effort passthrough":
     for level in ["none", "low", "medium", "high", "xhigh", "max"]:
@@ -720,6 +728,23 @@ suite "api request shaping":
     check body{"max_completion_tokens"}.getInt == 8192
     check body{"reasoning_effort"}.getStr == "xhigh"
     check "max_tokens" notin body
+
+  test "gpt-6.2-astra rides the shared gpt wire surfaces":
+    # Same completions shape as 6-astra (max_completion_tokens,
+    # reasoning_effort passthrough) and the /responses shape the
+    # first-party row and the chatgpt twin both use (effort under
+    # reasoning.effort, no temperature for the gpt family).
+    var body = %*{"stream": true}
+    let p = Profile(name: "openai.gpt-6.2-astra", family: "gpt",
+                    model: "gpt-6.2-astra", reasoning: "low")
+    applyGenerationDefaults(p, body)
+    applyReasoning(p, body)
+    check body{"max_completion_tokens"}.getInt == 8192
+    check body{"reasoning_effort"}.getStr == "low"
+    let rbody = buildResponsesBody(p, %*[{"role": "user", "content": "go"}])
+    check rbody{"model"}.getStr == "gpt-6.2-astra"
+    check rbody{"reasoning"}{"effort"}.getStr == "low"
+    check "temperature" notin rbody
 
   test "chatgpt gpt-6-astra verify body hits the Codex backend shape":
     # The subscription twin posts to chatgpt.com/backend-api/codex with
@@ -827,6 +852,34 @@ suite "api request shaping":
     check knownGoodGeneration("openai", "gpt-6-astra").maxTokens == 8192
     check maxOutputTokensFor(Profile(name: "openai.gpt-6-astra",
       model: "gpt-6-astra")) == 128_000
+
+  test "gpt-6.2-astra is known-good first-party and on its day-one hosts":
+    # Same line as 6-astra: 1.05M context, 8192 table generation default,
+    # 128k architectural output cap. chatgpt resolves through the
+    # openai catalog; openrouter and nano-gpt carry base + pro (public
+    # catalogs, no key here to ping a completion).
+    check isKnownGood(Profile(name: "openai.gpt-6.2-astra",
+                              model: "gpt-6.2-astra"))
+    check isKnownGood(Profile(name: "chatgpt.gpt-6.2-astra",
+                              model: "gpt-6.2-astra"))
+    check knownGoodContextWindow("openai", "gpt-6.2-astra") == 1_050_000
+    check knownGoodContextWindow("chatgpt", "gpt-6.2-astra") == 1_050_000
+    check knownGoodGeneration("openai", "gpt-6.2-astra").maxTokens == 8192
+    check maxOutputTokensFor(Profile(name: "openai.gpt-6.2-astra",
+      model: "gpt-6.2-astra")) == 128_000
+    check isKnownGood(Profile(name: "openrouter.openai/gpt-6.2-astra",
+                              model: "openai/gpt-6.2-astra"))
+    check isKnownGood(Profile(name: "openrouter.openai/gpt-6.2-astra-pro",
+                              model: "openai/gpt-6.2-astra-pro"))
+    check isKnownGood(Profile(name: "nanogpt.openai/gpt-6.2-astra",
+                              model: "openai/gpt-6.2-astra"))
+    check isKnownGood(Profile(name: "nanogpt.openai/gpt-6.2-astra-pro",
+                              model: "openai/gpt-6.2-astra-pro"))
+    # venice and cheaperinference have not listed it yet: no rows.
+    check not isKnownGood(Profile(name: "venice.openai-gpt-6.2-astra",
+                                  model: "openai-gpt-6.2-astra"))
+    check not isKnownGood(Profile(name: "cheaperinference.gpt-6.2-astra",
+                                  model: "gpt-6.2-astra"))
 
   test "grok-4.7 is known-good for xai and supergrok":
     # The subscription twin resolves through the xai catalog; same
