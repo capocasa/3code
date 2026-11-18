@@ -385,7 +385,10 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         if isRetryNow():
           # `:retry` during the wait: retry immediately. Same contract as
           # the real callModel — the curve resets below instead of aging,
-          # so the next failure backs off from the short end again.
+          # so the next failure backs off from the short end again. The
+          # error is committed first (hookRetryCut) exactly like the real
+          # callModel does, so the stub exercises the same frontend path.
+          hookRetryCut(detail)
           stubRetrySkipInc = true
           clearRetryNow()
           break

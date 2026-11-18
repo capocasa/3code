@@ -4,8 +4,8 @@
 ## turn is running. The turn controller calls these helpers directly and also
 ## registers them as API stream hooks. `api.nim` must not import this module.
 
-import std/[atomics, json, locks, os, osproc, strformat, strutils, terminal,
-  times, unicode]
+import std/[atomics, json, locks, os, osproc, strformat, strutils, tables,
+  terminal, times, unicode]
 when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
@@ -2400,6 +2400,18 @@ proc apiRetryNotice*(msg: string) =
   ## receive the notice event.
   discard msg
 
+proc apiRetryCut*(label: string) =
+  ## `:retry` cut the backoff short. The error that justified the wait
+  ## lives on the volatile notice row, which the next attempt erases —
+  ## without this commit the message would simply vanish, and a resend
+  ## that succeeds leaves no trace of what went wrong. Journaled like
+  ## every other scrollback-only line so the rebreak window can replay
+  ## it; no bar repaint (the spinner owns the footer mid-turn).
+  let bytes = errLnS(label)
+  termengine.noteNonMessageTail(bytes, journalAnchorMessagesLen)
+  commitTranscriptBytes(bytes, restoreEditor = true,
+                        reserveFooter = true)
+
 proc installApiStreamHooks*() =
   setApiStreamHooks(ApiStreamHooks(
     beforeCall: apiBeforeCall,
@@ -2422,7 +2434,8 @@ proc installApiStreamHooks*() =
     retryWaitTick: proc(remainingS: int) =
       setAnimRetryRemaining(remainingS),
     retryWaitClear: proc() =
-      clearAnimRetryWait()))
+      clearAnimRetryWait(),
+    retryCut: apiRetryCut))
 
 # ---------- Headless (library) stream hooks ----------
 #
@@ -2929,6 +2942,12 @@ proc inputThreadProc() {.thread.} =
       if turnActive and hasText and not modal and
           startsWithCommandPrefix(ed.line.text):
         let cmd = ed.line.text
+        # System commands are prompt-log content like any typed line:
+        # record the text now, before the command hook's commit clears
+        # the editor out from under readLineWith's own historyAdd (which
+        # then sees an empty buffer and skips). `:retry` and friends stay
+        # recallable via Up / Ctrl+R.
+        ed.historyAdd()
         pushInputEvent(InputEvent(kind: ieCommand, text: cmd))
         # Leave the editor's row model intact: whichever way the hook goes
         # (run inline now, or queue for the drain via commitQueuedEcho),
@@ -2961,6 +2980,12 @@ proc inputThreadProc() {.thread.} =
           pushInputEvent(InputEvent(kind: ieLine, text: ed.line.text))
           commitQueuedEcho(ed.line.text)
         else:
+          # Record before the push for the same reason as commands above:
+          # once the event is visible the controller's echo commit may
+          # clear the editor concurrently with readLineWith's own later
+          # historyAdd. The later add dedupes (same text) or no-ops (the
+          # buffer is clear by then), so this never double-records.
+          ed.historyAdd()
           let rows = minline.totalRows(ed.line.text, ed.promptW,
                                        ed.contPromptW, max(2, ed.width))
           pushInputEvent(InputEvent(kind: ieLine, text: ed.line.text,
@@ -2980,6 +3005,19 @@ proc inputThreadProc() {.thread.} =
         inputIdleLinePending.store(true, moRelease)
       ed.renderSuffix = ""
       ed.renderSuffixCursor = false
+    # Ctrl+Shift+R (kitty keyboard protocol; `retry` in DefaultShortcuts,
+    # rebindable via [shortcuts]): the `:retry` command as a key — same
+    # flag, same hint line. Unlike a submitted command the draft in the
+    # buffer survives, so the commit must not clear the editor, and a
+    # modal wizard owns the keys, so the press is inert there.
+    let retryKey: minline.KeyCallback = proc(ed: var minline.LineEditor) =
+      {.cast(gcsafe).}:
+        if inputModalActive.load(moAcquire): return
+        requestTurnRetry("ctrl+shift+r")
+        commitTranscriptBytes(hintLnS("instant retry requested; takes " &
+          "effect if a request is in flight or a backoff is running"),
+          restoreEditor = true, reserveFooter = true)
+    minline.CommandProcs["retry"] = retryKey
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].painter = proc(ed: var minline.LineEditor) =
