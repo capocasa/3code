@@ -2927,7 +2927,7 @@ proc inputThreadProc() {.thread.} =
       let turnActive = inputTurnActive.load(moAcquire)
       let hasText = ed.line.text.len > 0
       if turnActive and hasText and not modal and
-          (ed.line.text.startsWith(":") or isSlashHelp(ed.line.text)):
+          startsWithCommandPrefix(ed.line.text):
         let cmd = ed.line.text
         pushInputEvent(InputEvent(kind: ieCommand, text: cmd))
         # Leave the editor's row model intact: whichever way the hook goes
@@ -3210,8 +3210,8 @@ proc inputThreadProc() {.thread.} =
         # which never happens in practice; still handle it defensively.
         if text.len == 0:
           continue
-        if text[0] == ':':
-          # idle colon commands: push a line event since there's no
+        if startsWithCommandPrefix(text):
+          # idle commands: push a line event since there's no
           # activeCommandHook wired for idle mode; the controller handles it.
           pushInputEvent(InputEvent(kind: ieLine, text: text,
                                      echoRows: edPtr[].echoRows))

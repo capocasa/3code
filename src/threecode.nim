@@ -1338,7 +1338,7 @@ proc main() =
           if runTurnWithSafetyNet(): break
         continue
       let t = line.strip
-      if t in QuitLineCommands: break
+      if isQuitLine(t): break
       let commandResult = handleCommandResult(line, messages, session, prof, editor)
       if commandResult.recognized:
         if commandResult.disposition == cdModal:
