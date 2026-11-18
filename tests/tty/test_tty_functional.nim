@@ -2520,6 +2520,62 @@ max-tokens = "8192"
     tty.expectIdleCaret()
     tty.expectAlive()
 
+  test "backspace at column 0 of a multiline draft repaints the rows below":
+    # Regression: the diff painter paired editor rows by the caret's row
+    # movement, but the repaint is anchored at the block top. A backspace
+    # at column 0 joins two draft lines: every row below the caret rises
+    # one row, and the risen row's content matched the vacated row below
+    # it, so the diff skipped it — the stale un-joined row stayed on
+    # screen below the joined one while the shrink-blanker erased the row
+    # that held the moved content.
+    let root = newFixture("multiline_col0_backspace")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "col0 join reply",
+        "contentChunks": ["col0 join reply"],
+        "usage": {"promptTokens": 10, "completionTokens": 3,
+                  "totalTokens": 13, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "line one"
+    tty.send "\x1b[13;2u"
+    tty.send "line two"
+    tty.send "\x1b[13;2u"
+    tty.send "line three"
+    tty.expect "line three"
+    tty.drain(200)
+    # Caret to column 0 of the middle line, then join upward.
+    tty.send "\x1b[A"
+    tty.drain(150)
+    tty.send "\x1b[H"
+    tty.drain(150)
+    tty.send "\x7f"
+    tty.drain(300)
+
+    tty.expectCount("❯ line oneline two", 1, where = "screen")
+    tty.expectCount("  line three", 1, where = "screen")
+    tty.expectCount("  line two", 0, where = "screen")
+    # The surviving last line sits directly below the joined row: no
+    # stale row between them, no blank gap.
+    var joinedRow = -1
+    var threeRow = -1
+    for r in 0 ..< tty.grid.rows.len:
+      let text = tty.grid.rowText(r)
+      if "❯ line oneline two" in text: joinedRow = r
+      if "  line three" in text: threeRow = r
+    check joinedRow >= 0
+    check threeRow == joinedRow + 1
+    tty.expectIdleCaret()
+    tty.expectAlive()
+
   test "caret cell never strands or vanishes crossing empty draft rows":
     # Regression: the volatile painter's stored diff model claimed one more
     # footer row than it actually kept (the footer band was counted from the

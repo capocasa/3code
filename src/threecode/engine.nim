@@ -678,18 +678,25 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
       if drop > 0:
         e.committedRowWidths.setLen(e.committedRowWidths.len - drop)
       e.noteCommittedRows(join(windowRows, "\r\n"), separator = false)
-  # When the previous block was taller at the top, the vacated rows are
-  # handled one of two ways. When the shrink is exactly the footer band
-  # losing rows (a retry notice's padding rows clearing), absorb them
-  # resize-style: erase down from the old top and repaint the shorter
-  # block there, so its bottom (and the caret) rise and the vacated rows
-  # end up below the block as dead space. Blanking them in place instead
-  # would strand them above the block as blank scrollback no walk-up ever
-  # covers again. Any other top-shrink (a commit consumed content rows
-  # out of band) keeps the in-place blanking: blank that stale head
-  # explicitly, then step back down to the new block's top. (ED-0 would
-  # be shorter, but terminal models that implement it as "drop the rows
-  # below" shift anything underneath up into the block.)
+  # When the previous block was taller and the shrink is exactly the
+  # footer band losing rows (a retry notice's padding rows clearing),
+  # absorb it resize-style: erase down from the old top and repaint the
+  # shorter block there, so its bottom (and the caret) rise and the
+  # vacated rows end up below the block as dead space. Blanking them in
+  # place instead would strand them above the block as blank scrollback
+  # no walk-up ever covers again. (ED-0 would be shorter, but terminal
+  # models that implement it as "drop the rows below" shift anything
+  # underneath up into the block.)
+  #
+  # No other shrink blanks its head here. Every other diff-active
+  # shrink (a keystroke joining draft lines, a cancel clearing a wrapped
+  # draft) vacates rows at the block's BOTTOM — the editor is the
+  # bottom-most band — and the trailing blanker below the row loop
+  # erases those; blanking the top instead erased live bar rows, and the
+  # row diff then skipped rewriting them (their content matched the
+  # model), leaving a blank bar. Out-of-band shrinks (a commit consumed
+  # content rows) rewrite the screen themselves and clear the row model,
+  # so `prevH` never counts their vacated rows here.
   let staleHead = max(0, prevH - blockH)
   let footerShrink = max(0, max(e.paintedFooterRows, prevBarCount) -
     footerRowsAboveEditor)
@@ -697,17 +704,18 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
     staleHead <= footerShrink
   if absorbShrink:
     lead.add "\r\x1b[J"
-  elif staleHead > 0:
-    var headBuf = ""
-    for _ in 0 ..< staleHead:
-      headBuf.add "\r\x1b[2K"
-      headBuf.add "\x1b[1B"
-    headBuf.add "\x1b[" & $staleHead & "A"
-    lead.add headBuf
-  # Top-down rewrite: rows compare against the previous block aligned
-  # at the bottom. The editor sections align at their cursor rows (the
-  # caret does not move during a volatile repaint); rows before the
-  # previous block ever existed compare against a sentinel.
+  # Top-down rewrite: rows compare against the previous block by
+  # absolute row. The row loop paints from the walked-up old block top
+  # (the shrink path repaints there and blanks the vacated rows below
+  # the new bottom), so new row `i` lands on the screen cells the
+  # previous block's row `i` held; rows before the previous block ever
+  # existed compare against a sentinel. Pairing by the caret's row
+  # movement instead (align at cursor rows, shift by `prevH - blockH`)
+  # skips a row that shifted up after a shrink: a backspace at column 0
+  # joins two draft lines, every row below the caret rises one row, and
+  # the risen row's content matched the vacated row below it — the diff
+  # left the stale row on screen and the shrink-blanker erased the row
+  # that held the moved content.
   var buf = lead & "\r"
   # Editor-row indexing uses the physical editor count: after an
   # out-of-band wipe `prevEditorRows` is empty while the screen still
@@ -715,9 +723,8 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # the fresh editor rows against stale model rows (or nothing) and skip
   # repainting them.
   let prevEdTop = prevH - prevPhysEdRows
-  let prevAnchor = prevH - 1 - (blockH - 1 - anchor)
   # A growth scroll relocated the whole block: the previous model rows
-  # no longer sit where the bottom-aligned comparison assumes, so a
+  # no longer sit where the absolute-row comparison assumes, so a
   # "row unchanged" skip would leave the screen holding the previous
   # geometry (a blanked gap row with the prompt one row off — the
   # wizard-bootstrap lost-prompt race). Compare everything as missing
@@ -732,18 +739,17 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
       else: ""
     var p = Missing
     if diffValid and prevPhysEdRows > 0 and i >= edTop:
-      # Current editor row: compare to the previous editor row the same
-      # distance from the cursor. Rows the model no longer holds (wiped
+      # Current editor row: compare to the previous editor row at the
+      # same absolute block row. Rows the model no longer holds (wiped
       # out of band) compare against the sentinel and repaint.
-      let k = prevAnchor + (i - anchor) - prevEdTop
+      let k = i - prevEdTop
       p = (if k >= 0 and k < prevEditorRows.len: prevEditorRows[k]
            else: Missing)
     else:
-      # The previous block's top shifted by the same amount its cursor
-      # row moved (the caret does not move during a volatile repaint;
-      # sections below the cursor are rewritten each tick). Anchor-align
-      # both blocks so unchanged rows compare to themselves.
-      let j = prevAnchor + (i - anchor)
+      # Non-editor row: same absolute-row pairing against the previous
+      # block's model (sections below the cursor are rewritten each
+      # tick; a keystroke that moves the caret never changes them).
+      let j = i
       if diffValid and (prevPhysEdRows == 0 or j < prevEdTop) and
           j >= 0 and j < min(prevRows.len, prevH):
         p = prevRows[j]
