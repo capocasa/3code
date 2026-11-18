@@ -1888,9 +1888,9 @@ proc cmdSandboxSettingSelect(target: string): string =
   result = hintLnS("sandbox: off  (this session runs unconfined)")
 
 proc sandboxStatusLine(): string =
-  ## One-line enabled/disabled state for bare `:sandbox`: the setting,
-  ## whether the running session enforces, and the governing policy
-  ## file when it does. The rules themselves stay on `:sandbox show`.
+  ## One-line enabled/disabled state that leads every `:sandbox` dump:
+  ## the setting, whether the running session enforces, and the
+  ## governing policy file when it does.
   if not sandboxEnabled:
     "sandbox: off  (run unconfined)"
   elif not sandbox.active:
@@ -2536,14 +2536,12 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         resp "usage: :plugin [list|debug on|off]  (also :plugins)"
     of ":sandbox", ":sb":
-      # Bare `:sandbox` names the enabled state; `:sandbox show` leads
-      # with that state and then dumps the rules; allow/readonly/deny
+      # Bare `:sandbox` is `:sandbox show`: the enabled state leads,
+      # then the rules when the session enforces; allow/readonly/deny
       # append a line and reload. The path arg is written verbatim so
       # relative paths stay portable in the file.
-      let verb = if parts.len == 0: "status" else: parts[0]
+      let verb = if parts.len == 0: "show" else: parts[0]
       case verb
-      of "status":
-        resp sandboxStatusLine()
       of "show":
         # `active` means this session enforces, `sandboxEnabled` is the
         # persisted setting, and a mid-session `:sandbox on` arms live.
@@ -2552,7 +2550,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         # bare "not active" that reads like the setting did not take.
         var shown = sandboxStatusLine()
         if sandboxEnabled and sandbox.active:
-          shown.add "\n" & sandbox.renderSandbox(sandbox.current)
+          shown.add "\n\n" & sandbox.renderSandbox(sandbox.current)
         resp shown
       of "on", "off":
         body.add cmdSandboxSettingSelect(verb)

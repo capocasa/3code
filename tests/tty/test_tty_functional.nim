@@ -4503,8 +4503,8 @@ max-tokens = "8192"
     # --- :sandbox on arms enforcement for the running session (no
     # restart needed). The session boots with the setting off (fixture
     # config), matching a session launched before the sandbox was ever
-    # enabled. Bare :sandbox names the enabled state; :sandbox show
-    # leads with the same line and then dumps the rules. The fixture
+    # enabled. Bare :sandbox is :sandbox show: the state line leads,
+    # a blank row separates it from the rules dump. The fixture
     # policy pins deny / and allow ./, so the armed dump asserts the
     # same lines on all platforms. ---
     tty.send ":sandbox on"
@@ -4516,12 +4516,15 @@ max-tokens = "8192"
     tty.send ":sandbox"
     tty.send "\n"
     tty.expectNewInHistory "sandbox: on  (this session enforces", armedCount
+    tty.expectInHistory ")\n\ndeny      /"
     tty.expectNeverInHistory "sandbox not active"
     tty.drain(200)
+    let denyCount = tty.countInHistory("deny      /")
+    let allowCount = tty.countInHistory("allow     ./")
     tty.send ":sandbox show"
     tty.send "\n"
-    tty.expectInHistory "deny      /"
-    tty.expectInHistory "allow     ./"
+    tty.expectNewInHistory "deny      /", denyCount
+    tty.expectNewInHistory "allow     ./", allowCount
     tty.drain(200)
     # --- :sandbox off disarms the running session live; a bare :sandbox
     # names the off state. ---

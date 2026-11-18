@@ -1933,7 +1933,6 @@ Use an editor or the sandbox commands:
 
 ```
 :sandbox
-:sandbox show
 :sandbox edit
 :sandbox allow /opt
 :sandbox readonly /var
@@ -1955,8 +1954,9 @@ live: the fence lifts (ask approvals included) and the wall proxy stops. The
 setting is stored as `sandbox = off` in `[settings]`. `:sandbox on` restores
 enforcement just as live: the running session arms with the same steps a
 launch uses, so bash and the file tools fence immediately. Bare `:sandbox`
-names the state (off, armed with the governing policy file, or on but not
-yet armed); `:sandbox show` prints that line and then the rules. A command
+prints the state line (off, armed with the governing policy file, or on but
+not yet armed) and then the rules; `:sandbox show` is the same dump spelled
+out. A command
 already running keeps its fence until it exits; there is no un-fencing a
 live process. The one-shot equivalent is the
 `--no-sandbox` flag, and `3code sandbox --policy FILE restrict -- CMD` runs a
