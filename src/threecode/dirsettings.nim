@@ -142,6 +142,17 @@ proc cascadeConfigValue*(cwd, key: string): string =
       return t[key].strip
   ""
 
+proc cascadeStoreSettings*(cwd: string): Table[string, string] =
+  ## Every `[settings]` key the store cascade carries, nearest store
+  ## winning per key (a store that sets a key always overrides a
+  ## farther one; a store that omits it never blocks one). The user
+  ## config is NOT in this cascade — callers apply it first and treat
+  ## this as the override layer, so the full ladder reads: compiled
+  ## default < user config < nearest store.
+  for d in ancestorsNearestFirst(cwd):
+    for k, v in readStoreSettings(storeDirFor(d)).pairs:
+      if v.strip != "": result[k] = v.strip
+
 proc applyStoreBooleans*(storeDir: string; userOwned: bool) =
   ## Apply one store's `sandbox` / `sandbox_wall_warn` switches to the
   ## process globals. Called nearest-last so nearer stores win.

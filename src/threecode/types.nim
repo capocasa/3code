@@ -178,6 +178,14 @@ var sandboxWallWarn*: bool = true
   ## setup (`3code setup`) prints a one-time warning that
   ## bash runs unfenced. Default on; `[settings] sandbox_wall_warn =
   ## off` silences it.
+var providerWhitelist*: seq[string] = @[]
+  ## `[settings] limitproviders`: the provider names allowed to run
+  ## turns in this session, comma-separated. Empty (the default) means
+  ## no restriction. Resolved through the settings cascade (user
+  ## config, then the nearest directory store's `.3code/config`), so a
+  ## repository or parent directory can narrow the choice; provider
+  ## management verbs (`:provider add|edit|rm`, the CLI) always see the
+  ## full list.
 var userAgentTemplate* = ""
   ## `[settings] user_agent`: the User-Agent template sent on every model
   ## request. Empty keeps the compiled default; see `modelUserAgent`

@@ -3,7 +3,7 @@
 ## stores tighten, user-owned stores decide), and the writeConfigFile
 ## no-leak guard.
 
-import std/[os, strutils, unittest]
+import std/[os, sequtils, sets, strutils, tables, unittest]
 import threecode/[dirsettings, sandbox, config, types]
 
 proc newFixture(name: string): tuple[base, proj, sub: string] =
@@ -338,3 +338,137 @@ suite "dirsettings: dirconfig validation":
     writeConfigFile(cfgPath, "", @[])
     check "dirconfig = \"user\"" in readFile(cfgPath)
     dirsettings.dirConfigLocation = "project"
+
+suite "dirsettings: settings cascade":
+  # Every [settings] key follows the ladder: compiled default < user
+  # config < nearest store. The two security switches keep their clamp
+  # (suite above); `current` stays owned by the sticky-current resolver
+  # and `dirconfig` by the user config, so neither cascades from a
+  # store.
+
+  proc resetSettingsGlobals() =
+    notifyEnabled = true
+    streamingEnabled = true
+    maxTimeoutSetting = 0
+    bannerLinesSetting = 1
+    colorModePref = cmAuto
+    verifierEnabled = false
+    verifierModelSpec = ""
+    providerWhitelist = @[]
+    storeOverlayKeys = initHashSet[string]()
+    userSettingsRaw = initTable[string, string]()
+    activeProviders = @[]
+    activeCurrent = ""
+
+  test "every settings key cascades, nearest store winning":
+    let f = newFixture("allkeys")
+    defer:
+      resetSettingsGlobals()
+      dropFixture(f.base)
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath,
+      "[settings]\nnotify = \"off\"\nmax_timeout = \"111\"\n" &
+      "tone = \"dark\"\n")
+    writeStoreConfig(f.base,
+      "[settings]\nbanner_lines = \"7\"\ntone = \"light\"\n")
+    writeStoreConfig(f.proj, "[settings]\nnotify = \"on\"\n")
+    discard tryLoadStateOrEmpty(cfgPath)
+    check not notifyEnabled        # the user config's own line
+    check maxTimeoutSetting == 111 # user config
+    check colorModePref == cmDark  # user config
+    applyDirSettingsOverlay(f.sub)
+    check notifyEnabled            # nearest store overrides the user line
+    check maxTimeoutSetting == 111 # store silent: the user value stands
+    check bannerLinesSetting == 7  # store only
+    check colorModePref == cmLight # nearer store's tone over the farther
+
+  test "a store value never leaks into the user config":
+    let f = newFixture("noleakall")
+    defer:
+      resetSettingsGlobals()
+      dropFixture(f.base)
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath, "[settings]\ncurrent = \"x.y\"\nstreaming = \"on\"\n")
+    writeStoreConfig(f.proj,
+      "[settings]\nstreaming = \"off\"\nnotify = \"off\"\n" &
+      "max_timeout = \"555\"\n")
+    discard tryLoadStateOrEmpty(cfgPath)
+    applyDirSettingsOverlay(f.proj)
+    check not streamingEnabled
+    check not notifyEnabled
+    check maxTimeoutSetting == 555
+    writeConfigFile(cfgPath, "x.y", @[])
+    let body = readFile(cfgPath)
+    check "streaming" notin body  # the user's on == default: omitted
+    check "notify" notin body
+    check "max_timeout" notin body
+
+  test "claimSetting persists the in-session choice":
+    let f = newFixture("claim")
+    defer:
+      resetSettingsGlobals()
+      dropFixture(f.base)
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath, "[settings]\ncurrent = \"x.y\"\n")
+    writeStoreConfig(f.proj, "[settings]\nstreaming = \"off\"\n")
+    discard tryLoadStateOrEmpty(cfgPath)
+    applyDirSettingsOverlay(f.proj)
+    check not streamingEnabled
+    streamingEnabled = false
+    claimSetting("streaming")
+    writeConfigFile(cfgPath, "x.y", @[])
+    check "streaming = \"off\"" in readFile(cfgPath)
+
+  test "a store's verifier_model enables the verifier":
+    let f = newFixture("vstore")
+    defer:
+      resetSettingsGlobals()
+      dropFixture(f.base)
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath, "[settings]\ncurrent = \"x.y\"\n")
+    writeStoreConfig(f.proj,
+      "[settings]\nverifier_model = \"openrouter.typesafe/jev-latest\"\n")
+    discard tryLoadStateOrEmpty(cfgPath)
+    check not verifierEnabled
+    applyDirSettingsOverlay(f.proj)
+    check verifierEnabled
+    check verifierModelSpec == "openrouter.typesafe/jev-latest"
+    # An explicit user `verifier = off` still wins over the store pick.
+    writeFile(cfgPath,
+      "[settings]\ncurrent = \"x.y\"\nverifier = \"off\"\n" &
+      "verifier_model = \"openrouter.typesafe/jev-latest\"\n")
+    resetSettingsGlobals()
+    discard tryLoadStateOrEmpty(cfgPath)
+    applyDirSettingsOverlay(f.proj)
+    check not verifierEnabled
+
+  test "limitproviders cascades and narrows the selectable set":
+    let f = newFixture("limit")
+    defer:
+      resetSettingsGlobals()
+      dropFixture(f.base)
+    let cfgPath = f.base / "cfg" / "3code" / "config"
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath, "[settings]\ncurrent = \"x.y\"\nlimitproviders = \"zai\"\n")
+    writeStoreConfig(f.proj, "[settings]\nlimitproviders = \"zai, mistral\"\n")
+    discard tryLoadStateOrEmpty(cfgPath)
+    check providerWhitelist == @["zai"]
+    activeProviders = @[
+      ProviderRec(name: "zai", url: "https://z.ai", key: "k",
+                  models: @["glm-5.2"]),
+      ProviderRec(name: "mistral", url: "https://api.mistral.ai", key: "k",
+                  models: @["glm-5.2"]),
+      ProviderRec(name: "venice", url: "https://venice.ai", key: "k",
+                  models: @["glm-5.2"])]
+    applyDirSettingsOverlay(f.sub)
+    check providerWhitelist == @["zai", "mistral"]
+    check selectableProviders().mapIt(it.name) == @["zai", "mistral"]
+    check providerAllowed("zai")
+    check not providerAllowed("venice")
+    # Hand-edited key: a config write must not persist the store's list.
+    writeConfigFile(cfgPath, "", @[])
+    check "limitproviders" notin readFile(cfgPath)

@@ -1996,7 +1996,12 @@ A project directory can carry its own settings store, `.3code/config`, and it
 cascades: your own directory wins, then each ancestor's, nearest first. That is
 handy for preferences — which provider a monorepo root uses, which model a
 subdirectory sticks to — but those files are controlled by whoever controls the
-repository, so they never get the last word on security. The three sandbox
+repository, so they never get the last word on security. Every `[settings]`
+key follows this cascade (compiled default, then your
+`~/.config/3code/config`, then the nearest store): `notify`, `tone`,
+timeouts, the verifier pick, `limitproviders`, everything — except
+`dirconfig` (store placement is your call alone) and the security
+switches, which keep the one-way rule below. The three sandbox
 switches (`sandbox`, its `sandbox_enabled` alias, and `sandbox_wall_warn`) read
 from the cascade with a one-way rule: a project store may turn a setting **on**
 (it can tighten a sandbox you disabled globally for that tree), but a request
@@ -2056,8 +2061,11 @@ Disabling the sandbox is a user decision, never a project one. A
 directory, but for the security switches it works one way only: it may turn
 an off sandbox **on** (a team that wants enforcement despite a global
 `off`), and it may never turn an on sandbox **off** or silence the sandbox
-warning. Everything else in the store (`current`, timeouts, ...) keeps its
-nearest-store-wins cascade.
+warning. Everything else in the store (`current`, timeouts,
+`limitproviders`, ...) keeps its nearest-store-wins cascade, and a
+session's config writes never copy a store's value into your user config:
+an in-session toggle (`:streaming off`, ...) writes your choice, the store
+re-applies its own on the next launch.
 
 The explicit ways to run unconfined, none of which a repository can reach:
 

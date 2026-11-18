@@ -204,7 +204,18 @@ Keys under `[settings]`:
 | `verifier` | `on`/`off` | enable/disable the selected verifier without clearing it; absent means on while a model is selected |
 | `allow-empty-prompt` | `on`/`off` (default on) | submitting an empty prompt continues the ongoing session: a turn runs on the messages as they stand, appending no user message; `allow_empty_prompt` spelling accepted |
 | `user_agent` | template (default `3code $version`) | User-Agent header sent on every model request. Variables: `$version` (the full build version, e.g. `0.9.2-main-a1b2c3d4a`), `$branch` (`-main`), `$commit` / `$hash` (`-a1b2c3d4`), `$stage` (`-unstaged` when the build's sources differed from HEAD; each empty when not applicable), `$os`, `$arch`, and `$$` for a literal `$`. Unknown `$names` pass through verbatim; `user-agent` spelling accepted |
-| `dirconfig` | `project` (default) / `user` | where per-directory settings stores live: `<dir>/.3code` in the directory itself, or `~/.config/3code/dirs/<dir>` under your config root (stores there are user-owned, so their sandbox switches are authoritative; see [project settings](manual.html#project-settings-cannot-weaken-the-sandbox)) |
+| `dirconfig` | `project` (default) / `user` | where per-directory settings stores live: `<dir>/.3code` in the directory itself, or `~/.config/3code/dirs/<dir>` under your config root (stores there are user-owned, so their sandbox switches are authoritative; see [project settings](manual.html#project-settings-cannot-weaken-the-sandbox)). User-config only: a store never relocates the stores |
+| `limitproviders` | comma-separated provider names (default empty) | the provider whitelist: when set, only the named providers may run turns, serve `:provider`/`:model` picks, completion and the verifier pool in this session; a configured `current` outside the list falls back to the first allowed provider. Provider management (`:provider add/edit/rm`, the CLI) always sees the full list, and the key is never written by 3code itself; `limit-providers`/`limit_providers` spellings accepted |
+
+Every `[settings]` key resolves through the cascade: compiled default <
+this file < the nearest `.3code/config` up the parent chain (or its twin
+under `~/.config/3code/dirs/` with `dirconfig = "user"`). Exceptions:
+`dirconfig` itself, and the two sandbox switches, which a project store
+may tighten but never weaken (see
+[project settings](manual.html#project-settings-cannot-weaken-the-sandbox)).
+A session's config writes never copy a store's value into this file — an
+in-session toggle writes your choice, the store re-applies its own on the
+next launch.
 
 ### provider
 

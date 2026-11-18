@@ -285,7 +285,9 @@ proc completionFor*(line: string): seq[string] =
       # `:provider <tab>` teaches the subcommands instead of only the
       # names. minline's prefix filter picks between them.
       for v in ["add", "edit", "update", "new", "pull", "rm"]: result.add v
-      for pr in activeProviders:
+      # Switch-by-name offers only whitelisted providers; the verb
+      # slots below keep the full list (management is never limited).
+      for pr in selectableProviders():
         if pr.name notin result: result.add pr.name
       return
     if words.len == 3:
@@ -313,10 +315,11 @@ proc completionFor*(line: string): seq[string] =
     let idx = if dot > 0: providerIndex(last[0 ..< dot]) else: -1
     if idx >= 0:
       let pr = activeProviders[idx]
-      for m in orderedModels(pr):
-        if experimentalEnabled or knownGoodFamily(pr.name, m) != "":
-          result.add pr.name & "." & shortModel(m)
-      return
+      if providerAllowed(pr.name):
+        for m in orderedModels(pr):
+          if experimentalEnabled or knownGoodFamily(pr.name, m) != "":
+            result.add pr.name & "." & shortModel(m)
+        return
     let prov = currentProvider()
     for m in orderedModels(prov):
       if experimentalEnabled or knownGoodFamily(prov.name, m) != "":
@@ -1076,8 +1079,11 @@ proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
 proc cmdProviderList(prof: Profile): string =
   if activeProviders.len == 0:
     return hintLnS("no providers")
+  let shown = selectableProviders()
+  if shown.len == 0:
+    return hintLnS("no providers allowed here ([settings] limitproviders)")
   let curName = if prof.name == "": "" else: prof.name.split('.')[0]
-  for pr in activeProviders:
+  for pr in shown:
     let current = pr.name == curName
     # Only the current provider names a model: the live one, bright.
     # What a switch to another provider would land on is a convenience,
@@ -1106,6 +1112,9 @@ proc cmdProviderSelect(target: string, prof: var Profile): string =
       break
   if not found:
     return errLnS(&"unknown provider: {target}")
+  if not providerAllowed(target):
+    return errLnS(&"provider {target} is not allowed here " &
+      "([settings] limitproviders)")
   if prov.models.len == 0:
     return errLnS(&"provider {target} has no models")
   # Sticky models: land on this provider's last-used model, not its first.
@@ -1445,6 +1454,9 @@ proc cmdModelSelect(target: string, prof: var Profile): string =
   let (sel, idx, rest) = pickModel(target)
   if idx < 0:
     return unknownModelS(target, sel, rest)
+  if not providerAllowed(sel.name):
+    return errLnS(&"provider {sel.name} is not allowed here " &
+      "([settings] limitproviders)")
   let fullModel = sel.models[idx]
   if isDecisionModel(fullModel):
     return errLnS(&"{shortModel(fullModel)} is a verification-class " &
@@ -1531,6 +1543,7 @@ proc cmdStreamingSelect(target: string): string =
     streamingEnabled = false
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
+  claimSetting("streaming")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdStreamingList()
 
@@ -1557,6 +1570,8 @@ proc cmdVerifierList(prof: Profile): string =
     "works as a verifier: :verifier <model>")
 
 proc cmdVerifierPersist(prof: Profile): string =
+  claimSetting("verifier_model")
+  claimSetting("verifier")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   profileLinesS(prof)
 
@@ -1642,6 +1657,7 @@ proc cmdNotifySelect(target: string): string =
     notifyEnabled = false
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
+  claimSetting("notify")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdNotifyList()
 
@@ -1673,6 +1689,7 @@ proc cmdTabTitleSelect(target: string): string =
     tabTitleEnabled = false
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
+  claimSetting("tab-title")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdTabTitleList()
 
@@ -1702,6 +1719,7 @@ proc cmdRetrySelect(target: string): string =
     patientRetryEnabled = false
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
+  claimSetting("patient_retry")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdRetryList()
 

@@ -11,7 +11,8 @@
 ## and `:model` cycling walk the wizard-entered model order: the first model
 ## the user entered is the default and cycling follows config order.
 
-import std/[options, os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
+import std/[options, os, parsecfg, sequtils, sets, streams, strformat, strutils, tables, terminal, uri]
+from algorithm import sorted
 import plugins
 when defined(posix):
   import std/posix except SocketHandle
@@ -156,6 +157,28 @@ var bashSourcePref*: string
   ## shell to use, overriding detection. Same shape as `bash_path`, but
   ## honored on every OS.
 
+var userSettingsRaw* = initTable[string, string]()
+  ## The user config's own `[settings]` lines, canonical key -> raw
+  ## value as written (pre env-expansion), captured by the last
+  ## `parseConfigFile` run. `writeConfigFile` consults these while a
+  ## directory store overlay is in effect (`storeOverlayKeys`) so a
+  ## store's value is never serialized into the user config; absent
+  ## means the compiled default, and the line is simply omitted.
+
+var storeOverlayKeys* = initHashSet[string]()
+  ## Canonical `[settings]` keys a directory store overlay currently
+  ## supplies (see `applyDirSettingsOverlay`). While a key is in here
+  ## its effective value came from a store, not the user config;
+  ## `writeConfigFile` persists the `userSettingsRaw` line instead.
+  ## An in-session setting command removes its key via `claimSetting`:
+  ## the user just spoke, and this session's write must record it.
+
+var verifierExplicitSeen* = false
+  ## True once a `verifier = on|off` line was applied this parse (from
+  ## the user config or a store overlay): a selected `verifier_model`
+  ## defaults to enabled, and only an explicit `verifier` line may say
+  ## otherwise. The parse-time twin of parseConfigFile's old local.
+
 proc gateExperimental*(p: Profile): bool =
   ## True if the profile is allowed to run a turn under current policy:
   ## empty profile (caller handles that), known-good model, or the
@@ -269,6 +292,22 @@ proc currentProvider*(): ProviderRec =
     if pr.name == name: return pr
   ProviderRec()
 
+proc providerAllowed*(name: string): bool =
+  ## Whether `name` may run turns in this session: always true while
+  ## `limitproviders` is empty (the default), else exact membership.
+  ## Gates profile resolution, `:provider`/`:model` picks, completion
+  ## and the verifier pool — never the provider management verbs.
+  providerWhitelist.len == 0 or name in providerWhitelist
+
+proc selectableProviders*(): seq[ProviderRec] =
+  ## `activeProviders` narrowed to the `limitproviders` whitelist: the
+  ## list every pick surface offers. Management ops (`:provider
+  ## add|edit|rm`, the CLI, config writes) keep the full list, so a
+  ## limited directory never loses the providers it cannot run.
+  if providerWhitelist.len == 0: return activeProviders
+  for pr in activeProviders:
+    if providerAllowed(pr.name): result.add pr
+
 proc providerForProfile*(prof: Profile): ProviderRec =
   ## The provider rec backing a profile, looked up by the provider prefix
   ## of `prof.name` ("nebius.zai-org/GLM-5.1" -> nebius). Falls back to
@@ -360,6 +399,167 @@ proc expandEnvValue(s: string): string =
     return getEnv(t[1 .. ^1])
   s
 
+func canonicalSettingsKey*(key: string): string =
+  ## The one spelling per `[settings]` key: aliases (`sandbox_enabled`,
+  ## `max-timeout`, the legacy `mode`) collapse onto the canonical form
+  ## so overlay bookkeeping (`userSettingsRaw`, `storeOverlayKeys`)
+  ## cannot be split by a spelling choice, whatever file wrote it.
+  case key
+  of "sandbox_enabled": "sandbox"
+  of "patient-retry": "patient_retry"
+  of "max-timeout": "max_timeout"
+  of "force-timeout": "force_timeout"
+  of "banner-lines": "banner_lines"
+  of "verifier-model": "verifier_model"
+  of "bash-path": "bash_path"
+  of "allow_empty_prompt": "allow-empty-prompt"
+  of "system_command_prefixes": "system-command-prefixes"
+  of "user-agent": "user_agent"
+  of "limit-providers", "limit_providers": "limitproviders"
+  of "mode": "tone"
+  else: key
+
+proc applySettingsValue*(key, raw: string) =
+  ## Apply one `[settings]` key/value to the process globals — the single
+  ## dialect shared by `parseConfigFile`, the plugin-default bootstrap and
+  ## the directory store overlay (`applyDirSettingsOverlay`), so every
+  ## source behaves identically. `raw` is the value as written (pre
+  ## env-expansion; `$VAR` references expand here). Two keys are owned
+  ## elsewhere and not handled here: `current` (a profile pointer each
+  ## caller resolves its own way) and `dirconfig` (store placement is a
+  ## user-config decision alone — a store can never relocate the stores,
+  ## or it would grant itself authority).
+  let v = expandEnvValue(raw)
+  case key
+  of "notify":
+    case v.toLowerAscii
+    of "on", "true", "yes", "1": notifyEnabled = true
+    of "off", "false", "no", "0": notifyEnabled = false
+    else: discard
+  of "tab-title":
+    # Same boolean dialect as `notify`. Default on; an explicit `off`
+    # keeps 3code off the terminal tab title entirely.
+    case v.toLowerAscii
+    of "on", "true", "yes", "1": tabTitleEnabled = true
+    of "off", "false", "no", "0": tabTitleEnabled = false
+    else: discard
+  of "streaming":
+    # Same boolean dialect as `notify`. Default is on (set in types.nim);
+    # an explicit `off` opts into the reliable request/response path.
+    case v.toLowerAscii
+    of "on", "true", "yes", "1": streamingEnabled = true
+    of "off", "false", "no", "0": streamingEnabled = false
+    else: discard
+  of "verifier":
+    # Explicit enable/disable of the selected verifier model. Absent
+    # means "on while a model is selected" so the common config
+    # carries only the selection.
+    verifierExplicitSeen = true
+    case v.toLowerAscii
+    of "on", "true", "yes", "1": verifierEnabled = true
+    of "off", "false", "no", "0": verifierEnabled = false
+    else: discard
+  of "verifier_model", "verifier-model":
+    if v.strip != "": verifierModelSpec = v.strip
+  of "sandbox", "sandbox_enabled":
+    # Same boolean dialect as `notify`/`streaming`. Default on; an
+    # explicit `off` disables sandbox enforcement entirely (bash runs
+    # unconfined, in-process checks pass through).
+    case v.toLowerAscii
+    of "on", "true", "yes", "1": sandboxEnabled = true
+    of "off", "false", "no", "0": sandboxEnabled = false
+    else: discard
+  of "computer":
+    # Same boolean dialect. Session-scoped in spirit: this line exists
+    # so tests and scripted runs can arm computer use; the :computer
+    # toggle never writes it back. Inert unless compiled with
+    # -d:computerUse (computerUseBuild, the release kill-switch).
+    case v.toLowerAscii
+    of "on", "true", "yes", "1":
+      if computerUseBuild: computerUseEnabled = true
+    of "off", "false", "no", "0": computerUseEnabled = false
+    else: discard
+  of "allow-empty-prompt", "allow_empty_prompt":
+    # Same boolean dialect. Default on; an explicit `off` makes an
+    # empty submit a no-op again (the pre-continuation behavior).
+    case v.toLowerAscii
+    of "on", "true", "yes", "1": allowEmptyPromptEnabled = true
+    of "off", "false", "no", "0": allowEmptyPromptEnabled = false
+    else: discard
+  of "patient_retry", "patient-retry":
+    # Same boolean dialect. Default on; an explicit `off` makes
+    # retryable failures surface after the initial ramp-up (~1min)
+    # instead of entering the long patient hold.
+    case v.toLowerAscii
+    of "on", "true", "yes", "1": patientRetryEnabled = true
+    of "off", "false", "no", "0": patientRetryEnabled = false
+    else: discard
+  of "browserfetch":
+    # Same boolean dialect, default off (types.nim): opting in keeps
+    # a shared headless Chrome around for JS-shell web fetches.
+    # Inert unless compiled with -d:browserFetch
+    # (browserFetchBuild, the kill-switch).
+    case v.toLowerAscii
+    of "on", "true", "yes", "1":
+      if browserFetchBuild: browserFetchEnabled = true
+    of "off", "false", "no", "0": browserFetchEnabled = false
+    else: discard
+  of "sandbox_wall_warn":
+    # Silences only the Windows "wall not set up" warning; the
+    # fence itself is unaffected.
+    case v.toLowerAscii
+    of "on", "true", "yes", "1": sandboxWallWarn = true
+    of "off", "false", "no", "0": sandboxWallWarn = false
+    else: discard
+  of "max_timeout", "max-timeout":
+    # Whole seconds. Schema validation already rejected non-numbers,
+    # so a parse failure here is unreachable in practice.
+    try: maxTimeoutSetting = v.strip.parseInt
+    except ValueError: discard
+  of "force_timeout", "force-timeout":
+    try: forceTimeoutSetting = v.strip.parseInt
+    except ValueError: discard
+  of "banner_lines", "banner-lines":
+    try: bannerLinesSetting = v.strip.parseInt
+    except ValueError: discard
+  of "tone", "mode":
+    # `auto` detects the background (default); `dark`/`light` force a
+    # palette. `mode`/`bright` are the legacy spellings and stay
+    # accepted so existing configs keep working.
+    case v.strip.toLowerAscii
+    of "auto": colorModePref = cmAuto
+    of "dark": colorModePref = cmDark
+    of "light", "bright": colorModePref = cmLight
+    else: discard
+  of "bash_path", "bash-path":
+    bashPathOverride = v
+  of "bash":
+    bashSourcePref = v.strip.toLowerAscii
+  of "user_agent", "user-agent":
+    # Raw `raw`, not the env-expanded `v`: the `$vars` in the template
+    # belong to modelUserAgent's expansion, not the environment, and a
+    # leading `$os/...` would otherwise be eaten by expandEnvValue.
+    userAgentTemplate = raw
+  of "system-command-prefixes", "system_command_prefixes":
+    # Each non-whitespace character is one prefix; assignment (not
+    # accumulation), so a later line replaces the inherited set.
+    # An empty value is a schema error validateConfig reports with
+    # path:line; keep the last good set here so a broken line
+    # cannot strip command entry mid-parse.
+    let norm = normalizeCommandPrefixes(v)
+    if norm != "": commandPrefixes = norm
+  of "limitproviders", "limit-providers", "limit_providers":
+    # Comma- (or whitespace-) separated provider names; assignment, not
+    # accumulation. Any name is legal — a whitelist may pre-list a
+    # provider before it is configured. Empty value means no limit and
+    # is a schema error (validateConfig), reached here only via a
+    # plugin default.
+    providerWhitelist = @[]
+    for part in v.split({',', ' ', '\t'}):
+      let n = part.strip
+      if n.len > 0: providerWhitelist.add n
+  else: discard
+
 type
   RawEntry* = tuple[section, key, value: string, line: int]
     ## A key/value pair as written, before env expansion, with the line it
@@ -381,7 +581,9 @@ const
                   "verifier", "verifier_model", "verifier-model",
                   "computer", "user_agent", "user-agent",
                   "dirconfig",
-                  "system-command-prefixes", "system_command_prefixes"]
+                  "system-command-prefixes", "system_command_prefixes",
+                  "limitproviders", "limit-providers",
+                  "limit_providers"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -616,7 +818,12 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   var paramRec: ParamsRec
   var inParams = false
   var entries: seq[RawEntry]
-  var verifierExplicit = false
+  verifierExplicitSeen = false
+  # Reset every overlay-sourceable global the file may not carry, so a
+  # re-parse cannot inherit a store overlay's value as if the user had
+  # set it (the overlay re-applies its own keys afterwards).
+  providerWhitelist = @[]
+  userSettingsRaw.clear()
   applyPluginConfigDefaults()
   let stream = newFileStream(path, fmRead)
   if stream == nil: raise newException(ValueError, "cannot open " & path)
@@ -688,130 +895,20 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           pluginsLibOverride = v
         else: discard
       of "settings":
+        # Shared dialect with the plugin defaults and the directory store
+        # overlay (applySettingsValue); `current` and `dirconfig` are the
+        # two keys with caller-specific owners and are applied inline.
+        # The raw line is recorded (canonical key) so writeConfigFile can
+        # serialize the user config's own value while a store overlay is
+        # in effect.
         case e.key
         of "current": current = v
-        of "notify":
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": notifyEnabled = true
-          of "off", "false", "no", "0": notifyEnabled = false
-          else: discard
-        of "tab-title":
-          # Same boolean dialect as `notify`. Default on; an explicit `off`
-          # keeps 3code off the terminal tab title entirely.
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": tabTitleEnabled = true
-          of "off", "false", "no", "0": tabTitleEnabled = false
-          else: discard
-        of "streaming":
-          # Same boolean dialect as `notify`. Default is on (set in types.nim);
-          # an explicit `off` opts into the reliable request/response path.
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": streamingEnabled = true
-          of "off", "false", "no", "0": streamingEnabled = false
-          else: discard
-        of "verifier":
-          # Explicit enable/disable of the selected verifier model. Absent
-          # means "on while a model is selected" so the common config
-          # carries only the selection.
-          verifierExplicit = true
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": verifierEnabled = true
-          of "off", "false", "no", "0": verifierEnabled = false
-          else: discard
-        of "verifier_model", "verifier-model":
-          if v.strip != "": verifierModelSpec = v.strip
-        of "sandbox", "sandbox_enabled":
-          # Same boolean dialect as `notify`/`streaming`. Default on; an
-          # explicit `off` disables sandbox enforcement entirely (bash runs
-          # unconfined, in-process checks pass through).
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": sandboxEnabled = true
-          of "off", "false", "no", "0": sandboxEnabled = false
-          else: discard
-        of "computer":
-          # Same boolean dialect. Session-scoped in spirit: this line exists
-          # so tests and scripted runs can arm computer use; the :computer
-          # toggle never writes it back. Inert unless compiled with
-          # -d:computerUse (computerUseBuild, the release kill-switch).
-          case v.toLowerAscii
-          of "on", "true", "yes", "1":
-            if computerUseBuild: computerUseEnabled = true
-          of "off", "false", "no", "0": computerUseEnabled = false
-          else: discard
-        of "allow-empty-prompt", "allow_empty_prompt":
-          # Same boolean dialect. Default on; an explicit `off` makes an
-          # empty submit a no-op again (the pre-continuation behavior).
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": allowEmptyPromptEnabled = true
-          of "off", "false", "no", "0": allowEmptyPromptEnabled = false
-          else: discard
-        of "patient_retry", "patient-retry":
-          # Same boolean dialect. Default on; an explicit `off` makes
-          # retryable failures surface after the initial ramp-up (~1min)
-          # instead of entering the long patient hold.
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": patientRetryEnabled = true
-          of "off", "false", "no", "0": patientRetryEnabled = false
-          else: discard
-        of "browserfetch":
-          # Same boolean dialect, default off (types.nim): opting in keeps
-          # a shared headless Chrome around for JS-shell web fetches.
-          # Inert unless compiled with -d:browserFetch
-          # (browserFetchBuild, the kill-switch).
-          case v.toLowerAscii
-          of "on", "true", "yes", "1":
-            if browserFetchBuild: browserFetchEnabled = true
-          of "off", "false", "no", "0": browserFetchEnabled = false
-          else: discard
-        of "sandbox_wall_warn":
-          # Silences only the Windows "wall not set up" warning; the
-          # fence itself is unaffected.
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": sandboxWallWarn = true
-          of "off", "false", "no", "0": sandboxWallWarn = false
-          else: discard
-        of "max_timeout", "max-timeout":
-          # Whole seconds. Schema validation already rejected non-numbers,
-          # so a parse failure here is unreachable in practice.
-          try: maxTimeoutSetting = v.strip.parseInt
-          except ValueError: discard
-        of "force_timeout", "force-timeout":
-          try: forceTimeoutSetting = v.strip.parseInt
-          except ValueError: discard
-        of "banner_lines", "banner-lines":
-          try: bannerLinesSetting = v.strip.parseInt
-          except ValueError: discard
-        of "tone", "mode":
-          # `auto` detects the background (default); `dark`/`light` force a
-          # palette. `mode`/`bright` are the legacy spellings and stay
-          # accepted so existing configs keep working.
-          case v.strip.toLowerAscii
-          of "auto": colorModePref = cmAuto
-          of "dark": colorModePref = cmDark
-          of "light", "bright": colorModePref = cmLight
-          else: discard
-        of "bash_path", "bash-path":
-          bashPathOverride = v
-        of "bash":
-          bashSourcePref = v.strip.toLowerAscii
         of "dirconfig":
           let dv = v.strip.toLowerAscii
           if dv in DirConfigValues: dirsettings.dirConfigLocation = dv
-        of "user_agent", "user-agent":
-          # Raw `e.value`, not the env-expanded `v`: the `$vars` in the
-          # template belong to modelUserAgent's expansion, not the
-          # environment, and a leading `$os/...` would otherwise be eaten
-          # by expandEnvValue.
-          userAgentTemplate = e.value
-        of "system-command-prefixes", "system_command_prefixes":
-          # Each non-whitespace character is one prefix; assignment (not
-          # accumulation), so a later line replaces the inherited set.
-          # An empty value is a schema error validateConfig reports with
-          # path:line; keep the last good set here so a broken line
-          # cannot strip command entry mid-parse.
-          let norm = normalizeCommandPrefixes(v)
-          if norm != "": commandPrefixes = norm
-        else: discard
+        else:
+          userSettingsRaw[canonicalSettingsKey(e.key)] = e.value
+          applySettingsValue(e.key, e.value)
       of "search":
         case e.key
         of "exa-key": searchKeys["exa"] = v
@@ -877,7 +974,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   p.close
   # A selected verifier model is an enabled one unless the file says
   # otherwise explicitly (`verifier = off`), whatever the key order.
-  if verifierModelSpec != "" and not verifierExplicit:
+  if verifierModelSpec != "" and not verifierExplicitSeen:
     verifierEnabled = true
   activeConfigWarnings = configWarnings(path, entries)
   let verr = validateConfig(path, entries)
@@ -954,12 +1051,12 @@ proc mergeForeignEdits(path: string; current: var string,
        savedWallWarn, savedMaxTimeout, savedForceTimeout, savedColorMode,
        savedBash, savedBashSrc, savedTabTitle, savedVerifierOn,
        savedVerifierSpec, savedUserAgent, savedBannerLines,
-       savedDirConfig, savedCommandPrefixes) =
+       savedDirConfig, savedCommandPrefixes, savedWhitelist) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
      sandboxWallWarn, maxTimeoutSetting, forceTimeoutSetting, colorModePref,
      bashPathOverride, bashSourcePref, tabTitleEnabled, verifierEnabled,
      verifierModelSpec, userAgentTemplate, bannerLinesSetting,
-     dirsettings.dirConfigLocation, commandPrefixes)
+     dirsettings.dirConfigLocation, commandPrefixes, providerWhitelist)
   let savedParams = activeParams
   let savedWarnings = activeConfigWarnings
   let (diskCurrent, diskProviders, _, _, _, _) =
@@ -986,6 +1083,7 @@ proc mergeForeignEdits(path: string; current: var string,
   userAgentTemplate = savedUserAgent
   dirsettings.dirConfigLocation = savedDirConfig
   commandPrefixes = savedCommandPrefixes
+  providerWhitelist = savedWhitelist
   activeParams = savedParams
   activeConfigWarnings = savedWarnings
   var diskByName: Table[string, ProviderRec]
@@ -1050,6 +1148,61 @@ func normalizedCurrent(current: string; providers: seq[ProviderRec]): string =
       return current
   provName & "." & normalizeModelName(model)
 
+proc claimSetting*(key: string) =
+  ## An in-session command just set this `[settings]` key by hand
+  ## (`:streaming off`, `:verifier on`, ...): drop the store-overlay
+  ## bookkeeping so the next `writeConfigFile` serializes the live
+  ## global — the user's explicit choice — instead of the user
+  ## config's pre-overlay line. The store's value re-applies on the
+  ## next startup, the same contract `:sandbox on|off` follows.
+  storeOverlayKeys.excl(canonicalSettingsKey(key))
+
+proc userSettingBool(key: string; eff, default: bool): bool =
+  ## The value `writeConfigFile` should serialize for `key`: the live
+  ## global, unless a store overlay supplies the key — then the user
+  ## config's own line, or the compiled default when it has none (and
+  ## the line is omitted). Values outside the boolean dialect keep the
+  ## default, exactly like the parse-time application.
+  if canonicalSettingsKey(key) notin storeOverlayKeys: return eff
+  let raw = userSettingsRaw.getOrDefault(canonicalSettingsKey(key), "")
+  case expandEnvValue(raw).strip.toLowerAscii
+  of "on", "true", "yes", "1": true
+  of "off", "false", "no", "0": false
+  else: default
+
+proc userSettingInt(key: string; eff, default: int): int =
+  ## Integer twin of `userSettingBool`; unparsable user lines keep the
+  ## default (schema validation already rejects them at parse time).
+  if canonicalSettingsKey(key) notin storeOverlayKeys: return eff
+  let raw = userSettingsRaw.getOrDefault(canonicalSettingsKey(key), "")
+  try: parseInt(expandEnvValue(raw).strip)
+  except ValueError: default
+
+proc userSettingStr(key, eff, default: string): string =
+  ## String twin, deliberately without env expansion: the written line
+  ## round-trips the user's own spelling (including `$var` templates).
+  if canonicalSettingsKey(key) notin storeOverlayKeys: return eff
+  let raw = userSettingsRaw.getOrDefault(canonicalSettingsKey(key), "")
+  if raw.strip == "": default else: raw
+
+proc userSettingTone(eff: ColorMode): ColorMode =
+  ## `tone` twin; the legacy `mode` spelling reads the same canonical
+  ## slot (`userSettingsRaw` keys are canonical).
+  if "tone" notin storeOverlayKeys: return eff
+  let raw = userSettingsRaw.getOrDefault("tone", "")
+  case expandEnvValue(raw).strip.toLowerAscii
+  of "dark": cmDark
+  of "light", "bright": cmLight
+  else: cmAuto
+
+proc userSettingPrefixes(eff: string): string =
+  ## `system-command-prefixes` twin, normalized like the parse (each
+  ## non-whitespace character one prefix).
+  if "system-command-prefixes" notin storeOverlayKeys: return eff
+  let norm = normalizeCommandPrefixes(expandEnvValue(
+    userSettingsRaw.getOrDefault("system-command-prefixes", "")))
+  if norm != "": norm else: ":"
+
 proc writeConfigFile*(path: string, current: string,
                      providers: seq[ProviderRec]) =
   createDir(path.parentDir)
@@ -1080,12 +1233,14 @@ proc writeConfigFile*(path: string, current: string,
         buf.add engine & "-key = " & quoteVal(activeSearchKeys[engine]) & "\n"
   # Persist the streaming/notify toggles only when off — on is the default,
   # so a user who never changes them keeps a clean config. This also matches
-  # the defaults in types.nim.
-  if not streamingEnabled:
+  # the defaults in types.nim. While a directory store overlay supplies a
+  # key, the serialized value is the user config's own line (or the default
+  # when it has none) so the store's value never leaks into this file.
+  if not userSettingBool("streaming", streamingEnabled, true):
     buf.add "streaming = \"off\"\n"
-  if not notifyEnabled:
+  if not userSettingBool("notify", notifyEnabled, true):
     buf.add "notify = \"off\"\n"
-  if not tabTitleEnabled:
+  if not userSettingBool("tab-title", tabTitleEnabled, true):
     buf.add "tab-title = \"off\"\n"
   # A store's security switch must not edit the user config: while an
   # override is in effect (a user-owned store weakened the value, or a
@@ -1099,12 +1254,12 @@ proc writeConfigFile*(path: string, current: string,
     else: sandboxWallWarn
   if not effSandbox:
     buf.add "sandbox = \"off\"\n"
-  if not patientRetryEnabled:
+  if not userSettingBool("patient_retry", patientRetryEnabled, true):
     buf.add "patient_retry = \"off\"\n"
-  if not allowEmptyPromptEnabled:
+  if not userSettingBool("allow-empty-prompt", allowEmptyPromptEnabled, true):
     buf.add "allow-empty-prompt = \"off\"\n"
   when browserFetchBuild:
-    if browserFetchEnabled:
+    if userSettingBool("browserfetch", browserFetchEnabled, false):
       buf.add "browserfetch = \"on\"\n"
   if not effWallWarn:
     buf.add "sandbox_wall_warn = \"off\"\n"
@@ -1114,30 +1269,37 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "dirconfig = " & quoteVal(dirsettings.dirConfigLocation) & "\n"
   # Same non-default rule for the command prefix set: a rewrite must not
   # silently strip the characters that introduce commands.
-  if commandPrefixes != ":":
-    buf.add "system-command-prefixes = " & quoteVal(commandPrefixes) & "\n"
+  let wPrefixes = userSettingPrefixes(commandPrefixes)
+  if wPrefixes != ":":
+    buf.add "system-command-prefixes = " & quoteVal(wPrefixes) & "\n"
   # Bare number, not a quoted literal: the reader parseInts the raw value.
-  if maxTimeoutSetting > 0 and maxTimeoutSetting != MaxBashTimeout:
-    buf.add "max_timeout = " & $maxTimeoutSetting & "\n"
-  if forceTimeoutSetting > 0:
-    buf.add "force_timeout = " & $forceTimeoutSetting & "\n"
+  let wMaxTimeout = userSettingInt("max_timeout", maxTimeoutSetting, 0)
+  if wMaxTimeout > 0 and wMaxTimeout != MaxBashTimeout:
+    buf.add "max_timeout = " & $wMaxTimeout & "\n"
+  let wForceTimeout = userSettingInt("force_timeout", forceTimeoutSetting, 0)
+  if wForceTimeout > 0:
+    buf.add "force_timeout = " & $wForceTimeout & "\n"
   # Verifier selection persists as its own key; the on/off state rides
   # along only when it disagrees with the default (selected = enabled),
   # so an untouched config stays clean either way.
-  if verifierModelSpec != "":
-    buf.add "verifier_model = " & quoteVal(verifierModelSpec) & "\n"
-    if not verifierEnabled:
+  let wVModel = userSettingStr("verifier_model", verifierModelSpec, "")
+  if wVModel != "":
+    buf.add "verifier_model = " & quoteVal(wVModel) & "\n"
+    if not userSettingBool("verifier", verifierEnabled, true):
       buf.add "verifier = " & quoteVal("off") & "\n"
   # Same bare-number shape; the default (1) keeps a clean config.
-  if bannerLinesSetting != 1:
-    buf.add "banner_lines = " & $bannerLinesSetting & "\n"
+  let wBannerLines = userSettingInt("banner_lines", bannerLinesSetting, 1)
+  if wBannerLines != 1:
+    buf.add "banner_lines = " & $wBannerLines & "\n"
   # Persist the colour tone only when it differs from `auto` (the default).
-  if colorModePref != cmAuto:
-    let label = if colorModePref == cmDark: "dark" else: "light"
+  let wTone = userSettingTone(colorModePref)
+  if wTone != cmAuto:
+    let label = if wTone == cmDark: "dark" else: "light"
     buf.add "tone = " & quoteVal(label) & "\n"
   # Same non-default rule: the compiled `3code $version` UA is not written.
-  if userAgentTemplate != "":
-    buf.add "user_agent = " & quoteVal(userAgentTemplate) & "\n"
+  let wUserAgent = userSettingStr("user_agent", userAgentTemplate, "")
+  if wUserAgent != "":
+    buf.add "user_agent = " & quoteVal(wUserAgent) & "\n"
   if activeShortcuts.len > 0:
     buf.add "\n[shortcuts]\n"
     for cmd, spec in activeShortcuts:
@@ -1259,6 +1421,38 @@ proc applyEarlySandboxSettings*(path: string) =
   # Access Denied on Windows and kills the process through the unhandled
   # OSError. The finalizer never ran in a short session.
   p.close()
+
+proc applyDirSettingsOverlay*(cwd: string) =
+  ## The full directory overlay over the user config parse: the two
+  ## security switches through `dirsettings.applyDirConfig` (project
+  ## stores may only tighten them, never weaken), and every other
+  ## `[settings]` key nearest-store-wins over the user config's value —
+  ## the cascade every setting follows: compiled default < user config
+  ## (`~/.config/3code/config`) < the nearest directory store
+  ## (`./.3code/config`, or its twin under the config root when the
+  ## user config says `dirconfig = "user"`). `current` is owned by the
+  ## sticky-current resolver and `dirconfig` by the user config; neither
+  ## cascades from a store. Each applied key is registered in
+  ## `storeOverlayKeys` so `writeConfigFile` persists the user config's
+  ## own line, never the store's value. Idempotent; startup runs it
+  ## after the full parse, exactly once the parse has re-applied the
+  ## user config's own switches.
+  dirsettings.applyDirConfig(cwd)
+  storeOverlayKeys.clear()
+  let t = dirsettings.cascadeStoreSettings(cwd)
+  # Sorted for determinism: alias spellings of one key (`mode`/`tone`)
+  # in different stores apply in a fixed order, the canonical spelling
+  # last, matching the file-order rule the user config follows.
+  for k in sorted(toSeq(t.keys)):
+    if k in ["current", "dirconfig", "sandbox", "sandbox_enabled",
+             "sandbox_wall_warn"]: continue
+    applySettingsValue(k, t[k])
+    storeOverlayKeys.incl(canonicalSettingsKey(k))
+  # Same selected-verifier default as the parse: a store that sets
+  # `verifier_model` enables it unless some `verifier` line (user
+  # config or store) said otherwise.
+  if verifierModelSpec != "" and not verifierExplicitSeen:
+    verifierEnabled = true
 
 proc tryLoadStateOrEmpty*(path: string): tuple[current: string,
     providers: seq[ProviderRec], colors: Table[string, string], err: string] =
@@ -1461,8 +1655,11 @@ proc availableVerifiers*(providers: seq[ProviderRec]): seq[string] =
   ## The curated verification-class models whose provider section is
   ## configured, as `provider.model` specs in config order. This is the
   ## `:verifier list` offering and the pool `:verifier on` auto-picks
-  ## from — the one place these models are ever listed.
+  ## from — the one place these models are ever listed. Providers the
+  ## `limitproviders` whitelist excludes are skipped: a verifier runs
+  ## turns of its own, so it follows the same limit.
   for pr in providers:
+    if not providerAllowed(pr.name): continue
     for c in VerifierCombos:
       if canonicalKnownGoodProvider(pr.name) == c.provider.toLowerAscii:
         result.add pr.name & "." & c.model
@@ -1588,6 +1785,9 @@ proc buildVerifierProfile*(spec: string,
   let model = spec[dot + 1 .. ^1]
   for pr in providers:
     if pr.name != name: continue
+    if not providerAllowed(pr.name):
+      return (Profile(), &"provider '{name}' is not allowed here " &
+        "(limitproviders)")
     if pr.url == "":
       return (Profile(), &"provider '{name}': url not set")
     if pr.key == "" and pr.auth != "oauth":

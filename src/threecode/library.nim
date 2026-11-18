@@ -221,7 +221,19 @@ proc resolveSessionProfile*(wanted, resumeProfile: string): Profile =
   ## (`gateExperimental`), not what the config file says. Empty Profile
   ## when nothing resolves (first run, unknown model); callers decide
   ## how to surface that (CLI: provider wizard; library: AgentError).
-  result = buildProfile(activeCurrent, activeProviders, wanted)
+  ## The `limitproviders` whitelist narrows the pool: a current
+  ## outside it would leave the profile empty, so the resolver falls
+  ## back to the first allowed provider instead of refusing to run —
+  ## and aligns `activeCurrent` so `currentProvider()`, `:model` and
+  ## completion all agree with the profile actually running.
+  result = buildProfile(activeCurrent, selectableProviders(), wanted)
+  if providerWhitelist.len > 0 and result.name.len == 0:
+    let dot = activeCurrent.find('.')
+    let cur = if dot < 0: activeCurrent else: activeCurrent[0 ..< dot]
+    if not providerAllowed(cur):
+      result = buildProfile("", selectableProviders(), "")
+      if result.name.len > 0:
+        activeCurrent = result.name
 
 proc requireLive(s: AgentSession) =
   ## Guard for reads that describe a live session: safe mid-turn, refused
@@ -288,16 +300,19 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
   # Directory-specific overlay (`.3code/config` in the session dir or
   # any parent, nearest wins) — applied after the full parse so the
-  # user config's own switches land first. Project stores may only
-  # tighten the security switches, so whatever the arm below sees is
-  # the user's choice or stricter.
-  dirsettings.applyDirConfig(cwd)
+  # user config's own values land first. Every [settings] key cascades
+  # (compiled default < user config < nearest store); the security
+  # switches only tighten under project stores, so whatever the arm
+  # below sees is the user's choice or stricter.
+  applyDirSettingsOverlay(cwd)
   # Default-provider ladder, same as the CLI main: the directory store
   # cascade first (this directory's or the nearest ancestor's
   # `:provider` / `:model` pick, when it still resolves), then the
   # config `current`, then the most-used ledger, then the first
-  # [provider] section (inside buildProfile).
-  activeCurrent = resolveDefaultCurrent(cwd, activeCurrent, activeProviders)
+  # [provider] section (inside buildProfile); selectableProviders()
+  # keeps a limitproviders whitelist ahead of every rung.
+  activeCurrent = resolveDefaultCurrent(cwd, activeCurrent,
+                                        selectableProviders())
   if sandboxEnabled:
     sandbox.arm(cwd)
 

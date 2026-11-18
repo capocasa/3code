@@ -841,14 +841,17 @@ proc main() =
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
-  # Re-apply the directory overlay after the full parse (it re-applies
-  # the user config's own switches, which would otherwise undo a
-  # directory's `sandbox = off`). The default-provider ladder (directory
-  # store cascade, config current, most-used ledger, first section)
-  # lives in config.resolveDefaultCurrent.
-  dirsettings.applyDirConfig(safeCwd())
+  # Re-apply the directory overlay after the full parse: every
+  # [settings] key cascades (compiled default < user config < nearest
+  # store), and the parse just re-applied the user config's own values,
+  # which would otherwise undo a directory's setting. The
+  # default-provider ladder (directory store cascade, config current,
+  # most-used ledger, first section) lives in
+  # config.resolveDefaultCurrent; selectableProviders() keeps a
+  # limitproviders whitelist ahead of every rung.
+  applyDirSettingsOverlay(safeCwd())
   activeCurrent = resolveDefaultCurrent(safeCwd(), activeCurrent,
-                                       activeProviders)
+                                       selectableProviders())
   if activeProviders.len == 0 and activeCurrent != "":
     # A config that sets `current` but has no [provider] section used to
     # fall through to the first-run wizard, which then refused every name
