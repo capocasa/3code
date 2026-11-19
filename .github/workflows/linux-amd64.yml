@@ -198,9 +198,11 @@ jobs:
         # is propagated. The old `for c in ...; testament cat` loop ran
         # categories sequentially and, worse, a single hung test stalled
         # the pipe so the step showed nothing after it.
-        # 3600s, not 2400: the suite kept growing and both linux runners
-        # tipped over the 2400 cap (2687s/2449s, Nov 5), failing the job
+        # 5400s, not 3600: the suite kept growing and both linux runners
+        # tipped over the 3600 cap (amd64's step died at GitHub's 65-min
+        # kill, arm64's Run tests ran past 60m, Nov 19), failing the job
         # on the timeout, not a test. Same class of bump as 1800->2400
-        # (green arm64 sat at 1796s of the old 1800s cap, Oct 6).
-        run: sh tests/tools/ci_tests.sh 3600
-        timeout-minutes: 65
+        # (Oct 6) and 2400->3600 (Nov 5). timeout-minutes keeps a 5-min
+        # attribution window above the watchdog so the cap self-reports.
+        run: sh tests/tools/ci_tests.sh 5400
+        timeout-minutes: 95
