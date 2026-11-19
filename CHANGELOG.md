@@ -2,6 +2,14 @@ Changelog
 
 Unreleased
 
+- **Shift+Space types a space again.** Kitty-protocol terminals (kitty,
+  Ghostty, foot) report shift+space as `CSI 32;2 u` because space has
+  no shifted glyph to send as text, and iTerm2/xterm with
+  modifyOtherKeys send `CSI 27;2;32 ~`; the CSI-u decoder had no case
+  for the space key code, so the press vanished instead of typing.
+  Space with only Shift (or no modifiers) now inserts a space;
+  ctrl/alt/cmd+space chords stay unbound keys
+  (`tests/core/test_minline.nim`).
 - **Arming a goal mode takes a real snapshot: the fold diffs actual
   before-bytes.** Arming walks the project once (the manifest is still
   the cheap stat layer, now keyed by mtime, size and inode) and copies
