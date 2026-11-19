@@ -756,7 +756,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # Neither -c nor an XDG redirect: never touch the real user config —
     # spin a session-local one carrying only the [test] channel and pass
     # it via -c (appended: `--headless`/`--gui` must stay the first arg).
-    cfgPath = getTempDir() / "3code-tty-conf" /
+    cfgPath = tempDir() / "3code-tty-conf" /
       ($getCurrentProcessId() & "-" & $gIpcSessionSeq) / "config"
     childArgs.add @["-c", cfgPath]
   when defined(windows):

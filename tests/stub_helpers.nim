@@ -2,6 +2,17 @@
 ## resolution; no per-test nimble solver or incomplete source-mtime cache.
 import std/[os, osproc, sequtils, strtabs, strutils, sha1]
 
+proc tempDir*(): string =
+  ## std/os getTempDir hardcodes /data/local/tmp under defined(android)
+  ## and ignores TMPDIR entirely; the emulated-termux runner runs as a
+  ## uid that cannot write the shell user's dir, so honor TMPDIR there
+  ## like the app's util.tempDir does.
+  when defined(android):
+    let t = getEnv("TMPDIR")
+    if t.len > 0: t else: getTempDir()
+  else:
+    getTempDir()
+
 proc nimbleDepFlags*(): string =
   ## Out-of-tree probes must explicitly load the project's dependency paths.
   ## `nimble.paths` is a `nimble setup` artifact: present in a dev tree, but

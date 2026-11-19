@@ -25,7 +25,7 @@ import tty_expect, stub_helpers
 
 
 proc newFixture(name: string): string =
-  result = getTempDir() / "3code_tty_fixture" / (name & "_" & $getCurrentProcessId())
+  result = tempDir() / "3code_tty_fixture" / (name & "_" & $getCurrentProcessId())
   if dirExists(result):
     removeDir(result)
   createDir(result)
