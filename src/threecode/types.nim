@@ -384,6 +384,8 @@ type
     usage*: Usage
     lastPromptTokens*: int
     toolLog*: seq[ToolRecord]
+    lastPrompt*: string  ## raw previous user input (`@+`); in-memory only
+                          ## for now, not persisted across resume
     savePath*: string
     profileName*: string
     created*: string

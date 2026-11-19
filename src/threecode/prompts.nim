@@ -4118,6 +4118,8 @@ input:
   ctrl+v        paste from the system clipboard
   ctrl+y        paste the last cut/copied text
   @path         inline file contents (e.g. @src/foo.nim)
+  @*            splice the last command output in place
+  @+            splice your previous prompt in place
 """
 
 func matchesKnownGoodModel*(comboModel, model: string): bool =

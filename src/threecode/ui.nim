@@ -2052,25 +2052,60 @@ proc sessionPreamble*(cwd: string): string =
   if notes.len > 0:
     result.add "\n\n<project_notes>\n" & notes & "\n</project_notes>"
 
+proc lastBashInclude*(toolLog: seq[ToolRecord]): string =
+  ## The `@*` splice: the newest akBash toolLog record as `$ cmd\n<output>`,
+  ## output capped like file includes. The command line rides along because
+  ## `:!` output never reaches the model otherwise. "" when no bash ran yet
+  ## (the caller splices the no-value note in its place).
+  for i in countdown(toolLog.len - 1, 0):
+    let r = toolLog[i]
+    if r.kind != akBash: continue
+    const Cap = 64 * 1024
+    let body =
+      if r.output.len > Cap:
+        utf8ByteCut(r.output, Cap) & "\n... [truncated; output is " & $r.output.len & " bytes]"
+      else:
+        r.output
+    return "$ " & r.command & "\n" & body
+  ""
+
 proc inlineAtFiles*(msg: string, vision: bool, imgDir: string,
-    imgs: var seq[ImageInfo]): string =
+    imgs: var seq[ImageInfo]; lastBash = "", lastPrompt = ""): string =
   ## Find @path tokens (whitespace-delimited, must follow whitespace or start
   ## of input). For each that resolves to an existing regular file under cwd,
-  ## append `\n\n=== {path} ===\n<content>` (capped) to the message. Leave the
-  ## @token visible so the model sees the user's intent. Image files never
-  ## inline as text: on a vision profile they encode into `imgDir` and land
-  ## in `imgs` for the caller to attach as content blocks; otherwise they
+  ## append `\n\n=== {path} ===\n<content>` (capped) after the message text.
+  ## Leave the @token visible so the model sees the user's intent. Image files
+  ## never inline as text: on a vision profile they encode into `imgDir` and
+  ## land in `imgs` for the caller to attach as content blocks; otherwise they
   ## drop with a hint naming a vision model.
-  result = msg
+  ##
+  ## `@*` (last command output) and `@+` (previous prompt) are splice tokens:
+  ## the two-character token itself is replaced in place by the referenced
+  ## text, every occurrence, token-exact only (`@*rc` stays a file mention).
+  ## One pass over `msg`, so spliced text is never re-expanded.
+  result = ""
+  var blocks: seq[string]
   var seen: seq[string]
   var i = 0
   while i < msg.len:
     let prevOk = i == 0 or msg[i-1] in {' ', '\t', '\n'}
+    if prevOk and msg[i] == '@' and i + 1 < msg.len and msg[i+1] in {'*', '+'} and
+        (i + 2 == msg.len or msg[i+2] in {' ', '\t', '\n'}):
+      result.add case msg[i+1]
+        of '*':
+          if lastBash.len > 0: lastBash
+          else: "[no command output yet: run :! <command>]"
+        else:
+          if lastPrompt.len > 0: lastPrompt
+          else: "[no prompt yet]"
+      inc i, 2
+      continue
     if prevOk and msg[i] == '@' and i + 1 < msg.len and msg[i+1] notin {' ', '\t', '\n', '@'}:
       var j = i + 1
       while j < msg.len and msg[j] notin {' ', '\t', '\n'}:
         inc j
       let raw = msg[i+1 ..< j]
+      result.add msg[i ..< j]
       let path = resolvePath(raw)
       if path notin seen and fileExists(path):
         seen.add path
@@ -2079,11 +2114,11 @@ proc inlineAtFiles*(msg: string, vision: bool, imgDir: string,
             let (info, err) =
               encodeForVision(path, imgDir, nextImageIndex(imgDir))
             if err.len > 0:
-              result.add "\n\n=== " & raw & " ===\n[" & err & "]"
+              blocks.add "\n\n=== " & raw & " ===\n[" & err & "]"
             else:
               imgs.add info
           else:
-            result.add "\n\n[image ignored: " & raw &
+            blocks.add "\n\n[image ignored: " & raw &
               " — this model cannot see images; a vision model " &
               "(glm-5.3-flash on zai) can inspect it]"
         else:
@@ -2096,10 +2131,13 @@ proc inlineAtFiles*(msg: string, vision: bool, imgDir: string,
               else: s
             except CatchableError as e:
               "[error reading file: " & e.msg & "]"
-          result.add "\n\n=== " & raw & " ===\n" & content
+          blocks.add "\n\n=== " & raw & " ===\n" & content
       i = j
-    else:
-      inc i
+      continue
+    result.add msg[i]
+    inc i
+  for b in blocks:
+    result.add b
 
 proc isFirstUserMessage*(messages: JsonNode): bool =
   if messages == nil or messages.kind != JArray: return true
@@ -2113,17 +2151,18 @@ var lastImageAttachments*: seq[string] = @[]
   ## turn it into the `[image attached]` suffix.
 
 proc buildUserMessage*(messages: JsonNode, raw: string; cwd = safeCwd();
-    vision = false, imgDir = ""): JsonNode =
+    vision = false, imgDir = ""; lastBash = "", lastPrompt = ""): JsonNode =
   ## Apply @file inlining always; prepend the session preamble (cwd, git
   ## state, AGENTS.md, ls) only on the first user message of a session so
   ## resumed conversations don't re-inject stale context. `cwd` lets
   ## embedded sessions (library, ACP) build the preamble from the session's
   ## working dir instead of the process's. @image tokens on a vision
   ## profile return a content array (text block first, image blocks after)
-  ## instead of a plain string.
+  ## instead of a plain string. `lastBash`/`lastPrompt` feed the `@*`/`@+`
+  ## splice tokens; empty ones splice the no-value notes.
   var imgs: seq[ImageInfo]
   lastImageAttachments.setLen 0
-  let body = inlineAtFiles(raw, vision, imgDir, imgs)
+  let body = inlineAtFiles(raw, vision, imgDir, imgs, lastBash, lastPrompt)
   for im in imgs: lastImageAttachments.add im.name
   let text =
     if isFirstUserMessage(messages):
