@@ -71,7 +71,11 @@ suite "session change log":
       let cache = newReadCache()
       let (outp, code, diff) = runAction(
         act(akBash, cmd = "sed -i 's/x = 1/x = 2/' d.txt"), cache)
-      check code == 0
+      if code != 0:
+        # The child's own words name the confined-exec break (a bare
+        # `check code == 0` hides e.g. sed's EPERM on its -i temp file).
+        checkpoint("sed round-trip child output:\n" & outp)
+        fail()
       check diff.len > 0  # the live diff still paints
       check cache.changes.len == 1
       check cache.changes["d.txt".absolutePath].before == "x = 1\n"
