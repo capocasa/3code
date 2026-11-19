@@ -1709,13 +1709,13 @@ proc cmdRetry(arg: string): string =
   let parts = arg.splitWhitespace()
   case parts.len
   of 0:
-    # The command form: one-flag payload, effective while
-    # a request is in flight or a retry backoff is counting down. At idle
-    # the flag is cleared at the next callModel entry, so an idle
-    # invocation is inert.
-    requestTurnRetry(":retry")
-    return hintLnS("instant retry requested; takes " &
-      "effect if a request is in flight or a backoff is running")
+    # The command form: an empty submit, exactly Enter on an empty
+    # buffer. The queued empty line runs a turn on the conversation as
+    # it stands — no hint line, nothing appended — and the controller's
+    # empty-submit gates (provider, ongoing conversation, the
+    # allow-empty-prompt setting) decide whether a turn actually runs.
+    queueEmptySubmit()
+    return ""
   of 1:
     if parts[0] == "list":
       return cmdRetryList()

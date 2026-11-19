@@ -34,7 +34,7 @@ import rendering
 from ../toolstream import StreamMaxLines, initStreamingView, addLine,
   viewportRowsAt, bannerRowCountAt
 from ../api import ApiStreamHooks, requestTurnInterrupt, requestQuietShutdown,
-  requestTurnRetry, setApiStreamHooks, setInterrupted, QuietTooLongMs,
+  setApiStreamHooks, setInterrupted, QuietTooLongMs,
   clearNetworkQuiet
 
 
@@ -834,6 +834,17 @@ proc pushInputEvent*(ev: InputEvent) =
     inputState.eventQueue.add ev
   finally:
     release inputStateLock
+
+proc queueEmptySubmit*() =
+  ## `:retry`'s whole payload: the empty `ieLine` Enter on an empty buffer
+  ## queues at the idle prompt. Whichever controller path drains it —
+  ## `readInput` at idle, the post-turn drain mid-conversation — runs a
+  ## turn that sends the current conversation state as a request, and
+  ## every drain site already treats an empty `ieLine` exactly that way.
+  ## Safe from any thread (the queue is lock-guarded); in embeddings
+  ## with no controller draining the queue the event simply sits there,
+  ## the old idle no-op.
+  pushInputEvent(InputEvent(kind: ieLine, text: ""))
 
 proc pollInputEvent*(): InputEvent =
   ## Called by the controller to drain the next queued event. Returns
@@ -2400,18 +2411,6 @@ proc apiRetryNotice*(msg: string) =
   ## receive the notice event.
   discard msg
 
-proc apiRetryCut*(label: string) =
-  ## `:retry` cut the backoff short. The error that justified the wait
-  ## lives on the volatile notice row, which the next attempt erases —
-  ## without this commit the message would simply vanish, and a resend
-  ## that succeeds leaves no trace of what went wrong. Journaled like
-  ## every other scrollback-only line so the rebreak window can replay
-  ## it; no bar repaint (the spinner owns the footer mid-turn).
-  let bytes = errLnS(label)
-  termengine.noteNonMessageTail(bytes, journalAnchorMessagesLen)
-  commitTranscriptBytes(bytes, restoreEditor = true,
-                        reserveFooter = true)
-
 proc installApiStreamHooks*() =
   setApiStreamHooks(ApiStreamHooks(
     beforeCall: apiBeforeCall,
@@ -2434,8 +2433,7 @@ proc installApiStreamHooks*() =
     retryWaitTick: proc(remainingS: int) =
       setAnimRetryRemaining(remainingS),
     retryWaitClear: proc() =
-      clearAnimRetryWait(),
-    retryCut: apiRetryCut))
+      clearAnimRetryWait()))
 
 # ---------- Headless (library) stream hooks ----------
 #
@@ -3007,16 +3005,19 @@ proc inputThreadProc() {.thread.} =
       ed.renderSuffixCursor = false
     # Ctrl+Shift+R (kitty keyboard protocol; `retry` in DefaultShortcuts,
     # rebindable via [shortcuts]): the `:retry` command as a key — same
-    # flag, same hint line. Unlike a submitted command the draft in the
-    # buffer survives, so the commit must not clear the editor, and a
-    # modal wizard owns the keys, so the press is inert there.
+    # empty submit. At idle the submit transition resets the editor like
+    # Enter on an empty buffer does, so a draft is stashed into
+    # `prefillText` (the idle Ctrl-C path's trick) and returns with the
+    # next prompt; mid-turn nothing clears the editor and the draft
+    # rides out the queued submit. A modal wizard owns the keys, so the
+    # press is inert there.
     let retryKey: minline.KeyCallback = proc(ed: var minline.LineEditor) =
       {.cast(gcsafe).}:
         if inputModalActive.load(moAcquire): return
-        requestTurnRetry("ctrl+shift+r")
-        commitTranscriptBytes(hintLnS("instant retry requested; takes " &
-          "effect if a request is in flight or a backoff is running"),
-          restoreEditor = true, reserveFooter = true)
+        if not inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
+          ed.prefillText = ed.line.text
+          ed.clearLine()
+        queueEmptySubmit()
     minline.CommandProcs["retry"] = retryKey
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)

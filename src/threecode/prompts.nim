@@ -4003,8 +4003,8 @@ commands:
   :verifier list      list verification-class models (decision models like jev)
   :verifier X         run goal checks on X (a listed verifier or a provider model)
   :verifier on|off    toggle the verifier without losing the selection
-  :retry              retry now: cut a backoff wait (the curve resets) or
-                      resend a data-less in-flight request
+  :retry              send the current state as a request, exactly like
+                      Enter on an empty prompt
                       (also ctrl+shift+r on kitty-protocol terminals)
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
