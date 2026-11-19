@@ -2,6 +2,24 @@ Changelog
 
 Unreleased
 
+- **`:retry` sends the current state as a request.** Bare `:retry`
+  (and the Ctrl+Shift+R `retry` shortcut) is the empty submit now: it
+  queues exactly what Enter on an empty prompt queues, and the
+  controller answers with a turn that sends the conversation as it
+  stands - no user message appended, nothing echoed beyond the command
+  line. It needs an ongoing conversation (a system-only session has
+  nothing to continue); at idle without one it does nothing. It never
+  interrupts a request in flight or cuts a backoff short: typed while
+  a turn runs, the submit lines up behind it and fires when the turn
+  yields. The retry-now design this replaces - cutting a backoff wait,
+  resending a data-less in-flight request, the `retryCut` scrollback
+  hook, the `instant retry requested` line - was removed before ever
+  shipping. Ctrl+R stays history search; the two are only
+  distinguishable on terminals that speak the kitty keyboard protocol
+  (the CSI-u decoder keeps ctrl+shift+letter a distinct key, falling
+  back to the readline ctrl+letter meaning when nothing binds it),
+  rebindable as `retry` in `[shortcuts]`
+  (`tests/core/test_command_prefix.nim`, `tests/tty/test_retry_fixes.nim`).
 - **Launching from a deleted working directory refuses with a straight
   error.** A terminal left in a directory that was deleted or renamed
   away (a rebuilt clone, a tmpclean sweep) crashed 3code at startup with
@@ -180,13 +198,6 @@ Unreleased
   kimi takes the vLLM `enable_thinking` bool; their purpose-built
   apply/search models are separate non-chat endpoints and stay off
   the table.
-- **`:retry` no longer deletes the error it answers.** The retry notice
-  (the error detail plus the countdown) lives on the volatile notice
-  row, and a `:retry` that cut the wait erased it as the next attempt
-  started - a resend that then succeeded left no trace of what went
-  wrong. The cut now commits the error detail to scrollback first (the
-  new `retryCut` stream hook; the normal full backoff keeps the
-  ephemeral-notice design).
 - **System commands are prompt-log content now.** Commands submitted
   while a turn runs (`:retry`, `:model x`, ...) never reached the
   history file: the command hook's commit cleared the editor before
@@ -194,14 +205,6 @@ Unreleased
   with Up or Ctrl+R. Every submitted command is recorded at submit
   time now, exactly like a typed prompt (the idle path records before
   the controller's echo commit can race it).
-- **Ctrl+Shift+R retries now.** The browser hard-reload analogue of
-  `:retry`: cuts a backoff wait (the curve resets) or resends a
-  data-less in-flight request, printing the same `instant retry
-  requested` line. Ctrl+R stays history search; the two are only
-  distinguishable on terminals that speak the kitty keyboard protocol
-  (the CSI-u decoder now keeps ctrl+shift+letter a distinct key,
-  falling back to the readline ctrl+letter meaning when nothing binds
-  it). Rebindable as `retry` in `[shortcuts]`.
 - **GPT-6.2 Astra is known-good, live-tested through the ChatGPT
   backend.** The safety-cancelled 6.1-Astra line's successor shipped
   Nov 17: same 1.05M context, 128k output cap and text+image surface as
