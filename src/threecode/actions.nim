@@ -319,6 +319,16 @@ proc recordChange*(cache: ReadCache; path, before, after: string) =
   else:
     cache.changes[path].after = after
 
+const
+  DiffInputCapBytes* = 256 * 1024
+    ## Combined before/after byte ceiling for `computeDiff`: past it the
+    ## pair degrades to the name-only "diff over N bytes, not shown"
+    ## line. The O(n*m) LCS table costs 810 ms and 2.0 GB peak RSS on a
+    ## 520 KB pair (measured), and `patch` feeds it unbounded content.
+  DiffMaxLines* = 5000
+    ## The same guard on the axis that sizes the table: line counts. A
+    ## byte cap alone misses a file made of tiny lines.
+
 proc computeDiff*(before, after, label: string): string =
   ## Native unified-diff producer. Shelling out to the external `diff`
   ## binary breaks on Windows (no `diff` on stock installs) and on systems
@@ -333,8 +343,12 @@ proc computeDiff*(before, after, label: string): string =
   # arrive here with whatever the file held.
   if isBinaryContent(before) or isBinaryContent(after):
     return &"--- a/{label}\n+++ b/{label}\n[binary content changed: diff suppressed]"
+  if before.len + after.len > DiffInputCapBytes:
+    return &"--- a/{label}\n+++ b/{label}\n[diff over {before.len + after.len} bytes, not shown]"
   let a = before.splitLines(keepEol = false)
   let b = after.splitLines(keepEol = false)
+  if a.len + b.len > DiffMaxLines:
+    return &"--- a/{label}\n+++ b/{label}\n[diff over {before.len + after.len} bytes, not shown]"
   let ops = lcsOps(a, b)
 
   # Map each op to its source index in a / b so we can place context.

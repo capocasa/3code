@@ -134,3 +134,49 @@ The plan above shipped, with the one amendment the goal text demanded:
   oversize, skip dirs, sync), `tests/core/test_goal.nim` and
   `tests/core/test_modes.nim` (the prompt carries the change log and
   never a git feed).
+
+## Evaluated
+
+Does the snapshot have to copy the entire work tree? **No — by
+construction, and measured.** The plan splits detection from capture:
+
+- **Detection is metadata-only.** `armManifest` takes one stat walk
+  storing `(mtime, size)` per path. Measured on this tree: 1,654 paths
+  (after the skip list eats `nimcache/`, `3code.nimcache/`, `.git/`) →
+  5.5 ms and 354 KB of manifest memory; a synthetic tree at the
+  `ManifestMaxEntries` cap (20,000 paths) → 31 ms and 2.5 MB. No file
+  content is read at arm time — 128–220 B per path depending on table
+  fill, whatever the file sizes. The "snapshot" is a manifest, not a
+  copy.
+- **Capture is lazy, first-writer-copies.** `recordChange` stores a
+  path's original bytes only at the first observed mutation; later
+  mutations refresh only `after`. Content memory is O(changed bytes),
+  not O(tree bytes): mutating 500 of 20,000 1 KB files holds ~700 KB
+  (≈3.5% of the tree's 20 MB). A full copy of this repo would hold
+  ~10 MB just for the `3code` binary — the manifest holds 354 KB and
+  the binary is never read.
+- **Budgets bound the worst case.** 1 MB/path (`FoldFileCap`), 4 MB per
+  bash run (`FoldBudgetCap`), 20,000 manifest entries, skip dirs. One
+  bash run costs one stat walk (5–35 ms measured) plus ≤4 MB of reads
+  for what actually moved — noise next to the command it follows.
+
+The gap userspace COW cannot close — bytes overwritten before first
+  observation — is paid in honesty markers (`shellTouched`, "original
+  not captured"), not in an up-front full-tree copy. For the feed's
+  consumer (the verifier prompt, capped at 8 KB total) name-only
+  degradation is sufficient evidence. A volume-level snapshot
+  (reflink/btrfs/APFS) would make the full copy cheap, but it buys
+  platform dependence for bytes the verifier never sees.
+
+**Found while measuring: the render side is not budgeted like the
+capture side.** `lcsOps` (`actions.nim:284`) is an O(n·m) DP table
+and `SessionDiffPerPathCap` applies to its *output*, after the table
+exists. Measured: a 520 KB before/after pair costs 810 ms and a 2.0 GB
+peak RSS for a 177-byte diff; a pair at the 1 MB `FoldFileCap`
+extrapolates to ~7.7 GB. Reachable today without any shell fold:
+`patch` diffs eagerly (`actions.nim:641`) on unbounded content, and
+the write/patch/bash record paths read files with no capture cap
+(only the fold has one). The consistent fix is an input-size guard in
+`computeDiff` that falls back to the existing "diff over N bytes, not
+shown" name-only line — the degradation ladder already exists; the
+capture budgets just never reach it.

@@ -7,7 +7,7 @@
 import std/[json, os, sets, strutils, tables, tempfiles, times, unittest]
 import threecode/[types, actions]
 import threecode/goal except Usage
-import threecode/snap
+import threecode/[ignore, snap]
 
 proc withLogDir(body: proc (dir: string)) =
   let dir = createTempDir("changelog-test-", "")
@@ -132,6 +132,15 @@ suite "session change log":
       check "big.txt" in d
       check "not shown" in d
 
+  test "computeDiff degrades past the input caps":
+    let big = "line\n".repeat(60000)  # 300 KB pair: over the byte cap
+    let d = computeDiff(big, big & "extra\n", "big.txt")
+    check "not shown" in d
+    check "big.txt" in d
+    let many = "x\n".repeat(6000)   # 12 KB pair, over the line cap
+    check "not shown" in computeDiff(many, many & "y\n", "tiny.txt")
+    check computeDiff("same\n", "same\n", "eq.txt").len == 0
+
   test "turnDidWork is content-aware":
     withLogDir proc (dir: string) =
       let msgs = %*[{"role": "user", "content": "go"},
@@ -161,12 +170,12 @@ suite "working-tree manifest (goal-mode COW snapshot)":
       discard runAction(act(akBash, cmd = "bash -c 'echo new > f.txt'"), cache)
       check cache.changes.len == 1
       let e = cache.changes["f.txt".absolutePath]
-      check e.before == ""  # no original existed to copy by the time the
-                             # re-walk saw it: never fabricated
+      check e.before == "old\n"  # the arm-time snapshot copy: real
+                                 # before-bytes, never fabricated
       check e.after == "new\n"
-      check "f.txt".absolutePath in cache.shellTouched
+      check "f.txt".absolutePath notin cache.shellTouched
       let d = buildSessionDiff(cache)
-      check "changed via shell (original not captured" in d
+      check "-old" in d
       check "+new" in d
 
   test "no manifest, no fold: outside goal mode nothing walks":
@@ -206,17 +215,61 @@ suite "working-tree manifest (goal-mode COW snapshot)":
       check "-orig" in buildSessionDiff(cache)
       check "+v2" in buildSessionDiff(cache)
 
-  test "opaque shell deletion renders a name-only line":
+  test "opaque shell deletion renders a real minus-diff":
     withLogDir proc (dir: string) =
-      writeFile("d.txt", "x\n")
+      writeFile("d.txt", "x\ny\n")
       let cache = newReadCache()
       check armManifest(cache, ".")
       discard runAction(act(akBash, cmd = "bash -c 'rm d.txt'"), cache)
       let e = cache.changes["d.txt".absolutePath]
-      check e.before == ""
+      check e.before == "x\ny\n"  # stored before-bytes
       check e.after == ""
       let d = buildSessionDiff(cache)
-      check ("deleted via shell: " & "d.txt".absolutePath) in d
+      check "-x" in d
+      check "-y" in d
+      check "deleted via shell" notin d
+
+  test "arm materializes the snapshot; disarm deletes it":
+    withLogDir proc (dir: string) =
+      writeFile("s.txt", "s\n")
+      writeFile("goal.md", "g\n")
+      let cache = newReadCache()
+      syncManifest(cache, ".", "goal.md", true)
+      check fileExists(".3code/snapshot/s.txt")
+      check readFile(".3code/snapshot/s.txt") == "s\n"
+      syncManifest(cache, ".", "goal.md", false)
+      check not dirExists(".3code/snapshot")
+      check not cache.manifestArmed
+
+  test "re-arm copies only the delta":
+    withLogDir proc (dir: string) =
+      writeFile("keep.txt", "k\n")
+      writeFile("drop.txt", "d\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      let keepId = getFileInfo(".3code/snapshot/keep.txt").id
+      writeFile("fresh.txt", "f\n")
+      removeFile("drop.txt")
+      check armManifest(cache, ".")  # re-arm on a stale baseline
+      check getFileInfo(".3code/snapshot/keep.txt").id == keepId
+      check fileExists(".3code/snapshot/fresh.txt")
+      check not fileExists(".3code/snapshot/drop.txt")
+
+  test "a rename folds as one entry, not delete+create":
+    withLogDir proc (dir: string) =
+      writeFile("old.txt", "same\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      discard runAction(act(akBash, cmd = "bash -c 'mv old.txt new.txt'"), cache)
+      let n = "new.txt".absolutePath
+      check n in cache.changes
+      check "old.txt".absolutePath notin cache.changes
+      check cache.changes[n].before == "same\n"
+      check cache.changes[n].after == "same\n"
+      check cache.renamedFrom[n] == "old.txt".absolutePath
+      let d = buildSessionDiff(cache)
+      check "renamed from " in d
+      check "old.txt" in d
 
   test "oversize shell mutation degrades to a name-only line":
     withLogDir proc (dir: string) =
@@ -227,6 +280,47 @@ suite "working-tree manifest (goal-mode COW snapshot)":
       check cache.changes["big.bin".absolutePath].after == ""
       check "big.bin".absolutePath in cache.shellTouched
       check "content not captured" in buildSessionDiff(cache)
+
+  test "the walk honors the ignore cascade":
+    withLogDir proc (dir: string) =
+      let oldG = globalIgnoreFile
+      globalIgnoreFile = dir / "no-such-nimignore"  # embedded defaults
+      defer: globalIgnoreFile = oldG
+      writeFile(".gitignore", "secret\ngenerated/\n")
+      createDir("generated")
+      writeFile("generated/out.txt", "g\n")
+      writeFile("secret", "s\n")
+      writeFile("plain.txt", "p\n")
+      createDir("sub")
+      writeFile("sub/.gitignore", "!secret\n")
+      writeFile("sub/secret", "ss\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      check "plain.txt".absolutePath in cache.manifest
+      check "secret".absolutePath notin cache.manifest
+      check "generated/out.txt".absolutePath notin cache.manifest
+      check "sub/secret".absolutePath in cache.manifest  # deeper unignores
+
+  test ".3code/ignore overrides the gitignore and the defaults":
+    withLogDir proc (dir: string) =
+      let oldG = globalIgnoreFile
+      globalIgnoreFile = dir / "no-such-nimignore"
+      defer: globalIgnoreFile = oldG
+      createDir(".3code")
+      writeFile(".3code/ignore", "!node_modules/\nextra/\n")
+      createDir("node_modules/pkg")
+      writeFile("node_modules/pkg/junk.js", "j\n")
+      createDir("extra")
+      writeFile("extra/x.txt", "x\n")
+      createDir(".git")
+      writeFile(".git/config", "c\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      check "node_modules/pkg/junk.js".absolutePath in cache.manifest
+      check "extra/x.txt".absolutePath notin cache.manifest
+      check ".git/config".absolutePath notin cache.manifest  # still pruned:
+        # a bare-name negation names no subtree, so pruning stands
+      check fileExists(".3code/snapshot/node_modules/pkg/junk.js")
 
   test "skip dirs never enter the manifest":
     withLogDir proc (dir: string) =

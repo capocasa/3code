@@ -904,7 +904,8 @@ proc buildSessionDiff*(cache: ReadCache): string =
   for p in paths:
     let (before, after) = cache.changes[p]
     let viaShell = p in cache.shellTouched
-    if before == after and not viaShell:
+    let renamedFrom = cache.renamedFrom.getOrDefault(p, "")
+    if before == after and not viaShell and renamedFrom.len == 0:
       continue  # touched but net-identical
     if viaShell and after.len == 0:
       # No original existed to copy and no bytes were captured (over the
@@ -923,6 +924,8 @@ proc buildSessionDiff*(cache: ReadCache): string =
         (if viaShell: " [via shell]" else: "") & "\n"
       continue
     var d = computeDiff(before, after, p)
+    if renamedFrom.len > 0:
+      d = "renamed from " & renamedFrom & ":\n" & d
     if viaShell and before.len == 0:
       # First seen mutated by an opaque shell run: the current content is
       # real evidence, the empty original is not — say which is which.
