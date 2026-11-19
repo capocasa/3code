@@ -342,12 +342,21 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # Older 3.x flash tiers keep the same thinking-level surface; 3.1 Pro
     # (preview) adds minimal back. maxTokens is pinned to the 64k
     # architectural output cap for every tier.
-    # 4 Argon (Oct 2026): flagship successor on the same wire surface.
+    # 4 (Oct/Nov 2026): the successor line on the same wire surface.
     # Unified 1M window (input, thinking, and output share it), 64k
     # default AND max synchronous output (more 400s without the
     # background long-decode flag, unused here), thinking
-    # low/medium(default)/high; `minimal` is not a level (the compat
-    # endpoint maps it down to low, so it is simply not offered).
+    # low/medium/high; `minimal` is not a level (the compat endpoint
+    # maps it down to low, so it is simply not offered). Carbon is the
+    # flagship (default high, like every Pro tier); Neon (Nov 18,
+    # adapted from Carbon for long-running agent workflows, replaces
+    # 3.1 Pro in the Gemini app) and Hydrogen (Flash successor) add an
+    # `xhigh` level on top and default to medium. Carbon/Argon's
+    # ListModels outputTokenLimit reads 32768 — the non-streaming cap;
+    # 3code always streams, and Argon already pinned 64k against it.
+    ("google", "gemini-4-carbon", "gemini", "4", "carbon", "high", 0.2, 65536, tbNone, false, 1_048_576, false, true),
+    ("google", "gemini-4-neon", "gemini", "4", "neon", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
+    ("google", "gemini-4-hydrogen", "gemini", "4", "hydrogen", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("google", "gemini-4-argon", "gemini", "4", "argon", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("google", "gemini-3.8-flash", "gemini", "3", "8-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("google", "gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
@@ -357,6 +366,14 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("google", "gemini-3.1-flash-lite", "gemini", "3", "1-flash-lite", "low", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("google", "gemini-3.1-pro-preview", "gemini", "3", "1-pro", "high", 0.2, 65536, tbNone, false, 1_048_576, false, true),
     ("google", "gemini-3-flash-preview", "gemini", "3", "0-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false, true),
+    # Gemma 4 open weights ride the same endpoint (both in ListModels
+    # and the compat /models): generateContent-only, 262k ctx / 32k
+    # out, no thinking surface (no reasoning_effort — family `other`
+    # offers and sends no knob). Vision unverified, so off. Rows rest
+    # on the list endpoints + docs; no live turn yet (the prepay
+    # credits were depleted at curation time, 402 on every call).
+    ("google", "gemma-4-31b-it", "other", "4", "31b", "", 0.2, 32768, tbNone, false, 262_144, false, false),
+    ("google", "gemma-4-26b-a4b-it", "other", "4", "26b-a4b", "", 0.2, 32768, tbNone, false, 262_144, false, false),
 
     # claude (Anthropic Messages wire, /messages; see anthropic.nim).
     # First-party `anthropic` serves the wire; the `claudecode` twin
@@ -691,6 +708,12 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("venice", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("venice", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false, false),
+    # Gemma 4 on venice (flattened ids, venice's own spellings): the
+    # open weights' 262k window, no thinking knob (family `other`
+    # sends none — unprobed surface). maxTokens is venice's 8k cap,
+    # not the weights' 32k.
+    ("venice", "google-gemma-4-31b-it", "other", "4", "31b", "", 0.2, 8192, tbNone, false, 262_144, false, false),
+    ("venice", "google-gemma-4-26b-a4b-it", "other", "4", "26b-a4b", "", 0.2, 8192, tbNone, false, 262_144, false, false),
     ("venice", "grok-4-20", "grok", "4", "20", "low", 0.2, 8192, tbNone, false, 2_000_000, false, true),
     ("venice", "grok-4-20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, tbNone, false, 2_000_000, false, true),
     ("venice", "grok-4-3", "grok", "4", "3", "low", 0.2, 8192, tbNone, false, 1_000_000, false, true),
@@ -4460,6 +4483,8 @@ proc maxOutputTokensFor*(p: Profile): int =
   if "deepseek" in m and "v4" in m: return 384_000
   if "gpt-6" in m: return 128_000
   if "gemini-3" in m or "gemini-4" in m: return 65_536
+  # gemma-4 caps a generation at 32k inside its 262k window
+  if "gemma-4" in m: return 32_768
   if "space-bunny" in m: return 524_288
   let kg = knownGoodContextWindow(p)
   if kg > 0: return kg
@@ -4546,9 +4571,9 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         return @["low", "high", "max"]
       if fam == "other":
         # Unidentified models: no known knob, so none is offered and
-        # applyReasoning's else branch sends nothing. No combo rides
-        # `other` today; it's the bucket for the next stealth model
-        # whose surface hasn't been probed yet.
+        # applyReasoning's else branch sends nothing. The gemma-4 rows
+        # ride it (no thinking surface); it stays the bucket for the
+        # next stealth model whose surface hasn't been probed yet.
         return @[]
       if fam == "kimi" and combo.version == "3.1":
         # K3.1 Pro (every host) always thinks; the only knob is the
@@ -4626,8 +4651,11 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # (no off/none). 3.8 Flash rejects `minimal` outright; the older
         # 3.x tiers accept it. Default is medium on Flash, high on Pro.
         # 4 Argon drops `minimal` entirely (levels low/medium/high,
-        # default medium).
-        if combo.variant == "8-flash" or combo.variant == "argon":
+        # default medium). 4 Carbon matches Argon (default high);
+        # 4 Neon/Hydrogen add `xhigh` on top (default medium).
+        if combo.variant in ["neon", "hydrogen"]:
+          return @["low", "medium", "high", "xhigh"]
+        if combo.variant in ["8-flash", "argon", "carbon"]:
           return @["low", "medium", "high"]
         return @["minimal", "low", "medium", "high"]
       if fam == "grok":
