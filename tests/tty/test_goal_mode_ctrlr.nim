@@ -1,14 +1,10 @@
 discard """
   disabled: "win"
 """
-## Interactive coverage for the two controller-level features that unit
+## Interactive coverage for the controller-level features that unit
 ## suites cannot reach (they live behind the input thread and the idle
 ## REPL loop):
 ##
-## - `:retry` retry: the command must travel the idle REPL loop ->
-##   `requestTurnRetry`, and the retry backoff must break immediately
-##   when it lands (the transport-level contract is covered by
-##   tests/stream; this is the wiring).
 ## - Goal mode wiring: the file is the whole mode, and work starts the
 ##   moment it exists. `:goal TEXT` runs the kickoff turn at once; a
 ##   goal.md already on disk at startup does the same before any prompt.
@@ -70,45 +66,7 @@ proc toolReply(name, argsJson: string; content = ""): JsonNode =
      "usage": {"promptTokens": 5, "completionTokens": 2,
                 "totalTokens": 7, "cachedTokens": 0}}
 
-suite ":retry and goal mode (interactive)":
-  test ":retry during a 429 backoff retries immediately":
-    let root = newFixture("ctrl_r_backoff")
-    writeConfiguredProvider(root)
-    # A 429 whose backoff is 6000ms, then a normal reply. `:retry` sent
-    # during the wait must skip the remaining backoff and resend; the
-    # reply can then only appear long before the full 6s wait. Without
-    # the skip the expect times out (nothing else can produce the text).
-    writeFile(root / "run" / "stub_responses.json", $(%*[
-      {"failure": "429", "body": "{\"error\":\"rate limit\"}",
-       "delayMs": 6000},
-      {"role": "assistant", "preStreamDelayMs": 50,
-       "content": "recovered", "contentChunks": ["recovered"],
-       "usage": {"promptTokens": 5, "completionTokens": 1,
-                  "totalTokens": 6, "cachedTokens": 0}}
-    ]))
-    let stub = ensureStubBinary()
-    let tty = newTtySession(stub,
-                            args = ["-x", "-i"],
-                            cwd = root / "run",
-                            env = stubEnv(root, root / "run" / "stub_responses.json"))
-    defer:
-      tty.writeFrameArtifact(root / "frames.txt")
-      tty.close()
-
-    tty.expect "\u276f"
-    tty.send "go"
-    tty.expect "go"
-    tty.send "\n"
-    tty.expectNoticeRow("429")
-    tty.drain(100)
-    # `:retry` mid-backoff: the wait breaks and the resend runs.
-    tty.send ":retry\n"
-    let t0 = epochTime()
-    check tty.expectInHistory("recovered", timeoutMs = 4000)
-    let elapsed = epochTime() - t0
-    check elapsed < 5.0
-    tty.expectAlive()
-
+suite "goal mode (interactive)":
   test ":goal TEXT arms; the kickoff turn runs at once":
     let root = newFixture("goal_kickoff")
     writeConfiguredProvider(root)

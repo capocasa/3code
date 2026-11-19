@@ -112,7 +112,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">:verifier on/off</span></tt></td><td>toggle the verifier without losing the selection</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:notify</span></tt></td><td>show notify mode</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:notify on/off</span></tt></td><td>toggle the desktop notification that fires when a turn ends</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">:retry</span></tt></td><td>retry now: cut a backoff wait (the curve resets) or resend a data-less in-flight request</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:retry</span></tt></td><td>send the current state as a request, like Enter on an empty prompt</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:retry list</span></tt></td><td>show patient-retry mode</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:retry on/off</span></tt></td><td>toggle patient retry of 429/5xx/network errors</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:private</span></tt></td><td>show private mode and trusted providers</td></tr>
@@ -166,7 +166,7 @@
 <tr><td>Ctrl+]</td><td>jump to the next occurrence of the next typed character</td></tr>
 <tr><td>Ctrl+@ or Alt+Space</td><td>set the mark (binds <tt class="docutils literal"><span class="pre">exchange-point-and-mark</span></tt> to swap back)</td></tr>
 <tr><td>Ctrl+R / Ctrl+S</td><td>incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts</td></tr>
-<tr><td>Ctrl+Shift+R</td><td>retry now: cut a backoff wait (the curve resets) or resend a data-less in-flight request; the <tt class="docutils literal"><span class="pre">retry</span></tt> shortcut, distinct from Ctrl+R only on kitty-protocol terminals</td></tr>
+<tr><td>Ctrl+Shift+R</td><td>send the current state as a request, like Enter on an empty prompt; the <tt class="docutils literal"><span class="pre">retry</span></tt> shortcut, distinct from Ctrl+R only on kitty-protocol terminals</td></tr>
 <tr><td>Alt+P / Alt+N</td><td>history search completed at Enter</td></tr>
 <tr><td>Alt+&lt; / Alt+&gt;</td><td>jump to the oldest entry / back to the draft</td></tr>
 <tr><td>Ctrl+L</td><td>clear the screen</td></tr>
@@ -309,7 +309,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-19 08:02:11 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-19 09:15:30 UTC</small>
       </div>
     </div>
   </div>

@@ -385,21 +385,10 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
       hookRetryWait(retryLabel, backoff)
       var waitMs = backoff * 1000
       var lastShown = backoff
-      var stubRetrySkipInc = false
       while waitMs > 0:
         if isInterrupted():
           hookRetryWaitClear()
           raise newException(ApiError, "interrupted by user during retry backoff")
-        if isRetryNow():
-          # `:retry` during the wait: retry immediately. Same contract as
-          # the real callModel — the curve resets below instead of aging,
-          # so the next failure backs off from the short end again. The
-          # error is committed first (hookRetryCut) exactly like the real
-          # callModel does, so the stub exercises the same frontend path.
-          hookRetryCut(detail)
-          stubRetrySkipInc = true
-          clearRetryNow()
-          break
         let step = min(100, waitMs)
         sleep(step)
         waitMs -= step
@@ -408,9 +397,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
           lastShown = shown
           hookRetryWaitTick(shown)
       hookRetryWaitClear()
-      if stubRetrySkipInc:
-        resetRetryLevels()
-      elif category == "rate":
+      if category == "rate":
         inc rateRetryLevel
         rateLastTs = epochTime()
       else:

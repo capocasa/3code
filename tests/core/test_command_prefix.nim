@@ -6,6 +6,7 @@
 import std/[json, os, strutils, tempfiles, unittest]
 import threecode/[minline, types, ui]
 import threecode/api except callModel
+import threecode/fatprompt
 import threecode/goal
 
 # `:goal` arms land in the directory settings store; legacy goal.md
@@ -266,19 +267,22 @@ suite ":retry command":
   var prof = Profile()
   var editor: LineEditor
 
-  test "bare :retry requests an instant retry":
-    clearRetryNow()
+  test "bare :retry queues an empty submit, no hint line":
     check classifyCommand(":retry") == ckSafeImmediate
     let r = handleCommandResult(":retry", messages, session, prof, editor)
     check r.recognized and r.ok
-    check "instant retry" in r.body
-    check isRetryNow()
-    clearRetryNow()
+    check r.body == ""
+    # The payload is the empty-submit event Enter on an empty buffer
+    # queues; the controller drains it into a turn on the current state.
+    check hasQueuedAutosend()
+    let ev = pollInputEvent()
+    check ev.kind == ieLine
+    check ev.text == ""
+    check pollInputEvent().kind == ieNone
 
   test ":retry list still shows the patient-retry setting":
-    clearRetryNow()
     let r = handleCommandResult(":retry list", messages, session, prof,
                                 editor)
     check r.recognized and r.ok
     check "patient retry" in r.body
-    check not isRetryNow()
+    check pollInputEvent().kind == ieNone

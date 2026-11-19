@@ -530,7 +530,7 @@ The daily keys:
 | Up / Down | history |
 | Ctrl+Arrow | move by word |
 | Ctrl+R / Ctrl+S | search history as you type |
-| Ctrl+Shift+R | retry now: cut a backoff wait or resend a data-less in-flight request (needs a kitty-protocol terminal; see below) |
+| Ctrl+Shift+R | send the current state as a request, like Enter on an empty prompt (`:retry` as a key; needs a kitty-protocol terminal, see below) |
 | Alt+E | edit the input in $VISUAL/$EDITOR |
 | Ctrl+C or Esc | clear input; cancel the turn when it is empty |
 | Ctrl+D | exit |
@@ -635,14 +635,14 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `quoted-insert`, `char-search`, `char-search-backward`,
 `delete-horizontal-space`, `tab-insert`, `retry`.
 
-`retry` is the browser hard-reload analogue for `:retry`: it cuts a
-retry backoff wait short (the curve resets) or resends a data-less
-in-flight request, with the same `instant retry requested` line the
-command prints. It defaults to Ctrl+Shift+R because Ctrl+R is history
-search, and a terminal can only tell the two apart when it speaks the
-kitty keyboard protocol (kitty, ghostty, foot, WezTerm, recent xterm).
-Elsewhere the terminal sends one byte for both and the press stays
-history search — the same readline behavior as before.
+`retry` is the `:retry` command as a key: it queues the same empty
+submit Enter on an empty prompt produces, so a fresh request goes out
+on the conversation exactly as it stands (the half-typed draft is kept
+for the next prompt). It defaults to Ctrl+Shift+R because Ctrl+R is
+history search, and a terminal can only tell the two apart when it
+speaks the kitty keyboard protocol (kitty, ghostty, foot, WezTerm,
+recent xterm). Elsewhere the terminal sends one byte for both and the
+press stays history search — the same readline behavior as before.
 
 Keys joined by `>` form a chord: pressed in sequence, they run the
 command once. The default `edit-in-editor` binding is exactly that:
@@ -820,13 +820,14 @@ Use these commands to inspect or change the setting:
 :retry on
 ```
 
-`:retry` with no argument is retry now: it cuts a backoff wait short
-and resets the backoff schedule, so the next failure starts from the
-short end of the curve again, and it cancels and resends a request that
-has not shipped any output yet (still connecting, or headers only). Once
-model output is streaming, or at the idle prompt, it does nothing.
-Commands typed while a turn runs take effect at Enter, so this works
-mid-wait.
+`:retry` with no argument is the empty submit: it queues exactly what
+Enter on an empty prompt queues, and the controller answers with a
+turn that sends the conversation state as it stands — no user message
+appended, nothing echoed beyond the command line. It needs an ongoing
+conversation (a system-only session has nothing to continue); at idle
+without one it does nothing. It never interrupts a request in flight
+or cuts a backoff short: typed while a turn runs, the submit lines up
+behind it and fires when the turn yields.
 
 Even with patient retry off, 3code gives transient failures about a minute
 before returning to the interactive prompt. The setting is stored as
