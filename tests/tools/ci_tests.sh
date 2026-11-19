@@ -121,9 +121,17 @@ trap 'kill_tree "$TID"; exit 130' INT
 trap 'kill_tree "$TID"; exit 143' TERM
 
 timed_out=0
-elapsed=0
+# Wall-clock deadline, not an iteration counter: each loop pass costs
+# `sleep 5` PLUS the ps/pgrep watchdog work, and under runner load the
+# passes stretch past 5s. A counted loop then fires the cap minutes late
+# in wall time, GitHub's step timeout wins the race, and the run dies
+# with no attribution (linux-amd64 bd105506: step killed at 65m12s while
+# the "3600s" counter still read ~3320s).
+deadline=$(($(date +%s) + TIMEOUT_SECS))
+next_snap=$(($(date +%s) + WATCH_SECS))
 while kill -0 "$TID" 2>/dev/null; do
-  if [ "$elapsed" -ge "$TIMEOUT_SECS" ]; then
+  now=$(date +%s)
+  if [ "$now" -ge "$deadline" ]; then
     timed_out=1
     {
       echo "[watchdog] global timeout after ${TIMEOUT_SECS}s; live test processes:"
@@ -133,14 +141,14 @@ while kill -0 "$TID" 2>/dev/null; do
     break
   fi
   kill_sluggish_tests
-  if [ "$elapsed" -gt 0 ] && [ $((elapsed % WATCH_SECS)) -eq 0 ]; then
+  if [ "$now" -ge "$next_snap" ]; then
     {
       echo "[watch $(date +%T)] live test processes:"
       snapshot
     } >>"$SNAP"
+    next_snap=$((now + WATCH_SECS))
   fi
   sleep 5
-  elapsed=$((elapsed + 5))
 done
 sleep 2
 wait "$TID"
