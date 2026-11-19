@@ -188,18 +188,6 @@ jobs:
           docker exec $CID /data/data/com.termux/files/usr/tmp/tlscheck \
             | grep -q 'tls handshake ok'
 
-      - name: Upload artifact to 3code.capocasa.dev
-        if: github.ref == 'refs/heads/main'
-        run: |
-          # --retry: 5xx is transient on the upload endpoint. The .sha256
-          # rides along so the main-channel installer can verify.
-          # shasum: macOS runners ship no GNU sha256sum
-          if command -v sha256sum >/dev/null 2>&1; then sha256sum 3code-termux-arm64.tar.gz; else shasum -a 256 3code-termux-arm64.tar.gz; fi > 3code-termux-arm64.tar.gz.sha256
-          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz" \
-            https://3code.capocasa.dev/main/builds/upload.nim
-          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz.sha256" \
-            https://3code.capocasa.dev/main/builds/upload.nim
-
   yrc-stress:
     # YRC is Nim's experimental thread-safe ORC (shared heap, atomic RC,
     # concurrent cycle collector), only in devel (>= 2.3.1). 3code keeps a
@@ -298,3 +286,23 @@ jobs:
               exit 1
             fi
           done
+
+  # The dev-server upload is its own job (see linux-amd64.yml): a deploy
+  # endpoint hiccup must not skip the yrc stress suite that gates on smoke.
+  deploy:
+    needs: [smoke, yrc-stress]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: 3code-termux-arm64
+      - name: Upload artifact to 3code.capocasa.dev
+        run: |
+          # --retry: 5xx is transient on the upload endpoint. The .sha256
+          # rides along so the main-channel installer can verify.
+          sha256sum 3code-termux-arm64.tar.gz > 3code-termux-arm64.tar.gz.sha256
+          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz" \
+            https://3code.capocasa.dev/main/builds/upload.nim
+          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz.sha256" \
+            https://3code.capocasa.dev/main/builds/upload.nim
