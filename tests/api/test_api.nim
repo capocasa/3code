@@ -965,6 +965,46 @@ suite "api request shaping":
                                      model: "gemini-4-argon")) == 65_536
     check knownGoodReasoning("google", "gemini-4-argon") == "medium"
 
+  test "gemini-4 carbon/neon/hydrogen are known-good on google":
+    # Nov 2026 additions: Carbon (flagship, default high), Neon (Nov 18,
+    # agent workflows) and Hydrogen (Flash successor) share Argon's wire
+    # surface — 1M unified window, 64k streamed output — so they share
+    # the row shape; only the thinking ladders and defaults differ.
+    for model in ["gemini-4-carbon", "gemini-4-neon", "gemini-4-hydrogen"]:
+      check isKnownGood(Profile(name: "google." & model, model: model))
+      check knownGoodFamily("google", model) == "gemini"
+      check knownGoodContextWindow("google", model) == 1_048_576
+      check maxOutputTokensFor(Profile(name: "google." & model,
+                                       model: model)) == 65_536
+    check knownGoodReasoning("google", "gemini-4-carbon") == "high"
+    check knownGoodReasoning("google", "gemini-4-neon") == "medium"
+    check knownGoodReasoning("google", "gemini-4-hydrogen") == "medium"
+
+  test "gemma-4 pair rides family other with no knob":
+    # Open weights on the same endpoint: 262k window, 32k architectural
+    # output, no thinking surface — no reasoning level offered or sent.
+    for combo in [("google", "gemma-4-31b-it"),
+                  ("google", "gemma-4-26b-a4b-it"),
+                  ("venice", "google-gemma-4-31b-it"),
+                  ("venice", "google-gemma-4-26b-a4b-it")]:
+      let (prov, model) = combo
+      check isKnownGood(Profile(name: prov & "." & model, model: model))
+      check knownGoodFamily(prov, model) == "other"
+      check knownGoodContextWindow(prov, model) == 262_144
+      check knownGoodReasonings(prov, model).len == 0
+      check knownGoodReasoning(prov, model) == ""
+    check maxOutputTokensFor(Profile(name: "google.gemma-4-31b-it",
+                                     model: "gemma-4-31b-it")) == 32_768
+    block noKnob:
+      var body = %*{"stream": true}
+      let p = Profile(name: "google.gemma-4-31b-it", family: "other",
+                      version: "4", variant: "31b",
+                      model: "gemma-4-31b-it", reasoning: "")
+      applyReasoning(p, body)
+      check "reasoning_effort" notin body
+      check "reasoning" notin body
+      check "thinking" notin body
+
   test "geminicli aliases google known-good entries":
     check canonicalKnownGoodProvider("geminicli") == "google"
     check isKnownGood(Profile(name: "geminicli.gemini-3.8-flash", model: "gemini-3.8-flash"))
@@ -980,6 +1020,13 @@ suite "api request shaping":
     # compat endpoint would silently map it down to low).
     check knownGoodReasonings("google", "gemini-4-argon") == @["low", "medium", "high"]
     check knownGoodReasonings("opencode", "gemini-4-argon") == @["low", "medium", "high"]
+    # 4 Carbon matches Argon; Neon/Hydrogen add xhigh (still no off,
+    # and no minimal on the 4 family).
+    check knownGoodReasonings("google", "gemini-4-carbon") == @["low", "medium", "high"]
+    check knownGoodReasonings("google", "gemini-4-neon") ==
+      @["low", "medium", "high", "xhigh"]
+    check knownGoodReasonings("google", "gemini-4-hydrogen") ==
+      @["low", "medium", "high", "xhigh"]
     block effort:
       var body = %*{"stream": true}
       let p = Profile(name: "google.gemini-3.8-flash", family: "gemini",
@@ -996,6 +1043,15 @@ suite "api request shaping":
                       model: "gemini-3.7-flash", reasoning: "minimal")
       applyReasoning(p, body)
       check body{"reasoning_effort"}.getStr == "minimal"
+    block xhigh:
+      var body = %*{"stream": true}
+      let p = Profile(name: "google.gemini-4-neon", family: "gemini",
+                      version: "4", variant: "neon",
+                      model: "gemini-4-neon", reasoning: "xhigh")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "xhigh"
+      check "reasoning" notin body
+      check "thinking" notin body
 
   test "gemini omits deprecated temperature":
     let body = %*{"stream": true}
