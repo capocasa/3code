@@ -1322,7 +1322,9 @@ waits for it. The question and its answer are printed to your terminal
 only. Neither becomes a message: the next turn the model sees is exactly
 the conversation you had before asking, so a `:btw` costs no context window
 — but its burned tokens are real spend: they are added to the session and
-the token bar shows the sum of both requests.
+the token bar shows the sum of the rest's requests (the turn's own call,
+the verifier check, and any other side call that landed on the same
+rest, all added together).
 
 ## Chunked mode
 

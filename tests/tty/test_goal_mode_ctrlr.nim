@@ -266,6 +266,56 @@ suite "goal mode (interactive)":
     tty.expectInHistory "NEXT_TURN_OK"
     tty.expectAlive()
 
+  test "the bar sums every side call at one rest, not just the latest":
+    let root = newFixture("goal_side_sum")
+    writeConfiguredProvider(root)
+    # Response 1: the kickoff turn (5/2). Response 2: its turn-end
+    # verifier check (5/2, satisfied - the goal retires and the session
+    # idles on turn+check = 10/4). Response 3: a :btw aside asked while
+    # idle at that rest (4/1): its answer must add onto the bar the
+    # check already fed, landing on 14/5 - the second side call may
+    # never replace the first one's contribution.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 100,
+       "content": "checked.\nVERDICT: SATISFIED",
+       "contentChunks": ["checked.\nVERDICT: SATISFIED"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 100,
+       "content": "SIDE_ANSWER", "contentChunks": ["SIDE_ANSWER"],
+       "usage": {"promptTokens": 4, "completionTokens": 1,
+                  "totalTokens": 5, "cachedTokens": 0}}
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send ":goal make the stub say the word"
+    tty.send "\n"
+    tty.drain(100)
+    tty.expectInHistory "GOAL_WORK_DONE"
+    tty.expectInHistory "\u2713"
+    # The rest after the check: turn + check on the bar.
+    tty.drain(200)
+    tty.expectInHistory "↑10  ↓4"
+    # An aside at the same rest: its answer adds onto the running total.
+    tty.send ":btw what did the check cost?"
+    tty.send "\n"
+    tty.expectInHistory "SIDE_ANSWER"
+    tty.drain(300)
+    tty.expectInHistory "↑14  ↓5"
+    tty.expectAlive()
+
   test "ctrl-c during the verifier call interrupts the check, goal stays":
     let root = newFixture("goal_verify_interrupt")
     writeConfiguredProvider(root)
