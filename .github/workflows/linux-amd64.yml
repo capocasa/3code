@@ -27,14 +27,34 @@ jobs:
         # frozen snapshot.
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          apt-get -o Acquire::Retries=5 update
-          apt-get -o Acquire::Retries=5 install -y --no-install-recommends ca-certificates
+          # Runner-side apt fetches flake past apt's own retries (exit
+          # 100 twice in a row on the same pinned snapshot, Nov 19, while
+          # every snapshot pocket answered 200 from elsewhere). Retry the
+          # whole invocation at the shell level and re-emit the final
+          # tail as an annotation: the step log is unreadable without
+          # repo access, and apt's exit 100 names nothing.
+          try_apt() {
+            n=0
+            until [ "$n" -ge 5 ]; do
+              if apt-get -o Acquire::Retries=5 "$@"; then return 0; fi
+              n=$((n + 1)); sleep $((n * 10))
+            done
+            set +e
+            out=$(apt-get -o Acquire::Retries=1 "$@" 2>&1 | tail -n 20)
+            set -e
+            ann=$(printf '%s\n' "$out" | sed -e 's/%/%25/g' -e 's/\r//g' \
+              | awk '{printf "%s%s", sep, $0; sep="%0A"}')
+            printf '::error title=apt %s failed::%s\n' "$*" "$ann"
+            return 1
+          }
+          try_apt update
+          try_apt install -y --no-install-recommends ca-certificates
           sed -i 's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|' /etc/apt/sources.list
-          apt-get -o Acquire::Retries=5 update
+          try_apt update
           # build-essential: gcc/binutils for the binary; git: checkout +
           #   config.nims's version probe; curl/xz: nim toolchain download;
           #   procps: test watchdog ps/pgrep; zstd: actions/cache
-          apt-get -o Acquire::Retries=5 install -y --no-install-recommends build-essential git curl ca-certificates xz-utils procps zstd
+          try_apt install -y --no-install-recommends build-essential git curl ca-certificates xz-utils procps zstd
 
       - uses: actions/checkout@v4
 
