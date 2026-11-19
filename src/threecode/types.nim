@@ -349,6 +349,9 @@ type
   SessionChange* = tuple[before, after: string]
     ## One path's net session delta: the original content at first touch
     ## and the latest content after the last mutation.
+  ManifestSig* = tuple[mtime: Time, size: int, inode: int64]
+    ## The tree manifest's detection signature. The inode makes a rename
+    ## one moved entry instead of a delete+create pair.
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
     images*: seq[ImageInfo]  ## image reads this tool batch; the turn loop
@@ -359,18 +362,23 @@ type
       ## diff per mutated path. Rides the read cache because it is the
       ## one session-scoped ref already plumbed to every action executor;
       ## a nil cache (skill runs, some tests) simply records nothing.
-    manifest*: Table[string, (Time, int)]
-      ## The goal-mode tree snapshot: (mtime, size) per path at the last
-      ## observation (arm or fold) — a manifest, never content copies.
-      ## Copy-on-write stays the capture rule: originals enter `changes`
-      ## only when a mutation is observed (snap.foldManifest).
+    manifest*: Table[string, ManifestSig]
+      ## The goal-mode tree manifest: the detection signature per path at
+      ## the last observation (arm or fold). The before-bytes live in the
+      ## snapshot store on disk (`snap.nim`), not in memory: arming copies
+      ## the walked set under `.3code/snapshot/` and the fold reads
+      ## originals back from there.
     manifestRoot*: string
     manifestArmed*: bool  ## false outside a harness mode: no walk, no fold
     manifestTime*: Time  ## arming moment; a newer mode file re-arms
+    renamedFrom*: Table[string, string]
+      ## Change-log paths that are renames: new path -> the arm-time path
+      ## the inode moved from, so the render says "renamed" instead of a
+      ## delete+create pair.
     shellTouched*: HashSet[string]
-      ## Change-log paths first seen mutated by an opaque shell run: no
-      ## original bytes existed to copy, so the render says so instead of
-      ## fabricating a before-state.
+      ## Change-log paths with no before-bytes: mutated before arm, or
+      ## over the store caps. The render says so instead of fabricating a
+      ## before-state — the documented marker floor.
   PromptState* = object
     ## Cache proof for the constructed system prompt: `identity` is the
     ## `profileIdentity` stamp of the profile that built it, `skills` the
