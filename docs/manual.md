@@ -225,8 +225,16 @@ to the model you last used there, not the first one in its list. The current
 provider and model are also sticky per directory: each project starts where
 it last left off, while directories never touched by `:provider` / `:model`
 keep the global config default. All of this lives in the config file; see
-[config file in the reference](reference.html#config-file) for every key
-(`-c FILE` points a single run at a different one).
+[config file in the reference](reference.html#config-file) for every key.
+
+Config is read as a layer stack: the user config first, then every
+`-c FILE` in order (repeating works; a later file wins per key), then the
+nearest `.3code/config` walking up from the working directory. A
+repository can therefore pin providers, models, and settings for everyone
+who opens it — with the API key left out, inherited from your user config
+— and `-C` (with or without a file) opts out for one run. The full truth
+table and merge rules live in the reference's
+[config file](reference.html#config-file) section.
 
 ```
 :provider nvidia
@@ -2042,11 +2050,13 @@ layer.
 ### Who may turn the sandbox off
 
 Disabling the sandbox is a user decision, never a project one. A
-`.3code/config` in the project (or any parent) can switch settings per
-directory, but for the security switches it works one way only: it may turn
-an off sandbox **on** (a team that wants enforcement despite a global
-`off`), and it may never turn an on sandbox **off** or silence the sandbox
-warning. Everything else in the store (`current`, timeouts, ...) keeps its
+`.3code/config` in the project (or any parent) is also a full config layer
+(see [Providers and authentication](#providers-and-authentication)), but
+for the security switches it works one way only: it may turn an off sandbox
+**on** (a team that wants enforcement despite a global `off`), and it may
+never turn an on sandbox **off** or silence the sandbox warning. The same
+holds for `dirconfig` — a repository cannot relocate your stores.
+Everything else in the store (`current`, timeouts, ...) keeps its
 nearest-store-wins cascade.
 
 The explicit ways to run unconfined, none of which a repository can reach:

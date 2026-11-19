@@ -39,6 +39,8 @@
 </ul>
 </li>
 <li><a href="#config-file">Config file</a><ul>
+<li><a href="#the-layer-stack">The layer stack</a></li>
+<li><a href="#writes">Writes</a></li>
 <li><a href="#settings">settings</a></li>
 <li><a href="#provider">provider</a></li>
 <li><a href="#params">params</a></li>
@@ -62,7 +64,8 @@
        3code setup                  # one-time elevated sandbox setup (Windows)</pre></p>
 <table border="1" class="docutils"><tr><th>switch</th><th>effect</th></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-m</span></tt>, <tt class="docutils literal"><span class="pre">--model PROVIDER[.MODEL]</span></tt></td><td>pick a model from the config, overriding <tt class="docutils literal"><span class="pre">[settings] current</span></tt></td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">-c</span></tt>, <tt class="docutils literal"><span class="pre">--config FILE</span></tt></td><td>read providers and settings from FILE for this run, instead of the default config path</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">-c</span></tt>, <tt class="docutils literal"><span class="pre">--config FILE</span></tt></td><td>add FILE to the config layer stack for this run, replacing the user config; repeatable, later files win per key (see <a class="reference external" href="#config-file">Config file</a>)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">-C</span></tt>, <tt class="docutils literal"><span class="pre">--config-clear [FILE]</span></tt></td><td>clear the config stack — user config and project <tt class="docutils literal"><span class="pre">.3code/config</span></tt> are not read — then read FILE if given; later <tt class="docutils literal"><span class="pre">-c</span></tt> layers stack on top of it</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-r</span></tt>, <tt class="docutils literal"><span class="pre">--resume[=ID]</span></tt></td><td>resume the latest session from this directory, or a specific one by ID (<tt class="docutils literal"><span class="pre">-r ID</span></tt>, <tt class="docutils literal"><span class="pre">-rID</span></tt>, <tt class="docutils literal"><span class="pre">-r=ID</span></tt>, <tt class="docutils literal"><span class="pre">-r:ID</span></tt>, <tt class="docutils literal"><span class="pre">--resume=ID</span></tt>; every value option takes these forms)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-i</span></tt>, <tt class="docutils literal"><span class="pre">--interactive</span></tt></td><td>drop into the REPL after running an initial prompt; without it, a prompt argument runs once and exits</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-l</span></tt>, <tt class="docutils literal"><span class="pre">--list</span></tt></td><td>list recent sessions for this directory (max 20) and exit</td></tr>
@@ -172,8 +175,33 @@
 <tr><td>Esc</td><td>same as Ctrl+C</td></tr>
 <tr><td>Ctrl+D</td><td>exit</td></tr>
 </table>
-<h2 id="config-file">Config file</h2><p>Location: <tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt> on Linux, <tt class="docutils literal"><span class="pre">~/Library/Application Support/3code/config</span></tt> on macOS, <tt class="docutils literal"><span class="pre">%APPDATA%\3code\config</span></tt> on Windows; <tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt> overrides the base directory on every platform. <tt class="docutils literal"><span class="pre">-c FILE</span></tt> / <tt class="docutils literal"><span class="pre">--config FILE</span></tt> reads a different file for a single run; it is rewritten by 3code itself whenever providers or models change, same as the default. Annotated example: <tt class="docutils literal"><span class="pre">docs/config.example</span></tt> in the repository.</p>
-<p>Values are Nim string literals, always wrapped in double quotes. parsecfg treats <tt class="docutils literal"><span class="pre">:</span></tt>, <tt class="docutils literal"><span class="pre">=</span></tt>, and <tt class="docutils literal"><span class="pre">#</span></tt> as syntax in unquoted values, so an unquoted URL or API key can silently truncate. <tt class="docutils literal"><span class="pre">;</span></tt> and <tt class="docutils literal"><span class="pre">#</span></tt> start comments. An unknown section is a startup error with a <tt class="docutils literal"><span class="pre">file:line:</span></tt> pointer, so a typo cannot quietly disable a setting. An unknown key prints a <tt class="docutils literal"><span class="pre">file:line:</span></tt> warning at startup and is ignored, so a config written by a newer 3code still boots.</p>
+<h2 id="config-file">Config file</h2>
+<h3 id="the-layer-stack">The layer stack</h3><p>3code reads config as a stack of layers, lowest first; a key set by a later layer wins. Three kinds of layer:</p>
+<ul class="simple"><li>the <strong>user config</strong> — <tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt> on Linux, <tt class="docutils literal"><span class="pre">~/Library/Application Support/3code/config</span></tt> on macOS, <tt class="docutils literal"><span class="pre">%APPDATA%\3code\config</span></tt> on Windows; <tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt> overrides the base directory on every platform.</li>
+<li><strong>explicit layers</strong> — every <tt class="docutils literal"><span class="pre">-c FILE</span></tt> / <tt class="docutils literal"><span class="pre">--config FILE</span></tt>, in command-line order. Any <tt class="docutils literal"><span class="pre">-c</span></tt> replaces the user config for that run (the original single-<tt class="docutils literal"><span class="pre">-c</span></tt> meaning: point a run at a different config, isolated from yours).</li>
+<li>the <strong>project config</strong> — the nearest <tt class="docutils literal"><span class="pre">.3code/config</span></tt> found walking up from the working directory to the filesystem root. It always applies last, so a repository pin outranks everything; <tt class="docutils literal"><span class="pre">-C</span></tt> is the explicit opt-out. <tt class="docutils literal"><span class="pre">.3code/</span></tt> is already the project slot for skills, prompt</li>
+</ul>
+<p>templates, and per-directory settings, so the config joins its own file there.</p>
+<table border="1" class="docutils"><tr><th>invocation</th><th>read stack (later wins)</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">3code</span></tt></td><td>user config, then project</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">3code -c a</span></tt></td><td>a, then project</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">3code -c a -c b</span></tt></td><td>a, b, then project</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">3code -C a -c b</span></tt></td><td>a, b (no user config, no project)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">3code -c a -C b</span></tt></td><td>b (the <tt class="docutils literal"><span class="pre">-C</span></tt> resets everything)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">3code -C</span></tt></td><td>empty stack (first-run state)</td></tr>
+</table><p><tt class="docutils literal"><span class="pre">-C</span></tt> / <tt class="docutils literal"><span class="pre">--config-clear [FILE]</span></tt> clears the stack — the implicit layers included — and then adds its operand when given. <tt class="docutils literal"><span class="pre">3code -h</span></tt> prints the exact stack a run would read and the file it would write.</p>
+<p>Merge rules, per key, later layer winning:</p>
+<ul class="simple"><li><tt class="docutils literal"><span class="pre">[settings]</span></tt> scalars: per key.</li>
+<li><tt class="docutils literal"><span class="pre">current</span></tt>: the highest layer that sets it. A project-layer <tt class="docutils literal"><span class="pre">current</span></tt> also owns model selection for the directory — the per-directory sticky selection cannot defeat the repo pin.</li>
+<li><tt class="docutils literal"><span class="pre">[provider]</span></tt> blocks: by name. A later same-name block replaces the earlier one except that a missing <tt class="docutils literal"><span class="pre">key</span></tt> or <tt class="docutils literal"><span class="pre">url</span></tt> is inherited from the namesake below — an API key stays in your user config while a committed project config pins providers and models.</li>
+<li><tt class="docutils literal"><span class="pre">[params]</span></tt>: per (provider, model) scope, per key.</li>
+<li><tt class="docutils literal"><span class="pre">[search]</span></tt>, <tt class="docutils literal"><span class="pre">[colors]</span></tt>, <tt class="docutils literal"><span class="pre">[shortcuts]</span></tt>: per key.</li>
+</ul>
+<p>The security switches are the one exception: <tt class="docutils literal"><span class="pre">sandbox</span></tt> and <tt class="docutils literal"><span class="pre">sandbox_wall_warn</span></tt> (and <tt class="docutils literal"><span class="pre">dirconfig</span></tt>) in a project <tt class="docutils literal"><span class="pre">.3code/config</span></tt> are governed by the per-directory store rules — a repository file may tighten an off sandbox but never weaken an on one (see <a class="reference external" href="manual.html#project-settings-cannot-weaken-the-sandbox">project settings</a>).</p>
+<p>Every layer is validated on its own, so an error names the offending file and line (<tt class="docutils literal"><span class="pre">path:line: ...</span></tt>).</p>
+
+<h3 id="writes">Writes</h3><p>The write target is the last explicit <tt class="docutils literal"><span class="pre">-c</span></tt>/<tt class="docutils literal"><span class="pre">-C</span></tt> layer, else the user config; 3code rewrites it whenever providers or models change. The project config is never written — it is a hand-maintained baseline. Only the write target's own provider definitions (plus providers added during the session) persist: a definition that came from another layer stays in that layer's file, and a <tt class="docutils literal"><span class="pre">current</span></tt> naming such a provider never lands in the target. A long-lived session layered over a project config does not notice project-file edits made mid-session; restart to pick them up.</p>
+<p>Values are Nim string literals, always wrapped in double quotes. parsecfg treats <tt class="docutils literal"><span class="pre">:</span></tt>, <tt class="docutils literal"><span class="pre">=</span></tt>, and <tt class="docutils literal"><span class="pre">#</span></tt> as syntax in unquoted values, so an unquoted URL or API key can silently truncate. <tt class="docutils literal"><span class="pre">;</span></tt> and <tt class="docutils literal"><span class="pre">#</span></tt> start comments. An unknown section is a startup error with a <tt class="docutils literal"><span class="pre">file:line:</span></tt> pointer, so a typo cannot quietly disable a setting. An unknown key prints a <tt class="docutils literal"><span class="pre">file:line:</span></tt> warning at startup and is ignored, so a config written by a newer 3code still boots. Annotated example: <tt class="docutils literal"><span class="pre">docs/config.example</span></tt> in the repository.</p>
 <p>A minimal config:</p>
 <p><pre class="listing">[settings]
 current = &quot;baseten.glm5&quot;
@@ -274,7 +302,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-18 14:34:08 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-19 00:53:29 UTC</small>
       </div>
     </div>
   </div>

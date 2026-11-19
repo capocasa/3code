@@ -19,7 +19,8 @@ usage: 3code [options] [prompt...]
 | switch | effect |
 | --- | --- |
 | `-m`, `--model PROVIDER[.MODEL]` | pick a model from the config, overriding `[settings] current` |
-| `-c`, `--config FILE` | read providers and settings from FILE for this run, instead of the default config path |
+| `-c`, `--config FILE` | add FILE to the config layer stack for this run, replacing the user config; repeatable, later files win per key (see [Config file](#config-file)) |
+| `-C`, `--config-clear [FILE]` | clear the config stack — user config and project `.3code/config` are not read — then read FILE if given; later `-c` layers stack on top of it |
 | `-r`, `--resume[=ID]` | resume the latest session from this directory, or a specific one by ID (`-r ID`, `-rID`, `-r=ID`, `-r:ID`, `--resume=ID`; every value option takes these forms) |
 | `-i`, `--interactive` | drop into the REPL after running an initial prompt; without it, a prompt argument runs once and exits |
 | `-l`, `--list` | list recent sessions for this directory (max 20) and exit |
@@ -150,13 +151,71 @@ Default keys at the prompt. `:help` prints the ones in effect;
 
 ## Config file
 
-Location: `~/.config/3code/config` on Linux,
-`~/Library/Application Support/3code/config` on macOS,
-`%APPDATA%\3code\config` on Windows; `XDG_CONFIG_HOME` overrides the
-base directory on every platform. `-c FILE` / `--config FILE` reads a
-different file for a single run; it is rewritten by 3code itself whenever
-providers or models change, same as the default. Annotated example:
-`docs/config.example` in the repository.
+### The layer stack
+
+3code reads config as a stack of layers, lowest first; a key set by a
+later layer wins. Three kinds of layer:
+
+- the **user config** — `~/.config/3code/config` on Linux,
+  `~/Library/Application Support/3code/config` on macOS,
+  `%APPDATA%\3code\config` on Windows; `XDG_CONFIG_HOME` overrides the
+  base directory on every platform.
+- **explicit layers** — every `-c FILE` / `--config FILE`, in command-line
+  order. Any `-c` replaces the user config for that run (the original
+  single-`-c` meaning: point a run at a different config, isolated from
+  yours).
+- the **project config** — the nearest `.3code/config` found walking up
+  from the working directory to the filesystem root. It always applies
+  last, so a repository pin outranks everything; `-C` is the explicit
+  opt-out. `.3code/` is already the project slot for skills, prompt
+templates, and per-directory settings, so the config joins its own file
+there.
+
+| invocation | read stack (later wins) |
+| --- | --- |
+| `3code` | user config, then project |
+| `3code -c a` | a, then project |
+| `3code -c a -c b` | a, b, then project |
+| `3code -C a -c b` | a, b (no user config, no project) |
+| `3code -c a -C b` | b (the `-C` resets everything) |
+| `3code -C` | empty stack (first-run state) |
+
+`-C` / `--config-clear [FILE]` clears the stack — the implicit layers
+included — and then adds its operand when given. `3code -h` prints the
+exact stack a run would read and the file it would write.
+
+Merge rules, per key, later layer winning:
+
+- `[settings]` scalars: per key.
+- `current`: the highest layer that sets it. A project-layer `current` also
+  owns model selection for the directory — the per-directory sticky
+  selection cannot defeat the repo pin.
+- `[provider]` blocks: by name. A later same-name block replaces the
+  earlier one except that a missing `key` or `url` is inherited from the
+  namesake below — an API key stays in your user config while a
+  committed project config pins providers and models.
+- `[params]`: per (provider, model) scope, per key.
+- `[search]`, `[colors]`, `[shortcuts]`: per key.
+
+The security switches are the one exception: `sandbox` and
+`sandbox_wall_warn` (and `dirconfig`) in a project `.3code/config` are
+governed by the per-directory store rules — a repository file may tighten
+an off sandbox but never weaken an on one (see
+[project settings](manual.html#project-settings-cannot-weaken-the-sandbox)).
+
+Every layer is validated on its own, so an error names the offending file
+and line (`path:line: ...`).
+
+### Writes
+
+The write target is the last explicit `-c`/`-C` layer, else the user
+config; 3code rewrites it whenever providers or models change. The project
+config is never written — it is a hand-maintained baseline. Only the write
+target's own provider definitions (plus providers added during the
+session) persist: a definition that came from another layer stays in that
+layer's file, and a `current` naming such a provider never lands in the
+target. A long-lived session layered over a project config does not notice
+project-file edits made mid-session; restart to pick them up.
 
 Values are Nim string literals, always wrapped in double quotes. parsecfg
 treats `:`, `=`, and `#` as syntax in unquoted values, so an unquoted URL or
@@ -164,6 +223,7 @@ API key can silently truncate. `;` and `#` start comments. An unknown
 section is a startup error with a `file:line:` pointer, so a typo cannot
 quietly disable a setting. An unknown key prints a `file:line:` warning at
 startup and is ignored, so a config written by a newer 3code still boots.
+Annotated example: `docs/config.example` in the repository.
 
 A minimal config:
 

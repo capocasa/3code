@@ -354,6 +354,9 @@ proc acpMain*(args: seq[string]): int =
   # parseopt with an empty seq silently falls back to the process argv;
   # skip it entirely so `3code acp` parses nothing.
   if args.len > 0:
+    var configs: seq[string]
+    var configClear = false
+    var pending = ""
     var p = initOptParser(args,
       shortNoVal = {'x'}, longNoVal = @["debug", "experimental"])
     for kind, key, val in p.getopt():
@@ -361,18 +364,39 @@ proc acpMain*(args: seq[string]): int =
       of cmdLongOption, cmdShortOption:
         case key
         of "model", "m": model = val
-        # Config flags were applied to the stack by the main entry's
-        # applyConfigFlags before dispatch; accept and ignore here.
-        of "config", "c", "config-clear", "C": discard
+        of "config", "c":
+          # Repeatable layer; the clear resets everything collected
+          # so far and its optional operand starts a fresh stack.
+          if val != "": configs.add val
+          else: pending = "config"
+        of "config-clear", "C":
+          configClear = true
+          configs = @[]
+          if val != "": configs.add val
+          else: pending = "config-clear"
         of "debug": debug = true
         of "experimental": types.experimentalEnabled = true
         else:
           stderr.writeLine "3code --acp: unknown option: " & key
           return 2
       of cmdArgument:
-        stderr.writeLine "3code --acp: unexpected argument: " & key
-        return 2
+        case pending
+        of "config": configs.add key; pending = ""
+        of "config-clear":
+          configClear = true
+          configs = @[key]
+          pending = ""
+        else:
+          stderr.writeLine "3code --acp: unexpected argument: " & key
+          return 2
       of cmdEnd: discard
+    if pending == "config":
+      stderr.writeLine "3code --acp: option --config requires a value"
+      return 2
+    # Same stack the main entry's raw-argv scan produced; applying it
+    # here too keeps the frontend correct when entered directly.
+    configLayers = configs
+    configCleared = configClear
   let fe = AcpFrontend(model: model, debug: debug)
   initLock(fe.gate)
   while true:
