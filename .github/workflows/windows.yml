@@ -241,8 +241,12 @@ jobs:
           # Smoke-check: the statically linked 3code binary starts
           # standalone (no DLLs anywhere near it).
           ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
-          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") sh tests/tools/ci_tests.sh 900 tty
-        timeout-minutes: 20
+          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") sh tests/tools/ci_tests.sh 1500 tty
+        # 30min step for a 1500s watchdog: the tty category alone ran
+        # 924s already on Nov 12, and the wall-clock watchdog (once it
+        # actually fired on wall time, Nov 19) killed the 900s-capped
+        # run mid-suite. Same budget-bump class as the linux jobs.
+        timeout-minutes: 30
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4
