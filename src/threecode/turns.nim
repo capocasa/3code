@@ -903,32 +903,50 @@ proc accountSideCallUsage*(session: var Session; messages: JsonNode;
   ## A side call's tokens are the session's spend (the goal-mode verifier
   ## check, a `:btw` aside): account for them exactly like a main call's —
   ## the same `+=` the turn loop runs per model call, persisted with the
-  ## session — then add them onto the token bar's total on top of the
-  ## turn's own last call, so the bar the session rests on is the SUM of
-  ## both requests instead of being replaced by the side call's own
-  ## numbers (the side call paints no bar; see hookFinalUsage's
-  ## sideCallMode gate). A side call that spent nothing (failed call,
-  ## test seam) changes nothing, and a side call's prompt size never
-  ## reaches `lastPromptTokens`: its conversation is not the session's,
-  ## so the next main call's context gauge stays honest.
+  ## session — then add them onto the token bar's total on top of what
+  ## the rest has already spent, so the bar the session rests on is the
+  ## SUM of the rest's requests instead of being replaced by the side
+  ## call's own numbers (the side call paints no bar; see hookFinalUsage's
+  ## sideCallMode gate). The base is the running total of the rest: the
+  ## pending hint when it still holds one (an earlier side call at this
+  ## rest re-arms it with main-plus-sides-so-far), else the last
+  ## assistant usage on the wire — the streamed-reply turn end consumes
+  ## the hint into its receipt, and the inline usage it leaves behind is
+  ## the same call's numbers. Either way several side calls at one rest
+  ## (a check plus a `:btw`, a retried check) accumulate instead of each
+  ## repainting the bar with main-plus-itself alone, and re-arming the
+  ## hint with the sum keeps the next submit's receipt and the
+  ## submit-time resting gauge at the same total the bar shows. A rest
+  ## whose calls painted no usage at all (provider reported none) still
+  ## shows the side spend: it is the whole sum known for that rest, and
+  ## a side call's prompt size is not the session's context, so the
+  ## resting gauge keeps the last real one. A side call that spent
+  ## nothing (failed call, test seam) changes nothing, and a side call's
+  ## prompt size never reaches `lastPromptTokens`: its conversation is
+  ## not the session's, so the next main call's context gauge stays
+  ## honest.
   if usage.totalTokens <= 0: return
   session.usage.promptTokens += usage.promptTokens
   session.usage.completionTokens += usage.completionTokens
   session.usage.totalTokens += usage.totalTokens
   session.usage.cachedTokens += usage.cachedTokens
   saveSessionReported(session, messages)
-  let main = lastAssistantUsage(messages)
-  if main.totalTokens <= 0: return
+  let base =
+    if pendingHint.active: pendingHint.usage
+    else: lastAssistantUsage(messages)
   let combined = Usage(
-    promptTokens: main.promptTokens + usage.promptTokens,
-    completionTokens: main.completionTokens + usage.completionTokens,
-    totalTokens: main.totalTokens + usage.totalTokens,
-    cachedTokens: main.cachedTokens + usage.cachedTokens)
+    promptTokens: base.promptTokens + usage.promptTokens,
+    completionTokens: base.completionTokens + usage.completionTokens,
+    totalTokens: base.totalTokens + usage.totalTokens,
+    cachedTokens: base.cachedTokens + usage.cachedTokens)
+  let elapsed =
+    if pendingHint.active: pendingHint.elapsed else: -1
   let label = tokenLineLabel(combined, window)
-  if label.len == 0: return
+  emitFatPromptEvent setPendingHintEvent(combined, window, elapsed)
   emitFatPromptEvent setBarEvent(label)
-  emitFatPromptEvent setRestingLabelEvent(contextLabel(
-    combined.promptTokens, window))
+  if base.totalTokens > 0:
+    emitFatPromptEvent setRestingLabelEvent(contextLabel(
+      combined.promptTokens, window))
   # The turn's last paint (the verdict step's commit) still shows the
   # pre-check bar, and the boundary's end path finalizes state without
   # repainting chrome - paint the combined bar here so the resting row

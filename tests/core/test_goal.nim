@@ -449,8 +449,9 @@ suite "verifier token accounting":
   test "check tokens add to the ledger and the bar, never replace them":
     var session: Session
     session.savePath = ""
-    # The turn's own calls are already ledgered (100/20) and the last
-    # assistant message carries its inline usage; the check then spends
+    # The turn's own calls are already ledgered (100/20) and its final
+    # call's usage lives inline on the wire (the streamed-reply turn end
+    # consumed the pending hint into its receipt); the check then spends
     # 30 more in, 5 more out.
     session.usage = Usage(promptTokens: 100, completionTokens: 20,
       totalTokens: 120, cachedTokens: 0)
@@ -459,6 +460,7 @@ suite "verifier token accounting":
       {"role": "assistant", "content": "done",
        "usage": {"promptTokens": 100, "completionTokens": 20,
                   "totalTokens": 120, "cachedTokens": 0}}]
+    emitFatPromptEvent clearPendingHintEvent()
     accountSideCallUsage(session, messages,
       Usage(promptTokens: 30, completionTokens: 5, totalTokens: 35), 1_000)
     # The ledger gets the same += a main call's usage gets.
@@ -473,6 +475,36 @@ suite "verifier token accounting":
     # The check's prompt size never reaches the next call's gauge.
     check session.lastPromptTokens == 0
 
+  test "several side calls at one rest all sum onto the bar":
+    var session: Session
+    session.savePath = ""
+    session.usage = Usage(promptTokens: 100, completionTokens: 20,
+      totalTokens: 120, cachedTokens: 0)
+    var messages = %*[
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "done",
+       "usage": {"promptTokens": 100, "completionTokens": 20,
+                  "totalTokens": 120, "cachedTokens": 0}}]
+    emitFatPromptEvent clearPendingHintEvent()
+    # Two side calls before the next main call - a verifier check plus
+    # a :btw answer, or a retried check after a failed one: each must
+    # add onto the rest's total, never replace what the last one put
+    # there. The first falls back to the wire's inline usage; the second
+    # must pick up the re-armed hint the first left.
+    accountSideCallUsage(session, messages,
+      Usage(promptTokens: 30, completionTokens: 5, totalTokens: 35), 1_000)
+    accountSideCallUsage(session, messages,
+      Usage(promptTokens: 40, completionTokens: 8, totalTokens: 48), 1_000)
+    check session.usage.totalTokens == 203
+    check fatPromptState.footer.barLabel ==
+      contextLabel(170, 1_000) & "  ↑170  ↓33"
+    # The sum is the rest's record too, not just the live paint: the
+    # next submit's receipt and the submit-time resting gauge read the
+    # same pending hint, so they must carry the summed numbers as well.
+    check fatPromptState.footer.pendingHint.usage.totalTokens == 203
+    check fatPromptState.footer.pendingHint.usage.promptTokens == 170
+    check fatPromptState.footer.restingLabel == contextLabel(170, 1_000)
+
   test "a check that spent nothing changes nothing":
     var session: Session
     session.savePath = ""
@@ -486,12 +518,18 @@ suite "verifier token accounting":
     check session.usage.totalTokens == 120
     check fatPromptState.footer.barLabel == "○ 10%"
 
-  test "no assistant usage on the wire means ledger-only accounting":
+  test "a rest whose main call painted no usage still shows the side spend":
     var session: Session
     session.savePath = ""
     var messages = %*[{"role": "user", "content": "go"}]
+    emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
     accountSideCallUsage(session, messages,
       Usage(promptTokens: 30, completionTokens: 5, totalTokens: 35), 1_000)
     check session.usage.totalTokens == 35
-    check fatPromptState.footer.barLabel == ""
+    # No main-call usage this rest (provider reported none): the side
+    # call's tokens are still the rest's whole spend, and the bar is the
+    # sum of what is known - it never drops real spend from display.
+    check fatPromptState.footer.barLabel ==
+      contextLabel(30, 1_000) & "  ↑30  ↓5"
+    check fatPromptState.footer.pendingHint.usage.totalTokens == 35

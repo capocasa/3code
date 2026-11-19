@@ -229,6 +229,10 @@ suite ":btw side questions":
       {"role": "assistant", "content": "done",
        "usage": {"promptTokens": 100, "completionTokens": 20,
                   "totalTokens": 120, "cachedTokens": 0}}]
+    # The streamed-reply turn end consumed the pending hint into its
+    # receipt, so the idle prompt's delivery falls back to the wire's
+    # inline usage - the same shape a real :btw answer arrives in.
+    emitFatPromptEvent clearPendingHintEvent()
     accountSideCallUsage(session, messages,
       Usage(promptTokens: 11, completionTokens: 7, totalTokens: 18), 1_000)
     check session.usage.promptTokens == 111
