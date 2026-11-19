@@ -26,10 +26,12 @@ type ConfPair* = tuple[key, val: string]
 proc quoteConfVal*(v: string): string =
   ## INI quoting for merged config values: quote only when the value
   ## would not round-trip bare (empty, surrounding whitespace, quotes,
-  ## comment markers, or the `=`/`[` structural characters).
+  ## comment markers, or the `=`/`[` structural characters, or a `:` —
+  ## parsecfg's alternative key:value separator, which a bare Windows
+  ## drive-letters path trips as "invalid token: :" in the child).
   var bare = v.len > 0 and v.strip == v and "\n" notin v
   for ch in v:
-    if ch in {'"', ';', '#', '=', '['}:
+    if ch in {'"', ';', '#', '=', '[', ':'}:
       bare = false
   if bare:
     v
