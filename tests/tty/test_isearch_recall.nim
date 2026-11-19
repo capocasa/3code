@@ -11,7 +11,11 @@ import tty_expect
 import stub_helpers
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "tests/testdata/output/tty" / (name & "_" & $getCurrentProcessId())
+  # Outside the checkout, like every other tty fixture: config discovery
+  # walks up from the child's cwd, and a developer's own repo-root
+  # `.3code/config` pin would beat the fixture's provider (the arm64 run
+  # hit it; test_acp's fixture isolates for the same reason).
+  result = tempDir() / "3code_tty_fixture" / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
 
