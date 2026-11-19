@@ -3904,6 +3904,14 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
     discard dispatchKeyName(ed,
       if (bits and 1) != 0: "shift-tab" else: "tab")
     return
+  if key == 32:
+    # Shift+Space stays a space: kitty-protocol terminals report it as
+    # `CSI 32;2 u` (space has no shifted glyph to send as text), and the
+    # generic decode below has no printable fallback, so without this
+    # the press vanished instead of typing.
+    if bits == 0 or bits == 1:
+      ed.printChar(32)
+    return
   var base = ""
   case key
   of 2: base = "insert"
@@ -4198,6 +4206,9 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
             let keyName = modifiedKeyName("enter", nums[1])
             if keyName.len > 0:
               discard dispatchKeyName(ed, keyName)
+          elif nums.len == 3 and nums[2] == 32 and nums[1] == 2:
+            # Shift+Space under modifyOtherKeys: still a space.
+            ed.printChar(32)
         else: discard  # page keys, F-keys: nothing bound
         return false
       else:

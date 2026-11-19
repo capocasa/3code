@@ -1671,6 +1671,7 @@ const
   KittyAltBackspace* = @[27, 91, 49, 50, 55, 59, 51, 117]  # CSI 127;3 u
   KittyCmdBackspace* = @[27, 91, 49, 50, 55, 59, 57, 117]  # CSI 127;9 u
   CmdLeftSeq* = @[27, 91, 49, 59, 57, 68]            # CSI 1;9 D
+  XModShiftSpace* = @[27, 91, 50, 55, 59, 50, 59, 51, 50, 126]  # CSI 27;2;32 ~
 
 suite "minline editor: kitty keyboard protocol":
   test "CSI u ctrl+letter maps to the control key":
@@ -1742,6 +1743,48 @@ suite "minline editor: kitty keyboard protocol":
     d.pushString "c"
     d.push Enter
     check d.run(ed, prompt = "> ") == "ab\nc"
+
+  test "CSI 32;2 u inserts a space (Shift+Space)":
+    # kitty-protocol terminals report shift+space as `CSI 32;2 u` because
+    # space has no shifted glyph; the press must still type a space.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push @[27, 91, 51, 50, 59, 50, 117]  # CSI 32;2 u
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab c"
+
+  test "CSI 32 u (report-all-keys space) inserts a space":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push @[27, 91, 51, 50, 117]  # CSI 32 u
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab c"
+
+  test "CSI 32;6 u (ctrl+shift+space) stays unbound":
+    # Only shift may keep space's text meaning; real modifier chords
+    # (ctrl+shift here) remain dead keys like other unbound CSI u codes.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push @[27, 91, 51, 50, 59, 54, 117]  # CSI 32;6 u
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abc"
+
+  test "xterm modifyOtherKeys shift+space inserts a space":
+    # `CSI 27;2;32 ~` (iTerm2/xterm with modifyOtherKeys): shift+space
+    # must type a space there too, not vanish.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.push XModShiftSpace
+    d.pushString "c"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "ab c"
 
   test "cmd+left is bindable (no default)":
     var ed = initEditor()
