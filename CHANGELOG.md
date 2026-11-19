@@ -2,6 +2,26 @@ Changelog
 
 Unreleased
 
+- **The token bar sums every side call at a rest, never just the
+  latest.** A rest's token bar is the SUM of its requests - the turn's
+  final call plus each harness side call that landed on it - but the
+  side-call accounting recomputed that sum from the turn's usage plus
+  the side call being handled, so a second side call at the same rest
+  (a goal check plus a `:btw` answer arriving in the same idle, a
+  retried check) REPLACED the earlier one's contribution on the bar
+  instead of adding to it, and the resting gauge the next submit
+  painted from the pending hint dropped back to the turn-only numbers:
+  the bar showed one request's tokens or the other's, never the sum.
+  `accountSideCallUsage` now accumulates: the base is the pending hint
+  when one is armed (an earlier side call re-arms it with the running
+  total), else the last assistant usage on the wire (the streamed-reply
+  turn end consumes the hint into its receipt), and the sum re-arms the
+  hint so the bar, the submit-time resting gauge, and the receipt the
+  next submit commits all carry the same total. A rest whose calls
+  painted no usage at all still shows the side spend - real spend is
+  never dropped from display (`tests/core/test_goal.nim`,
+  `tests/tty/test_goal_mode_ctrlr.nim`).
+
 - **`nimdiff` is the diff engine.** The in-tree O(n*m) LCS (`lcsOps`)
   and its unified renderer are deleted; `computeDiff` keeps its
   signature and output contract but delegates to the `nimdiff`
