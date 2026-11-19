@@ -504,6 +504,13 @@ var
   rateRetryLevel = 0      # 429 specifically (rate limit / capacity crunch)
   rateLastTs = 0.0
 
+proc resetRetryLevels*() {.gcsafe.} =
+  ## Zero the transport retry curve. The retry-now command is gone, but
+  ## the SSE truncation/backoff tests still need per-test isolation from
+  ## whatever levels earlier tests ran up.
+  serverRetryLevel = 0
+  rateRetryLevel = 0
+
 proc decayLevel(level: var int, lastTs: var float, now: float) =
   if level > 0 and lastTs > 0.0:
     let idleMin = int((now - lastTs) / 60.0)
