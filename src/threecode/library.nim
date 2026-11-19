@@ -277,6 +277,10 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   experimentalEnabled = opts.experimental
   debugEnabled = opts.debug
   let cwd = if opts.cwd.len > 0: opts.cwd else: safeCwd()
+  # Project-local config discovery against the session cwd (the CLI
+  # main does the same against the process cwd before dispatching
+  # here). A `-C` in effect skips the walk.
+  projectLayer = discoverProjectConfig(cwd)
 
   materializeBuiltinSkills()
 
@@ -293,11 +297,11 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   # then tc_register_config defaults are in the table by the time the
   # real parse below applies them. In a CLI/headless run the load
   # already happened at argv time and both calls are no-ops.
-  discard tryLoadStateOrEmpty(configPath())
+  discard tryLoadStackOrEmpty()
   pluginsDiscoverAndLoad()
 
   var colorKeys: Table[string, string]
-  (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
+  (activeCurrent, activeProviders, colorKeys) = loadStackOrEmpty()
   # Directory-specific overlay (`.3code/config` in the session dir or
   # any parent, nearest wins) — applied after the full parse so the
   # user config's own values land first. Every [settings] key cascades
@@ -310,9 +314,12 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   # `:provider` / `:model` pick, when it still resolves), then the
   # config `current`, then the most-used ledger, then the first
   # [provider] section (inside buildProfile); selectableProviders()
-  # keeps a limitproviders whitelist ahead of every rung.
-  activeCurrent = resolveDefaultCurrent(cwd, activeCurrent,
-                                        selectableProviders())
+  # keeps a limitproviders whitelist ahead of every rung — unless the
+  # project layer pinned `current`: the repo pin owns selection, and
+  # the per-directory sticky must not defeat it on every later start.
+  if not (projectLayer != "" and currentOriginLayer == projectLayer):
+    activeCurrent = resolveDefaultCurrent(cwd, activeCurrent,
+                                          selectableProviders())
   if sandboxEnabled:
     sandbox.arm(cwd)
 

@@ -35,8 +35,11 @@ proc readerProc(job: ReadJob) {.thread.} =
     job.sh.atEof = true
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "tests/testdata/output/core" /
-    (name & "_" & $getCurrentProcessId())
+  # Outside the checkout: the spawned binary discovers project-local
+  # `.3code/config` by walking up from its cwd, and a developer's own
+  # pin (this repo or any parent checkout) must never leak into the
+  # config stack under test.
+  result = getTempDir() / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
   createDir(result / "tmp"); createDir(result / "proj")
@@ -70,7 +73,12 @@ proc spawnAcp(bin, root: string; responses: string): Session =
   env["TERM"] = "dumb"
   env["PATH"] = getEnv("PATH")
   mergeChildConf(childConfigFile(env), test = [("stub_responses", responses)])
-  result.p = startProcess(bin, args = ["--acp"], env = env, options = {})
+  # Isolated cwd: project-local `.3code/config` discovery walks up from
+  # the process cwd, and a developer's checkout (or this repo's own
+  # untracked store) must never leak into the ACP session's config
+  # stack. Same isolation the rpc fixture already has via workDir.
+  result.p = startProcess(bin, workingDir = root / "run",
+                          args = ["--acp"], env = env, options = {})
   result.sh = Shared()
   initLock(result.sh.gate)
   let job: ReadJob = (f: result.p.outputStream, sh: result.sh)

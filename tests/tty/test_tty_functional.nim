@@ -32,7 +32,11 @@ proc scenarioOnly(): string =
   if paramCount() > 0: paramStr(1) else: ""
 
 
-const VisualOutputRoot = "tests/testdata" / "output" / "tty"
+# Scratch fixtures live outside the checkout: the spawned binary
+# discovers project-local `.3code/config` by walking up from its cwd,
+# and a developer's own pin (this repo or any parent checkout) must
+# never leak into the config stack under test.
+let VisualOutputRoot = getTempDir() / "3code_tty_fixture"
 const SimpleVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "simple.txt"
 const MultilineVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "multiline.txt"
 const BashToolVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "bash_tool_visual_test.txt"
@@ -40,7 +44,7 @@ const OtherToolsVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "othe
 const ResizeStreamFrames = "tests/testdata" / "fixtures" / "tty" / "resize_stream_frames.txt"
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / VisualOutputRoot / (name & "_" & $getCurrentProcessId())
+  result = VisualOutputRoot / (name & "_" & $getCurrentProcessId())
   if dirExists(result):
     removeDir(result)
   createDir(result)

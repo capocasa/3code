@@ -57,8 +57,11 @@ proc parseHeadless(args: seq[string]): HeadlessOpts =
           if v != "": o.model = v
           else: pending = "model"
         of "c", "config":
-          if v != "": configPathOverride = v
-          else: pending = "config"
+          # Stack applied by the main entry's applyConfigFlags; consume
+          # the operand so it never lands in the prompt words.
+          if v == "": pending = "config"
+        of "C", "config-clear":
+          if v == "": pending = "config-clear"
         of "r", "resume":
           o.resume = true
           if v != "": o.resumeId = v
@@ -74,13 +77,14 @@ proc parseHeadless(args: seq[string]): HeadlessOpts =
       of cmdArgument:
         case pending
         of "model": o.model = k; pending = ""
-        of "config": configPathOverride = k; pending = ""
+        of "config", "config-clear": pending = ""
         of "session": o.sessionOut = k; pending = ""
         of "resume": o.resumeId = k; pending = ""
         else: words.add k
       of cmdEnd: discard
-  # bare `-r` means "resume the latest session for this directory"
-  if pending notin ["", "resume"]: quit(ExitUsage)
+  # bare `-r` means "resume the latest session for this directory";
+  # a bare `-C` (no operand) is likewise fine.
+  if pending notin ["", "resume", "config-clear"]: quit(ExitUsage)
   o.prompt = words.join(" ")
   o
 

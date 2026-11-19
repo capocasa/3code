@@ -421,6 +421,177 @@ suite "cli --config switch":
     let r = run(["-h"])
     check r.code == 2
     check "--config FILE" in r.o
+    check "--config-clear" in r.o
+
+suite "cli config layer stack":
+  # Repeatable -c and the -C clear. Same observable as the --config
+  # suite: a layer that sets `current` without a [provider] section
+  # dies naming the file that contributed it, which only happens when
+  # the file was actually read. The isolated XDG root carries a user
+  # config with a current of its own, so a run that ignores it (a
+  # missing -c layer, or the empty -C stack) reaches the wizard
+  # instead of dying — the suppression side of each rule.
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-cli-stack-" & $getCurrentProcessId() & "deny" &
+                          $epochTime().int64)
+    createDir(tmp / "xdg" / "3code")
+    writeFile(tmp / "xdg" / "3code" / "config",
+      "[settings]\ncurrent = \"user.pin\"\n")
+
+  teardown:
+    if dirExists(tmp): removeDir(tmp)
+
+  proc runIn(flags: string): tuple[o: string, code: int] =
+    let env = newStringTable({"XDG_DATA_HOME": tmp,
+                               "XDG_CONFIG_HOME": tmp / "xdg"})
+    let (outp, code) = execCmdEx(binPath().quoteShell & " " & flags,
+                                 {poStdErrToStdOut, poUsePath, poDaemon},
+                                 env, tmp)
+    result = (outp.strip(), code)
+
+  proc layer(name, current: string) =
+    writeFile(tmp / name, "[settings]\ncurrent = \"" & current & "\"\n")
+
+  test "-c twice: the later file wins":
+    layer("a", "a.m")
+    layer("b", "b.m")
+    let r = runIn("-c " & (tmp / "a").quoteShell &
+                  " -c " & (tmp / "b").quoteShell)
+    check r.code == 3
+    check (tmp / "b") in r.o
+    check (tmp / "a") notin r.o
+
+  test "-C resets: -c a -C b reads only b":
+    layer("a", "a.m")
+    layer("b", "b.m")
+    let r = runIn("-c " & (tmp / "a").quoteShell &
+                  " -C " & (tmp / "b").quoteShell)
+    check r.code == 3
+    check (tmp / "b") in r.o
+    check (tmp / "a") notin r.o
+
+  test "-C a -c b keeps both layers":
+    layer("a", "a.m")
+    layer("b", "b.m")
+    let r = runIn("-C " & (tmp / "a").quoteShell &
+                  " -c " & (tmp / "b").quoteShell)
+    check r.code == 3
+    check (tmp / "b") in r.o
+
+  test "a missing later layer falls back to the earlier one":
+    layer("a", "a.m")
+    let r = runIn("-c " & (tmp / "a").quoteShell &
+                  " -c " & (tmp / "gone").quoteShell)
+    check r.code == 3
+    check (tmp / "a") in r.o
+
+  test "bare -C is the first-run state":
+    let r = runIn("-C")
+    check r.code == 3
+    check "no [provider] section" notin r.o
+
+  test "-C also drops the user global":
+    layer("a", "a.m")
+    let r = runIn("-C " & (tmp / "a").quoteShell)
+    check r.code == 3
+    check (tmp / "a") in r.o
+    check "user.pin" notin r.o
+
+  test "--config-clear=FILE form works":
+    layer("a", "a.m")
+    let r = runIn("--config-clear=" & (tmp / "a").quoteShell)
+    check r.code == 3
+    check (tmp / "a") in r.o
+
+  test "a bare -C before the prompt is not a usage error":
+    let r = runIn("-C")
+    check r.code != 2
+
+suite "cli project-local config discovery":
+  # `.3code/config` found by walking up from the working directory joins
+  # the read stack last: a repo pin beats the user config, and `-C` opts
+  # out. Every run's cwd is a tmp tree (the suite's own), so a
+  # developer's real pin can never leak into these results.
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-cli-proj-" & $getCurrentProcessId() & "deny" &
+                          $epochTime().int64)
+    createDir(tmp / "xdg" / "3code")
+    writeFile(tmp / "xdg" / "3code" / "config", "[settings]\n")
+    createDir(tmp / "repo" / "sub")
+    createDir(tmp / "repo" / ".3code")
+    writeFile(tmp / "repo" / ".3code" / "config",
+      "[settings]\ncurrent = \"pin.m\"\n")
+
+  teardown:
+    if dirExists(tmp): removeDir(tmp)
+
+  proc runIn(cwd, flags: string): tuple[o: string, code: int] =
+    let env = newStringTable({"XDG_DATA_HOME": tmp,
+                               "XDG_CONFIG_HOME": tmp / "xdg"})
+    let (outp, code) = execCmdEx(binPath().quoteShell & " " & flags,
+                                 {poStdErrToStdOut, poUsePath, poDaemon},
+                                 env, cwd)
+    result = (outp.strip(), code)
+
+  test "a subdir run reads the repo-root .3code/config":
+    let r = runIn(tmp / "repo" / "sub", "")
+    check r.code == 3
+    check "no [provider] section" in r.o
+    check (tmp / "repo" / ".3code" / "config") in r.o
+
+  test "the project pin beats an explicit -c layer":
+    writeFile(tmp / "layer", "[settings]\ncurrent = \"layer.m\"\n")
+    let r = runIn(tmp / "repo" / "sub", "-c " & (tmp / "layer").quoteShell)
+    check r.code == 3
+    check (tmp / "repo" / ".3code" / "config") in r.o
+
+  test "-C skips the walk entirely":
+    let r = runIn(tmp / "repo" / "sub", "-C")
+    check r.code == 3
+    check "no [provider] section" notin r.o
+
+  test "a directory without a store reads the user config only":
+    let r = runIn(tmp, "")
+    check r.code == 3
+    check "no [provider] section" notin r.o
+
+  test "-h lists the stack with the project layer":
+    let r = runIn(tmp / "repo" / "sub", "-h")
+    check r.code == 2
+    check "config read (later wins): " & (tmp / "xdg" / "3code" / "config") &
+          ", " & (tmp / "repo" / ".3code" / "config") in r.o
+    check "config write: " & (tmp / "xdg" / "3code" / "config") in r.o
+
+  test "a project provider inherits key and url from the user config":
+    # The API-key-less project file pattern: the user config carries the
+    # secret, the repo pins models. Observable: with the inherited key
+    # the profile builds, so the run passes the config stage instead of
+    # dying at it (no config die in the output).
+    writeFile(tmp / "xdg" / "3code" / "config", """
+[settings]
+
+[provider]
+name = "pin"
+url = "https://example/v1"
+key = "secret"
+models = "other"
+""")
+    writeFile(tmp / "repo" / ".3code" / "config", """
+[settings]
+current = "pin.m"
+
+[provider]
+name = "pin"
+models = "m"
+""")
+    let r = runIn(tmp / "repo" / "sub", "")
+    check "no [provider] section" notin r.o
+    check "url not set" notin r.o
+    check "key not set" notin r.o
 
 suite "cli syntax errors do no startup work":
   # All argument parsing and syntax validation must complete and bail before

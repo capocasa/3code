@@ -388,6 +388,9 @@ proc rpcMain*(args: seq[string]): int =
     else:
       rest = args
   if rest.len > 0:
+    var configs: seq[string]
+    var configClear = false
+    var pending = ""
     var p = initOptParser(rest,
       shortNoVal = {'x'}, longNoVal = @["debug", "experimental"])
     for kind, key, val in p.getopt():
@@ -395,16 +398,39 @@ proc rpcMain*(args: seq[string]): int =
       of cmdLongOption, cmdShortOption:
         case key
         of "model", "m": model = val
-        of "config", "c": configPathOverride = val
+        of "config", "c":
+          # Repeatable layer; the clear resets everything collected
+          # so far and its optional operand starts a fresh stack.
+          if val != "": configs.add val
+          else: pending = "config"
+        of "config-clear", "C":
+          configClear = true
+          configs = @[]
+          if val != "": configs.add val
+          else: pending = "config-clear"
         of "debug": debug = true
         of "experimental": types.experimentalEnabled = true
         else:
           stderr.writeLine "3code --rpc: unknown option: " & key
           return 2
       of cmdArgument:
-        stderr.writeLine "3code --rpc: unexpected argument: " & key
-        return 2
+        case pending
+        of "config": configs.add key; pending = ""
+        of "config-clear":
+          configClear = true
+          configs = @[key]
+          pending = ""
+        else:
+          stderr.writeLine "3code --rpc: unexpected argument: " & key
+          return 2
       of cmdEnd: discard
+    if pending == "config":
+      stderr.writeLine "3code --rpc: option --config requires a value"
+      return 2
+    # Same stack the main entry's raw-argv scan produced; applying it
+    # here too keeps the frontend correct when entered directly.
+    configLayers = configs
+    configCleared = configClear
 
   # The first session roots at the process cwd; a deleted one must
   # refuse here, not crash on getcwd below or serve "/"-rooted sessions.

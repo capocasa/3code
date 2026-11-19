@@ -14,7 +14,7 @@ import stub_helpers
 import ttty/grid
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "tests/testdata/output/tty" /
+  result = getTempDir() / "3code_tty_fixture" /
     (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")

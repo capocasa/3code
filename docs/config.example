@@ -3,6 +3,13 @@
 # Values are Nim string literals — always wrap them in double quotes.
 # parsecfg treats ':', '=', and '#' as syntax in unquoted values, so
 # unquoted URLs or API keys will silently truncate or drop.
+#
+# This file is the base of a layer stack: every -c FILE adds a layer
+# (replacing this one for that run), and the nearest .3code/config
+# walking up from the working directory applies last — a repo can pin
+# providers and models there while leaving `key`/`url` out, inheriting
+# them from this file. -C / --config-clear skips the implicit layers
+# for one run. See the "Config file" section of docs/reference.md.
 
 [settings]
 current = "ollama.qwen3-coder:480b"

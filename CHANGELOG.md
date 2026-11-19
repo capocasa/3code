@@ -118,6 +118,27 @@ Unreleased
   repaint actually paints them (`src/threecode/engine.nim`
   `paintVolatileRegion`, regression test in
   `tests/tty/test_tty_functional.nim`).
+- **Config is a layer stack: project-local `.3code/config`, repeatable
+  `-c`, and `-C` to clear.** 3code used to read exactly one config file;
+  a repository can now pin providers, models, and settings for everyone
+  who opens it — `.3code/config` discovered by walking up from the
+  working directory applies as the last (strongest) layer, with `key`
+  and `url` inherited from the user config when the project file omits
+  them, so API keys stay out of committed files without duplicating
+  provider definitions. `-c FILE` is repeatable (later files win per key
+  and replace the user config, preserving the old single-`-c` isolation
+  meaning), and `-C [FILE]` clears the stack — implicit layers included
+  — for testing or for ignoring a repo pin. `current` from the project
+  layer owns model selection (the per-directory sticky cannot defeat
+  the pin), the security switches stay under the one-way project-store
+  clamp (a repo may tighten, never weaken, and cannot relocate stores,
+  nor silence the root refusal: `allow_root` is user-owned too), and
+  writes still target the user config (or the last explicit layer):
+  definitions from other layers are never copied into it and the
+  project file is never written. Every layer validates with its own
+  `path:line` errors, `3code -h` prints the exact read stack and write
+  target, and rpc/acp take the repeatable flags too.
+
 - **`:btw` never blocks the prompt anymore.** The side question fired
   its meta-call synchronously, freezing the UI for the whole round
   trip. It runs on a worker thread now (`btwthread.nim`): the command

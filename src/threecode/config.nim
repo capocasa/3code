@@ -106,6 +106,16 @@ var baselineProviders*: seq[ProviderRec]
   ## Same startup snapshot for the provider list. A provider that differs
   ## from BOTH this baseline and the in-memory list was edited by another
   ## 3code instance since startup; `writeConfigFile` keeps the disk version.
+var providerOrigins*: Table[string, seq[string]]
+  ## Provider name -> every layer file that defined it, in read order
+  ## (the last entry defined the version in `activeProviders`).
+  ## `writeConfigFile` consults this so a definition that came ONLY from
+  ## a non-target layer (a lower `-c` file, the project layer) is never
+  ## copied into the write target; a name the target itself defines
+  ## keeps its own entry there, and names missing from the table are
+  ## in-session additions. Populated by the layered read
+  ## (`tryLoadStateLayers`); empty in single-file loads, which filter
+  ## nothing.
 var activeParams*: seq[ParamsRec]
   ## Every `[params]` section from the active config, in file order. Kept
   ## so `writeConfigFile` can persist them and `buildProfile` can resolve
@@ -801,7 +811,7 @@ proc applyPluginConfigDefaults() =
     of "user_agent", "user-agent": userAgentTemplate = v
     else: discard
 
-proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) {.raises: [ValueError, IOError, OSError].} =
+proc parseConfigFile*(path: string, isProjectStore = false): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) {.raises: [ValueError, IOError, OSError].} =
   ## Streaming parse so that repeated [provider] and [params] sections
   ## accumulate as lists. Returns
   ## `(current, providers, colors, searchKeys, searchEngine, shortcuts)`;
@@ -821,6 +831,14 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   ## went bad on disk must surface as a caught error there, not kill the
   ## process. Startup callers (`loadStateOrEmpty`, `loadProfile`) turn the
   ## raise into the same `die` the parser used to do inline.
+  ##
+  ## `isProjectStore` marks the discovered `.3code/config` layer: its
+  ## security switches (`sandbox`, `sandbox_wall_warn`) and `dirconfig`
+  ## are NOT applied here. That file is repository-controlled, and those
+  ## keys belong to `dirsettings.applyDirConfig`, the monotonic overlay
+  ## that lets a project store tighten security but never weaken it (and
+  ## never relocate the stores). Everything else in the file layers
+  ## normally.
   var current = ""
   var searchKeys: Table[string, string]
   var searchEngine = ""
@@ -923,15 +941,33 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         case e.key
         of "current": current = v
         of "dirconfig":
-          let dv = v.strip.toLowerAscii
-          if dv in DirConfigValues: dirsettings.dirConfigLocation = dv
+          # A repository-controlled file may not relocate the stores:
+          # authority over which files are user-owned follows this
+          # switch, so only the user config (or an explicit -c layer)
+          # may set it.
+          if not isProjectStore:
+            let dv = v.strip.toLowerAscii
+            if dv in DirConfigValues: dirsettings.dirConfigLocation = dv
         # Runtime knobs ride the runtime.nim store; the file's own line
         # is captured for the writeConfigFile round-trip (a store
         # overlay's value cascades through applySettingsValue without
         # being captured, so it never leaks into the user config).
-        of "allow_root", "trace_file", "debug_log", "force_sync_output",
+        # `allow_root` is the one authority-bearing knob: a
+        # repository-controlled project layer may not silence the root
+        # refusal, the same authority rule `sandbox` follows below.
+        of "allow_root":
+          if not isProjectStore: stashRuntime("settings", e.key, v)
+        of "trace_file", "debug_log", "force_sync_output",
            "termdbg", "ask_timeout_ms", "google_project":
           stashRuntime("settings", e.key, v)
+        # The project layer's security switches belong to
+        # dirsettings.applyDirConfig, the monotonic clamp (a repo store
+        # may tighten, never weaken): applying them here would let a
+        # repository-controlled file weaken an enabled sandbox.
+        of "sandbox", "sandbox_enabled", "sandbox_wall_warn":
+          if not isProjectStore:
+            userSettingsRaw[canonicalSettingsKey(e.key)] = e.value
+            applySettingsValue(e.key, e.value)
         else:
           userSettingsRaw[canonicalSettingsKey(e.key)] = e.value
           applySettingsValue(e.key, e.value)
@@ -1246,11 +1282,38 @@ proc writeConfigFile*(path: string, current: string,
   # `qwen-3.6:latest`), and with no table entry nothing maps it back,
   # so the mangled id would go on the wire and 404.
   var providers = providers
+  # Layer-origin filter: a definition that exists only in other layers
+  # (a lower `-c` file, the project `.3code/config`) stays in those
+  # files — copying it into the target would fork the definition and,
+  # for the project layer, leak repo-pinned settings into the user
+  # config. A name the target itself defines survives the filter so the
+  # disk-keep rule in `mergeForeignEdits` can preserve the target's own
+  # version (the merged view may carry a higher layer's edits). The
+  # layer files themselves are never written by this path.
+  var persisted: seq[ProviderRec]
+  for pr in providers:
+    let defs = providerOrigins.getOrDefault(pr.name, @[])
+    if defs.len == 0 or path in defs:
+      persisted.add pr
+  providers = persisted
   for pr in providers.mitems:
     pr.models = dedupModels(pr.models.mapIt(
       if knownGoodWireModel(pr.name, it) != "": normalizeModelName(it) else: it))
   var current = current
   if not mergeForeignEdits(path, current, providers): return
+  # A current naming a provider that is not being persisted (it lives in
+  # another layer) must not land in the target: it would never resolve
+  # there and the next layer-less start would fall into the wizard.
+  # Empty is safe — resolution falls back to the first provider. Only a
+  # genuinely layered session (some provider came from another file)
+  # rewrites it away; single-file sessions keep the old verbatim write.
+  var foreignLayer = false
+  for _, defs in providerOrigins:
+    for o in defs:
+      if o != path: foreignLayer = true
+  if foreignLayer and current != "" and
+      buildProfile(current, providers, "").name == "":
+    current = ""
   let cur = normalizedCurrent(current, providers)
   var buf = "[settings]\n"
   buf.add "current = " & quoteVal(cur) & "\n"
@@ -1396,12 +1459,142 @@ proc writeConfigFile*(path: string, current: string,
   writeFile(tmpPath, buf)
   moveFile(tmpPath, path)
 
-var configPathOverride* = ""
-  ## Set by `-c/--config` before the first `configPath()` call.
+var configLayers*: seq[string]
+  ## The explicit `-c FILE` / `-C FILE` operands, in command-line
+  ## order. Managed exclusively through `addConfigLayer` /
+  ## `clearConfigLayers` / `applyConfigFlags` so every parser (main
+  ## getopt, the plugin pre-scan, the provider subcommand, headless,
+  ## rpc, acp) lands on one stack.
+var configCleared*: bool
+  ## Any `-C` was seen: the implicit layers (user global, project)
+  ## are off for this run; only layers added after the clear are read.
+var projectLayer*: string = ""
+  ## The discovered `.3code/config` (nearest ancestor of the working
+  ## directory), applied last in the read stack. Empty when none was
+  ## found or a `-C` cleared it.
+
+proc addConfigLayer*(path: string) =
+  ## `-c FILE`: append one layer. The user global drops out as soon as
+  ## any explicit layer exists (single-`-c` replace semantics survive).
+  if path != "": configLayers.add path
+
+proc clearConfigLayers*(path: string) =
+  ## `-C [FILE]`: reset the stack — implicit layers included — then add
+  ## `path` as the first layer when given. A bare clear yields the
+  ## empty stack (the first-run state).
+  configCleared = true
+  configLayers = @[]
+  if path != "": configLayers.add path
+
+proc configReadPaths*(): seq[string] =
+  ## The files to read, lowest layer first; a key set by a later file
+  ## wins. Any explicit `-c` replaces the user global; the project layer
+  ## always applies last unless a `-C` cleared the implicit stack.
+  if configCleared: return configLayers
+  if configLayers.len == 0:
+    result.add userConfigRoot() / "config"
+  else:
+    result = configLayers
+  if projectLayer != "": result.add projectLayer
 
 proc configPath*(): string =
-  if configPathOverride.len > 0: configPathOverride
+  ## The WRITE target: the last explicit `-c`/`-C` layer, else the user
+  ## global. Reads must not use this — `configReadPaths()` is the read
+  ## side (a `-C` run writes the user global while reading nothing).
+  if configLayers.len > 0: configLayers[^1]
   else: userConfigRoot() / "config"
+
+proc discoverProjectConfig*(startDir: string): string =
+  ## The nearest `.3code/config` walking up from `startDir` to the
+  ## filesystem root: the project-local config layer, "" when no
+  ## ancestor carries one. No git-root bounding in v1 — the walk is
+  ## the whole contract. A `-C` in effect skips the walk entirely
+  ## (the project layer is implicit, and a clear clears the implicit
+  ## stack).
+  if configCleared: return ""
+  var d = startDir
+  if d == "": return ""
+  while true:
+    let p = d / dirsettings.StoreDirName / dirsettings.StoreConfigFile
+    if fileExists(p): return p
+    let (head, tail) = splitPath(d)
+    if tail.len == 0 or head == d: return ""
+    d = head
+
+proc scanConfigFlags*(args: seq[string]): tuple[layers: seq[string],
+    cleared: bool] =
+  ## Pure argv scan for the config flags, mirroring the option table's
+  ## value shapes: `-c FILE`, `--config FILE`, `--config=FILE`, attached
+  ## `-cFILE` / `-c=FILE` / `-c:FILE`, and the same forms for
+  ## `-C`/`--config-clear` where the operand is optional (a following
+  ## token is the operand unless it starts with `-`). Stops at `--`:
+  ## everything after it is prompt text, not flags. Short clusters walk
+  ## the same letters `expandAttachedValues` + parseopt do: the first
+  ## value-taking letter owns the rest of the token, so `-mc v` sets a
+  ## model (not a config layer) exactly like the real parser.
+  let valueOpts = {'m', 's', 'r', 'C'} + plugins.pluginCliValueShorts()
+  var i = 0
+  while i < args.len:
+    let a = args[i]
+    if a == "--": break
+    if a.len >= 2 and a[0] == '-' and a[1] != '-':
+      # Short cluster: walk to the first value-taking letter. Booleans
+      # before it pass through; the letter found owns the rest.
+      var j = 1
+      var hit = false
+      while j < a.len:
+        if a[j] in valueOpts or a[j] == 'c':
+          hit = true
+          break
+        inc j
+      if hit and (a[j] == 'c' or a[j] == 'C'):
+        var rest = if j + 1 <= a.len - 1: a[j + 1 .. ^1] else: ""
+        if rest.len > 0 and rest[0] in {'=', ':'}: rest = rest[1 .. ^1]
+        if a[j] == 'c':
+          if rest != "":
+            result.layers.add rest
+          elif i + 1 < args.len:
+            result.layers.add args[i + 1]
+            inc i
+        else:
+          # The clear resets everything accumulated so far, implicit
+          # layers included; its operand (if any) starts a fresh stack.
+          result.cleared = true
+          result.layers = @[]
+          if rest != "":
+            result.layers.add rest
+          elif i + 1 < args.len and args[i + 1].len > 0 and
+              args[i + 1][0] != '-':
+            result.layers.add args[i + 1]
+            inc i
+        inc i
+        continue
+    elif a == "--config":
+      if i + 1 < args.len:
+        result.layers.add args[i + 1]
+        inc i
+    elif a.startsWith("--config="):
+      result.layers.add a[9 .. ^1]
+    elif a == "--config-clear":
+      result.cleared = true
+      result.layers = @[]
+      if i + 1 < args.len and args[i + 1].len > 0 and args[i + 1][0] != '-':
+        result.layers.add args[i + 1]
+        inc i
+    elif a.startsWith("--config-clear="):
+      result.cleared = true
+      result.layers = @[]
+      if a[15 .. ^1] != "": result.layers.add a[15 .. ^1]
+    inc i
+
+proc applyConfigFlags*(args: seq[string]) =
+  ## Set the layer stack from a full argv. Idempotent: the stack is
+  ## rebuilt from the scan every time, so the main entry point can run
+  ## it once up front (before any subcommand dispatch) and every later
+  ## parser only consumes the tokens without touching the state.
+  let s = scanConfigFlags(args)
+  configLayers = s.layers
+  configCleared = s.cleared
 
 proc resolveSearchKey*(engine: string; keys: Table[string, string]): string =
   ## The engine-specific `[search] exa-key` / `brave-key`. Returns "" when
@@ -1497,8 +1690,11 @@ proc applyDirSettingsOverlay*(cwd: string) =
   ## `storeOverlayKeys` so `writeConfigFile` persists the user config's
   ## own line, never the store's value. Idempotent; startup runs it
   ## after the full parse, exactly once the parse has re-applied the
-  ## user config's own switches.
+  ## user config's own switches. Marks already recorded by the layered
+  ## read (a lower `-c` file, the project layer) survive the rebuild:
+  ## this overlay clears nothing, it only adds the store's keys on top.
   dirsettings.applyDirConfig(cwd)
+  let savedLayerMarks = storeOverlayKeys
   storeOverlayKeys.clear()
   let t = dirsettings.cascadeStoreSettings(cwd)
   # Sorted for determinism: alias spellings of one key (`mode`/`tone`)
@@ -1509,6 +1705,7 @@ proc applyDirSettingsOverlay*(cwd: string) =
              "sandbox_wall_warn"]: continue
     applySettingsValue(k, t[k])
     storeOverlayKeys.incl(canonicalSettingsKey(k))
+  storeOverlayKeys.incl(savedLayerMarks)
   # Same selected-verifier default as the parse: a store that sets
   # `verifier_model` enables it unless some `verifier` line (user
   # config or store) said otherwise.
@@ -1563,6 +1760,123 @@ proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, s
   ## `baselineProviders`) that `writeConfigFile` diffs against to keep
   ## concurrent instances from clobbering each other's edits.
   let (current, providers, colors, err) = tryLoadStateOrEmpty(path)
+  if err != "": die err, ExitConfig
+  printConfigWarnings()
+  (current, providers, colors)
+
+var currentOriginLayer* = ""
+  ## The file that contributed the active `current`, for diagnostics
+  ## that must name a layer (the "current but no [provider]" die names
+  ## the offending file, not the write target).
+proc patchParams(dst: var ModelParams, src: ModelParams)
+  ## Forward decl: the layered read merges `[params]` scopes with the
+  ## same per-field patch the profile resolver uses (definition below).
+
+proc tryLoadStateLayers*(paths: seq[string]): tuple[current: string,
+    providers: seq[ProviderRec], colors: Table[string, string], err: string] =
+  ## Layered read of `paths`, lowest first. Merge rules, later layer
+  ## winning per key:
+  ## - `[settings]` scalars: applied per key by the sequential parses
+  ##   (`parseConfigFile` only touches keys a file sets).
+  ## - `current`: the highest layer that sets it.
+  ## - `[provider]` blocks: by name; a later same-name block replaces the
+  ##   earlier one EXCEPT that a missing `key`/`url` is inherited from the
+  ##   namesake below — API keys stay out of committed project files
+  ##   without duplicating provider definitions.
+  ## - `[params]`: by (provider, model) scope, per key.
+  ## - `[search]` / `[colors]` / `[shortcuts]`: per key.
+  ## Each file runs the full `validateConfig`, so a malformed layer dies
+  ## (or returns err here) naming its own `path:line`. Missing files are
+  ## skipped, not layers that blank out the ones below them.
+  var current = ""
+  var providers: seq[ProviderRec]
+  var colors: Table[string, string]
+  var searchKeys: Table[string, string]
+  var searchEngine = ""
+  var shortcuts: Table[string, string]
+  var params: seq[ParamsRec]
+  var origins: Table[string, seq[string]]
+  var warnings: seq[string]
+  currentOriginLayer = ""
+  # Write bookkeeping across the stack: after the loop `userSettingsRaw`
+  # must hold the WRITE TARGET's own [settings] lines and
+  # `storeOverlayKeys` every key a non-target layer (a lower `-c` file,
+  # the project layer) supplies, so `writeConfigFile` persists the
+  # target's own value, never a foreign layer's — the dir-store
+  # no-leak rule generalized to the whole stack. `activeExtraConf`
+  # round-trips only the target's runtime-knob lines for the same
+  # reason. `configPath()` is the target because it is the only file
+  # this stack ever writes.
+  let target = configPath()
+  var targetSettings = initTable[string, string]()
+  var targetExtra: seq[tuple[section, key, value: string]] = @[]
+  storeOverlayKeys.clear()
+  for p in paths:
+    if not fileExists(p): continue
+    let isProject = p != "" and p == projectLayer
+    let (cur, provs, cols, skeys, sengine, scuts) =
+      try: parseConfigFile(p, isProject)
+      except CatchableError as e:
+        return ("", @[], initTable[string, string](), e.msg)
+    if p == target:
+      targetSettings = userSettingsRaw
+      targetExtra = activeExtraConf
+    else:
+      for k in keys(userSettingsRaw): storeOverlayKeys.incl(k)
+    if cur != "":
+      current = cur
+      currentOriginLayer = p
+    var fresh: seq[ProviderRec]
+    for np in provs:
+      origins.mgetOrPut(np.name, @[]).add p
+      block merge:
+        for i in 0 ..< providers.len:
+          if providers[i].name != np.name: continue
+          var m = np
+          if m.url == "": m.url = providers[i].url
+          if m.key == "" and m.auth != "oauth": m.key = providers[i].key
+          providers[i] = m
+          break merge
+        fresh.add np
+    providers.add fresh
+    for k, v in cols: colors[k] = v
+    for k, v in skeys: searchKeys[k] = v
+    if sengine != "": searchEngine = sengine
+    for k, v in scuts: shortcuts[k] = v
+    for e in activeParams:
+      block paramsMerge:
+        for i in 0 ..< params.len:
+          if params[i].provider == e.provider and params[i].model == e.model:
+            patchParams(params[i].params, e.params)
+            break paramsMerge
+        params.add e
+    warnings.add activeConfigWarnings
+  activeConfigWarnings = warnings
+  userSettingsRaw = targetSettings
+  activeExtraConf = targetExtra
+  baselineCurrent = current
+  baselineProviders = providers
+  providerOrigins = origins
+  activeCurrent = current
+  activeProviders = providers
+  if searchEngine != "": activeSearchEngine = searchEngine
+  activeSearchKeys = searchKeys
+  activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
+  activeShortcuts = shortcuts
+  minline.configuredShortcuts = activeShortcuts
+  activeParams = params
+  (current, providers, colors, "")
+
+proc tryLoadStackOrEmpty*(): tuple[current: string,
+    providers: seq[ProviderRec], colors: Table[string, string], err: string] =
+  ## The startup stack read: `tryLoadStateLayers` over `configReadPaths()`.
+  tryLoadStateLayers(configReadPaths())
+
+proc loadStackOrEmpty*(): (string, seq[ProviderRec], Table[string, string]) =
+  ## Dying twin of `tryLoadStackOrEmpty` for the full startup read; same
+  ## per-file semantics as `loadStateOrEmpty` (a malformed layer dies with
+  ## its own `path:line` message; every layer's warnings print once).
+  let (current, providers, colors, err) = tryLoadStackOrEmpty()
   if err != "": die err, ExitConfig
   printConfigWarnings()
   (current, providers, colors)
