@@ -282,11 +282,16 @@ suite "sandbox ask prompt":
   test "a flips an exact file ask rule in place and the retry lands":
     # The ask rule names the denied file itself: allow is the rule
     # changing, not a new rule, so it takes the ask line's position -
-    # and lifts the ask subtree's fence for the retry.
+    # and lifts the ask subtree's fence for the retry. The file is
+    # planted first: the Linux backend enforces an ask with a bind
+    # mask, and a mask can only mount over a target that exists, so a
+    # not-yet-created file is the one shape bash cannot be fenced for
+    # (the write-tool legs cover that side in-process).
     if bashSandboxWorks():
       let root = newFixture("allow_exact")
       defer: removeDir(root)
       writeConfiguredProvider(root)
+      writeFile(root / "run" / "vault" / "out.txt", "")
       writeFile(root / "run" / ".sandbox",
         "deny /\nallow ./\nask ./vault/out.txt\ndeny ./locked\n")
       let tty = startAskSession(root, 20_000)
