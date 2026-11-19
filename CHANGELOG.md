@@ -2,6 +2,30 @@ Changelog
 
 Unreleased
 
+- **Gemini 4 Carbon, Neon and Hydrogen join the google table, and
+  `xhigh` arrives as a thinking level.** The 4.x family outgrew its
+  single Argon row: Carbon (flagship), Neon (Nov 18, adapted from
+  Carbon for long-running agent workflows) and Hydrogen (Flash
+  successor) share Argon's wire surface - 1M unified window, 64k
+  streamed output, thinking low/medium/high, no `minimal`, no off -
+  so they share the row shape; Carbon defaults to `high` like every
+  Pro tier, Neon/Hydrogen to `medium`. Neon and Hydrogen additionally
+  accept an `xhigh` reasoning_effort above high (Carbon and Argon stop
+  at high), wired through `knownGoodReasonings` and
+  `applyGeminiReasoning`; `:reasoning xhigh` was already valid input
+  for the grok/claude/gpt ladders, so only the gemini branches needed
+  widening. Rows verified against the live `/v1beta/models` listing;
+  chat turns themselves still await an AI Studio prepay top-up (402 on
+  every call today).
+- **Gemma 4 open weights are curated on google and venice.** The same
+  generativelanguage endpoint chat-serves the gemma-4-31b-it /
+  gemma-4-26b-a4b-it open models (262k context, 32k output cap), and
+  venice serves the pair under flattened ids. They have no thinking
+  surface, so the rows ride the `other` family: no reasoning level is
+  offered or sent (`:reasoning` lists nothing for them, the first
+  curated residents of that bucket). `maxOutputTokensFor` caps gemma-4
+  at 32k so the escalation ladder stops at the weights' real ceiling
+  instead of climbing to the 262k context figure.
 - **Shift+Space types a space again.** Kitty-protocol terminals (kitty,
   Ghostty, foot) report shift+space as `CSI 32;2 u` because space has
   no shifted glyph to send as text, and iTerm2/xterm with
