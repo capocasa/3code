@@ -24,48 +24,37 @@ shows as untracked noise in `git status` inside repos (it already
 does today); users who mind add it to their own ignore — we never act
 inside git's namespace on their behalf.
 
-## The diff engine: `computeDiff` today, `nimdiff` later
+## The diff engine: `nimdiff`
 
-The snapshot plan uses the engine already in the binary — `computeDiff`
-+ `lcsOps` (`src/threecode/actions.nim:322`, `:284`): an in-process
-LCS emitting unified hunks with context, binary suppression, zero
-subprocesses, zero git (built originally because shelling out to `diff`
-breaks on stock Windows). Nothing in the snapshot work waits on a new
-engine.
+The snapshot store and every other diff in the binary use `nimdiff`
+(`~/p/nimdiff`, created from `computeDiff` in a separate session and
+swapped in): a Myers O((n+m)·D) linear-space engine linked into the
+binary — `import nimdiff`, zero forks, zero git. `computeDiff` in
+`src/threecode/actions.nim` is a thin wrapper over it so no call site
+changed; `lcsOps` and the in-tree renderer are deleted — one engine,
+not two. 3code's binary classifier (ANSI-aware, 512-byte scan) stays
+at the wrapper boundary; nimdiff's rule is git's NUL-only one, which
+would let control-character soup through.
 
-**One in-tree addition ships with the store, because real before-bytes
-make today's measured hazard reachable:** an input-size guard in
-`computeDiff` — pairs over the cap degrade to the existing "diff over
-N bytes, not shown" name-only line. A condition and a fallback string;
-measured need: a 520 KB before/after pair costs 810 ms and a 2.0 GB
-peak RSS table with the current O(n·m) DP, and `patch` already feeds
-it unbounded content today.
+The input-size guard that shipped with the store (256 KB combined /
+5000 lines, degrade to name-only) retired with the swap: it guarded
+the O(n·m) DP table's measured 2.0 GB peak on a 520 KB pair, a
+hazard the linear-space engine does not have. The session feed's own
+per-path and total caps still bound what reaches the verifier.
 
-**Planned replacement: `nimdiff` at `~/p/nimdiff`**, created by a
-separate session based on `computeDiff`, swapped in later. It stays a
-**library linked into the binary** — `import nimdiff`, zero forks,
-zero git; a CLI front-end in the package is fine for manual testing,
-3code never invokes it.
+**Landed as described above** — byte-for-byte compatible
+`computeDiff(before, after, label)` output under the frozen contract
+(unified `---`/`+++`/`@@` hunks with 3 context lines, `+`/`-`/` `
+prefixes, binary-suppression header, empty string for equal inputs;
+`tests/core/test_session_diff.nim` and the green/red painter are the
+acceptance surface), `threecode.nimble` carries `requires "nimdiff
+>= 0.1.0"` with the revision pinned in `nimble.lock` (git URL, the
+`sandwall`/`streamhttp` pattern), and the Myers/Hirschberg brief met
+its target: milliseconds and kilobytes where the DP was 810 ms and
+2.0 GB.
 
-- **Contract, frozen from today's behavior:** byte-for-byte compatible
-  `computeDiff(before, after, label)` output — unified `---`/`+++`/`@@`
-  hunks with 3 context lines, `+`/`-`/` ` prefixes, binary-suppression
-  header, empty string for equal inputs. `tests/core/test_session_diff.nim`
-  and the green/red painter are the acceptance surface.
-- **Its brief beyond the port:** Myers O((n+m)·D) with linear-space
-  divide-and-conquer (Hirschberg refinement) replacing the O(n·m)
-  table — milliseconds and kilobytes where today is 810 ms and 2.0 GB,
-  since real edits have small edit distance — plus common
-  prefix/suffix line trimming. The in-tree guard retires into the
-  engine proper.
-- **Wiring at swap time:** `threecode.nimble` gains `requires "nimdiff
-  >= …"` (local path during development, git URL in CI — the
-  `sandwall`/`streamhttp` pattern); `actions.nim`'s `computeDiff`
-  becomes a thin wrapper over `nimdiff` so no call site changes;
-  `lcsOps` and the in-tree renderer are deleted — one engine, not two.
-
-Scope guard: no directory diffing (the fold maps paths, the engine
-diffs contents), no patience/histogram heuristics, no external
+Scope guard, held: no directory diffing (the fold maps paths, the
+engine diffs contents), no patience/histogram heuristics, no external
 tools.
 
 ## Semantics
@@ -223,8 +212,13 @@ classes, `**`, negations): every case agrees except the designed
 divergence — a re-inclusion beneath an ignored directory, which git
 refuses to even look at.
 
-Tiers 4–6 stay future work as planned; the portable copy already
-rides `copyFile`, which uses the platform clone syscall where one
-exists (macOS `copyfile(3)`), and measured 105 ms to arm this repo
+Tier 6 landed too (`nimdiff` swap, see above): `computeDiff` is a
+wrapper, `lcsOps` and the in-tree renderer are deleted, and the
+step-1 input caps retired with the DP table they guarded — the caps
+test in `test_session_diff.nim` now asserts real hunks on the same
+over-cap pairs. Tiers 4–5 stay future work as planned; the portable
+copy already rides `copyFile`, which uses the platform clone syscall
+where one exists (macOS `copyfile(3)`), and measured 105 ms to arm
+this repo
 (7.7 MB walked set, 397 paths after the cascade) with 37 ms
 no-change folds; incremental re-arms copy only the delta.

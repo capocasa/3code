@@ -47,6 +47,18 @@
         "sha1": "a9dc8cfd3c0546957d1a99d2c6ace8fc5034f330"
       }
     },
+    "nimdiff": {
+      "version": "0.1.0",
+      "vcsRevision": "a37c0be759933e2ecb0488cce8b4e4571652ca8c",
+      "url": "https://github.com/capocasa/nimdiff",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "fd980bfdb5ad74cc9c092c3f86d6ec0b70ea1d16"
+      }
+    },
     "ws": {
       "version": "0.6.0",
       "vcsRevision": "c9c0c7b51e2e83cc9305a895a0b144a297b4bea8",

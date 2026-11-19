@@ -12,6 +12,7 @@ requires "unicodedb >= 0.13.0"
 requires "tinotify >= 0.1.3"
 requires "sandwall >= 0.5.12"
 requires "libsha >= 1.0"
+requires "nimdiff >= 0.1.0"
 requires "zippy >= 0.10"
 requires "ws >= 0.6.0"
 

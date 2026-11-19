@@ -2,6 +2,25 @@ Changelog
 
 Unreleased
 
+- **`nimdiff` is the diff engine.** The in-tree O(n*m) LCS (`lcsOps`)
+  and its unified renderer are deleted; `computeDiff` keeps its
+  signature and output contract but delegates to the `nimdiff`
+  package - Myers O(ND) in its linear-space divide-and-conquer form,
+  linked in as a library (zero forks, zero git, same stock-Windows
+  story), pinned in `nimble.lock`. One engine now serves every diff
+  in the binary: write/patch/apply_patch tool results, shell-mutation
+  captures, and the goal-mode session feed. The input caps (256 KB
+  combined / 5000 lines) retired with the DP table they guarded -
+  the measured hazard was the 2 GB table, not the rendering, so a
+  300 KB pair now renders real hunks in milliseconds instead of a
+  name-only line, and the session feed's own per-path and total caps
+  still bound what reaches the verifier. 3code's stricter binary
+  classifier (ANSI-aware, 512-byte scan) stays at the wrapper
+  boundary - nimdiff's NUL-only git rule would let control-character
+  soup through (`tests/core/test_session_diff.nim`,
+  `tests/shell/test_actions_text.nim`,
+  `tests/shell/test_actions_extra.nim`).
+
 - **Gemini 4 Carbon, Neon and Hydrogen join the google table, and
   `xhigh` arrives as a thinking level.** The 4.x family outgrew its
   single Argon row: Carbon (flagship), Neon (Nov 18, adapted from

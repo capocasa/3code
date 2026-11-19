@@ -134,13 +134,15 @@ suite "session change log":
       check "big.txt" in d
       check "not shown" in d
 
-  test "computeDiff degrades past the input caps":
-    let big = "line\n".repeat(60000)  # 300 KB pair: over the byte cap
+  test "computeDiff handles large inputs (nimdiff engine, no caps)":
+    # The input-size caps retired with the O(n*m) LCS they guarded:
+    # nimdiff is linear-space, so over-cap pairs render real hunks now.
+    let big = "line\n".repeat(60000)  # 300 KB pair, past the old byte cap
     let d = computeDiff(big, big & "extra\n", "big.txt")
-    check "not shown" in d
+    check "+extra" in d
     check "big.txt" in d
-    let many = "x\n".repeat(6000)   # 12 KB pair, over the line cap
-    check "not shown" in computeDiff(many, many & "y\n", "tiny.txt")
+    let many = "x\n".repeat(6000)   # 12 KB pair, past the old line cap
+    check "+y" in computeDiff(many, many & "y\n", "tiny.txt")
     check computeDiff("same\n", "same\n", "eq.txt").len == 0
 
   test "turnDidWork is content-aware":
