@@ -2,6 +2,36 @@ Changelog
 
 Unreleased
 
+- **Arming a goal mode takes a real snapshot: the fold diffs actual
+  before-bytes.** Arming walks the project once (the manifest is still
+  the cheap stat layer, now keyed by mtime, size and inode) and copies
+  the walked set into `.3code/snapshot/` - a plain portable copy on
+  the same volume, no git, no kernel facilities (the platform copy
+  syscall picks up any clone acceleration for free). Every session
+  mutation - tool writes, opaque shell work, deletions, renames - now
+  has real before-bytes at the fold: a deleted or `python
+  rewrite.py`-rewritten file renders a true minus-diff instead of the
+  `changed via shell (original not captured)` marker, and a rename
+  folds as one renamed entry instead of a delete+create pair (inode
+  identity carries it). The marker floor survives only for paths
+  mutated before the arm or past the store caps (1 MB per file, 64 MB
+  per arm; past the budget a path keeps detection but not
+  before-bytes). Re-arm while armed copies only the delta; disarm
+  deletes the store. The walk now speaks gitignore syntax through a
+  three-tier cascade - global defaults (`~/p/nimignore`, else the
+  embedded copy: VCS internals, dependency trees, build caches,
+  `.3code/` itself), the per-directory `.gitignore` chain
+  deepest-wins, and `.3code/ignore` as the override, always last, `!`
+  negation included; a directory is pruned only when no anchored
+  negation from any source could match beneath it, so `build/` +
+  `!build/output.txt` keeps `output.txt` reachable (git cannot do
+  this). `computeDiff` gained input caps (256 KB combined
+  before/after, 5000 lines) past which the pair degrades to a
+  name-only line: the O(n*m) LCS table costs 810 ms and 2.0 GB peak
+  RSS on a 520 KB pair, measured. Fifos and device nodes never enter
+  the manifest - opening a leftover fifo read-only would hang the
+  fold, and now the store copy too (`tests/core/test_ignore.nim`,
+  `tests/core/test_session_diff.nim`).
 - **`:retry` sends the current state as a request.** Bare `:retry`
   (and the Ctrl+Shift+R `retry` shortcut) is the empty submit now: it
   queues exactly what Enter on an empty prompt queues, and the
