@@ -34,10 +34,13 @@ TIMEOUT_SECS=${1:-1500}
 [ $# -gt 0 ] && shift
 . "$(dirname "$0")/test_processes.sh"
 WATCH_SECS=30
-# 480, not 300: the slowest legitimate tty stress test runs ~280-310s
-# on a 3-core CI runner; the 300 cap killed it mid-run as a "hang".
-# The cap exists to catch hangs (no progress), which it still does.
-PER_TEST_SECS=${PER_TEST_SECS:-480}
+# 720, not 480: the caps keep pace with the slowest legitimate tests.
+# 300 died to the tty stress test (~310s on 3 cores); 480 later died to
+# the shakedown itself (651s local, longer on arm CI), which the cap
+# killed mid-suite as an all-[OK]-then-exit-1 mystery. OSX already ran
+# 720 for this class. The cap exists to catch hangs (no progress), which
+# it still does.
+PER_TEST_SECS=${PER_TEST_SECS:-720}
 
 LOG=$(mktemp "${TMPDIR:-/tmp}/3code_testament.XXXXXXXX") || exit 1
 SNAP=$(mktemp "${TMPDIR:-/tmp}/3code_watch.XXXXXXXX") || exit 1
@@ -192,10 +195,19 @@ fi
 # readable from the UI and the API without downloading job logs.
 emit_failure_annotation() {
   [ -n "${GITHUB_ACTIONS:-}" ] || return 0
+  # Head AND tail: a failing suite's diff body starts with hundreds of
+  # [OK] lines, and the check failures sit at the end - a head-only cap
+  # hides the very lines that name the break (the arm64 tty_functional
+  # failure was all [OK] under the old 3000-char cap).
   {
     sed 's/\x1b\[[0-9;]*m//g' "$FAILS" "$SNAP" 2>/dev/null
     sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aE 'FAIL:|FAILURE!|Tests passed' | tail -n 30
-  } | head -c 3000 | awk 'BEGIN{ORS="%0A"} {gsub(/%/, "%25"); print}' > "$FAILS.ann"
+  } | sed 's/\x1b\[[0-9;]*m//g' > "$FAILS.txt"
+  {
+    head -c 2600 "$FAILS.txt"
+    echo "[... snip ...]"
+    tail -c 1800 "$FAILS.txt"
+  } | awk 'BEGIN{ORS="%0A"} {gsub(/%/, "%25"); print}' > "$FAILS.ann"
   printf '::error title=%s::%s\n' "$1" "$(cat "$FAILS.ann")"
 }
 
