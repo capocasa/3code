@@ -173,8 +173,16 @@ suite "ctrl-z suspends from every key encoding and repaints on resume":
       # sigwait. The drain also repaints (out-of-band screen change).
       tty.advanceRawMark()
       discard kill(tty.pid, SIGCONT)
-      tty.drain(400)
-      check "\u276f" in cleanRaw(tty.freshRaw())
+      # Poll the post-mark stream instead of one sample after a fixed
+      # drain: the out-of-band repaint is not instantaneous, and a slow
+      # runner blanks the one-shot sample (two macOS CI failures).
+      var repainted = false
+      for i in 0 ..< 20:
+        tty.drain(100)
+        if "\u276f" in cleanRaw(tty.freshRaw()):
+          repainted = true
+          break
+      check repainted
 
       # A subsequent Ctrl-Z still suspends and resumes cleanly.
       tty.send "\x1a"
