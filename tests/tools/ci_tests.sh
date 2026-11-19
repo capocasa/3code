@@ -204,9 +204,12 @@ emit_failure_annotation() {
     sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aE 'FAIL:|FAILURE!|Tests passed' | tail -n 30
   } | sed 's/\x1b\[[0-9;]*m//g' > "$FAILS.txt"
   {
-    head -c 2600 "$FAILS.txt"
+    head -c 2000 "$FAILS.txt"
+    echo "[... snip ... every failed check: ...]"
+    sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+      | grep -aE 'Check failed|\[FAILED\]|FAIL: ' | head -n 40
     echo "[... snip ...]"
-    tail -c 1800 "$FAILS.txt"
+    tail -c 1200 "$FAILS.txt"
   } | awk 'BEGIN{ORS="%0A"} {gsub(/%/, "%25"); print}' > "$FAILS.ann"
   printf '::error title=%s::%s\n' "$1" "$(cat "$FAILS.ann")"
 }
