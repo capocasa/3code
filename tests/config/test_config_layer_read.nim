@@ -93,7 +93,7 @@ models = "m3"
     check provs[0].url == "https://low.example/v1"  # inherited
     check provs[0].key == "low-key"                  # inherited
     check provs[0].models == @["m3"]                 # replaced, not merged
-    check providerOrigins["alpha"] == tmp / "high"
+    check providerOrigins["alpha"] == @[tmp / "low", tmp / "high"]
 
   test "distinct provider names stack":
     writeFile(tmp / "low", """
@@ -265,6 +265,37 @@ models = "m9"
       let text = readFile(tmp / "fresh")
       check "current = \"\"" in text
       check "extra" notin text
+
+  test "a provider defined in both layers keeps the target's own copy":
+    saveGlobals():
+      writeFile(tmp / "a", """
+[settings]
+current = "both.m"
+
+[provider]
+name = "both"
+url = "https://a/v1"
+key = "ka"
+models = "m1"
+""")
+      writeFile(tmp / "b", """
+[provider]
+name = "both"
+models = "m2"
+""")
+      let (cur, provs, _, err) = tryLoadStateLayers(@[tmp / "a", tmp / "b"])
+      check err == ""
+      # The merged view carries a's url/key under b's models.
+      check provs[0].url == "https://a/v1"
+      check provs[0].models == @["m2"]
+      # Writing the target b keeps b's own definition verbatim: the
+      # name is not dropped, and a's fields are not copied in.
+      writeConfigFile(tmp / "b", cur, provs)
+      let text = readFile(tmp / "b")
+      check "name = \"both\"" in text
+      check "m2" in text
+      check "https://a/v1" notin text
+      check "ka" notin text
 
   test "a foreign edit to the target survives a layered write":
     saveGlobals():
