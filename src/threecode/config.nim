@@ -591,7 +591,7 @@ proc applyPluginConfigDefaults() =
     of "user_agent", "user-agent": userAgentTemplate = v
     else: discard
 
-proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) {.raises: [ValueError, IOError, OSError].} =
+proc parseConfigFile*(path: string, isProjectStore = false): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) {.raises: [ValueError, IOError, OSError].} =
   ## Streaming parse so that repeated [provider] and [params] sections
   ## accumulate as lists. Returns
   ## `(current, providers, colors, searchKeys, searchEngine, shortcuts)`;
@@ -611,6 +611,14 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   ## went bad on disk must surface as a caught error there, not kill the
   ## process. Startup callers (`loadStateOrEmpty`, `loadProfile`) turn the
   ## raise into the same `die` the parser used to do inline.
+  ##
+  ## `isProjectStore` marks the discovered `.3code/config` layer: its
+  ## security switches (`sandbox`, `sandbox_wall_warn`) and `dirconfig`
+  ## are NOT applied here. That file is repository-controlled, and those
+  ## keys belong to `dirsettings.applyDirConfig`, the monotonic overlay
+  ## that lets a project store tighten security but never weaken it (and
+  ## never relocate the stores). Everything else in the file layers
+  ## normally.
   var current = ""
   var searchKeys: Table[string, string]
   var searchEngine = ""
@@ -731,11 +739,13 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "sandbox", "sandbox_enabled":
           # Same boolean dialect as `notify`/`streaming`. Default on; an
           # explicit `off` disables sandbox enforcement entirely (bash runs
-          # unconfined, in-process checks pass through).
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": sandboxEnabled = true
-          of "off", "false", "no", "0": sandboxEnabled = false
-          else: discard
+          # unconfined, in-process checks pass through). Skipped for the
+          # project store: applyDirConfig owns these with the clamp.
+          if not isProjectStore:
+            case v.toLowerAscii
+            of "on", "true", "yes", "1": sandboxEnabled = true
+            of "off", "false", "no", "0": sandboxEnabled = false
+            else: discard
         of "computer":
           # Same boolean dialect. Session-scoped in spirit: this line exists
           # so tests and scripted runs can arm computer use; the :computer
@@ -773,11 +783,12 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           else: discard
         of "sandbox_wall_warn":
           # Silences only the Windows "wall not set up" warning; the
-          # fence itself is unaffected.
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": sandboxWallWarn = true
-          of "off", "false", "no", "0": sandboxWallWarn = false
-          else: discard
+          # fence itself is unaffected. Project store: see `sandbox`.
+          if not isProjectStore:
+            case v.toLowerAscii
+            of "on", "true", "yes", "1": sandboxWallWarn = true
+            of "off", "false", "no", "0": sandboxWallWarn = false
+            else: discard
         of "max_timeout", "max-timeout":
           # Whole seconds. Schema validation already rejected non-numbers,
           # so a parse failure here is unreachable in practice.
@@ -803,8 +814,13 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "bash":
           bashSourcePref = v.strip.toLowerAscii
         of "dirconfig":
-          let dv = v.strip.toLowerAscii
-          if dv in DirConfigValues: dirsettings.dirConfigLocation = dv
+          # A repository-controlled file may not relocate the stores:
+          # authority over which files are user-owned follows this
+          # switch, so only the user config (or an explicit -c layer)
+          # may set it.
+          if not isProjectStore:
+            let dv = v.strip.toLowerAscii
+            if dv in DirConfigValues: dirsettings.dirConfigLocation = dv
         of "user_agent", "user-agent":
           # Raw `e.value`, not the env-expanded `v`: the `$vars` in the
           # template belong to modelUserAgent's expansion, not the
@@ -1270,6 +1286,23 @@ proc configPath*(): string =
   if configLayers.len > 0: configLayers[^1]
   else: userConfigRoot() / "config"
 
+proc discoverProjectConfig*(startDir: string): string =
+  ## The nearest `.3code/config` walking up from `startDir` to the
+  ## filesystem root: the project-local config layer, "" when no
+  ## ancestor carries one. No git-root bounding in v1 — the walk is
+  ## the whole contract. A `-C` in effect skips the walk entirely
+  ## (the project layer is implicit, and a clear clears the implicit
+  ## stack).
+  if configCleared: return ""
+  var d = startDir
+  if d == "": return ""
+  while true:
+    let p = d / dirsettings.StoreDirName / dirsettings.StoreConfigFile
+    if fileExists(p): return p
+    let (head, tail) = splitPath(d)
+    if tail.len == 0 or head == d: return ""
+    d = head
+
 proc scanConfigFlags*(args: seq[string]): tuple[layers: seq[string],
     cleared: bool] =
   ## Pure argv scan for the config flags, mirroring the option table's
@@ -1492,8 +1525,9 @@ proc tryLoadStateLayers*(paths: seq[string]): tuple[current: string,
   currentOriginLayer = ""
   for p in paths:
     if not fileExists(p): continue
+    let isProject = p != "" and p == projectLayer
     let (cur, provs, cols, skeys, sengine, scuts) =
-      try: parseConfigFile(p)
+      try: parseConfigFile(p, isProject)
       except CatchableError as e:
         return ("", @[], initTable[string, string](), e.msg)
     if cur != "":

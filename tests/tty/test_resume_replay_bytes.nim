@@ -17,10 +17,9 @@ import ttty/grid
 import frame_artifact
 import stub_helpers
 
-const VisualOutputRoot = "tests/testdata" / "output" / "tty"
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / VisualOutputRoot / (name & "_" & $getCurrentProcessId())
+  result = getTempDir() / "3code_tty_fixture" / (name & "_" & $getCurrentProcessId())
   if dirExists(result):
     removeDir(result)
   createDir(result)

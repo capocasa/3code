@@ -13,7 +13,11 @@ import std/[json, os, osproc, strtabs, strutils, unittest]
 import stub_helpers
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "tests/testdata/output/core" / (name & "_" & $getCurrentProcessId())
+  # Outside the checkout: the spawned binary discovers project-local
+  # `.3code/config` by walking up from its cwd, and a developer's own
+  # pin (this repo or any parent checkout) must never leak into the
+  # config stack under test.
+  result = getTempDir() / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
   createDir(result / "tmp")

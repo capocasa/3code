@@ -7,7 +7,7 @@ discard """
   matrix: ""
 """
 
-import std/[os, unittest]
+import std/[os, times, unittest]
 import threecode/[config, util]
 
 suite "config: flag scan":
@@ -58,6 +58,56 @@ suite "config: flag scan":
     check s.layers.len == 0
     # -xc v: booleans pass through, the c takes the next token.
     check scanConfigFlags(@["-xc", "v"]).layers == @["v"]
+
+suite "config: project discovery":
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-projdisc-" & $getCurrentProcessId() & "-" &
+                          $epochTime().int64)
+    createDir(tmp)
+
+  teardown:
+    removeDir(tmp)
+
+  test "no .3code/config anywhere yields empty":
+    let savedLayers = configLayers
+    let savedCleared = configCleared
+    applyConfigFlags(@[])
+    check discoverProjectConfig(tmp) == ""
+    check discoverProjectConfig("") == ""
+    configLayers = savedLayers
+    configCleared = savedCleared
+
+  test "a subdir finds the repo-root file, nearest wins":
+    createDir(tmp / "repo" / ".3code")
+    writeFile(tmp / "repo" / ".3code" / "config", "[settings]\n")
+    createDir(tmp / "repo" / "sub" / "deep")
+    check discoverProjectConfig(tmp / "repo" / "sub" / "deep") ==
+      tmp / "repo" / ".3code" / "config"
+    # A nearer file shadows the farther one.
+    createDir(tmp / "repo" / "sub" / ".3code")
+    writeFile(tmp / "repo" / "sub" / ".3code" / "config", "[settings]\n")
+    check discoverProjectConfig(tmp / "repo" / "sub" / "deep") ==
+      tmp / "repo" / "sub" / ".3code" / "config"
+    check discoverProjectConfig(tmp / "repo") ==
+      tmp / "repo" / ".3code" / "config"
+
+  test "a -C in effect skips the walk":
+    createDir(tmp / ".3code")
+    writeFile(tmp / ".3code" / "config", "[settings]\n")
+    let savedLayers = configLayers
+    let savedCleared = configCleared
+    applyConfigFlags(@["-C"])
+    check discoverProjectConfig(tmp) == ""
+    applyConfigFlags(@["-C", "a"])
+    check discoverProjectConfig(tmp) == ""
+    # An explicit -c alone does NOT skip the walk: the project layer
+    # still applies on top of it.
+    applyConfigFlags(@["-c", "a"])
+    check discoverProjectConfig(tmp) == tmp / ".3code" / "config"
+    configLayers = savedLayers
+    configCleared = savedCleared
 
 suite "config: read stack and write target":
   setup:

@@ -509,6 +509,90 @@ suite "cli config layer stack":
     let r = runIn("-C")
     check r.code != 2
 
+suite "cli project-local config discovery":
+  # `.3code/config` found by walking up from the working directory joins
+  # the read stack last: a repo pin beats the user config, and `-C` opts
+  # out. Every run's cwd is a tmp tree (the suite's own), so a
+  # developer's real pin can never leak into these results.
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-cli-proj-" & $getCurrentProcessId() & "deny" &
+                          $epochTime().int64)
+    createDir(tmp / "xdg" / "3code")
+    writeFile(tmp / "xdg" / "3code" / "config", "[settings]\n")
+    createDir(tmp / "repo" / "sub")
+    createDir(tmp / "repo" / ".3code")
+    writeFile(tmp / "repo" / ".3code" / "config",
+      "[settings]\ncurrent = \"pin.m\"\n")
+
+  teardown:
+    if dirExists(tmp): removeDir(tmp)
+
+  proc runIn(cwd, flags: string): tuple[o: string, code: int] =
+    let env = newStringTable({"XDG_DATA_HOME": tmp,
+                               "XDG_CONFIG_HOME": tmp / "xdg"})
+    let (outp, code) = execCmdEx(binPath().quoteShell & " " & flags,
+                                 {poStdErrToStdOut, poUsePath, poDaemon},
+                                 env, cwd)
+    result = (outp.strip(), code)
+
+  test "a subdir run reads the repo-root .3code/config":
+    let r = runIn(tmp / "repo" / "sub", "")
+    check r.code == 3
+    check "no [provider] section" in r.o
+    check (tmp / "repo" / ".3code" / "config") in r.o
+
+  test "the project pin beats an explicit -c layer":
+    writeFile(tmp / "layer", "[settings]\ncurrent = \"layer.m\"\n")
+    let r = runIn(tmp / "repo" / "sub", "-c " & (tmp / "layer").quoteShell)
+    check r.code == 3
+    check (tmp / "repo" / ".3code" / "config") in r.o
+
+  test "-C skips the walk entirely":
+    let r = runIn(tmp / "repo" / "sub", "-C")
+    check r.code == 3
+    check "no [provider] section" notin r.o
+
+  test "a directory without a store reads the user config only":
+    let r = runIn(tmp, "")
+    check r.code == 3
+    check "no [provider] section" notin r.o
+
+  test "-h lists the stack with the project layer":
+    let r = runIn(tmp / "repo" / "sub", "-h")
+    check r.code == 2
+    check "config read (later wins): " & (tmp / "xdg" / "3code" / "config") &
+          ", " & (tmp / "repo" / ".3code" / "config") in r.o
+    check "config write: " & (tmp / "xdg" / "3code" / "config") in r.o
+
+  test "a project provider inherits key and url from the user config":
+    # The API-key-less project file pattern: the user config carries the
+    # secret, the repo pins models. Observable: with the inherited key
+    # the profile builds, so the run passes the config stage instead of
+    # dying at it (no config die in the output).
+    writeFile(tmp / "xdg" / "3code" / "config", """
+[settings]
+
+[provider]
+name = "pin"
+url = "https://example/v1"
+key = "secret"
+models = "other"
+""")
+    writeFile(tmp / "repo" / ".3code" / "config", """
+[settings]
+current = "pin.m"
+
+[provider]
+name = "pin"
+models = "m"
+""")
+    let r = runIn(tmp / "repo" / "sub", "")
+    check "no [provider] section" notin r.o
+    check "url not set" notin r.o
+    check "key not set" notin r.o
+
 suite "cli syntax errors do no startup work":
   # All argument parsing and syntax validation must complete and bail before
   # any side-effecting startup runs — in particular skill extraction, which

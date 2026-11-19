@@ -6,7 +6,7 @@ import tty_expect
 import stub_helpers
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "tests/testdata/output/tty" / (name & "_" & $getCurrentProcessId())
+  result = getTempDir() / "3code_tty_fixture" / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
 

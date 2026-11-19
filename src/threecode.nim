@@ -149,7 +149,9 @@ proc usage() {.noreturn.} =
   -v, --version        print version
   -h, --help           this message
 
-config: """ & configPath()
+config read (later wins): """ & configReadPaths().join(", ") & """
+
+config write: """ & configPath()
   # Plugin-registered CLI surface: listed only when plugins added one,
   # so a stock install sees exactly the built-in usage. Same alignment
   # shape as the built-in rows above (24-col gutter).
@@ -379,6 +381,11 @@ proc main() =
   # the tokens without touching the state, so they can never disagree
   # about the stack the way the old first-vs-last pre-scans did.
   applyConfigFlags(rawParams)
+  # Project-local config discovery: the nearest `.3code/config` up from
+  # the working directory joins the read stack as its last (strongest)
+  # layer. Runs before every dispatch so the provider subcommand,
+  # headless, rpc and acp all see it; a `-C` skips the walk entirely.
+  projectLayer = discoverProjectConfig(safeCwd())
   # All the early-dispatch subcommands below run with redirected or
   # piped stdio (box children, the stdio relay, elevated setup); their
   # exit procs must not splice terminal-restore escapes into the stream.
@@ -749,6 +756,10 @@ proc main() =
   # consult forward so `sandbox_wall_warn = off` works on the first
   # print. The full parse re-applies them unchanged.
   for layerPath in configReadPaths():
+    # The project layer's security switches are owned by
+    # dirsettings.applyDirConfig (the clamp runs right below); applying
+    # them here would let a repo file weaken an enabled sandbox.
+    if layerPath == projectLayer: continue
     applyEarlySandboxSettings(layerPath)
   # Directory-specific settings overlay: a `.3code/config` in the
   # session dir (or any parent, nearest wins) may tighten the sandbox
@@ -851,6 +862,12 @@ proc main() =
   # and from there to the first [provider] section.
   dirsettings.applyDirConfig(safeCwd())
   block:
+    # A project-layer `current` pin owns selection: the per-directory
+    # sticky (the data-root store or the legacy .current file) must not
+    # defeat the repo pin on every later start — an accidental switch
+    # in one directory would otherwise move every start off the pin.
+    if projectLayer != "" and currentOriginLayer == projectLayer:
+      break
     let dirCurrent = loadDirCurrent(safeCwd())
     if dirCurrent != "" and
        buildProfile(dirCurrent, activeProviders, "").name.len > 0:

@@ -265,6 +265,10 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   experimentalEnabled = opts.experimental
   debugEnabled = opts.debug
   let cwd = if opts.cwd.len > 0: opts.cwd else: safeCwd()
+  # Project-local config discovery against the session cwd (the CLI
+  # main does the same against the process cwd before dispatching
+  # here). A `-C` in effect skips the walk.
+  projectLayer = discoverProjectConfig(cwd)
 
   materializeBuiltinSkills()
 
@@ -293,8 +297,11 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   # the user's choice or stricter.
   dirsettings.applyDirConfig(cwd)
   # Per-directory sticky current, same resolution as the CLI main: this
-  # directory's last `:provider` / `:model` wins when it still resolves.
+  # directory's last `:provider` / `:model` wins when it still resolves
+  # — unless the project layer pinned `current`; the pin owns selection.
   block:
+    if projectLayer != "" and currentOriginLayer == projectLayer:
+      break
     let dirCurrent = loadDirCurrent(cwd)
     if dirCurrent != "" and
        buildProfile(dirCurrent, activeProviders, "").name.len > 0:
