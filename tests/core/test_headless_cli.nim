@@ -12,6 +12,7 @@ discard """
 import std/[algorithm, json, os, osproc, sequtils, strutils, unittest]
 import ../plugin_helpers
 import ../stub_helpers
+import threecode/dirsettings
 
 var
   root: string
@@ -221,3 +222,48 @@ suite "headless cli (binary)":
     removeFile(root / "run" / ".3code" / "config")
     removeFile(root / "run" / ".sandbox")
     stubReplies()  # restore the file for any later run
+
+  test "a project-layer current pin owns selection over the dir sticky":
+    # In dirconfig = "user" mode the per-directory sticky lives under the
+    # config root while the project layer is still the .3code/config in
+    # the tree, so the two can disagree. The project config redefines
+    # the stub provider with a second model (url and key inherited from
+    # the user config) and pins it; the user-root store's sticky names
+    # the first model and resolves, so without the pin-owns rule it
+    # would win on every start.
+    writeFile(root / "cfg" / "3code" / "config", """
+[settings]
+current = "stub.stub-model"
+dirconfig = "user"
+
+[provider]
+name = "stub"
+url = "stub://provider"
+key = "stub"
+family = "glm"
+models = "stub-model"
+""")
+    createDir(root / "run" / ".3code")
+    writeFile(root / "run" / ".3code" / "config", """
+[settings]
+current = "stub.stub-model2"
+
+[provider]
+name = "stub"
+models = "stub-model stub-model2"
+""")
+    let store = root / "cfg" / "3code" / "dirs" /
+        dirsettings.mangleDirPath(root / "run")
+    createDir(store)
+    writeFile(store / "config", "[settings]\ncurrent = \"stub.stub-model\"\n")
+    defer:
+      writeProvider()
+      removeFile(root / "run" / ".3code" / "config")
+      removeDir(store)
+    let r = run(["--headless", "-x", "say something"])
+    check r.code == 0
+    check r.o.len == 0
+    var sawPin = false
+    for f in walkFiles(root / "share" / "3code" / "sessions" / "*.3log"):
+      if "stub-model2" in readFile(f): sawPin = true
+    check sawPin
