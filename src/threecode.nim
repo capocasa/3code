@@ -1003,7 +1003,7 @@ proc main() =
         dropQueuedCommand(cmd)
   )
 
-  proc runModeKickoff(m: ModeDesc): bool
+  proc runModeKickoff(m: ModeDesc; armText = ""): bool
     ## Forward: defined after runTurnWithSafetyNet, used by the command
     ## paths below (runDeferredCommand, the idle loop) and the startup
     ## detection after them.
@@ -1065,8 +1065,9 @@ proc main() =
                             reserveFooter = true)
     if res.startGoalTurn:
       # A mid-turn mode arm (e.g. a queued `:goal`): work starts as soon
-      # as the command has yielded (now).
-      discard runModeKickoff(activeMode(session.cwd))
+      # as the command has yielded (now). The armed mode comes with the
+      # result - a transcript mode is not armed until its kickoff lands.
+      discard runModeKickoff(res.armMode, res.armText)
 
   proc saveSessionReporting(session: Session, messages: JsonNode) =
     ## Submit-path checkpoint: a failed commit is painted into the
@@ -1190,8 +1191,9 @@ proc main() =
 
   # A mode was just armed (`:goal TEXT`, `:cyber ...`) or detected at
   # startup: append the harness-autosent kickoff prompt and run the
-  # turn now - the mode's work begins the moment the file is written
-  # (or found), never at the next turn boundary. The kickoff item in
+  # turn now - the mode's work begins the moment the arm happens
+  # (the file written, or the kickoff message itself for a transcript
+  # mode), never at the next turn boundary. The kickoff item in
   # scrollback is the flag icon plus the goal text alone - no hint line
   # before it, the item itself says what started. The discipline
   # baselines bind here: the first turn is compared against the file as
@@ -1199,16 +1201,21 @@ proc main() =
   # refreshSystemPrompt: the kickoff rides the existing system prompt
   # exactly like the in-turn feedback continuation in turns.nim.
   # Returns true if a buffered quit/interrupt should end the session.
-  proc runModeKickoff(m: ModeDesc): bool =
-    let modeText = readModeText(m, session.cwd)
+  # `armText` is the armed text a transcript mode's verb carried (the
+  # kickoff IS the arm, so it is not in the conversation yet); file
+  # modes ignore it and read their trigger file.
+  proc runModeKickoff(m: ModeDesc; armText = ""): bool =
+    let modeText =
+      if m.transcript: armText else: readModeText(m, session.cwd)
     session.goalNotified = true
     session.modeSnapshot = modeText
     if session.readCache != nil:
       session.changeCountStart = session.readCache.changes.len
-    # A second mode's file on disk while one mode starts is a refused
-    # arming: say so once, right above the kickoff item (same order as
-    # the turn-boundary detection in turns.nim).
-    let other = conflictingMode(m, session.cwd)
+    # A second live mode while one starts is a refused arming: say so
+    # once, right above the kickoff item (same order as the
+    # turn-boundary detection in turns.nim).
+    let other = conflictingMode(m, session.cwd, messages,
+                                session.goalSteps)
     if not noMode(other):
       let conflictBytes = receiptBytes(modeConflictLabel(m, other))
       termengine.noteNonMessageTail(conflictBytes, messages.len)
@@ -1303,17 +1310,18 @@ proc main() =
     tabtitle.paintTabTitleIdle()
     emitTestFrameEvent()
     startupTrace("first-prompt-painted")
-    # A mode trigger file that is already on disk when the session opens
-    # is just as armed as one written by its verb: the file is the whole
-    # protocol, and whoever wrote it (the user, another tool, a previous
-    # session) meant work to happen. Kick the mode's work off now - the
-    # same kickoff path `:goal TEXT` takes - instead of waiting for the
-    # first prompt to hit a turn-end boundary - UNLESS the kickoff
-    # stanza already reached the model (a resumed session: the latch is
-    # persisted, and the content-lead witness covers sessions saved
-    # before the latch existed). Session cwd, not process cwd: same
-    # authority as the turn-end check in turns.nim.
-    let mode = activeMode(session.cwd)
+    # A mode that is already armed when the session opens is just as
+    # live as one armed by its verb mid-session: a trigger file on
+    # disk (whoever wrote it meant work to happen) or, for goal mode,
+    # the conversation's own unretired kickoff - a resumed session
+    # picks the mode back up from the .3log. Kick the mode's work off
+    # now - the same kickoff path `:goal TEXT` takes - instead of
+    # waiting for the first prompt to hit a turn-end boundary - UNLESS
+    # the kickoff stanza already reached the model (a resumed session:
+    # the latch is persisted, and the content-lead witness covers
+    # sessions saved before the latch existed). Session cwd, not
+    # process cwd: same authority as the turn-end check in turns.nim.
+    let mode = activeMode(session.cwd, messages, session.goalSteps)
     if not noMode(mode) and not session.goalNotified and
         not modeKickoffIn(messages):
       if runModeKickoff(mode):
@@ -1447,7 +1455,7 @@ proc main() =
           extraWalkRows = commandResult.preNewlineRows)
         releaseIdleSubmittedInput()
         if commandResult.startGoalTurn:
-          if runModeKickoff(activeMode(session.cwd)):
+          if runModeKickoff(commandResult.armMode, commandResult.armText):
             break
         continue
       if prof.name == "":

@@ -1002,9 +1002,13 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
 
 proc goalVerdictStyle*(verdict: GoalVerdictKind): tuple[glyph, color: string] =
   ## The verdict's own marker and color: green `✓` when satisfied, red
-  ## `✗` for anything else - FEEDBACK and an unreadable verdict alike,
-  ## since a check without a verdict is a failed check, never a pass.
-  if verdict == gvkSatisfied: ("✓", "\x1b[32m")
+  ## `✗` for anything not satisfied - FEEDBACK and an unreadable verdict
+  ## alike, since a check without a verdict is a failed check, never a
+  ## pass - and a dim `⊘` for the user's cancel, which is no verdict at
+  ## all, just the mode ending.
+  case verdict
+  of gvkSatisfied: ("✓", "\x1b[32m")
+  of gvkCancelled: ("⊘", GreyFg)
   else: ("✗", "\x1b[31m")
 
 proc goalStepBytes*(step: GoalStep): string =

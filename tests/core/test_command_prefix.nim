@@ -11,8 +11,6 @@ import threecode/goal
 
 # `:goal` arms land in the directory settings store; legacy goal.md
 # names only apply to sessions armed before the store existed.
-const StoreGoal = ".3code" / "goal"
-const StoreCancelled = ".3code" / "goal-cancelled"
 
 proc withCommandDir(body: proc ()) =
   let dir = createTempDir("cmd-prefix-", "")
@@ -28,6 +26,17 @@ suite "command prefix resolution":
   var prof = Profile()
   var editor: LineEditor
 
+  template freshConvo() =
+    # Goal state lives in the conversation now, so every goal test
+    # starts from a fresh one instead of a fresh directory.
+    messages = %*[{"role": "system", "content": "s"}]
+    session = Session()
+
+  template commitArm(r: CommandResult) =
+    # What the controller does after a successful arm: append the
+    # kickoff message. The kickoff IS the arm.
+    messages.add goalKickoffMessage(r.armText)
+
   test "canonical names: exact, prefix, ambiguous, unknown":
     check canonicalCommandName(":goal") == (":goal", "")
     check canonicalCommandName(":g") == (":goal", "")
@@ -42,11 +51,13 @@ suite "command prefix resolution":
     check classifyCommand(":g ship it") == ckMutating
     check classifyCommand(":g") == ckSafeImmediate
     withCommandDir:
+      freshConvo()
       let r = handleCommandResult(":g ship it", messages, session, prof,
                                   editor)
       check r.recognized and r.ok
       check r.name == "goal"
-      check readFile(StoreGoal).strip == "ship it"
+      commitArm(r)
+      check goalTextFromMessages(messages) == "ship it"
 
   test "ambiguous prefix is an error naming the candidates":
     check classifyCommand(":se") == ckUnknown
@@ -61,52 +72,55 @@ suite "command prefix resolution":
     check "did you mean :goal?" in r.body
 
   test "bang forces :goal over a live goal":
-    withCommandDir:
-      discard handleCommandResult(":g first", messages, session, prof,
+    freshConvo()
+    commitArm handleCommandResult(":g first", messages, session, prof,
                                   editor)
-      let refuse = handleCommandResult(":g second", messages, session,
-                                       prof, editor)
-      check refuse.recognized and not refuse.ok
-      check ":goal!" in refuse.body
-      let replace = handleCommandResult(":goal! second", messages, session,
-                                        prof, editor)
-      check replace.recognized and replace.ok
-      check readFile(StoreGoal).strip == "second"
+    let refuse = handleCommandResult(":g second", messages, session,
+                                     prof, editor)
+    check refuse.recognized and not refuse.ok
+    check ":goal!" in refuse.body
+    let replace = handleCommandResult(":goal! second", messages, session,
+                                      prof, editor)
+    check replace.recognized and replace.ok
+    commitArm(replace)
+    check goalTextFromMessages(messages) == "second"
 
   test "bare :goal! cancels the live goal":
-    withCommandDir:
-      discard handleCommandResult(":g doomed", messages, session, prof,
+    freshConvo()
+    commitArm handleCommandResult(":g doomed", messages, session, prof,
                                   editor)
-      check classifyCommand(":g!") == ckMutating
-      let r = handleCommandResult(":g!", messages, session, prof, editor)
-      check r.recognized and r.ok
-      check "goal-cancelled" in r.body
-      check not fileExists(StoreGoal)
-      check readFile(StoreCancelled).strip == "doomed"
-      let none = handleCommandResult(":g!", messages, session, prof, editor)
-      check none.recognized and not none.ok
-      check "no goal active" in none.body
+    check classifyCommand(":g!") == ckMutating
+    let r = handleCommandResult(":g!", messages, session, prof, editor)
+    check r.recognized and r.ok
+    check "goal cancelled" in r.body
+    check not goalActiveIn(messages, session.goalSteps)
+    let none = handleCommandResult(":g!", messages, session, prof, editor)
+    check none.recognized and not none.ok
+    check "no goal active" in none.body
 
   test "a pasted multi-line :goal arms the whole text":
-    withCommandDir:
-      # The empty rest of the first line after `:goal` (a newline, not a
-      # space) must not leak into the command name: the verb is `:goal`
-      # and every following line is the goal text.
-      let cmd = ":goal\n\ngoal description\non several alines"
-      check classifyCommand(cmd) == ckMutating
-      let r = handleCommandResult(cmd, messages, session, prof, editor)
-      check r.recognized and r.ok
-      check r.name == "goal"
-      check r.body == ""
-      check readFile(StoreGoal) == "goal description\non several alines\n"
+    freshConvo()
+    # The empty rest of the first line after `:goal` (a newline, not a
+    # space) must not leak into the command name: the verb is `:goal`
+    # and every following line is the goal text.
+    let cmd = ":goal\n\ngoal description\non several alines"
+    check classifyCommand(cmd) == ckMutating
+    let r = handleCommandResult(cmd, messages, session, prof, editor)
+    check r.recognized and r.ok
+    check r.name == "goal"
+    check r.body == ""
+    check r.armText == "goal description\non several alines"
+    commitArm(r)
+    check goalTextFromMessages(messages) ==
+      "goal description\non several alines"
 
   test "bare :goal shows the live goal text":
-    withCommandDir:
-      discard handleCommandResult(":goal make it so", messages, session,
+    freshConvo()
+    commitArm handleCommandResult(":goal make it so", messages, session,
                                   prof, editor)
-      let r = handleCommandResult(":g", messages, session, prof, editor)
-      check r.recognized and r.ok
-      check "make it so" in r.body
+    let r = handleCommandResult(":g", messages, session, prof, editor)
+    check r.recognized and r.ok
+    check "make it so" in r.body
 
   test "other commands accept and ignore the bang":
     check classifyCommand(":q!") == ckQuit
@@ -122,6 +136,17 @@ suite "goal command verbs":
   var session = Session()
   var prof = Profile()
   var editor: LineEditor
+
+  template freshConvo() =
+    # Goal state lives in the conversation, so every goal test starts
+    # from a fresh one instead of a fresh directory.
+    messages = %*[{"role": "system", "content": "s"}]
+    session = Session()
+
+  template commitArm(r: CommandResult) =
+    # What the controller does after a successful arm: append the
+    # kickoff message. The kickoff IS the arm.
+    messages.add goalKickoffMessage(r.armText)
 
   test "modeArmWrite classifies the arm-shaped writes":
     check modeArmWrite(":goal make it so")
@@ -148,118 +173,116 @@ suite "goal command verbs":
         check not fileExists(".3code" / "cybernetic")
 
   test ":goal TEXT arms silently; the kickoff item is the announcement":
-    withCommandDir:
-      let r = handleCommandResult(":goal make it so", messages, session,
-                                  prof, editor)
-      check r.recognized and r.ok
-      # An arm answers with no body: the controller commits the ⚑ kickoff
-      # item (flag plus goal text alone) as the whole announcement, and a
-      # receipt or echoed command would only repeat the goal text.
-      check r.body == ""
-      check r.startGoalTurn
-      check readFile(StoreGoal).strip == "make it so"
+    freshConvo()
+    let r = handleCommandResult(":goal make it so", messages, session,
+                                prof, editor)
+    check r.recognized and r.ok
+    # An arm answers with no body: the controller commits the ⚑ kickoff
+    # item (flag plus goal text alone) as the whole announcement, and a
+    # receipt or echoed command would only repeat the goal text.
+    check r.body == ""
+    check r.startGoalTurn
+    check r.armText == "make it so"
+    commitArm(r)
+    check goalActiveIn(messages, session.goalSteps)
 
   test ":goal new is the balking synonym":
-    withCommandDir:
-      let r = handleCommandResult(":goal new first goal", messages, session,
+    freshConvo()
+    commitArm handleCommandResult(":goal new first goal", messages, session,
                                   prof, editor)
-      check r.recognized and r.ok
-      check r.body == ""
-      check readFile(StoreGoal).strip == "first goal"
-      let balk = handleCommandResult(":goal new second goal", messages,
-                                     session, prof, editor)
-      check balk.recognized and not balk.ok
-      check ":goal!" in balk.body
-      check readFile(StoreGoal).strip == "first goal"
-      let usage = handleCommandResult(":goal new", messages, session, prof,
-                                      editor)
-      check usage.recognized and not usage.ok
-      check "usage" in usage.body
+    let balk = handleCommandResult(":goal new second goal", messages,
+                                   session, prof, editor)
+    check balk.recognized and not balk.ok
+    check ":goal!" in balk.body
+    check goalTextFromMessages(messages) == "first goal"
+    let usage = handleCommandResult(":goal new", messages, session, prof,
+                                    editor)
+    check usage.recognized and not usage.ok
+    check "usage" in usage.body
 
   test ":goal cancel retires like bare :goal!":
-    withCommandDir:
-      discard handleCommandResult(":goal doomed", messages, session, prof,
+    freshConvo()
+    commitArm handleCommandResult(":goal doomed", messages, session, prof,
                                   editor)
-      check classifyCommand(":goal cancel") == ckMutating
-      let r = handleCommandResult(":goal cancel", messages, session, prof,
+    check classifyCommand(":goal cancel") == ckMutating
+    let r = handleCommandResult(":goal cancel", messages, session, prof,
+                                editor)
+    check r.recognized and r.ok
+    check "goal cancelled" in r.body
+    check not goalActiveIn(messages, session.goalSteps)
+    let none = handleCommandResult(":goal cancel", messages, session, prof,
+                                   editor)
+    check none.recognized and not none.ok
+    check "no goal active" in none.body
+
+  when defined(posix):
+    test ":goal edit without a live goal edits the scratch copy":
+      freshConvo()
+      let src = getTempDir() / "goal_edit_new.txt"
+      writeFile(src, "fresh goal\n")
+      putEnv("EDITOR", "cp " & src)
+      defer: delEnv("EDITOR")
+      let r = handleCommandResult(":goal edit", messages, session, prof,
                                   editor)
       check r.recognized and r.ok
-      check "goal-cancelled" in r.body
-      check readFile(StoreCancelled).strip == "doomed"
-      let none = handleCommandResult(":goal cancel", messages, session, prof,
-                                      editor)
-      check none.recognized and not none.ok
-      check "no goal active" in none.body
-
-  when defined(posix):
-    test ":goal edit without a live goal creates and opens it":
-      withCommandDir:
-        let src = getTempDir() / "goal_edit_new.txt"
-        writeFile(src, "fresh goal\n")
-        putEnv("EDITOR", "cp " & src)
-        defer: delEnv("EDITOR")
-        let r = handleCommandResult(":goal edit", messages, session, prof,
-                                    editor)
-        check r.recognized and r.ok
-        check r.body == ""
-        check readFile(StoreGoal).strip == "fresh goal"
+      check r.body == ""
+      check r.armText.strip == "fresh goal"
+      commitArm(r)
+      check goalTextFromMessages(messages) == "fresh goal"
 
     test ":goal edit creating nothing arms nothing":
-      withCommandDir:
-        putEnv("EDITOR", "true")
-        defer: delEnv("EDITOR")
-        let r = handleCommandResult(":goal edit", messages, session, prof,
-                                    editor)
-        check r.recognized and r.ok
-        check "not armed" in r.body
-        check not fileExists(GoalFileName)
-        check not fileExists(GoalCancelledName)
-        check not fileExists(StoreGoal)
+      freshConvo()
+      putEnv("EDITOR", "true")
+      defer: delEnv("EDITOR")
+      let r = handleCommandResult(":goal edit", messages, session, prof,
+                                  editor)
+      check r.recognized and r.ok
+      check "not armed" in r.body
+      check not goalActiveIn(messages, session.goalSteps)
 
-  when defined(posix):
     test ":goal edit rewrites the live goal in $EDITOR":
-      withCommandDir:
-        discard handleCommandResult(":goal original text", messages, session,
+      freshConvo()
+      commitArm handleCommandResult(":goal original text", messages, session,
                                     prof, editor)
-        # `cp <src>` + appended target = `cp <src> goal.md`.
-        let src = getTempDir() / "goal_edit_src.txt"
-        writeFile(src, "edited text\n")
-        putEnv("EDITOR", "cp " & src)
-        defer: delEnv("EDITOR")
-        let r = handleCommandResult(":goal edit", messages, session, prof,
-                                    editor)
-        check r.recognized and r.ok
-        check r.body == ""
-        check readFile(StoreGoal).strip == "edited text"
+      # `cp <src>` + appended target = `cp <src> <scratch copy>`.
+      let src = getTempDir() / "goal_edit_src.txt"
+      writeFile(src, "edited text\n")
+      putEnv("EDITOR", "cp " & src)
+      defer: delEnv("EDITOR")
+      let r = handleCommandResult(":goal edit", messages, session, prof,
+                                  editor)
+      check r.recognized and r.ok
+      check r.body == ""
+      commitArm(r)
+      check goalTextFromMessages(messages) == "edited text"
 
-    test ":goal edit with an emptied file cancels the goal":
-      withCommandDir:
-        discard handleCommandResult(":goal original text", messages, session,
+    test ":goal edit with an emptied scratch cancels the goal":
+      freshConvo()
+      commitArm handleCommandResult(":goal original text", messages, session,
                                     prof, editor)
-        let src = getTempDir() / "goal_edit_empty.txt"
-        writeFile(src, "\n")
-        putEnv("EDITOR", "cp " & src)
-        defer: delEnv("EDITOR")
-        let r = handleCommandResult(":goal edit", messages, session, prof,
-                                    editor)
-        check r.recognized and r.ok
-        check "goal-cancelled" in r.body
-        check not fileExists(GoalFileName)
-        check not fileExists(StoreGoal)
+      let src = getTempDir() / "goal_edit_empty.txt"
+      writeFile(src, "\n")
+      putEnv("EDITOR", "cp " & src)
+      defer: delEnv("EDITOR")
+      let r = handleCommandResult(":goal edit", messages, session, prof,
+                                  editor)
+      check r.recognized and r.ok
+      check "goal cleared" in r.body
+      check not goalActiveIn(messages, session.goalSteps)
 
     test ":goal edit with unchanged text does not re-kick":
-      withCommandDir:
-        discard handleCommandResult(":goal stable text", messages, session,
+      freshConvo()
+      commitArm handleCommandResult(":goal stable text", messages, session,
                                     prof, editor)
-        let src = getTempDir() / "goal_edit_same.txt"
-        writeFile(src, "stable text\n")
-        putEnv("EDITOR", "cp " & src)
-        defer: delEnv("EDITOR")
-        let r = handleCommandResult(":goal edit", messages, session, prof,
-                                    editor)
-        check r.recognized and r.ok
-        check "unchanged" in r.body
-        check readFile(StoreGoal).strip == "stable text"
+      let src = getTempDir() / "goal_edit_same.txt"
+      writeFile(src, "stable text\n")
+      putEnv("EDITOR", "cp " & src)
+      defer: delEnv("EDITOR")
+      let r = handleCommandResult(":goal edit", messages, session, prof,
+                                  editor)
+      check r.recognized and r.ok
+      check "unchanged" in r.body
+      check goalTextFromMessages(messages) == "stable text"
 
 suite ":retry command":
   var messages = %* []

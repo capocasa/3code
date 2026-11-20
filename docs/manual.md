@@ -1377,20 +1377,26 @@ covers most of the same ground at a fraction of the context cost.
 
 ## Goal mode
 
-Goal mode is the sturdier option for a long coding task. Drop a `goal.md` into
-the project root stating the goal: what must be true when the work is done,
-how to verify it. Anyone can write the file — you directly, or the model when
-you ask for multi-part work.
+Goal mode is the sturdier option for a long coding task. Arm one with
+`:goal <text>` stating the goal: what must be true when the work is done,
+how to verify it.
 
-While `goal.md` exists, every turn end runs a satisfaction check: a fresh
+The goal lives in the session's own scrollback, not in a file: the `⚑`
+kickoff message is the goal, the verifier's verdict rows are its
+retirement records, and a resumed session derives the mode from the
+`.3log` alone — there is no `goal.md` to write, share, or clean up, and
+nothing another session or tool can do to the goal from disk.
+
+While a goal is armed, every turn end runs a satisfaction check: a fresh
 side conversation with the session's own model, given the goal text, a
 summary of what the turn actually did (files, patches, commands — never the
 agent's own claims), and the session change log — the net per-path record
 of everything the session changed on disk, shell commands included —
 judges from those inputs alone and answers with a verdict. Not satisfied,
 the agent is sent back in
-with the verifier's feedback. Satisfied, the harness renames the file to
-`achieved.md` (the record of the run) and idles. The check has no
+with the verifier's feedback. Satisfied, the goal retires — the green `✓`
+row the check just painted is the whole record — and the session idles
+until a new `:goal` arms the next one. The check has no
 tools and no rounds: orientation is the harness's job, so the check is one
 model call. And it shows its work: the verifier's reply lands in scrollback
 as a dim quote block of its own — a solid vertical rule down the left,
@@ -1446,34 +1452,27 @@ glance. A verifier that stops resolving (provider removed, key gone) is
 skipped with a visible note — the check falls back to the session model
 rather than going silent.
 
-The file is the whole interface — existence is the mode, and work starts
-the moment the file exists. Edit `goal.md` mid-run to steer (`:goal edit`
-opens it in `$VISUAL/$EDITOR`, creating it when missing; a changed file
-restarts the goal work at once), delete
-it to end goal mode silently, interrupt to pause. Arming starts work
-immediately: `:goal <text>` writes the file and runs the kickoff turn
-with no echoed command line and no receipt — the kickoff item is the
-arm's whole announcement, and repeating the goal text above it would
-say it twice; a `goal.md` that is already on disk when 3code starts
-does the same before any prompt. The kickoff speaks
-as one scrollback item — the `⚑` flag plus the goal text alone — and
-the stanza is fed exactly once per arming: resuming a session never
-re-feeds it, the check just runs at the next turn end. Each turn end
-runs the check; the verifier's
-reply is the whole display, a dim quote block led by a green `✓` or a
-red `✗` (the verdict line itself is stripped; a failed or unreadable
-check shows the same red `✗` row). A satisfied verdict
-retires the file to `achieved.md`; an unmet one sends the agent back
-in: the feedback lands as a `⚑` row and the next turn starts on its
-own, no key pressed.
-`:goal cancel` (or
-`:goal!`) cancels
-the active goal, retiring the file to `goal-cancelled.md` (`:goal new
-<text>` is the balking synonym that refuses a live goal, `:goal! <text>`
-replaces it, bare `:goal` shows it). A failing verifier call is retried at
-the next turn end; the harness does not give up on its own, but if it ever
-does the record lands in `goal-given-up.md`. Retired files accumulate
-harmlessly; delete or archive them whenever.
+Arming starts work immediately: `:goal <text>` lands the kickoff in the
+conversation and runs the kickoff turn with no echoed command line and no
+receipt — the kickoff item is the arm's whole announcement, and repeating
+the goal text above it would say it twice. The kickoff speaks as one
+scrollback item — the `⚑` flag plus the goal text alone — and the stanza
+is fed exactly once per arming: resuming a session never re-feeds it, the
+check just runs at the next turn end. Each turn end runs the check; the
+verifier's reply is the whole display, a dim quote block led by a green
+`✓` or a red `✗` (the verdict line itself is stripped; a failed or
+unreadable check shows the same red `✗` row). A satisfied verdict
+retires the goal; an unmet one sends the agent back in: the feedback
+lands as a `⚑` row and the next turn starts on its own, no key pressed.
+`:goal cancel` (or `:goal!`) cancels the active goal — a dim `⊘` row is
+the retirement record (`:goal new <text>` is the balking synonym that
+refuses a live goal, `:goal! <text>` replaces it, bare `:goal` shows
+it, `:goal edit` revises the text in `$VISUAL/$EDITOR` through a scratch
+copy: a changed text re-arms, an emptied one cancels). Interrupt pauses
+(work and check skip; the goal stays armed). A failing verifier call is
+retried at the next turn end; the harness does not give up on its own.
+A `goal.md` left in the project root by an older 3code arms nothing —
+the conversation is the whole protocol now.
 
 ## No sub-agents
 

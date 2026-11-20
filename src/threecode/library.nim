@@ -41,7 +41,7 @@
 import std/[json, os, strutils, tables, times, atomics, locks]
 import types, util, prompts, session, config, actions, api, compact, display,
        ui, plugins, auth_xai, auth_openai, auth_google, sandbox, minline,
-       transcript, turns
+       transcript, turns, goal
 import btwthread
 import dirsettings
 import fatprompt as fatruntime
@@ -553,6 +553,23 @@ proc command*(s: AgentSession; cmd: string): string =
   if not res.recognized:
     return "unknown command: " & cmd.strip & "  (try :help)"
   result = normalizeItem(res.body)
+  if res.startGoalTurn and not noMode(res.armMode):
+    # The REPL controller appends the kickoff message and runs the
+    # kickoff turn the moment a mode-verb arm yields; this API is the
+    # controller here, so the arm does the same before it returns. A
+    # transcript mode IS its kickoff message - skipping this would
+    # validate the arm and then drop it on the floor.
+    s.state.goalNotified = true
+    s.state.modeSnapshot =
+      if res.armMode.transcript: res.armText
+      else: readModeText(res.armMode, s.state.cwd, s.messages)
+    if s.state.readCache != nil:
+      s.state.changeCountStart = s.state.readCache.changes.len
+    s.messages.add res.armMode.kickoffMessage(
+      if res.armMode.transcript: res.armText
+      else: readModeText(res.armMode, s.state.cwd, s.messages))
+    saveSession(s.state, s.messages)
+    result = normalizeItem(promptBody(s, ""))
   # A `:btw` fires on a worker thread (the REPL command never blocks);
   # this API is synchronous by contract, so the answer is joined and
   # folded into the returned body instead of being dropped. Its tokens

@@ -1,5 +1,6 @@
-## The mode registry substrate: one mode = one trigger file + one verb,
-## goal mode is entry #1, and arming is mutually exclusive across modes.
+## The mode registry substrate: one mode = one verb and one state model
+## (a trigger file, or the conversation itself), goal mode is entry #1,
+## and arming is mutually exclusive across modes.
 ## The goal-mode entry itself is behavior-covered by test_goal.nim; this
 ## suite exercises the registry walks with a second, synthetic mode so
 ## exclusivity is testable before cybernetic mode exists.
@@ -123,6 +124,7 @@ suite "cybernetic mode entry":
       check modeRegistry.len >= 2
       let m = modeRegistry[1]
       check m.name == "cybernetic"
+      check not m.transcript
       check m.fileName == CyberFileName
       check m.verb == ":cyber"
       check m.confirmedName == CyberConfirmedName
@@ -142,16 +144,23 @@ suite "cybernetic mode entry":
   when cyberneticBuild:
     test "mutual exclusivity with the real registry entries":
       withModeDir proc (dir: string) =
-        check startGoal("live goal").ok
-        let r = startMode(cyberneticMode, "my plan")
+        var session: Session
+        var msgs = newJArray()
+        proc armGoal(text: string) =
+          msgs.add goalKickoffMessage(text)
+        armGoal("live goal")
+        let r = startMode(cyberneticMode, "my plan", messages = msgs,
+                          steps = session.goalSteps)
         check not r.ok
-        check ".3code/goal (goal mode) is already active" in r.err
+        check "goal mode is already active" in r.err
         check ":goal!" in r.err
         check not fileExists(CyberFileName)
         check not fileExists(".3code" / "cybernetic")
-        check cancelGoal().ok
-        check startMode(cyberneticMode, "my plan").ok
-        let r2 = startGoal("back again")
+        check retireGoalCancelled(session, msgs)
+        check startMode(cyberneticMode, "my plan", messages = msgs,
+                        steps = session.goalSteps).ok
+        let r2 = startGoal("back again", messages = msgs,
+                           steps = session.goalSteps)
         check not r2.ok
         check ".3code/cybernetic (cybernetic mode) is already active" in r2.err
 
@@ -188,23 +197,26 @@ suite "cybernetic mode entry":
         let other = conflictingMode(goalMode)
         check other.name == "cybernetic"
         let label = modeConflictLabel(goalMode, other)
-        check label.startsWith(CyberFileName & " is also on disk")
+        check label.startsWith(CyberFileName & " on disk is also active")
         check ":goal!" in label and ":cyber" in label
 
 suite "mode registry":
-  test "goal mode is entry #1; activeMode walks the registry":
+  test "goal mode is entry #1, transcript-armed; activeMode walks the registry":
     check modeRegistry.len >= 1
-    check modeRegistry[0].fileName == GoalFileName
+    check modeRegistry[0].name == "goal"
+    check modeRegistry[0].transcript
+    check modeRegistry[0].fileName == ""
+    check modeRegistry[0].verb == ":goal"
     withModeDir proc (dir: string) =
-      check noMode(activeMode())
-      writeFile(GoalFileName, "the goal\n")
-      let m = activeMode()
+      # A goal.md on disk arms nothing anymore: the conversation is the
+      # protocol, and an empty one has no mode.
+      writeFile("goal.md", "the goal\n")
+      check noMode(activeMode(".", newJArray(), @[]))
+      let msgs = %*[goalKickoffMessage("the goal")]
+      let m = activeMode(".", msgs, @[])
       check not noMode(m)
       check m.name == "goal"
-      check m.fileName == GoalFileName
-      check m.verb == ":goal"
-      check m.confirmedName == GoalConfirmedName
-      check m.cancelledName == GoalCancelledName
+      check readModeText(m, ".", msgs) == "the goal"
 
   test "a second registry entry is discovered by the walk":
     withModeDir proc (dir: string) =
@@ -224,27 +236,28 @@ suite "mode registry":
   test "mutual exclusivity: arming a second mode is refused":
     withModeDir proc (dir: string) =
       withSynthMode proc () =
-        discard startGoal("first things first")
-        let r = startMode(synthMode(), "mine now")
+        let msgs = %*[goalKickoffMessage("first things first")]
+        let r = startMode(synthMode(), "mine now", dir = ".", messages = msgs)
         check not r.ok
-        # The teaching error names the live mode's file and its exit.
-        check ".3code/goal" in r.err
+        # The teaching error names the live mode and its exit.
+        check "goal mode" in r.err
         check ":goal!" in r.err
         check not fileExists("synth.md")
 
   test "exclusivity is not forceable in either direction":
     withModeDir proc (dir: string) =
       withSynthMode proc () =
-        discard startGoal("live")
-        # Force replaces a mode's own live file, never another mode's.
-        let r = startMode(synthMode(), "force it", force = true)
+        let msgs = %*[goalKickoffMessage("live")]
+        # Force replaces a mode's own live state, never another mode's.
+        let r = startMode(synthMode(), "force it", force = true,
+                          messages = msgs)
         check not r.ok
         check "mutually exclusive" in r.err
         writeFile("synth.md", "synth live\n")
-        let r2 = startGoal("steal it back", force = true)
+        let r2 = startGoal("steal it back", force = true, messages = msgs)
         check not r2.ok
         check "synth.md" in r2.err
-        check readFile(".3code" / "goal").strip == "live"
+        check goalTextFromMessages(msgs) == "live"
 
   test "cancelMode and completeMode retire through the descriptor":
     withModeDir proc (dir: string) =

@@ -1566,7 +1566,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, lay out a task list first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
 
 # Output
 
@@ -1724,7 +1724,7 @@ No command injection, XSS, SQL injection, path traversal, or unescaped shell-out
 
 # Skills
 
-Load on demand when a skill fits the task; don't preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
+Load on demand when a skill fits the task; don't preload the catalog. For work with more than ~2 moving parts, lay out a task list first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
 
 # Output
 
@@ -1826,7 +1826,7 @@ Calibrated to refuse rather than guess. If the answer cannot be supported by the
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, lay out a task list first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
 
 # Attribution
 
@@ -2065,7 +2065,7 @@ No command injection, XSS, SQL injection, path traversal, or unescaped shell-out
 
 # Skills
 
-Load on demand when a skill fits the task; don't preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
+Load on demand when a skill fits the task; don't preload the catalog. For work with more than ~2 moving parts, lay out a task list first (goal statement, steps, verification) and keep working until the goal is met. {{skills}}
 
 # Output
 
@@ -3164,7 +3164,7 @@ No command injection, XSS, SQL injection, path traversal, or unescaped shell-out
 
 # Skills
 
-Load on demand when a skill fits; never preload the catalog. More than ~2 moving parts: write goal.md first (goal statement, steps, verification) and work until it is met. {{skills}}
+Load on demand when a skill fits; never preload the catalog. More than ~2 moving parts: lay out a task list first (goal statement, steps, verification) and work until it is met. {{skills}}
 
 # Output
 
@@ -3988,7 +3988,7 @@ when cyberneticBuild:
                       cybernetic-cancelled.md)
   :cyber! TEXT        replace an active plan and restart toward it
   (goal and cybernetic modes are mutually exclusive: one mode, one
-  file, one verb)
+  verb)
 """
   const CyberAbbrev* = ":cy = :cyber, "
 else:
@@ -4039,20 +4039,21 @@ commands:
   :computer on|off   let the model see and drive this desktop for the
                       session (vision models only; a one-time note enters
                       the chat)
-  :goal               show the active goal (.3code/goal or goal.md in
-                      this directory)
-  :goal TEXT          write the goal file and start working toward it at once:
-                      while the file exists, a read-only verifier checks
-                      at every turn end and sends the agent back until
-                      the goal is satisfied (file retired to achieved)
+  :goal               show the active goal
+  :goal TEXT          arm the goal and start working toward it at once: a
+                      read-only verifier checks at every turn end and
+                      sends the agent back until the goal is satisfied.
+                      The goal lives in this session's conversation - a
+                      resumed session keeps it, a satisfied check
+                      retires it (its ✓ row is the record), a new :goal
+                      arms the next one
   :goal new TEXT      same, but bawks when a goal is already active
-  :goal edit          revise the goal file in $VISUAL/$EDITOR, creating it
-                      when missing (a changed file restarts goal work
-                      immediately)
+  :goal edit          revise the goal text in $VISUAL/$EDITOR (a changed
+                      text re-arms and restarts the work at once)
   :goal cancel        cancel the active goal (same as :goal!)
   :goal! TEXT         replace an active goal and restart toward it
-  :goal!              cancel the active goal (retires to goal-cancelled.md;
-                      interrupt only skips one satisfaction check)
+  :goal!              cancel the active goal; interrupt only skips one
+                      satisfaction check
 """ & CyberHelp & """  :prompt             show the active system prompt
   :show [N]           follow tool call N live while it runs (default: the
                       running call, else the last); dump full output when done
