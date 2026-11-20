@@ -285,7 +285,7 @@ proc accEraseLine(a: var LineAcc; mode: int) =
   case mode
   of 1:
     if a.phys.len > 0:
-      a.phys.delete(0, min(a.col, a.phys.len - 1))
+      a.phys.delete(0 .. min(a.col, a.phys.len - 1))
     a.col = 0
   of 2:
     a.phys.setLen(0)

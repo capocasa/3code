@@ -2,6 +2,16 @@ Changelog
 
 Unreleased
 
+- **The whitespace patch strategy anchors at the first match.** The
+  collapsed-whitespace fallback (taken when the search block differs
+  from the file by interior whitespace runs) kept scanning past its
+  first hit and patched the last matching position, while the exact
+  and indent strategies both take the first; a search block that
+  squashes equal in two places now edits the first occurrence like
+  its siblings. Surfaced by the new UnnamedBreak warning, which
+  showed the loop's `break` bound to the inner candidate block.
+  (`tests/shell/test_actions_extra.nim`)
+
 - **A write to a sandbox policy file names the real rule: only the
   user can change sandbox rules.** The policy slots ride every load
   as hidden read-only guards no rule in the file can weaken, so a

@@ -2243,12 +2243,13 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # one-line notice plus the stack trace to stderr and quit cleanly
     # so the user isn't left staring at a dead prompt after a crash
     # that would otherwise vanish silently.
-    when not defined(release):
+    when defined(release):
+      let trace = e.getStackTrace()
+      stderr.writeLine "3code: internal error during turn: " & e.msg
+      if trace.len > 0:
+        stderr.writeLine trace
+      stderr.writeLine "3code: session saved at " & session.savePath &
+        ". Please open an issue with the lines above."
+      quit()
+    else:
       raise
-    let trace = e.getStackTrace()
-    stderr.writeLine "3code: internal error during turn: " & e.msg
-    if trace.len > 0:
-      stderr.writeLine trace
-    stderr.writeLine "3code: session saved at " & session.savePath &
-      ". Please open an issue with the lines above."
-    quit()

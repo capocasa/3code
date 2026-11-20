@@ -275,6 +275,16 @@ suite "fuzzy patch matching":
     check strategy == "whitespace"
     check newText == "qux\nbaz\n"
 
+  test "interior whitespace collapse anchors at the first match":
+    # Like every other strategy (exact `find`, findFirstLineIdx), the
+    # whitespace scan must take the first candidate, not the last.
+    let file = "foo   bar\nbaz\nfoo  bar\n"
+    let search = "foo bar\n"
+    let (newText, ok, strategy) = fuzzyReplaceFirst(file, search, "qux\n")
+    check ok
+    check strategy == "whitespace"
+    check newText == "qux\nbaz\nfoo  bar\n"
+
   test "no match returns not ok":
     let (newText, ok, strategy) = fuzzyReplaceFirst(
       "one\ntwo\n", "three", "x")

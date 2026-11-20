@@ -848,7 +848,7 @@ proc renderAssistantContentBytes*(content: string;
       result.add body
   while result.len > 0 and result[^1] in {'\r', '\n'}:
     result.setLen(result.len - 1)
-  if result.startsWith("\r\n"): result.delete(0, 1)
+  if result.startsWith("\r\n"): result.delete(0..1)
 
 proc toolIcon*(kind: ActionKind): string =
   case kind

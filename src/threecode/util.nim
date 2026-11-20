@@ -426,7 +426,7 @@ when defined(posix):
       if path.len == 0:
         debugLogFd = -2
         return
-      debugLogFd = posix.open(path, O_WRONLY or O_APPEND or O_CREAT, 0o600)
+      debugLogFd = posix.open(path.cstring, O_WRONLY or O_APPEND or O_CREAT, 0o600)
       if debugLogFd < 0:
         debugLogFd = -2
         return
@@ -1578,13 +1578,14 @@ func fuzzyReplaceFirst*(s, needle, repl: string): tuple[newText: string, ok: boo
     if headSq.len == 0: break wsCheck
     var wsStart = -1
     if fileLines.len >= needleLines.len:
-      for i in 0 .. fileLines.len - needleLines.len:
-        block c2:
-          for j in 0 ..< needleLines.len:
-            if squash(fileLines[i + j]) != squash(needleLines[j]):
-              break c2
-          wsStart = i
-          break
+      block scan:
+        for i in 0 .. fileLines.len - needleLines.len:
+          block c2:
+            for j in 0 ..< needleLines.len:
+              if squash(fileLines[i + j]) != squash(needleLines[j]):
+                break c2
+            wsStart = i
+            break scan
     if wsStart < 0: break wsCheck
     var replLines = repl.splitLines
     while replLines.len > 0 and replLines[^1].strip.len == 0:

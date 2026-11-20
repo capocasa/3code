@@ -1192,15 +1192,16 @@ proc main() =
         "terminal, reattach before sending more prompts."
       result = true   # treat as quit so the REPL loop exits cleanly
     except CatchableError as e:
-      when not defined(release):
+      when defined(release):
+        let trace = e.getStackTrace()
+        stderr.writeLine "3code: internal error during turn: " & e.msg
+        if trace.len > 0:
+          stderr.writeLine trace
+        stderr.writeLine "3code: session saved at " & session.savePath &
+          ". Please open an issue with the lines above."
+        result = true
+      else:
         raise
-      let trace = e.getStackTrace()
-      stderr.writeLine "3code: internal error during turn: " & e.msg
-      if trace.len > 0:
-        stderr.writeLine trace
-      stderr.writeLine "3code: session saved at " & session.savePath &
-        ". Please open an issue with the lines above."
-      result = true
 
   # A mode was just armed (`:goal TEXT`, `:cyber ...`) or detected at
   # startup: append the harness-autosent kickoff prompt and run the
@@ -1508,14 +1509,15 @@ proc main() =
       "); session saved."
     quit(0)
   except CatchableError as e:
-    when not defined(release):
+    when defined(release):
+      let trace = e.getStackTrace()
+      stderr.writeLine "3code: internal error: " & e.msg
+      if trace.len > 0:
+        stderr.writeLine trace
+      stderr.writeLine "3code: session saved at " & session.savePath &
+        ". Please open an issue with the lines above."
+      quit(1)
+    else:
       raise
-    let trace = e.getStackTrace()
-    stderr.writeLine "3code: internal error: " & e.msg
-    if trace.len > 0:
-      stderr.writeLine trace
-    stderr.writeLine "3code: session saved at " & session.savePath &
-      ". Please open an issue with the lines above."
-    quit(1)
 when isMainModule:
   main()

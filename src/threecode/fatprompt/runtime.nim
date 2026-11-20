@@ -2506,7 +2506,7 @@ proc editBufferInExternalEditor(ed: var minline.LineEditor) =
   let editor = getEnv("VISUAL", getEnv("EDITOR",
     when defined(windows): "notepad" else: "vi"))
   when defined(posix):
-    discard chmod(tmpFile, 0o600)
+    discard chmod(tmpFile.cstring, 0o600)
     # Suspend raw mode so the editor sees a cooked terminal: snapshot the
     # current (raw) mode, restore the cooked original, run the editor,
     # then re-apply the raw snapshot. The cooked snapshot itself must
