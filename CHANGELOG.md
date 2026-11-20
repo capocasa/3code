@@ -2,6 +2,28 @@ Changelog
 
 Unreleased
 
+- **Ungranted /dev device nodes are masked, not merely unopenable.**
+  Landlock gates open(2) but not stat(2) or faccessat(2), so a fenced
+  command probing a world-writable node like /dev/kvm saw the live
+  device owned by nobody:nobody (the namespace maps only the
+  launching user) and `test -r && test -w` printed "rw OK" - rw
+  access nothing would honor, with no denial for the ask gate to
+  redeem. box.nim now binds a mode-0000 user-owned scratch file
+  over every /dev device node the effective grants do not cover
+  (baseline nodes, policy roots, and /dev/ptmx plus runtime-created
+  slaves stay live, so pty allocation and `2>/dev/null` keep
+  working): listings show an owned permission-less file instead of
+  nobody's device, the probes fail, and a real open dies EACCES -
+  the denial shape the bash ask gate scrapes where the policy
+  floors the path at ask, so `allow /dev/kvm` at the prompt lifts
+  the mask on the next launch and the device opens for real. An
+  accumulated `allow /dev/pts`-style grant still exposes every
+  live pty slave on the box - the user's rule to narrow, not the
+  fence's to override. Runs that never entered a user namespace
+  keep the true owner display and skip the mask; unavailable
+  namespaces degrade with a notice like every other backend gap.
+  (`tests/core/test_sandbox_devices.nim`)
+
 - **The whitespace patch strategy anchors at the first match.** The
   collapsed-whitespace fallback (taken when the search block differs
   from the file by interior whitespace runs) kept scanning past its
