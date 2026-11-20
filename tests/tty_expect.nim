@@ -1304,6 +1304,19 @@ proc rowContaining*(s: TtySession; text: string): int =
       return i
   -1
 
+proc dumpTailFrames*(s: TtySession; n = 5): string =
+  ## The last `n` frames, non-empty rows only: the child's most recent
+  ## output. A wrong-exit-code failure's reason (an unhandled exception
+  ## or `3code: internal error` line) is painted there, and without this
+  ## dump the assert names only the code, never the cause.
+  let start = max(0, s.frames.len - max(1, n))
+  for i in start ..< s.frames.len:
+    let frame = s.frames[i]
+    result.add &"frame {i} @{frame.ms}ms changed={frame.changedRows}\n"
+    for row in frame.rows:
+      if row.len > 0:
+        result.add row & "\n"
+
 proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
   var hits: seq[int]
   for i, frame in s.frames:
@@ -1313,14 +1326,7 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
         break
 
   if hits.len == 0:
-    let start = max(0, s.frames.len - max(1, radius * 2 + 1))
-    for i in start ..< s.frames.len:
-      let frame = s.frames[i]
-      result.add &"frame {i} @{frame.ms}ms changed={frame.changedRows}\n"
-      for row in frame.rows:
-        if row.len > 0:
-          result.add row & "\n"
-    return
+    return s.dumpTailFrames(radius * 2 + 1)
 
   var ranges: seq[tuple[first, last: int]]
   for hit in hits:
@@ -1852,7 +1858,8 @@ proc expectExit*(s: TtySession; code: int; timeoutMs = 5000): bool {.discardable
   while epochTime() < deadline:
     s.drain(0, recordFrame = false)
     if s.exited:
-      doAssert s.exitCode == code, &"expected exit code {code}, got {s.exitCode}"
+      doAssert s.exitCode == code, &"expected exit code {code}, got {s.exitCode}\n" &
+        s.dumpTailFrames()
       return true
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
