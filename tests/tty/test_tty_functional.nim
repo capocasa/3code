@@ -31,6 +31,12 @@ proc scenarioOnly(): string =
   ## functional <name>`); empty means "run everything" (testament).
   if paramCount() > 0: paramStr(1) else: ""
 
+# unittest treats every argv element as an exact test-name filter, so a
+# scenario run selected zero tests and proved nothing. Opt out when a
+# scenario name is given; testament's no-arg invocation is unchanged.
+if paramCount() > 0:
+  disableParamFiltering()
+
 
 # Scratch fixtures live outside the checkout: the spawned binary
 # discovers project-local `.3code/config` by walking up from its cwd,
