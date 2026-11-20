@@ -345,7 +345,9 @@ suite "api request shaping":
     # Hy4's chat template accepts exactly high and no_think; Hy3 keeps low.
     check knownGoodReasonings("openrouter", "tencent/hy4-preview") == @["no_think", "high"]
     check knownGoodReasonings("tencent", "hy4-preview") == @["no_think", "high"]
+    check knownGoodReasonings("deepinfra", "tencent/Hy4-preview") == @["no_think", "high"]
     check knownGoodReasonings("openrouter", "tencent/hy3") == @["no_think", "low", "high"]
+    check knownGoodContextWindow("deepinfra", "tencent/Hy4-preview") == 1_000_000
 
   test "mistral: medium/large-4 none/high, large-3 no knob":
     check knownGoodReasonings("mistral", "mistral-medium-3-5") == @["none", "high"]

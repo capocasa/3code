@@ -528,6 +528,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # (default) or no_think; preserved thinking. Tencent recommends temp
     # 0.9; held at 0.6 for agentic tool-call reliability.
     ("openrouter", "tencent/hy4-preview", "hy", "4", "preview", "high", 0.6, 65536, tbAllTurns, false, 1_000_000, false, false),
+    # DeepInfra lists it with the capital H, same spelling quirk as its
+    # Hy3 row; its catalog gives the full 1,048,576-token window.
+    ("deepinfra", "tencent/Hy4-preview", "hy", "4", "preview", "high", 0.6, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("tencent", "hy4-preview", "hy", "4", "preview", "high", 0.6, 65536, tbAllTurns, false, 1_000_000, false, false),
 
     # grok (xAI first-party API, api.x.ai/v1; OpenAI-compatible)
