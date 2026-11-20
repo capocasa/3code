@@ -1,6 +1,12 @@
 import std/[json, os, strutils, unittest]
 import threecode/[prompts, compact, types]
 
+# unittest treats every argv element as an exact test-name filter, so the
+# documented `--regen-golden` invocation silently selected zero tests and
+# regenerated nothing. Opt out of that filtering when regenerating.
+if "--regen-golden" in commandLineParams():
+  disableParamFiltering()
+
 const GoldenFamilies = [
   "laguna", "glm", "kolibri", "minimax", "longcat", "qwen", "hy",
   "mistral", "deepseek", "gpt", "gpt-oss", "other", "0xalpha",
