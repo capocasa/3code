@@ -24,6 +24,32 @@ Unreleased
   machinery
   (`tests/core/test_session.nim`, `tests/tty/test_goal_mode_ctrlr.nim`).
 
+- **The sandboxed shell runs as you, not as nobody.** sandwall enters
+  a user+mount namespace for the deny masks (and the network fence)
+  and composed the namespace's id-map writes from ids read only AFTER
+  unshare(2) - by then they already showed as the unmapped overflow
+  65534, the kernel rejected the "0 65534 1" line (an unprivileged
+  writer may map only its own id), sandwall degraded, and every
+  fenced command ran stranded in an unmapped namespace: `id` said
+  `nobody` while the inherited env said `USER=carlo`, every file in a
+  listing read `nobody:nobody`, ssh and git tripped over a passwd
+  home of `/` and dubious repo ownership, and a sandboxed agent
+  naturally misread its own project as remotely owned. The fix
+  belongs in sandwall and only there: the kernel binds a /proc
+  id-map file to the task's user namespace at OPEN time and checks
+  the write against the opener's credentials, so no wrapper-side fd
+  trick can reach the stranded namespace (a pre-unshare handle names
+  the immutable initial map; a handle opened after restrict() is
+  EACCES under the Landlock domain). sandwall 0.5.15 reads the
+  ids BEFORE the unshare and self-maps the user onto themselves, so
+  the confined tree sees the world as the user who launched it;
+  the manifest now requires sandwall >= 0.5.15. The box driver
+  keeps a degrade guard (box.nim repairUsernsIds): it detects a
+  still-unmapped namespace -
+  sandwall too old, a nested run from an already-unmapped namespace
+  where no outer id is expressible, or a run nested under an outer
+  Landlock domain that denies the map-file opens outright - and says
+  so instead of failing the run (`tests/core/test_sandbox_userns.nim`).
 - **The token bar sums every side call at a rest, never just the
   latest.** A rest's token bar is the SUM of its requests - the turn's
   final call plus each harness side call that landed on it - but the

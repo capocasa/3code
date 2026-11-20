@@ -374,12 +374,15 @@ when defined(posix):
     ##   Without host rules the network is open and no tunnel is
     ##   needed, but the pw_dir repair below still is.
     ##
-    ## * repair the defaults that break under the fence. The fenced
-    ##   child runs as uid 65534 (nobody), whose passwd home is /, so
-    ##   ssh's pw_dir-based defaults would look under /.ssh: no config
-    ##   aliases, no default identities, no known_hosts. The file
-    ##   carries a copy of ~/.ssh/config with ~ rewritten to the
-    ##   absolute home, plus explicit fallbacks.
+    ## * repair the defaults that break under the fence. With the
+    ## user namespace mapped (box.nim repairs sandwall's stranded
+    ## unmapped namespace) the fenced uid is the launching user's and
+    ## pw_dir is right; when that repair degrades (a nested run from
+    ## an already-unmapped namespace), the child is uid 65534 (nobody),
+    ## whose passwd home is /, and ssh's pw_dir-based defaults would
+    ## look under /.ssh: no config aliases, no default identities, no
+    ## known_hosts. The file carries a copy of ~/.ssh/config with ~
+    ## rewritten to the absolute home, plus explicit fallbacks.
     ##
     ## Not covered: scp and sftp, whose OpenSSH 9.8+ binaries exec
     ## /usr/bin/ssh by absolute path - no PATH shim or env reaches
@@ -411,9 +414,10 @@ when defined(posix):
           text.add(line.replace("~/", home) & "\n")
       except CatchableError: discard  # unreadable: defaults only
     text.add "\n# 3code wall proxy (sandbox fence)\nHost *\n"
-    # the fenced uid is 65534, so ssh would log in as nobody@...;
-    # the launching user's name is the right default (a User in the
-    # user's own stanzas, or user@host / -l, still wins: first match)
+    # when the id mapping degrades, the fenced uid is 65534 and ssh
+    # would log in as nobody@...; the launching user's name is the
+    # right default (a User in the user's own stanzas, or user@host /
+    # -l, still wins: first match)
     let loginName = getEnv("LOGNAME", getEnv("USER", ""))
     if loginName.len > 0:
       text.add "  User " & loginName & "\n"
