@@ -72,10 +72,10 @@ proc snapshot(s: TtySession; label: string) =
 
 proc barElapsedSecs(row: string): int =
   ## The trailing turn clock of a LIVE streaming bar row, in whole
-  ## seconds, or -1. The format is clockDuration's (`4`, `2:08`,
-  ## `1:12:21`; leading zero fields dropped). Only spinner-led rows are
-  ## considered: committed receipts also end in a clock now (the turn's
-  ## final elapsed), and those must not count as live frames.
+  ## seconds, or -1. The format is clockDuration's (`33s`, `2:08`,
+  ## `1:12:21`, `2d 3:04:05`). Only spinner-led rows are considered:
+  ## committed receipts also end in a clock now (the turn's final
+  ## elapsed), and those must not count as live frames.
   ## Harness rows carry full-width trailing padding; drop it first.
   result = -1
   let led = row.strip(leading = true, trailing = false)
@@ -84,18 +84,31 @@ proc barElapsedSecs(row: string): int =
             "\u2826", "\u2827", "\u2807", "\u280f"]:
     if led.startsWith(g): live = true; break
   if not live: return
-  let s = row.strip(leading = false, trailing = true)
-  let sp = s.rfind(' ')
-  if sp < 0: return
+  let fields = row.strip.splitWhitespace()
+  if fields.len == 0: return
+  var clock = fields[fields.high]
+  if clock[^1] != 's' and ':' notin clock: return
+  var days = 0
+  if fields.len >= 2:
+    let prev = fields[fields.high - 1]
+    if prev.len >= 2 and prev[^1] == 'd' and
+        prev[0 ..< ^1].allCharsInSet({'0'..'9'}):
+      try: days = parseInt(prev[0 ..< ^1])
+      except ValueError: return
   var mult = 1
   try:
-    let parts = s[sp + 1 .. ^1].split(':')
+    if clock[^1] == 's': clock = clock[0 ..< ^1]
+    let parts = clock.split(':')
     for i in countdown(parts.high, 0):
-      if parts[i].len == 0: return -1
+      if parts[i].len == 0:
+        result = -1
+        return
       inc result, parseInt(parts[i]) * mult
       mult *= 60
   except ValueError:
     result = -1
+    return
+  result += days * 86400
 
 suite "typing during active stream":
   test "no cursor visibility toggles while a turn runs":

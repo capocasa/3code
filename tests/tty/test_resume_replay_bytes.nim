@@ -241,12 +241,13 @@ suite "resume replay matches live scrollback byte-for-byte":
     check liveConv.len > 0
     check replayConv.len > 0
 
-    # Mask volatile fields: elapsed-clock suffixes on receipts ("  0s",
-    # "  00:00:00") depend on the live run's wall clock and are not
-    # persisted.
+    # Mask volatile fields: elapsed-clock suffixes on receipts
+    # (clockDuration: "  0s", "  2:08", "  1:12:21", "  2d 3:04:05")
+    # depend on the live run's wall clock and are not persisted.
     proc mask(rows: seq[string]): seq[string] =
       for row in rows:
-        result.add row.replace(re"  ?(\d+s|\d+:\d{2}:\d{2})$", "")
+        result.add row.replace(
+          re"  ?(\d+s|\d+(:\d{2}){1,2}|\d+d \d+(:\d{2}){1,2})$", "")
 
     let d = diffRows(mask(liveConv), mask(replayConv), "conversation region")
     writeFile(root / "live_region.txt", mask(liveConv).join("\n"))

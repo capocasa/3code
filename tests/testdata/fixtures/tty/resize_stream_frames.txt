@@ -298,5 +298,5 @@
 
 ● Resize stream part one. Resize stream part two. Resize stream complete.
 
-  ○0%  ↑42  ↓9  0
+  ○0%  ↑42  ↓9  0s
 ❯

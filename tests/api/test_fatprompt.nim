@@ -76,10 +76,10 @@ suite "fat prompt frame model":
     p.setEditor "hello"
 
     p.checkFrame ["three", "four", "", "thinking...",
-                  "◐  ○2%  ↑20  7", "❯ hello"]
+                  "◐  ○2%  ↑20  7s", "❯ hello"]
 
     p.setTicker ""
-    p.checkFrame ["three", "four", "", "", "◐  ○2%  ↑20  7",
+    p.checkFrame ["three", "four", "", "", "◐  ○2%  ↑20  7s",
                   "❯ hello"]
 
   test "multiline editor grows reserved area and shrinking reveals scrollback":
@@ -126,7 +126,7 @@ suite "fat prompt frame model":
                   elapsedS = 3)
     # ↑ is the raw fresh input (2000 - 500); the cached share rides ↻,
     # so the slots sum to the provider's bill.
-    check tokenBarText(p.tokenBar) == "●  ○1%  ↑1.5k  ↻500  ↓25  3"
+    check tokenBarText(p.tokenBar) == "●  ○1%  ↑1.5k  ↻500  ↓25  3s"
 
     # A cached share reported above the prompt clamps ↑ to 0: the slot
     # drops out instead of painting a negative fresh count.
@@ -134,7 +134,7 @@ suite "fat prompt frame model":
                         completionTokens: 36, totalTokens: 52),
                   window = 128000, apiActive = true, spinner = "○",
                   elapsedS = 3)
-    check tokenBarText(p.tokenBar) == "○  ○0%  ↻3.2k  ↓36  3"
+    check tokenBarText(p.tokenBar) == "○  ○0%  ↻3.2k  ↓36  3s"
 
   test "bash viewport shows cutoff plus bottom seven while active":
     var p = initFatPrompt(width = 50, height = 13, window = 1000)

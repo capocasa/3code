@@ -981,7 +981,7 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
 
 proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure label string for the bar / receipt: "○N%  ↑fresh  ↻cached
-  ## ↓completion  hh:mm:ss" (no styling, no leading spaces — caller wraps
+  ## ↓completion  33s/2:08/1:12:21" (no styling, no leading spaces — caller wraps
   ## it in cyan-bright for the bar or cyan for the receipt). Empty
   ## when there's no usage to report. ↑ is the raw fresh count (prompt
   ## minus cached — `↻` carries the cached share, so the slots sum to
