@@ -138,8 +138,15 @@ proc closeAcp(s: Session): int =
   s.closed = true
   s.p.inputStream.close()
   result = s.p.waitForExit(timeout = 15000)
-  s.p.close()
+  if s.p.running():
+    # EOF for the reader only exists once the child is gone. Closing the
+    # pipes under a still-blocked reader frees the FILE* it is inside of
+    # (the IOError errno 0 teardown flake); kill stragglers so joinThread
+    # is guaranteed to return before close().
+    s.p.kill()
+    result = s.p.waitForExit(timeout = 15000)
   joinThread(s.th)
+  s.p.close()
 
 suite "acp frontend":
   let stub = ensureStubBinary()

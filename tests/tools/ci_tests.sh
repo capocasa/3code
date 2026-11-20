@@ -34,10 +34,13 @@ TIMEOUT_SECS=${1:-1500}
 [ $# -gt 0 ] && shift
 . "$(dirname "$0")/test_processes.sh"
 WATCH_SECS=30
-# 480, not 300: the slowest legitimate tty stress test runs ~280-310s
-# on a 3-core CI runner; the 300 cap killed it mid-run as a "hang".
-# The cap exists to catch hangs (no progress), which it still does.
-PER_TEST_SECS=${PER_TEST_SECS:-480}
+# 720, not 480: the caps keep pace with the slowest legitimate tests.
+# 300 died to the tty stress test (~310s on 3 cores); 480 later died to
+# the shakedown itself (651s local, longer on arm CI), which the cap
+# killed mid-suite as an all-[OK]-then-exit-1 mystery. OSX already ran
+# 720 for this class. The cap exists to catch hangs (no progress), which
+# it still does.
+PER_TEST_SECS=${PER_TEST_SECS:-720}
 
 LOG=$(mktemp "${TMPDIR:-/tmp}/3code_testament.XXXXXXXX") || exit 1
 SNAP=$(mktemp "${TMPDIR:-/tmp}/3code_watch.XXXXXXXX") || exit 1
@@ -121,9 +124,17 @@ trap 'kill_tree "$TID"; exit 130' INT
 trap 'kill_tree "$TID"; exit 143' TERM
 
 timed_out=0
-elapsed=0
+# Wall-clock deadline, not an iteration counter: each loop pass costs
+# `sleep 5` PLUS the ps/pgrep watchdog work, and under runner load the
+# passes stretch past 5s. A counted loop then fires the cap minutes late
+# in wall time, GitHub's step timeout wins the race, and the run dies
+# with no attribution (linux-amd64 bd105506: step killed at 65m12s while
+# the "3600s" counter still read ~3320s).
+deadline=$(($(date +%s) + TIMEOUT_SECS))
+next_snap=$(($(date +%s) + WATCH_SECS))
 while kill -0 "$TID" 2>/dev/null; do
-  if [ "$elapsed" -ge "$TIMEOUT_SECS" ]; then
+  now=$(date +%s)
+  if [ "$now" -ge "$deadline" ]; then
     timed_out=1
     {
       echo "[watchdog] global timeout after ${TIMEOUT_SECS}s; live test processes:"
@@ -133,14 +144,14 @@ while kill -0 "$TID" 2>/dev/null; do
     break
   fi
   kill_sluggish_tests
-  if [ "$elapsed" -gt 0 ] && [ $((elapsed % WATCH_SECS)) -eq 0 ]; then
+  if [ "$now" -ge "$next_snap" ]; then
     {
       echo "[watch $(date +%T)] live test processes:"
       snapshot
     } >>"$SNAP"
+    next_snap=$((now + WATCH_SECS))
   fi
   sleep 5
-  elapsed=$((elapsed + 5))
 done
 sleep 2
 wait "$TID"
@@ -184,10 +195,22 @@ fi
 # readable from the UI and the API without downloading job logs.
 emit_failure_annotation() {
   [ -n "${GITHUB_ACTIONS:-}" ] || return 0
+  # Head AND tail: a failing suite's diff body starts with hundreds of
+  # [OK] lines, and the check failures sit at the end - a head-only cap
+  # hides the very lines that name the break (the arm64 tty_functional
+  # failure was all [OK] under the old 3000-char cap).
   {
     sed 's/\x1b\[[0-9;]*m//g' "$FAILS" "$SNAP" 2>/dev/null
     sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -aE 'FAIL:|FAILURE!|Tests passed' | tail -n 30
-  } | head -c 3000 | awk 'BEGIN{ORS="%0A"} {gsub(/%/, "%25"); print}' > "$FAILS.ann"
+  } | sed 's/\x1b\[[0-9;]*m//g' > "$FAILS.txt"
+  {
+    head -c 2000 "$FAILS.txt"
+    echo "[... snip ... every failed check: ...]"
+    sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+      | grep -aE 'Check failed|\[FAILED\]|FAIL: ' | head -n 40
+    echo "[... snip ...]"
+    tail -c 1200 "$FAILS.txt"
+  } | awk 'BEGIN{ORS="%0A"} {gsub(/%/, "%25"); print}' > "$FAILS.ann"
   printf '::error title=%s::%s\n' "$1" "$(cat "$FAILS.ann")"
 }
 

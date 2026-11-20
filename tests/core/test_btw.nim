@@ -9,6 +9,7 @@
 ## tokens) is drained from the job.
 import std/[json, strutils, unittest]
 import std/net except send
+from std/nativesockets import selectRead
 import std/atomics
 import threecode/[btwthread, compact, display, fatprompt, minline, turns,
                   types, ui, util]
@@ -30,20 +31,19 @@ proc send(client: Socket; data: string) =
   # EPIPE retry spin (nim-lang/Nim#23455).
   net.send(client, data, flags = {})
 
-proc setListenerTimeoutMs(sock: Socket; ms: int) =
-  # SO_RCVTIMEO wakes the blocking accept so the serve loop can re-check
-  # `stop` (the same trick tests/mock_server.nim uses).
-  when defined(posix):
-    var tv: Timeval
-    tv.tv_sec = Time(ms div 1000)
-    tv.tv_usec = Suseconds((ms mod 1000) * 1000)
-    discard setsockopt(sock.getFd(), SOL_SOCKET, SO_RCVTIMEO,
-                       addr tv, sizeof(tv).SockLen)
-
 proc serve(s: BtwSrv) {.thread.} =
+  # selectRead, not SO_RCVTIMEO on the listener: accept(2) ignores that
+  # option on macOS, so a timeout-wrapped accept parks forever there and
+  # stopBtwSrv's joinThread hangs (the 720s OSX watchdog kill; same trap
+  # acceptWithinDeadline in tests/stream/test_streaming_sse.nim records).
   {.cast(gcsafe).}:
-    s.listener.setListenerTimeoutMs(300)
     while not s.stop:
+      try:
+        var fds = @[s.listener.getFd]
+        if selectRead(fds, 200) == 0:
+          continue  # nothing dialed in: re-check `stop`
+      except OSError:
+        continue
       var client: Socket
       try:
         s.listener.accept(client)
@@ -66,10 +66,12 @@ proc serve(s: BtwSrv) {.thread.} =
         # Gate: the test releases the response to observe the command
         # returning while the answer is still in flight. Bounded so a
         # forgotten flip cannot wedge the suite.
+        # posix sleep (re-exported here) counts whole seconds, so the
+        # bound is ten one-second polls, not the 10_000ms it pretends to be.
         var waited = 0
-        while not s.gate.load(moAcquire) and waited < 10_000:
-          discard sleep(5)  # posix sleep (re-exported here) returns cint
-          inc waited, 5
+        while not s.gate.load(moAcquire) and waited < 10:
+          discard sleep(1)
+          inc waited
         let reply = """{"choices":[{"message":{"role":"assistant","content":"SIDE ANSWER"}}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"""
         send(client, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
           "Content-Length: " & $reply.len & "\r\nConnection: close\r\n\r\n" &

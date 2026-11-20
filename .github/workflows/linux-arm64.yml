@@ -26,14 +26,34 @@ jobs:
         # frozen snapshot.
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          apt-get -o Acquire::Retries=5 update
-          apt-get -o Acquire::Retries=5 install -y --no-install-recommends ca-certificates
+          # Runner-side apt fetches flake past apt's own retries (exit
+          # 100 twice in a row on the same pinned snapshot, Nov 19, while
+          # every snapshot pocket answered 200 from elsewhere). Retry the
+          # whole invocation at the shell level and re-emit the final
+          # tail as an annotation: the step log is unreadable without
+          # repo access, and apt's exit 100 names nothing.
+          try_apt() {
+            n=0
+            until [ "$n" -ge 5 ]; do
+              if apt-get -o Acquire::Retries=5 "$@"; then return 0; fi
+              n=$((n + 1)); sleep $((n * 10))
+            done
+            set +e
+            out=$(apt-get -o Acquire::Retries=1 "$@" 2>&1 | tail -n 20)
+            set -e
+            ann=$(printf '%s\n' "$out" | sed -e 's/%/%25/g' -e 's/\r//g' \
+              | awk '{printf "%s%s", sep, $0; sep="%0A"}')
+            printf '::error title=apt %s failed::%s\n' "$*" "$ann"
+            return 1
+          }
+          try_apt update
+          try_apt install -y --no-install-recommends ca-certificates
           sed -i 's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|' /etc/apt/sources.list
-          apt-get -o Acquire::Retries=5 update
+          try_apt update
           # build-essential: gcc/binutils for nim + the binary; git: checkout
           #   + config.nims's version probe; curl/xz: nim source download;
           #   procps: test watchdog ps/pgrep; zstd: actions/cache
-          apt-get -o Acquire::Retries=5 install -y --no-install-recommends build-essential git curl ca-certificates xz-utils procps zstd
+          try_apt install -y --no-install-recommends build-essential git curl ca-certificates xz-utils procps zstd
 
       - uses: actions/checkout@v4
 
@@ -156,18 +176,6 @@ jobs:
           name: 3code-linux-arm64
           path: 3code-linux-arm64.tar.gz
 
-      - name: Upload artifact to 3code.capocasa.dev
-        if: github.ref == 'refs/heads/main'
-        run: |
-          # --retry: 5xx is transient on the upload endpoint. The .sha256
-          # rides along so the main-channel installer can verify.
-          # shasum: macOS runners ship no GNU sha256sum
-          if command -v sha256sum >/dev/null 2>&1; then sha256sum 3code-linux-arm64.tar.gz; else shasum -a 256 3code-linux-arm64.tar.gz; fi > 3code-linux-arm64.tar.gz.sha256
-          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-arm64.tar.gz" \
-            https://3code.capocasa.dev/main/builds/upload.nim
-          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-arm64.tar.gz.sha256" \
-            https://3code.capocasa.dev/main/builds/upload.nim
-
   test:
     # Tests stay on the stock runner: they produce no artifacts, and the
     # sandbox/tty tests assume runner-level kernel access (landlock,
@@ -223,9 +231,32 @@ jobs:
         # is propagated. The old `for c in ...; testament cat` loop ran
         # categories sequentially and, worse, a single hung test stalled
         # the pipe so the step showed nothing after it.
-        # 3600s, not 2400: the suite kept growing and both linux runners
-        # tipped over the 2400 cap (2687s/2449s, Nov 5), failing the job
+        # 5400s, not 3600: the suite kept growing and both linux runners
+        # tipped over the 3600 cap (amd64's step died at GitHub's 65-min
+        # kill, arm64's Run tests ran past 60m, Nov 19), failing the job
         # on the timeout, not a test. Same class of bump as 1800->2400
-        # (green arm64 sat at 1796s of the old 1800s cap, Oct 6).
-        run: sh tests/tools/ci_tests.sh 3600
-        timeout-minutes: 65
+        # (Oct 6) and 2400->3600 (Nov 5). timeout-minutes keeps a 5-min
+        # attribution window above the watchdog so the cap self-reports.
+        run: sh tests/tools/ci_tests.sh 5400
+        timeout-minutes: 95
+
+  # The dev-server upload is its own job, not a build step: the test job
+  # gates on build, and a deploy-endpoint hiccup (a mid-migration web
+  # root 404ing upload.nim, Nov 19) must not skip the Linux test suites.
+  deploy:
+    needs: [build, test]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: 3code-linux-arm64
+      - name: Upload artifact to 3code.capocasa.dev
+        run: |
+          # --retry: 5xx is transient on the upload endpoint. The .sha256
+          # rides along so the main-channel installer can verify.
+          sha256sum 3code-linux-arm64.tar.gz > 3code-linux-arm64.tar.gz.sha256
+          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-arm64.tar.gz" \
+            https://3code.capocasa.dev/main/builds/upload.nim
+          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-arm64.tar.gz.sha256" \
+            https://3code.capocasa.dev/main/builds/upload.nim

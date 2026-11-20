@@ -241,8 +241,12 @@ jobs:
           # Smoke-check: the statically linked 3code binary starts
           # standalone (no DLLs anywhere near it).
           ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
-          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") sh tests/tools/ci_tests.sh 900 tty
-        timeout-minutes: 20
+          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") sh tests/tools/ci_tests.sh 1500 tty
+        # 30min step for a 1500s watchdog: the tty category alone ran
+        # 924s already on Nov 12, and the wall-clock watchdog (once it
+        # actually fired on wall time, Nov 19) killed the 900s-capped
+        # run mid-suite. Same budget-bump class as the linux jobs.
+        timeout-minutes: 30
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4
@@ -257,8 +261,8 @@ jobs:
           # rides along so the main-channel installer can verify.
           # shasum: macOS runners ship no GNU sha256sum
           if command -v sha256sum >/dev/null 2>&1; then sha256sum 3code-windows-amd64.zip; else shasum -a 256 3code-windows-amd64.zip; fi > 3code-windows-amd64.zip.sha256
-          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-windows-amd64.zip" \
+          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-windows-amd64.zip" \
             https://3code.capocasa.dev/main/builds/upload.nim
-          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-windows-amd64.zip.sha256" \
+          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-windows-amd64.zip.sha256" \
             https://3code.capocasa.dev/main/builds/upload.nim
 

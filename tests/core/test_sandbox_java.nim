@@ -50,8 +50,17 @@ when defined(posix):
         let dir = getTempDir() / ("3code-java-" & $getCurrentProcessId())
         createDir(dir)
         defer: removeDir(dir)
+        # The recipe form, not bare `restrict DIR`: the exec baseline
+        # covers system prefixes only, and a runner/user JDK lives under
+        # ~/hostedtoolcache (CI) or /opt/homebrew - exec there is EPERM
+        # by design until the recipe grants the java home read+exec
+        # (`readonly`), the same way the dotnet leg grants ~/.dotnet.
+        let javaHome = java.parentDir.parentDir  # <HOME>/bin/java
+        let pol = dir / "policy"
+        writeFile(pol, "deny /\nallow " & dir & "\nreadonly " &
+                       javaHome & "\nallow *\n")
         let p = startProcess(binPath(), args =
-          @["sandbox", "restrict", dir, "--", java, "-version"],
+          @["sandbox", "--policy", pol, "restrict", "--", java, "-version"],
           options = {poStdErrToStdOut}, workingDir = dir)
         # Bounded wait: the gh #64 failure mode is a hang on mach_msg
         # before main, and a regression must fail fast, not wedge the

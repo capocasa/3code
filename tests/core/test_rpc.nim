@@ -168,7 +168,11 @@ suite "rpc frontend":
     let oldSid = idRow(s.port)[5]
     check oldSid.len > 0
     let oldCwd = idRow(s.port)[1]
-    check oldCwd == root / "proj"
+    # The child reports its cwd as getcwd() sees it, and getcwd resolves
+    # symlinks: macOS TMPDIR is /var/..., which is /private/var/... to
+    # the kernel. Canonicalize the expectation (the failed-switch checks
+    # below compare the verbatim request parameter, not a getcwd).
+    check oldCwd == expandFilename(root / "proj")
 
     let failResp = req(s.port, $HttpPost, "/session/new?dir=" & lockedDir)
     check failResp.code == 500

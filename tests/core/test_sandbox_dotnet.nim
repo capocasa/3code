@@ -159,7 +159,13 @@ print('SOCKET-OK')
           putEnv("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", savedSkip)
           putEnv("DOTNET_NOLOGO", savedLogo)
           putEnv("DOTNET_CLI_TELEMETRY_OPTOUT", savedTele)
-        let r = runSandboxed(pol, dir, [dn, "build", "-nologo"])
+        # UseSharedCompilation=false and /nr:false: the Roslyn compiler
+        # server (VBCSCompiler) and reused MSBuild nodes OUTLIVE the build
+        # by design, keep the inherited stdout pipe open, and the harness
+        # reads to EOF - without these flags the build succeeds, dotnet
+        # exits, and readAll still waits on the lingering server forever.
+        let r = runSandboxed(pol, dir,
+          [dn, "build", "-nologo", "/nr:false", "/p:UseSharedCompilation=false"])
         check r.exitCode == 0
         check "Build succeeded" in r.output
         check "Permission denied" notin r.output

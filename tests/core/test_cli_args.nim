@@ -529,6 +529,12 @@ suite "cli project-local config discovery":
   teardown:
     if dirExists(tmp): removeDir(tmp)
 
+  proc projCfg(): string =
+    # The walked project layer prints as the child's getcwd() reports it,
+    # and getcwd resolves symlinks - macOS TMPDIR lives under /var, which
+    # is /private/var to the kernel - so canonicalize every expectation.
+    expandFilename(tmp / "repo" / ".3code" / "config")
+
   proc runIn(cwd, flags: string): tuple[o: string, code: int] =
     let env = newStringTable({"XDG_DATA_HOME": tmp,
                                "XDG_CONFIG_HOME": tmp / "xdg"})
@@ -541,13 +547,13 @@ suite "cli project-local config discovery":
     let r = runIn(tmp / "repo" / "sub", "")
     check r.code == 3
     check "no [provider] section" in r.o
-    check (tmp / "repo" / ".3code" / "config") in r.o
+    check projCfg() in r.o
 
   test "the project pin beats an explicit -c layer":
     writeFile(tmp / "layer", "[settings]\ncurrent = \"layer.m\"\n")
     let r = runIn(tmp / "repo" / "sub", "-c " & (tmp / "layer").quoteShell)
     check r.code == 3
-    check (tmp / "repo" / ".3code" / "config") in r.o
+    check projCfg() in r.o
 
   test "-C skips the walk entirely":
     let r = runIn(tmp / "repo" / "sub", "-C")
@@ -563,7 +569,7 @@ suite "cli project-local config discovery":
     let r = runIn(tmp / "repo" / "sub", "-h")
     check r.code == 2
     check "config read (later wins): " & (tmp / "xdg" / "3code" / "config") &
-          ", " & (tmp / "repo" / ".3code" / "config") in r.o
+          ", " & projCfg() in r.o
     check "config write: " & (tmp / "xdg" / "3code" / "config") in r.o
 
   test "a project provider inherits key and url from the user config":

@@ -70,8 +70,18 @@ suite "session change log":
       writeFile("d.txt", "x = 1\n")
       let cache = newReadCache()
       let (outp, code, diff) = runAction(
-        act(akBash, cmd = "sed -i 's/x = 1/x = 2/' d.txt"), cache)
-      check code == 0
+        # -i.bak, not bare -i: BSD sed (macOS) takes the next argument
+        # as the mandatory backup suffix, so GNU's bare `-i 's/...'`
+        # eats the script as the suffix and runs the FILE as the script.
+        # The .bak is removed in the same action; the manifest nets it
+        # out, leaving d.txt as the one recorded change.
+        act(akBash, cmd =
+          "sed -i.bak 's/x = 1/x = 2/' d.txt && rm d.txt.bak"), cache)
+      if code != 0:
+        # The child's own words name the confined-exec break (a bare
+        # `check code == 0` hides e.g. sed's EPERM on its -i temp file).
+        checkpoint("sed round-trip child output:\n" & outp)
+        fail()
       check diff.len > 0  # the live diff still paints
       check cache.changes.len == 1
       check cache.changes["d.txt".absolutePath].before == "x = 1\n"

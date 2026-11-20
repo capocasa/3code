@@ -741,21 +741,20 @@ proc traceHook(lib: PluginLib; hook: HookId; ms: float) =
 
 # -- public host API ------------------------------------------------
 
-var condInitDone = false
-
-proc initCondAndLocksOnce() =
-  if condInitDone: return
-  condInitDone = true
-  initLock(pLock)
-  initLock(syncDispLock)
-  initCond(pCond)
+# The registry locks are ready from module load, not lazily at
+# discovery: config.nim's flag scan (pluginCliValueShorts) and its
+# config-default reads run before pluginsDiscoverAndLoad, and acquiring
+# an uninitialized lock is UB on Windows (a zeroed CRITICAL_SECTION
+# hangs or dies at once; Linux's zeroed pthread mutex hides it).
+initLock(pLock)
+initLock(syncDispLock)
+initCond(pCond)
 
 proc pluginsDiscoverAndLoad*() =
   ## Scan the lib dirs once at startup and start the plugin thread.
   ## Safe to call from both the CLI and library entry points; guarded.
   if started: return
   started = true
-  initCondAndLocksOnce()
   var dirs: seq[string]
   if pluginsLibOverride.len > 0: dirs.add pluginsLibOverride
   dirs.add userDataRoot() / "lib"
@@ -1339,9 +1338,7 @@ proc pluginOnFileWrite*(path: string; bytes: int; kind: int) =
 proc pluginConfigDefaultsAll*(): seq[tuple[section, key, value, owner: string]] =
   ## Locked copy for config.nim's apply-at-parse-start and `:plugins`.
   ## Reachable before any discovery: config parse runs ahead of
-  ## pluginsDiscoverAndLoad, and an unheld lock must not be acquired
-  ## (zeroed CRITICAL_SECTION = UB on Windows).
-  initCondAndLocksOnce()
+  ## pluginsDiscoverAndLoad (the locks are module-initialized).
   pLock.acquire()
   for k, v in pCfgDefaults.pairs:
     let dot = k.find('.')
@@ -1351,7 +1348,6 @@ proc pluginConfigDefaultsAll*(): seq[tuple[section, key, value, owner: string]] 
 proc pluginConfigDefault*(section, key: string): tuple[value, owner: string] =
   ## The registered default for `section.key`, empty when no plugin
   ## claimed it.
-  initCondAndLocksOnce()
   pLock.acquire()
   if section & "." & key in pCfgDefaults:
     result = pCfgDefaults[section & "." & key]

@@ -188,18 +188,6 @@ jobs:
           docker exec $CID /data/data/com.termux/files/usr/tmp/tlscheck \
             | grep -q 'tls handshake ok'
 
-      - name: Upload artifact to 3code.capocasa.dev
-        if: github.ref == 'refs/heads/main'
-        run: |
-          # --retry: 5xx is transient on the upload endpoint. The .sha256
-          # rides along so the main-channel installer can verify.
-          # shasum: macOS runners ship no GNU sha256sum
-          if command -v sha256sum >/dev/null 2>&1; then sha256sum 3code-termux-arm64.tar.gz; else shasum -a 256 3code-termux-arm64.tar.gz; fi > 3code-termux-arm64.tar.gz.sha256
-          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz" \
-            https://3code.capocasa.dev/main/builds/upload.nim
-          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz.sha256" \
-            https://3code.capocasa.dev/main/builds/upload.nim
-
   yrc-stress:
     # YRC is Nim's experimental thread-safe ORC (shared heap, atomic RC,
     # concurrent cycle collector), only in devel (>= 2.3.1). 3code keeps a
@@ -277,6 +265,44 @@ jobs:
           docker cp build/test_resize_ticker_android $CID:$W/test_resize_ticker
           docker cp build/test_gui_join_freeze_android $CID:$W/test_gui_join_freeze
           docker exec $CID sh -c "cd $W && mkdir -p build && printf '%s\\n' $W/3code_stub > build/prebuilt-stub"
+          # Real Termux exports TMPDIR=$PREFIX/tmp in its login env; a
+          # bare docker exec gets none, Nim's stdlib getTempDir then
+          # falls back to the shell-user's /data/local/tmp, unwritable
+          # for the container uid, and every tty fixture createDir dies
+          # with EACCES. Export what the tests would see on a phone.
+          T=/data/data/com.termux/files/usr/tmp
+          docker exec $CID mkdir -p $T
+          # A failed test's tail is re-emitted as an annotation: the step
+          # log is unreadable without repo access, and the tail names the
+          # failing check from the API alone (same rationale as
+          # ci_tests.sh's emit_failure_annotation).
           for t in test_spinner_race_stress test_resize_ticker test_gui_join_freeze; do
-            docker exec -t $CID sh -c "cd $W && ./$t"
+            if ! docker exec -t -e TMPDIR=$T $CID sh -c "cd $W && ./$t" > "$t.log" 2>&1; then
+              tail -n 40 "$t.log" | sed 's/^/  /' >&2
+              ann=$(tail -n 40 "$t.log" | sed -e 's/\x1b\[[0-9;]*m//g' \
+                -e 's/%/%25/g' -e 's/\r//g' \
+                | awk '{printf "%s%s", sep, $0; sep="%0A"}')
+              printf '::error title=yrc %s failed::%s\n' "$t" "$ann"
+              exit 1
+            fi
           done
+
+  # The dev-server upload is its own job (see linux-amd64.yml): a deploy
+  # endpoint hiccup must not skip the yrc stress suite that gates on smoke.
+  deploy:
+    needs: [smoke, yrc-stress]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: 3code-termux-arm64
+      - name: Upload artifact to 3code.capocasa.dev
+        run: |
+          # --retry: 5xx is transient on the upload endpoint. The .sha256
+          # rides along so the main-channel installer can verify.
+          sha256sum 3code-termux-arm64.tar.gz > 3code-termux-arm64.tar.gz.sha256
+          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz" \
+            https://3code.capocasa.dev/main/builds/upload.nim
+          curl -f --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz.sha256" \
+            https://3code.capocasa.dev/main/builds/upload.nim
