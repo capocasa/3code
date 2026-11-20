@@ -323,10 +323,12 @@ suite "non-streaming xml tool_call promotion":
         "finish_reason": "stop"}],
       "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
     }]""")
-    # nvidia.z-ai/glm-5.3 is the known-good combo with xmlToolCalls=true.
-    let p = Profile(name: "nvidia.z-ai/glm-5.3", url: "https://x/v1",
-                    key: "stub-key", model: "z-ai/glm-5.3", family: "glm",
-                    reasoning: "on")
+    # nvidia.z-ai/glm-5.3-flash is the combo that still carries
+    # xmlToolCalls=true (the bare 5.3 row retired with the Nov 20 catalog
+    # sweep; the flash variant leaks the chat template the same way).
+    let p = Profile(name: "nvidia.z-ai/glm-5.3-flash", url: "https://x/v1",
+                    key: "stub-key", model: "z-ai/glm-5.3-flash",
+                    family: "glm", reasoning: "low")
     var usage: Usage
     let msg = callModel(p,
       %*[{"role": "user", "content": "run ls -la"}], usage, 0)
