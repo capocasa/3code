@@ -55,15 +55,6 @@ const
   EvidenceResultCap* = 240  ## per-call result head ceiling
   GoalDiffCapBytes* = 8000  ## rendered session-diff feed ceiling
 type
-  GoalVerdictKind* = enum
-    gvkNone      ## output carried no contract line; never counts as satisfied
-    gvkSatisfied
-    gvkFeedback
-
-  GoalVerdict* = object
-    kind*: GoalVerdictKind
-    feedback*: string  ## the text after "VERDICT: FEEDBACK:"
-
   GoalCheckResult* = object
     ok*: bool      ## the side call itself succeeded
     err*: string   ## failure reason when not ok
@@ -72,15 +63,6 @@ type
                    ## account exactly like a main call's (ledger, token
                    ## bar) — zero when the call failed or ran through
                    ## the test seam
-
-  GoalStep* = object
-    ## One visible verifier step. The toolless verifier produces exactly
-    ## one: its reply minus the verdict line, whose verdict rides the
-    ## step so scrollback can show it as an icon instead of the contract
-    ## text. Everything the check says is scrollback material - the
-    ## check must never look silent.
-    prose*: string  ## the verifier's reply without its verdict line
-    verdict*: GoalVerdictKind  ## gvkNone for informational notes
 
 const VerifierPreamble* = """You are verifying progress toward a goal. You get the goal text, an
 evidence summary of the agent's last turn (harness-built from the

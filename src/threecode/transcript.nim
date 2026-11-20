@@ -155,7 +155,8 @@ proc appendItem*(item: TranscriptItem; restoreEditor = true;
     reserveFooter = reserveFooter)
 
 proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
-                       window: int, family: string): Usage =
+                       window: int, family: string,
+                       goalSteps: seq[GoalStepRecord] = @[]): Usage =
   ## Replay the whole conversation into scrollback so a resumed session drops
   ## the user back into the full prior context, reachable by scrolling up.
   ## The session file is already bounded by compaction to roughly one context
@@ -200,9 +201,24 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
     let fn = m{"flailNote"}.getStr("")
     if fn.len > 0:
       flailNotes[m{"tool_call_id"}.getStr] = fn
+  # Verifier steps replay at their anchored position through the same
+  # formatter the live commit used, so a resumed scrollback keeps the
+  # verdict rows (the goal verify) the session painted: after the turn's
+  # final reply, before the harness continuation that may follow.
+  var markIdx = 0
+  template goalChecksAfter(n: int) =
+    while markIdx < goalSteps.len and goalSteps[markIdx].after <= n:
+      var bytes = goalStepBytes(goalSteps[markIdx].step)
+      inc markIdx
+      if bytes.len == 0: continue
+      bytes.trimTranscriptTail()
+      stdout.write "\n"
+      stdout.write bytes & "\n"
+      termengine.noteCommittedRows(bytes)
   var lastAgentNote = ""
   var toolIdx = 0
   for i in start ..< messages.len:
+    goalChecksAfter(i)
     let m = messages[i]
     case m{"role"}.getStr
     of "user":
@@ -405,12 +421,14 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       # toolLog; nothing to do here.
       discard
     else: discard
+  goalChecksAfter(messages.len)
   stdout.flushFile
 
 proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
                      window: int; family: string;
                      journal: seq[termengine.TailJournalRecord];
-                     width, budget: int): seq[string] =
+                     width, budget: int;
+                     goalSteps: seq[GoalStepRecord] = @[]): seq[string] =
   ## The rebreak window's content: the committed transcript tail re-rendered
   ## at the CURRENT terminal width (the formatters read the live width; the
   ## `width` argument is advisory), newest content last, at most `budget`
@@ -455,7 +473,20 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
     let rows = itemRows(bytes)
     if rows.len > 0:
       units.add (anchor, rows)
+  # Same position rule as the replay walk: a verifier step anchors after
+  # the first `after` messages, older than the message that follows it,
+  # so emitting it at the top of message i's iteration keeps both the
+  # sequence order and the merge's newest-first tie-break correct.
+  var markIdx = 0
+  template goalChecksAfter(n: int) =
+    while markIdx < goalSteps.len and goalSteps[markIdx].after <= n:
+      var bytes = goalStepBytes(goalSteps[markIdx].step)
+      inc markIdx
+      if bytes.len == 0: continue
+      bytes.trimTranscriptTail()
+      emit n, bytes
   for i in start ..< messages.len:
+    goalChecksAfter(i)
     let m = messages[i]
     let anchor = i + 1
     case m{"role"}.getStr
@@ -577,6 +608,7 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
     of "tool":
       discard
     else: discard
+  goalChecksAfter(messages.len)
   # Merge the journal and cut to the budget. The scan walks the tail
   # backwards, so `picked` accumulates newest-first; emission below
   # reverses it, because the window paints top-to-bottom and must show

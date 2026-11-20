@@ -87,7 +87,8 @@ const SessionExt* = ".3log"
 
 const Roles = ["session", "skills", "system", "context", "project_notes",
                "user", "image", "reasoning", "assistant",
-               "tool_use", "tool_result", "tokens", "flail"]
+               "tool_use", "tool_result", "tokens", "flail",
+               "goal_check"]
 
 # ---------- paths ----------
 
@@ -1181,6 +1182,23 @@ proc emitTokens(s: var string, usage: JsonNode) =
   hdr.add " elapsed=" & $elapsed & "s"
   emitHeaderOnly s, hdr
 
+proc goalVerdictWord*(v: GoalVerdictKind): string =
+  ## The `goal_check` record's verdict spelling: `satisfied`, `feedback`,
+  ## or `none` (an informational step - the red "check unavailable" row
+  ## included, since a check without a verdict is a failed check).
+  case v
+  of gvkSatisfied: "satisfied"
+  of gvkFeedback: "feedback"
+  of gvkNone: "none"
+
+proc goalVerdictFromWord*(w: string): GoalVerdictKind =
+  ## The load side of `goalVerdictWord`; an unknown word reads as `none`
+  ## (the red icon), never as satisfied.
+  case w
+  of "satisfied": gvkSatisfied
+  of "feedback": gvkFeedback
+  else: gvkNone
+
 type SessionSaveError* = object of CatchableError
   ## A transcript save failed. `path` names the save target; `committed`
   ## locates the failure relative to the atomic replace:
@@ -1234,7 +1252,23 @@ proc renderSession*(session: Session, messages: JsonNode): string =
         if idx < session.toolLog.len:
           idToExit[id] = session.toolLog[idx].code
         inc idx
+  # Verifier steps interleave at their anchored position: after the
+  # first `after` messages, exactly where the live session committed
+  # them (the end-call boundary sits between the turn's final reply and
+  # the harness continuation that may follow it). A step whose anchor
+  # outlives the conversation (compaction shrank it behind the
+  # session's back) is dropped rather than pinned to a wrong turn.
+  var markIdx = 0
+  template emitGoalChecksAfter(n: int) =
+    while markIdx < session.goalSteps.len and session.goalSteps[markIdx].after <= n:
+      let mark = session.goalSteps[markIdx]
+      emitRecord s, "goal_check verdict=" & goalVerdictWord(mark.step.verdict),
+                  mark.step.prose
+      inc markIdx
+  var msgIdx = 0
   for m in messages:
+    let idx = msgIdx
+    inc msgIdx
     if m.kind != JObject: continue
     case m{"role"}.getStr
     of "system":
@@ -1328,6 +1362,7 @@ proc renderSession*(session: Session, messages: JsonNode): string =
       if flailNote.len > 0: hdr.add " +flail"
       emitRecord s, hdr, m{"content"}.getStr("")
     else: discard
+    emitGoalChecksAfter(idx + 1)
   s
 
 # ---------- save / load ----------
@@ -1912,6 +1947,14 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
         sess.usage.totalTokens += u{"totalTokens"}.getInt(0)
         sess.usage.cachedTokens += u{"cachedTokens"}.getInt(0)
         sess.lastPromptTokens = u{"promptTokens"}.getInt(0)
+    of "goal_check":
+      # A verifier step at its scrollback position: after the messages
+      # parsed so far. Written interleaved by renderSession, so the
+      # count here reproduces the live anchor exactly.
+      sess.goalSteps.add GoalStepRecord(
+        after: messages.len,
+        step: GoalStep(prose: r.body,
+          verdict: goalVerdictFromWord(kv.getOrDefault("verdict"))))
     of "flail":
       # The flail note for the tool_result that follows it.
       if pos.len > 0: pendingFlail[pos[0]] = r.body
@@ -1942,6 +1985,10 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
     backfill.add %*{"role": "system", "content": DefaultSystemPrompt}
     for m in messages: backfill.add m
     messages = backfill
+    # The backfilled system message shifts every anchor the records
+    # counted without it (new-format files carry no system record); a
+    # legacy file's own system record already counted.
+    for g in mitems(sess.goalSteps): inc g.after
   sess.toolLog = buildToolLogFromMessages(messages, exitByCallId)
   sess.plan = buildPlanFromMessages(messages, exitByCallId)
   (sess, messages)

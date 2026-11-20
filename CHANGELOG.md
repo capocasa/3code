@@ -2,6 +2,28 @@ Changelog
 
 Unreleased
 
+- **A resume replays the goal verify, not just its consequences.**
+  The turn-end satisfaction check's verdict row (the `✓`/`✗` quote
+  block) was display-only: nothing persisted it, so `3code -r` -
+  loading scrollback from disk - dropped every check the session had
+  run. The resumed scrollback showed the `⚑` goal-check continuation
+  with the verifier's feedback embedded as text, but the verdict row
+  itself (its icon, its own prose, its position between the reply it
+  judged and the continuation it caused) was gone, and a satisfied
+  history showed no `✓` at all. Each verifier step is now recorded on
+  the session anchored to the message position it was committed at,
+  written into the `.3log` as a `goal_check verdict=...` record at
+  exactly that spot, and replayed through the same formatter the live
+  commit used - replay/live parity restored, the rebreak window
+  included (it renders from the same anchored records). The boundary
+  that falls through without appending a message (SATISFIED retires
+  the goal, a failed check without a discipline note) now checkpoints
+  the session so the row reaches disk before the session idles;
+  `:clear` and every compaction drop the records with the conversation
+  they described, and the cybernetic mode's steps ride the same
+  machinery
+  (`tests/core/test_session.nim`, `tests/tty/test_goal_mode_ctrlr.nim`).
+
 - **The token bar sums every side call at a rest, never just the
   latest.** A rest's token bar is the SUM of its requests - the turn's
   final call plus each harness side call that landed on it - but the

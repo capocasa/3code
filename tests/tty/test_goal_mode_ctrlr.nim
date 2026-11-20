@@ -609,3 +609,58 @@ suite "goal mode resume (interactive)":
     check fileExists(root / "run" / ".3code" / "achieved")
     check not fileExists(root / "run" / ".3code" / "goal")
     tty2.expectAlive()
+
+  test "a resumed session replays the verifier's verdict row":
+    # The goal verify itself must survive loading scrollback from disk:
+    # the verdict row a live session painted (the ✗ quote block after
+    # the turn's reply) replays on `-r` between that reply and the ⚑
+    # continuation it sent, not just the continuation's embedded
+    # feedback text.
+    let root = newFixture("goal_resume_verify_row")
+    writeConfiguredProvider(root)
+    createDir(root / "run" / ".3code")
+    writeFile(root / "run" / ".3code" / "goal",
+      "keep working after resume\n")
+    # Phase 1: the kickoff turn answers, its verifier replies FEEDBACK
+    # with a prose marker, and the turn the feedback starts is
+    # interrupted mid-call so the mode stays armed for phase 2.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("WORK_TURN_ONE"),
+      reply("VERIFY_PROSE_MARKER\nVERDICT: FEEDBACK: FEEDBACK_MARKER_NEXT"),
+      reply("WORK_TURN_TWO", delayMs = 8000),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    tty.expect "\u276f"
+    tty.expectInHistory "⚑ keep working after resume"
+    tty.expectInHistory "WORK_TURN_ONE"
+    # The live verdict row: the verifier's prose as a quoted step.
+    tty.expectInHistory "VERIFY_PROSE_MARKER"
+    tty.drain(300)
+    tty.send "\x03"
+    tty.expectInHistory "interrupted by user"
+    tty.drain(300)
+    tty.ctrlD()
+    tty.expectExit(0, timeoutMs = 5000)
+    check fileExists(root / "run" / ".3code" / "goal")
+    # Phase 2: resume. The replayed scrollback keeps the verdict row at
+    # its position: after WORK_TURN_ONE, before the ⚑ goal-check
+    # continuation.
+    let tty2 = newTtySession(stub,
+                            args = ["-x", "-i", "-r"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty2.writeFrameArtifact(root / "frames.txt")
+      tty2.close()
+    tty2.expectIdleCaret(timeoutMs = 8000)
+    tty2.drain(300)
+    tty2.expectInHistory "VERIFY_PROSE_MARKER"
+    let hist = tty2.cleanRaw()
+    check hist.find("VERIFY_PROSE_MARKER") > hist.find("WORK_TURN_ONE")
+    check hist.find("VERIFY_PROSE_MARKER") <
+        hist.find("Verifier feedback:")
+    tty2.expectAlive()

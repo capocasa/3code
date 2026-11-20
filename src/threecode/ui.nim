@@ -2867,6 +2867,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           ok = false
           resp "failed or not worth it"
         else:
+          session.goalSteps.setLen 0
           resp &"collapsed {n} message" &
             (if n == 1: "" else: "s") &
             " into a synthetic recap"

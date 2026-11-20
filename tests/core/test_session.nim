@@ -506,6 +506,57 @@ suite "session: renderSession → loadSessionFile round-trip":
     check lm[2]["role"].getStr == "assistant"
     check lm[2]["content"].getStr == "Hi there"
 
+  test "round-trips goal verifier steps at their anchored position":
+    # The goal verify must survive loading scrollback from disk: each
+    # step renders as a goal_check record after the first `after`
+    # messages and reloads with the same anchor, prose and verdict, so
+    # a resumed session can replay the verdict rows it painted.
+    let sess = Session(created: "20250101T120000", profileName: "test",
+                       cwd: "/tmp",
+                       goalSteps: @[
+                         GoalStepRecord(after: 3, step: GoalStep(
+                           prose: "not yet", verdict: gvkFeedback)),
+                         GoalStepRecord(after: 5, step: GoalStep(
+                           prose: "all good", verdict: gvkSatisfied))])
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "work"},
+      {"role": "assistant", "content": "did part"},
+      {"role": "user", "content": "more", "agentSent": true,
+       "goalSent": true},
+      {"role": "assistant", "content": "did rest"},
+      {"role": "user", "content": "done"}
+    ]
+    let text = renderSession(sess, msgs)
+    # The records sit exactly at their anchors: the feedback step
+    # between the first reply and the goal continuation, the satisfied
+    # step after the final reply.
+    check text.find("goal_check verdict=feedback") >
+        text.find("did part")
+    check text.find("goal_check verdict=feedback") <
+        text.find("more")
+    check text.find("goal_check verdict=satisfied") >
+        text.find("did rest")
+    check text.find("goal_check verdict=satisfied") <
+        text.find("done")
+    writeFile(tmp, text)
+    let (ls, lm) = loadSessionFile(tmp)
+    check lm.len == 6
+    check ls.goalSteps.len == 2
+    check ls.goalSteps[0].after == 3
+    check ls.goalSteps[0].step.prose == "not yet"
+    check ls.goalSteps[0].step.verdict == gvkFeedback
+    check ls.goalSteps[1].after == 5
+    check ls.goalSteps[1].step.prose == "all good"
+    check ls.goalSteps[1].step.verdict == gvkSatisfied
+    # Re-rendering the loaded session reproduces the records (stable
+    # round trip, anchors included).
+    let again = renderSession(ls, lm)
+    check again.find("goal_check verdict=feedback") >
+        again.find("did part")
+    check again.find("goal_check verdict=satisfied") >
+        again.find("did rest")
+
   test "round-trips assistant with tool_calls":
     let sess = Session(created: "20250101T120000", profileName: "test",
                        cwd: "/tmp")

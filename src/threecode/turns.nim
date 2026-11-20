@@ -1286,6 +1286,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           if summarized > 0: summarized
           else: applySummary(messages, OverflowFallbackSummary)
         if collapsed > 0:
+          # Compaction rewrote the history the step anchors point into;
+          # the verify rows are collateral of the collapse (like the
+          # prose they accompanied), not something to re-pin wrong.
+          session.goalSteps.setLen 0
           saveSessionReported(session, messages)
           let collapsedNotice = hintLnS(
             "· request rejected as too large; collapsed " &
@@ -1519,6 +1523,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     of caSummarize:
       let summarized = summarizeHistory(messages, p)
       if summarized > 0:
+        session.goalSteps.setLen 0
         let summarizeNotice = hintLnS(
           &"· summarized {summarized} message" &
             (if summarized == 1: "" else: "s") &
@@ -1835,6 +1840,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           session.promptState = PromptState()
           refreshSystemPrompt(messages, p, session.promptState)
           session.toolLog.setLen 0
+          session.goalSteps.setLen 0
           session.usage = Usage()
           session.lastPromptTokens = 0
           session.readCache = nil
@@ -2021,8 +2027,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # Verifier steps land in scrollback as they happen: same commit
       # path as the receipts around them, an item rendered like a reply
       # that speaks its verdict in color, icon first, through and
-      # through.
+      # through. Each step is also recorded on the session, anchored to
+      # the messages it judged: the next save persists it as a
+      # `goal_check` record so `3code -r` replays the verify instead of
+      # dropping it with the rest of the display-only rows. The session
+      # is a var parameter (not capturable), so the hook captures a
+      # pointer to just the seq; `msgs` re-reads the live length at
+      # fire time.
+      let stepsOut = addr session.goalSteps
+      let msgs = messages
       goalStepHook = proc (step: GoalStep) =
+        stepsOut[].add GoalStepRecord(after: msgs.len, step: step)
         let stepBytes = goalStepBytes(step)
         termengine.noteNonMessageTail(stepBytes, journalAnchorMessagesLen)
         commitTranscriptBytes(stepBytes, true)
@@ -2114,6 +2129,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         if note.len > 0:
           sendBack(note, mode.name & " update discipline (no verdict)")
           continue
+      # The fall-through verdicts (satisfied, a failed or verdict-less
+      # check without a discipline note) append no message, so nothing
+      # below would save; checkpoint here so the step the hook just
+      # recorded - the ✓ row above all - reaches the .3log before the
+      # session idles or quits. The `continue` branches save inside
+      # `sendBack`.
+      saveSessionReported(session, messages)
     else:
       session.goalNotified = false
       session.modeSnapshot = ""

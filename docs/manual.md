@@ -1401,7 +1401,13 @@ stripped:
       │ verdict text
 
 A green `✓` when the goal is satisfied, a red `✗` when it is not. Nothing
-the harness runs is ever silent.
+the harness runs is ever silent. The verdict rows are session history, not
+live-only paint: each one is written into the `.3log` at the spot it was
+committed, so `3code -r` replays them between the reply they judged and the
+`⚑` continuation that followed — a resumed scrollback shows every check the
+session ran, not just the feedback text the continuation carries. (A
+compaction that collapses the history drops its verify rows with it, like
+any other detail of the collapsed turns.)
 
 ### Verifier models
 

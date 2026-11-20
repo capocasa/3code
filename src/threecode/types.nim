@@ -270,6 +270,30 @@ type
     ## One item in a model-emitted `update_plan` / `todo` list.
     text*: string
     status*: string
+  GoalVerdictKind* = enum
+    gvkNone      ## output carried no contract line; never counts as satisfied
+    gvkSatisfied
+    gvkFeedback
+  GoalVerdict* = object
+    kind*: GoalVerdictKind
+    feedback*: string  ## the text after "VERDICT: FEEDBACK:"
+  GoalStep* = object
+    ## One visible verifier step. The toolless verifier produces exactly
+    ## one: its reply minus the verdict line, whose verdict rides the
+    ## step so scrollback can show it as an icon instead of the contract
+    ## text. Everything the check says is scrollback material - the
+    ## check must never look silent. Defined here (not goal.nim) so the
+    ## session codec can persist steps without importing the mode logic.
+    prose*: string  ## the verifier's reply without its verdict line
+    verdict*: GoalVerdictKind  ## gvkNone for informational notes
+  GoalStepRecord* = object
+    ## A verifier step plus its scrollback position: the step renders
+    ## after the first `after` messages of the conversation. Persisted
+    ## as a `goal_check` record at exactly that spot in the .3log, so a
+    ## resumed session replays the verdict rows a live session painted
+    ## between the turn's last reply and the harness continuation.
+    after*: int
+    step*: GoalStep
   ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akScreenshot, akClear, akDMail, akPlugin, akError
   Action* = object
     ## The parsed, tool-agnostic representation of a single model tool call.
@@ -406,6 +430,12 @@ type
                          ## model. Persisted (session record `goal_notified`):
                          ## a resumed session never re-feeds the stanza - the
                          ## end-call boundary goes straight to the check
+    goalSteps*: seq[GoalStepRecord]  ## verifier steps the session painted,
+                                     ## anchored to their message position:
+                                     ## replayed on resume so the goal verify
+                                     ## survives loading scrollback from disk.
+                                     ## Cleared with the conversation (:clear,
+                                     ## compaction) like the tool log
     modeSnapshot*: string  ## the armed mode's file bytes at this turn's
                            ## start: the update-discipline and delta
                            ## baseline (transient; a resumed session starts

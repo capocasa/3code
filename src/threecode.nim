@@ -1264,7 +1264,8 @@ proc main() =
       stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
       let window = contextWindowFor(prof)
       let lastUsage = replaySessionTail(messages, session.toolLog,
-                                        window, prof.family)
+                                        window, prof.family,
+                                        session.goalSteps)
       if lastUsage.totalTokens > 0:
         # Same shape as `endTurn`: gap row + bar+prompt in typing-ready
         # state, carrying the last response's usage so
@@ -1350,7 +1351,8 @@ proc main() =
         {.cast(gcsafe).}:
           result = renderTailRows(inputMessages[], inputSession[].toolLog,
             contextWindowFor(inputProfile[]), inputProfile[].family,
-            termengine.tailJournalSnapshot(), width, budget)
+            termengine.tailJournalSnapshot(), width, budget,
+            inputSession[].goalSteps)
       termengine.transcriptTailRows = tailRowsAt
     while true:
       # Parked: the input wait is the one window where the session
