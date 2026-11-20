@@ -981,7 +981,7 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
 
 proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure label string for the bar / receipt: "○N%  ↑fresh  ↻cached
-  ## ↓completion  hh:mm:ss" (no styling, no leading spaces — caller wraps
+  ## ↓completion  33s/2:08/1:12:21" (no styling, no leading spaces — caller wraps
   ## it in cyan-bright for the bar or cyan for the receipt). Empty
   ## when there's no usage to report. ↑ is the raw fresh count (prompt
   ## minus cached — `↻` carries the cached share, so the slots sum to
@@ -1002,9 +1002,13 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
 
 proc goalVerdictStyle*(verdict: GoalVerdictKind): tuple[glyph, color: string] =
   ## The verdict's own marker and color: green `✓` when satisfied, red
-  ## `✗` for anything else - FEEDBACK and an unreadable verdict alike,
-  ## since a check without a verdict is a failed check, never a pass.
-  if verdict == gvkSatisfied: ("✓", "\x1b[32m")
+  ## `✗` for anything not satisfied - FEEDBACK and an unreadable verdict
+  ## alike, since a check without a verdict is a failed check, never a
+  ## pass - and a dim `⊘` for the user's cancel, which is no verdict at
+  ## all, just the mode ending.
+  case verdict
+  of gvkSatisfied: ("✓", "\x1b[32m")
+  of gvkCancelled: ("⊘", GreyFg)
   else: ("✗", "\x1b[31m")
 
 proc goalStepBytes*(step: GoalStep): string =

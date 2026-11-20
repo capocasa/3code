@@ -6,8 +6,9 @@
 ## `[settings] dirconfig = "user"` says so. The store holds the
 ## directory's own `config` (an ini whose `[settings]` section overrides
 ## the user config: `current`, `sandbox = off`, ...), its `sandbox`
-## policy file, and the harness mode files (`goal`, `achieved`,
-## `goal-cancelled`, `cybernetic`, ...).
+## policy file, and the file-based harness mode files
+## (`cybernetic`, ...). Goal mode keeps its state in the conversation,
+## not here.
 ##
 ## Resolution cascades: for a setting, the directory's own store wins,
 ## then each ancestor's store, nearest first; the user config is the
@@ -19,10 +20,10 @@
 ## config, or a store under the user config root when the user config
 ## says `dirconfig = "user"`. Authority follows that mode switch, never
 ## the store path's shape.
-## Legacy layouts stay readable: a root-level `.sandbox` policy file, a
-## `goal.md` in the project root, and the old
-## `~/.local/share/3code/dirs/<mangled>.current` sticky-current file are
-## consulted as fallbacks so an upgraded tree keeps working.
+## Legacy layouts stay readable: a root-level `.sandbox` policy file
+## and the old `~/.local/share/3code/dirs/<mangled>.current`
+## sticky-current file are consulted as fallbacks so an upgraded tree
+## keeps working.
 
 import std/[os, options, parsecfg, streams, strutils, tables]
 import types, util
@@ -83,7 +84,7 @@ proc storeDirFor*(dir: string): string =
     dir / StoreDirName
 
 proc storeFileFor*(dir, name: string): string =
-  ## Path of `name` (e.g. "config", "sandbox", "goal") in `dir`'s store.
+  ## Path of `name` (e.g. "config", "sandbox") in `dir`'s store.
   storeDirFor(dir) / name
 
 proc ancestorsNearestFirst*(cwd: string): seq[string] =
@@ -112,7 +113,7 @@ proc cascadeStoreFile*(cwd, name: string): string =
 proc readStoreSettings*(storeDir: string): Table[string, string] =
   ## The `[settings]` map from a store's `config` file, raw values.
   ## Missing or malformed file reads empty: a store that carries only a
-  ## sandbox policy or goal file is still a valid store.
+  ## sandbox policy is still a valid store.
   let path = storeDir / StoreConfigFile
   if not fileExists(path): return result
   let stream = newFileStream(path, fmRead)

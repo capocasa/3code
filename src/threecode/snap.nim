@@ -170,12 +170,14 @@ proc syncManifest*(cache: ReadCache; root, modeFile: string;
                    modeActive: bool) =
   ## The turn-boundary arming gate, called once per turn start: disarm
   ## when no mode is active, arm when one is and the baseline is stale —
-  ## never armed yet, or armed before the mode file was last written (a
-  ## retire-and-rearm without a turn in between must not keep the old
-  ## baseline). This is what keeps every diffing cost inside an active
-  ## mode.
+  ## never armed yet, or (file modes) armed before the mode file was
+  ## last written (a retire-and-rearm without a turn in between must
+  ## not keep the old baseline). A transcript mode passes no file:
+  ## armed state alone decides, and the fresh baseline comes from the
+  ## explicit `armManifest` at the kickoff. This is what keeps every
+  ## diffing cost inside an active mode.
   if cache == nil: return
-  if not modeActive or not fileExists(modeFile):
+  if not modeActive or (modeFile.len > 0 and not fileExists(modeFile)):
     if cache.manifestArmed:
       # Disarm deletes the snapshot store with the manifest.
       if cache.manifestRoot.len > 0:
@@ -186,7 +188,7 @@ proc syncManifest*(cache: ReadCache; root, modeFile: string;
       cache.manifestRoot = ""
     return
   var stale = not cache.manifestArmed
-  if not stale:
+  if not stale and modeFile.len > 0:
     let m = localSig(modeFile)
     if m.size < 0 or m[0] > cache.manifestTime: stale = true
   if stale: discard armManifest(cache, root)

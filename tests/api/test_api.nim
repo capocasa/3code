@@ -83,7 +83,7 @@ suite "api request shaping":
     # OpenAI's post-4o chat lineup (o-series, gpt-5.x) rejects max_tokens
     # outright; the budget field is max_completion_tokens.
     var body = %*{"stream": true}
-    let p = Profile(name: "openai.gpt-5.6", family: "gpt", model: "gpt-5.6")
+    let p = Profile(name: "openai.gpt-5.4", family: "gpt", model: "gpt-5.4")
 
     applyGenerationDefaults(p, body)
 
@@ -345,7 +345,9 @@ suite "api request shaping":
     # Hy4's chat template accepts exactly high and no_think; Hy3 keeps low.
     check knownGoodReasonings("openrouter", "tencent/hy4-preview") == @["no_think", "high"]
     check knownGoodReasonings("tencent", "hy4-preview") == @["no_think", "high"]
+    check knownGoodReasonings("deepinfra", "tencent/Hy4-preview") == @["no_think", "high"]
     check knownGoodReasonings("openrouter", "tencent/hy3") == @["no_think", "low", "high"]
+    check knownGoodContextWindow("deepinfra", "tencent/Hy4-preview") == 1_000_000
 
   test "mistral: medium/large-4 none/high, large-3 no knob":
     check knownGoodReasonings("mistral", "mistral-medium-3-5") == @["none", "high"]
@@ -646,7 +648,6 @@ suite "api request shaping":
     # 5.1+ adds none; 5.4/5.5 add xhigh; 5.6 adds max; pros reason
     # unconditionally; gpt-4.x has no knob at all.
     check knownGoodReasonings("openai", "o3") == @["low", "medium", "high"]
-    check knownGoodReasonings("openai", "o4-mini") == @["low", "medium", "high"]
     check knownGoodReasonings("openai", "gpt-5") ==
       @["minimal", "low", "medium", "high"]
     check knownGoodReasonings("openai", "gpt-5-mini") ==
@@ -667,8 +668,6 @@ suite "api request shaping":
       @["low", "medium", "high", "xhigh", "max"]
     check knownGoodReasonings("openrouter", "openai/gpt-5.6-luna-pro") ==
       @["low", "medium", "high", "xhigh", "max"]
-    check knownGoodReasonings("openai", "gpt-5.6") ==
-      @["none", "low", "medium", "high", "xhigh", "max"]
     check knownGoodReasonings("openai", "gpt-5.6-luna") ==
       @["none", "low", "medium", "high", "xhigh", "max"]
     # gpt-6-astra and gpt-6.1-sol drop "none": reasoning cannot be
@@ -804,7 +803,6 @@ suite "api request shaping":
     check knownGoodReasonings("xai", "grok-4.3") == @["low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-4.20-0309-non-reasoning") == @["off", "low", "medium", "high"]
     check knownGoodReasonings("openrouter", "x-ai/grok-4.20") == @["off", "low", "medium", "high"]
-    check knownGoodReasonings("xai", "grok-build-0.1") == @["low", "medium", "high"]
     check knownGoodReasonings("openrouter", "x-ai/grok-4.5") == @["low", "medium", "high"]
 
   test "gpt-6 sol/luna and gpt-6.1 sol are known-good for openai and chatgpt":
@@ -917,7 +915,6 @@ suite "api request shaping":
     check knownGoodContextWindow("xai", "grok-4.5") == 500_000
     check knownGoodContextWindow("xai", "grok-4.3") == 1_000_000
     check knownGoodContextWindow("xai", "grok-4.20-0309-non-reasoning") == 2_000_000
-    check knownGoodContextWindow("xai", "grok-build-0.1") == 256_000
 
   test "supergrok aliases xai known-good entries":
     check canonicalKnownGoodProvider("supergrok") == "xai"
@@ -1129,8 +1126,6 @@ suite "api request shaping":
       check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
 
   test "mimo knownGoodReasonings offers off/on":
-    check knownGoodReasonings("xiaomi", "mimo-v2.5-pro") == @["off", "on"]
-    check knownGoodReasonings("xiaomi", "mimo-v2.5") == @["off", "on"]
     check knownGoodReasonings("xiaomi", "mimo-v2.6-pro") == @["off", "on"]
     check knownGoodReasonings("xiaomi", "mimo-v2.6-flash") == @["off", "on"]
     check knownGoodReasonings("openrouter", "xiaomi/mimo-v2.5-pro") == @["off", "on"]
@@ -2076,8 +2071,8 @@ suite "xml tool_call fallback":
     check "temperature" notin body
 
   test "fallback flag is per-known-good entry":
-    check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm-5.3",
-      model: "z-ai/glm-5.3", family: "glm")) == true
+    check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm-5.3-flash",
+      model: "z-ai/glm-5.3-flash", family: "glm")) == true
     check xmlToolCallsFallback(Profile(name: "zai.glm-5.1",
       model: "glm-5.1", family: "glm")) == false
     check xmlToolCallsFallback(Profile(name: "nvidia.openai/gpt-oss-120b",
@@ -2978,9 +2973,9 @@ block scenario_c:
   # measured body size, not on a rejection.
   server.rejectSummarizer = false
   server.envelope = 2_000_000
-  let zenProfile = Profile(name: "opencode.glm-5.2",
+  let zenProfile = Profile(name: "opencode.glm-5.3",
     url: "http://127.0.0.1:" & $server.port,
-    key: "k", family: "glm", model: "glm-5.2")
+    key: "k", family: "glm", model: "glm-5.3")
   var messages = %*[{"role": "system", "content": "sys"}]
   for i in 1..17:
     messages.add %*{"role": "user", "content": "turn " & $i & " " & "x".repeat(60000)}

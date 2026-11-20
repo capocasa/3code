@@ -140,7 +140,7 @@ suite "prompts: defaultReasoningsFor":
     check defaultReasoningsFor("zai", "glm-5.1", "glm") == @["off", "on"]
     check defaultReasoningsFor("zai", "glm-5", "glm") == @["off", "on"]
     check defaultReasoningsFor("zai", "glm-4.7", "glm") == @["off", "on"]
-    check defaultReasoningsFor("nebius", "zai-org/GLM-5.1", "glm") == @["off", "on"]
+    check defaultReasoningsFor("novita", "zai-org/GLM-5.1", "glm") == @["off", "on"]
 
   test "glm-5.2 on z.ai exposes off/high/max":
     check defaultReasoningsFor("zai", "glm-5.2", "glm") == @["off", "high", "max"]
@@ -159,7 +159,7 @@ suite "prompts: defaultReasoningsFor":
     check defaultReasoningsFor("mistral", "zai-glm-5-3", "glm") == @["low", "high", "max"]
 
   test "kimi exposes off/on":
-    check defaultReasoningsFor("nvidia", "moonshotai/kimi-k2.6", "kimi") ==
+    check defaultReasoningsFor("novita", "moonshotai/kimi-k2.6", "kimi") ==
       @["off", "on"]
     check defaultReasoningsFor("together", "moonshotai/Kimi-K2.6", "kimi") ==
       @["off", "on"]

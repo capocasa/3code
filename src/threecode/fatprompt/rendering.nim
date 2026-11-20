@@ -364,7 +364,8 @@ func hasElapsedSuffix*(label: string): bool =
     tail[0].isDigit and ':' in tail
 
 func barTickLabel*(label: string; secs: int): string =
-  ## Bar-tick label with the whole-second turn timer appended (hh:mm:ss).
+  ## Bar-tick label with the whole-second turn timer appended
+  ## (clockDuration: 33s, 2:08, 1:12:21, 2d 3:04:05).
   ## Labels that already carry a clock are passed through unchanged. Both
   ## the GUI thread's tick and the input thread's editor repaint must build
   ## the bar label through this so a keystroke frame can never show a

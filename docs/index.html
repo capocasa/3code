@@ -573,7 +573,7 @@ brave-key = &quot;...&quot;</pre></p>
 <p>If the old work is no longer relevant, clear it. A fresh context is safer than a summary of things the model no longer needs.</p>
 <p><tt class="docutils literal"><span class="pre">:btw</span></tt> asks the model a side question about the conversation — &quot;what did that error mean?&quot;, &quot;why did we pick the parser rewrite?&quot; — without touching the context:</p>
 <p><pre class="listing">:btw why did we skip the cache in that last change?</pre></p>
-<p>The command returns at once — the answer runs on a background request and lands under a dim <tt class="docutils literal"><span class="pre">💬</span></tt> block as soon as it arrives, so the prompt never waits for it. The question and its answer are printed to your terminal only. Neither becomes a message: the next turn the model sees is exactly the conversation you had before asking, so a <tt class="docutils literal"><span class="pre">:btw</span></tt> costs no context window — but its burned tokens are real spend: they are added to the session and the token bar shows the sum of both requests.</p>
+<p>The command returns at once — the answer runs on a background request and lands under a dim <tt class="docutils literal"><span class="pre">💬</span></tt> block as soon as it arrives, so the prompt never waits for it. The question and its answer are printed to your terminal only. Neither becomes a message: the next turn the model sees is exactly the conversation you had before asking, so a <tt class="docutils literal"><span class="pre">:btw</span></tt> costs no context window — but its burned tokens are real spend: they are added to the session and the token bar shows the sum of the rest's requests (the turn's own call, the verifier check, and any other side call that landed on the same rest, all added together).</p>
 
 <h2 id="chunked-mode">Chunked mode</h2><p>For a large mechanical task, ask the model to split the work into files. Each chunk ends by calling the <tt class="docutils literal"><span class="pre">clear</span></tt> tool with instructions for the next one. The model carries the plan forward and leaves the spent context behind.</p>
 <p>Example:</p>
@@ -597,7 +597,7 @@ Task: add test coverage to the parser module.</pre></p>
 <p>While <tt class="docutils literal"><span class="pre">goal.md</span></tt> exists, every turn end runs a satisfaction check: a fresh side conversation with the session's own model, given the goal text, a summary of what the turn actually did (files, patches, commands — never the agent's own claims), and the session change log — the net per-path record of everything the session changed on disk, shell commands included — judges from those inputs alone and answers with a verdict. Not satisfied, the agent is sent back in with the verifier's feedback. Satisfied, the harness renames the file to <tt class="docutils literal"><span class="pre">achieved.md</span></tt> (the record of the run) and idles. The check has no tools and no rounds: orientation is the harness's job, so the check is one model call. And it shows its work: the verifier's reply lands in scrollback as a dim quote block of its own — a solid vertical rule down the left, the verdict spoken by the leading icon alone — with the verdict line stripped:</p>
 <pre>✓ │ this is the
   │ verdict text</pre>
-<p>A green <tt class="docutils literal"><span class="pre">✓</span></tt> when the goal is satisfied, a red <tt class="docutils literal"><span class="pre">✗</span></tt> when it is not. Nothing the harness runs is ever silent.</p>
+<p>A green <tt class="docutils literal"><span class="pre">✓</span></tt> when the goal is satisfied, a red <tt class="docutils literal"><span class="pre">✗</span></tt> when it is not. Nothing the harness runs is ever silent. The verdict rows are session history, not live-only paint: each one is written into the <tt class="docutils literal"><span class="pre">.3log</span></tt> at the spot it was committed, so <tt class="docutils literal"><span class="pre">3code -r</span></tt> replays them between the reply they judged and the <tt class="docutils literal"><span class="pre">⚑</span></tt> continuation that followed — a resumed scrollback shows every check the session ran, not just the feedback text the continuation carries. (A compaction that collapses the history drops its verify rows with it, like any other detail of the collapsed turns.)</p>
 
 <h3 id="verifier-models">Verifier models</h3><p>The check can also run on a dedicated verification-class model:</p>
 <p><pre class="listing">:verifier                 show the verifier setting
@@ -961,7 +961,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-19 09:15:28 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-19 20:22:39 UTC</small>
       </div>
     </div>
   </div>

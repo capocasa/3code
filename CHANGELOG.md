@@ -2,6 +2,87 @@ Changelog
 
 Unreleased
 
+- **A write to a sandbox policy file names the real rule: only the
+  user can change sandbox rules.** The policy slots ride every load
+  as hidden read-only guards no rule in the file can weaken, so a
+  read/write/patch/apply_patch aimed at one always denied - but with
+  the generic `is read-only (policy: ...)` text, which sent the model
+  digging for a rule to edit instead of asking. The denial now says
+  what the file is: `./.sandbox is a policy file (sandbox rules can
+  only be changed by the user, :sandbox edit)`. Every slot spelling
+  under any prefix asks that way - the legacy root `.sandbox`, the
+  store `.3code/sandbox`, and the user `3code/sandbox` under the
+  config root - matched against the hidden guard that denied, so a
+  plain `readonly` rule keeps the generic text and reads of the
+  policy stay allowed (the denial hint points the model at the file).
+  (`tests/core/test_sandbox_cascade.nim`)
+
+- **Catalog sweep: 98 delisted rows out, DeepInfra Hy4-preview in.**
+  Every known-good row was re-checked against its provider's live
+  `/models` list, and the 98 host+model pairs a provider no longer
+  serves are gone, so `3code --good` stops recommending ids that 404.
+  The aggregator hosts took the deepest cuts (33 rows across tensorx,
+  opencodego and opencode: kimi k2.5 through k2.7, glm 5 to 5.2,
+  minimax m2.5 to m3, mimo v2.5, the older qwen ids). OpenAI
+  first-party retired o1, o3-mini, o4-mini, gpt-4.1-nano and the base
+  gpt-5.6 (the sol/terra/luna splits stay), xAI and OpenRouter
+  dropped grok-build-0.1, xiaomi delisted its first-party mimo v2.5,
+  and nebius dropped its GLM-5.1. Every model survives on each host
+  that still lists it - only the dead pairs left the table. One
+  addition: DeepInfra joins OpenRouter and tencent for
+  `tencent/Hy4-preview` (DeepInfra's capital-H spelling, the same
+  quirk as its Hy3 row) with the catalog's full 1,048,576-token
+  window and the same high/no_think reasoning ladder
+  (`tests/api/test_api.nim`, `tests/config/test_provider_wizard.nim`).
+
+- **A resume replays the goal verify, not just its consequences.**
+  The turn-end satisfaction check's verdict row (the `✓`/`✗` quote
+  block) was display-only: nothing persisted it, so `3code -r` -
+  loading scrollback from disk - dropped every check the session had
+  run. The resumed scrollback showed the `⚑` goal-check continuation
+  with the verifier's feedback embedded as text, but the verdict row
+  itself (its icon, its own prose, its position between the reply it
+  judged and the continuation it caused) was gone, and a satisfied
+  history showed no `✓` at all. Each verifier step is now recorded on
+  the session anchored to the message position it was committed at,
+  written into the `.3log` as a `goal_check verdict=...` record at
+  exactly that spot, and replayed through the same formatter the live
+  commit used - replay/live parity restored, the rebreak window
+  included (it renders from the same anchored records). The boundary
+  that falls through without appending a message (SATISFIED retires
+  the goal, a failed check without a discipline note) now checkpoints
+  the session so the row reaches disk before the session idles;
+  `:clear` and every compaction drop the records with the conversation
+  they described, and the cybernetic mode's steps ride the same
+  machinery
+  (`tests/core/test_session.nim`, `tests/tty/test_goal_mode_ctrlr.nim`).
+
+- **The sandboxed shell runs as you, not as nobody.** sandwall enters
+  a user+mount namespace for the deny masks (and the network fence)
+  and composed the namespace's id-map writes from ids read only AFTER
+  unshare(2) - by then they already showed as the unmapped overflow
+  65534, the kernel rejected the "0 65534 1" line (an unprivileged
+  writer may map only its own id), sandwall degraded, and every
+  fenced command ran stranded in an unmapped namespace: `id` said
+  `nobody` while the inherited env said `USER=carlo`, every file in a
+  listing read `nobody:nobody`, ssh and git tripped over a passwd
+  home of `/` and dubious repo ownership, and a sandboxed agent
+  naturally misread its own project as remotely owned. The fix
+  belongs in sandwall and only there: the kernel binds a /proc
+  id-map file to the task's user namespace at OPEN time and checks
+  the write against the opener's credentials, so no wrapper-side fd
+  trick can reach the stranded namespace (a pre-unshare handle names
+  the immutable initial map; a handle opened after restrict() is
+  EACCES under the Landlock domain). sandwall 0.5.15 reads the
+  ids BEFORE the unshare and self-maps the user onto themselves, so
+  the confined tree sees the world as the user who launched it;
+  the manifest now requires sandwall >= 0.5.15. The box driver
+  keeps a degrade guard (box.nim repairUsernsIds): it detects a
+  still-unmapped namespace -
+  sandwall too old, a nested run from an already-unmapped namespace
+  where no outer id is expressible, or a run nested under an outer
+  Landlock domain that denies the map-file opens outright - and says
+  so instead of failing the run (`tests/core/test_sandbox_userns.nim`).
 - **The token bar sums every side call at a rest, never just the
   latest.** A rest's token bar is the SUM of its requests - the turn's
   final call plus each harness side call that landed on it - but the

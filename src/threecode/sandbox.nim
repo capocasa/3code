@@ -379,12 +379,15 @@ when defined(posix):
     ##   Without host rules the network is open and no tunnel is
     ##   needed, but the pw_dir repair below still is.
     ##
-    ## * repair the defaults that break under the fence. The fenced
-    ##   child runs as uid 65534 (nobody), whose passwd home is /, so
-    ##   ssh's pw_dir-based defaults would look under /.ssh: no config
-    ##   aliases, no default identities, no known_hosts. The file
-    ##   carries a copy of ~/.ssh/config with ~ rewritten to the
-    ##   absolute home, plus explicit fallbacks.
+    ## * repair the defaults that break under the fence. With the
+    ## user namespace mapped (box.nim repairs sandwall's stranded
+    ## unmapped namespace) the fenced uid is the launching user's and
+    ## pw_dir is right; when that repair degrades (a nested run from
+    ## an already-unmapped namespace), the child is uid 65534 (nobody),
+    ## whose passwd home is /, and ssh's pw_dir-based defaults would
+    ## look under /.ssh: no config aliases, no default identities, no
+    ## known_hosts. The file carries a copy of ~/.ssh/config with ~
+    ## rewritten to the absolute home, plus explicit fallbacks.
     ##
     ## Not covered: scp and sftp, whose OpenSSH 9.8+ binaries exec
     ## /usr/bin/ssh by absolute path - no PATH shim or env reaches
@@ -416,9 +419,10 @@ when defined(posix):
           text.add(line.replace("~/", home) & "\n")
       except CatchableError: discard  # unreadable: defaults only
     text.add "\n# 3code wall proxy (sandbox fence)\nHost *\n"
-    # the fenced uid is 65534, so ssh would log in as nobody@...;
-    # the launching user's name is the right default (a User in the
-    # user's own stanzas, or user@host / -l, still wins: first match)
+    # when the id mapping degrades, the fenced uid is 65534 and ssh
+    # would log in as nobody@...; the launching user's name is the
+    # right default (a User in the user's own stanzas, or user@host /
+    # -l, still wins: first match)
     let loginName = getEnv("LOGNAME", getEnv("USER", ""))
     if loginName.len > 0:
       text.add "  User " & loginName & "\n"
@@ -759,6 +763,19 @@ proc canonicalRules*(rules: Policy): Policy =
     if result[i].kind == rkPath:
       result[i].path = resolveRawPath(result[i].path)
 
+proc policySlotShaped*(path: string): bool =
+  ## Whether `path` names a sandbox policy slot under any prefix: the
+  ## legacy root-level `.sandbox`, or a `sandbox` file inside a `.3code`
+  ## or `3code` directory (the repo store, an ancestor's store, or the
+  ## user config root). The hidden guards deny exactly these files, so
+  ## the write denial says so instead of a generic read-only: no rule
+  ## and no ask grant can ever open them, only the user can.
+  let name = path.extractFilename
+  if name == PolicyFile: return true
+  if name != UserPolicyFile: return false
+  let holder = path.parentDir.extractFilename
+  holder == ".3code" or holder == "3code"
+
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
   ## Check a raw (possibly relative) path against the current policy,
   ## reloading the policy first when the file changed. This is the
@@ -779,7 +796,17 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   of akReadOnly:
     if not needsWrite: (true, "")
     else:
-      (false, "sandbox: " & shown & " is read-only (" & policyHint() & ")")
+      var policySlot = false
+      for r in canonicalRules(current):
+        if r.hidden and r.kind == rkPath and policySlotShaped(r.path) and
+            isPathUnder(resolved, r.path):
+          policySlot = true
+          break
+      if policySlot:
+        (false, "sandbox: " & shown & " is a policy file (sandbox rules " &
+          "can only be changed by the user, :sandbox edit)")
+      else:
+        (false, "sandbox: " & shown & " is read-only (" & policyHint() & ")")
   of akDeny, akAsk:
     # akAsk denies identically here; only the bash tool's ask flow
     # redeems it (see the ask-gate section below).

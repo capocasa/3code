@@ -5,19 +5,19 @@ discard """
 ## suites cannot reach (they live behind the input thread and the idle
 ## REPL loop):
 ##
-## - Goal mode wiring: the file is the whole mode, and work starts the
-##   moment it exists. `:goal TEXT` runs the kickoff turn at once; a
-##   goal.md already on disk at startup does the same before any prompt.
-##   The arm announces with the kickoff item alone - the `⚑` flag plus
-##   the goal text, no echoed command line, no receipt, no hint line,
-##   no `Goal armed:` scaffold - and the stanza is fed exactly once per
-##   arming: a
-##   resumed session never re-feeds it. Each turn end runs the verifier
-##   whose reply is the whole display - a quote block led by the green
-##   `✓` or red `✗` icon, no notice before or after it. An unmet
-##   verdict sends the agent back in under the `⚑` marker and the next
-##   turn starts on its own; a satisfied one retires goal.md to
-##   achieved.md.
+## - Goal mode wiring: the conversation is the whole mode. `:goal TEXT`
+##   appends the kickoff and runs the turn at once; a goal.md left on
+##   disk (the upgrade case) arms nothing. The arm announces with the
+##   kickoff item alone - the `⚑` flag plus the goal text, no echoed
+##   command line, no receipt, no hint line, no `Goal armed:` scaffold -
+##   and the stanza is fed exactly once per arming: a resumed session
+##   never re-feeds it, it just derives goal mode from the .3log. Each
+##   turn end runs the verifier whose reply is the whole display - a
+##   quote block led by the green `✓` or red `✗` icon, no notice
+##   before or after it. An unmet verdict sends the agent back in under
+##   the `⚑` marker and the next turn starts on its own; a satisfied
+##   one retires the goal in the .3log (a `goal_check verdict=satisfied`
+##   record), and a new `:goal` arms the next one.
 import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
@@ -40,6 +40,16 @@ key = "stub"
 family = "glm"
 models = "stub-model"
 """)
+
+proc sessionLogHas(root, want: string): bool =
+  ## True once some session file in the fixture's data root carries
+  ## `want`: the .3log is where the goal's retirement record lands now
+  ## that no file on disk ever holds goal state.
+  for f in walkFiles(root / "xdg" / "3code" / "sessions" / "*.3log"):
+    try:
+      if want in readFile(f): return true
+    except CatchableError: discard
+  false
 
 proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   let data = root / "data"
@@ -70,10 +80,9 @@ suite "goal mode (interactive)":
   test ":goal TEXT arms; the kickoff turn runs at once":
     let root = newFixture("goal_kickoff")
     writeConfiguredProvider(root)
-    check not fileExists(root / "run" / ".3code" / "goal")
     # Response 1 goes to the kickoff turn the arm starts; response 2 is
-    # its turn-end verifier side call (satisfied verdict retires
-    # goal.md).
+    # its turn-end verifier side call (a satisfied verdict retires the
+    # goal into the .3log).
     writeFile(root / "run" / "stub_responses.json", $(%*[
       {"role": "assistant", "preStreamDelayMs": 50,
        "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
@@ -132,36 +141,23 @@ suite "goal mode (interactive)":
     tty.expectNeverInHistory "verifying"
     tty.expectNeverInHistory "verification"
     tty.drain(300)
-    check fileExists(root / "run" / ".3code" / "achieved")
-    check not fileExists(root / "run" / ".3code" / "goal")
+    # The retirement record is the satisfied goal_check in the .3log;
+    # nothing on disk holds goal state.
+    check sessionLogHas(root, "goal_check verdict=satisfied")
+    check not fileExists(root / "run" / "goal.md")
     tty.expectAlive()
 
-  test "goal.md present at startup starts the kickoff turn at once":
+  test "a goal.md left on disk arms nothing":
     let root = newFixture("goal_startup_kickoff")
     writeConfiguredProvider(root)
-    # goal.md is written before the session starts - how a user (or any
-    # other tool) arms a goal without ever touching :goal. Startup must
-    # treat it exactly like a `:goal` arm: the detection hint, then the
-    # kickoff turn, no prompt required.
+    # The upgrade scenario: a goal.md left in the project root by an
+    # older 3code (or written by hand). The file is no longer the
+    # protocol - startup must not arm goal mode, no kickoff runs, and
+    # an ordinary prompt answers with the FIRST queued reply (a kickoff
+    # turn would burn it), with no verifier call behind it.
     writeFile(root / "run" / "goal.md", "make the stub say GOAL_WORK_DONE\n")
-    # Response 1 goes to the startup kickoff turn; response 2 is its
-    # turn-end verifier side call (satisfied verdict retires goal.md);
-    # response 3 answers the follow-up prompt that proves the session
-    # idles normally afterwards.
     writeFile(root / "run" / "stub_responses.json", $(%*[
-      {"role": "assistant", "preStreamDelayMs": 50,
-       "content": "GOAL_WORK_DONE", "contentChunks": ["GOAL_WORK_DONE"],
-       "usage": {"promptTokens": 5, "completionTokens": 2,
-                  "totalTokens": 7, "cachedTokens": 0}},
-      {"role": "assistant", "preStreamDelayMs": 50,
-       "content": "all done\nVERDICT: SATISFIED",
-       "contentChunks": ["all done\nVERDICT: SATISFIED"],
-       "usage": {"promptTokens": 5, "completionTokens": 2,
-                  "totalTokens": 7, "cachedTokens": 0}},
-      {"role": "assistant", "preStreamDelayMs": 50,
-       "content": "NEXT_TURN_OK", "contentChunks": ["NEXT_TURN_OK"],
-       "usage": {"promptTokens": 5, "completionTokens": 2,
-                  "totalTokens": 7, "cachedTokens": 0}}
+      reply("NEXT_TURN_OK"),
     ]))
     let stub = ensureStubBinary()
     let tty = newTtySession(stub,
@@ -173,28 +169,20 @@ suite "goal mode (interactive)":
       tty.close()
 
     tty.expect "\u276f"
-    # Nothing is typed: the kickoff turn runs on its own, before any
-    # prompt - the flag-led goal item is the whole announcement.
-    tty.expectNeverInHistory "detected implementing"
-    tty.expectInHistory "⚑ make the stub say GOAL_WORK_DONE"
-    tty.expectNeverInHistory "Goal armed:"
-    tty.expectInHistory "GOAL_WORK_DONE"
-    check fileExists(root / "run" / "goal.md")
-    # The kickoff turn's end runs the check - the verifier's ✓ icon row
-    # is the whole display, and the retirement to achieved.md hangs off
-    # that boundary.
-    tty.expectInHistory "\u2713"
-    tty.expectNeverInHistory "verifying"
-    tty.expectNeverInHistory "verification"
     tty.drain(300)
-    check fileExists(root / "run" / "achieved.md")
-    check not fileExists(root / "run" / "goal.md")
-    # The session is back to an ordinary idle prompt: a typed prompt
-    # answers normally, and no second turn fires on its own.
+    # No kickoff item, no self-started turn, nothing armed.
+    tty.expectNeverInHistory "\u2691"
+    tty.expectNeverInHistory "Goal armed:"
+    tty.expectNeverInHistory "GOAL_WORK_DONE"
     tty.send "still here"
     tty.expect "still here"
     tty.send "\n"
     tty.expectInHistory "NEXT_TURN_OK"
+    tty.drain(300)
+    # No verifier side call ever fired and no retirement record exists;
+    # the stale file itself stays untouched.
+    check not sessionLogHas(root, "goal_check")
+    check fileExists(root / "run" / "goal.md")
     tty.expectAlive()
 
   test "verifier reply lands in scrollback; keys typed during the check survive":
@@ -257,8 +245,7 @@ suite "goal mode (interactive)":
     # replaced by the check's 5/2.
     tty.drain(200)
     tty.expectInHistory "↑10  ↓4"
-    check fileExists(root / "run" / ".3code" / "achieved")
-    check not fileExists(root / "run" / ".3code" / "goal")
+    check sessionLogHas(root, "goal_check verdict=satisfied")
     # Submit the buffer that lived through the check: the echoed prompt
     # only appears if every keystroke survived the side call.
     tty.send "\n"
@@ -350,19 +337,22 @@ suite "goal mode (interactive)":
     tty.expectNeverInHistory "detected implementing"
     # Ctrl-C while the verifier's slow model call runs: the interrupt is
     # honored after the side call returns, skips the satisfaction check,
-    # and ends the turn. goal.md survives.
+    # and ends the turn. The goal survives - in the conversation.
     tty.drain(400)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
     tty.drain(300)
-    check fileExists(root / "run" / ".3code" / "goal")
-    check not fileExists(root / "run" / ".3code" / "achieved")
+    # No retirement record, and the verb still reports the live goal.
+    check not sessionLogHas(root, "verdict=satisfied")
+    tty.send ":goal"
+    tty.expect "work toward it"
+    tty.send "\n"
+    tty.drain(200)
     tty.expectAlive()
 
   test "unmet verdict shows the evaluation, then just continues":
     let root = newFixture("goal_feedback_continue")
     writeConfiguredProvider(root)
-    writeFile(root / "run" / "goal.md", "make the stub do two turns\n")
     # Response 1: the kickoff turn's reply. Response 2: an unmet verdict.
     # Response 3: the continuation turn's reply, which must start on its
     # own - no prompt is sent at any point. Response 4: the satisfied
@@ -383,6 +373,9 @@ suite "goal mode (interactive)":
       tty.close()
 
     tty.expect "\u276f"
+    tty.send ":goal make the stub do two turns"
+    tty.send "\n"
+    tty.drain(100)
     tty.expectInHistory "⚑ make the stub do two turns"
     tty.expectNeverInHistory "Goal armed:"
     tty.expectInHistory "WORK_TURN_ONE"
@@ -401,14 +394,12 @@ suite "goal mode (interactive)":
     # The continuation turn's satisfied check retires the goal.
     tty.expectInHistory "\u2713"
     tty.drain(300)
-    check fileExists(root / "run" / "achieved.md")
-    check not fileExists(root / "run" / "goal.md")
+    check sessionLogHas(root, "goal_check verdict=satisfied")
     tty.expectAlive()
 
   test "inline verdict ending the verifier's prose line is honored":
     let root = newFixture("goal_inline_verdict")
     writeConfiguredProvider(root)
-    writeFile(root / "run" / "goal.md", "make the stub do one turn\n")
     # The shape a live verifier produced: the contract words terminate
     # the prose line instead of owning one. The reply's last words are
     # still the verdict, so the check must honor them - a red-x row
@@ -427,6 +418,9 @@ suite "goal mode (interactive)":
       tty.close()
 
     tty.expect "\u276f"
+    tty.send ":goal make the stub do one turn"
+    tty.send "\n"
+    tty.drain(100)
     tty.expectInHistory "\u2691 make the stub do one turn"
     tty.expectInHistory "GOAL_WORK_DONE"
     # The icon row honors the inline verdict: green check, contract
@@ -435,29 +429,24 @@ suite "goal mode (interactive)":
     tty.expectInHistory "\u2713"
     tty.expectNeverInHistory "VERDICT"
     tty.drain(300)
-    check fileExists(root / "run" / "achieved.md")
-    check not fileExists(root / "run" / "goal.md")
+    check sessionLogHas(root, "goal_check verdict=satisfied")
     tty.expectAlive()
 
 suite "goal mode mid-turn detection (interactive)":
-  test "goal.md written during a turn kicks off at the turn's end":
-    let root = newFixture("goal_midturn_detect")
+  test "the agent writing goal.md arms nothing":
+    let root = newFixture("goal_midturn_file_inert")
     writeConfiguredProvider(root)
-    # The agent writes goal.md as part of an ordinary turn. That turn's
-    # end is a DETECTION, not a check: the work just finished was never
-    # aimed at the goal, so the boundary prints the detection hint and
-    # runs the kickoff turn right there - the same immediate start a
-    # startup detection and a `:goal` arm take. Only the kickoff turn's
-    # own end runs the verifier.
+    # The agent writes goal.md as part of an ordinary turn. The file is
+    # no longer the protocol, so the turn's end is an ordinary end: no
+    # detection, no kickoff turn, no verifier - the session idles and
+    # the next queued reply belongs to the user's next prompt.
     # Response 1: the write tool call. Response 2: the turn's final
-    # reply. Response 3: the kickoff turn's reply. Response 4: the
-    # kickoff turn's verifier (SATISFIED retires goal.md).
+    # reply. Response 3: the next prompt's reply.
     writeFile(root / "run" / "stub_responses.json", $(%*[
       toolReply("write",
         """{"path": "goal.md", "body": "make the stub say GOAL_WORK_DONE"}"""),
       reply("GOAL_WRITTEN"),
-      reply("GOAL_WORK_DONE"),
-      reply("all done\nVERDICT: SATISFIED"),
+      reply("NEXT_TURN_OK"),
     ]))
     let stub = ensureStubBinary()
     let tty = newTtySession(stub,
@@ -472,21 +461,19 @@ suite "goal mode mid-turn detection (interactive)":
     tty.send "go"
     tty.expect "go"
     tty.send "\n"
-    # The turn writes the file and finishes; no verifier judges that
-    # turn - the kickoff's flag-led goal item lands instead (no hint
-    # line), and the kickoff turn runs without any prompt.
     tty.expectInHistory "GOAL_WRITTEN"
-    tty.expectNeverInHistory "detected implementing"
-    tty.expectInHistory "⚑ make the stub say GOAL_WORK_DONE"
-    tty.expectNeverInHistory "Goal armed:"
-    tty.expectInHistory "GOAL_WORK_DONE"
-    # The kickoff turn's end is the first check.
-    tty.expectInHistory "\u2713"
-    tty.expectNeverInHistory "verifying"
-    tty.expectNeverInHistory "verification"
     tty.drain(300)
-    check fileExists(root / "run" / "achieved.md")
-    check not fileExists(root / "run" / "goal.md")
+    # No kickoff, no self-started turn, no check. (The goal text itself
+    # does appear - the write tool's echo shows the file body - so the
+    # assertions watch the mode's own surfaces, not the text.)
+    tty.expectNeverInHistory "\u2691"
+    tty.expectNeverInHistory "Goal armed:"
+    check not sessionLogHas(root, "goal_check")
+    check fileExists(root / "run" / "goal.md")
+    tty.send "next"
+    tty.expect "next"
+    tty.send "\n"
+    tty.expectInHistory "NEXT_TURN_OK"
     tty.expectAlive()
 
   test "a goal queued mid-turn arms with the ⚑ item alone at the drain":
@@ -541,8 +528,7 @@ suite "goal mode mid-turn detection (interactive)":
     check tty.rowContaining("❯ :goal make the stub") == -1
     check tty.rowContaining("goal armed") == -1
     check tty.rowContaining("⚑ make the stub say GOAL_WORK_DONE") >= 0
-    check fileExists(root / "run" / ".3code" / "achieved")
-    check not fileExists(root / "run" / ".3code" / "goal")
+    check sessionLogHas(root, "goal_check verdict=satisfied")
     tty.expectAlive()
 
 suite "goal mode resume (interactive)":
@@ -551,11 +537,8 @@ suite "goal mode resume (interactive)":
     writeConfiguredProvider(root)
     # Phase 1 arms the goal and leaves the mode live: the kickoff turn
     # answers, the turn-end verifier is Ctrl-C'd mid-call (the check is
-    # skipped, goal.md stays), and the session exits with the kickoff
-    # stanza already in the conversation.
-    createDir(root / "run" / ".3code")
-    writeFile(root / "run" / ".3code" / "goal",
-      "keep working after resume\n")
+    # skipped, no retirement record lands), and the session exits with
+    # the kickoff stanza already in the conversation.
     writeFile(root / "run" / "stub_responses.json", $(%*[
       reply("WORK_TURN_ONE"),
       reply("never reached\nVERDICT: SATISFIED", delayMs = 8000),
@@ -566,6 +549,9 @@ suite "goal mode resume (interactive)":
                             cwd = root / "run",
                             env = stubEnv(root, root / "run" / "stub_responses.json"))
     tty.expect "\u276f"
+    tty.send ":goal keep working after resume"
+    tty.send "\n"
+    tty.drain(100)
     tty.expectInHistory "⚑ keep working after resume"
     tty.expectInHistory "WORK_TURN_ONE"
     tty.drain(400)
@@ -574,7 +560,7 @@ suite "goal mode resume (interactive)":
     tty.drain(300)
     tty.ctrlD()
     tty.expectExit(0, timeoutMs = 5000)
-    check fileExists(root / "run" / ".3code" / "goal")
+    check not sessionLogHas(root, "verdict=satisfied")
     # Phase 2 resumes. The stub queue holds exactly two replies: the
     # answer to the typed prompt, then its turn-end verifier. If the
     # kickoff stanza were re-fed, it would consume the first reply and
@@ -606,6 +592,59 @@ suite "goal mode resume (interactive)":
     tty2.expectInHistory "NEXT_AFTER_RESUME"
     tty2.expectInHistory "\u2713"
     tty2.drain(300)
-    check fileExists(root / "run" / ".3code" / "achieved")
-    check not fileExists(root / "run" / ".3code" / "goal")
+    check sessionLogHas(root, "goal_check verdict=satisfied")
+    tty2.expectAlive()
+
+  test "a resumed session replays the verifier's verdict row":
+    # The goal verify itself must survive loading scrollback from disk:
+    # the verdict row a live session painted (the ✗ quote block after
+    # the turn's reply) replays on `-r` between that reply and the ⚑
+    # continuation it sent, not just the continuation's embedded
+    # feedback text.
+    let root = newFixture("goal_resume_verify_row")
+    writeConfiguredProvider(root)
+    # Phase 1: the kickoff turn answers, its verifier replies FEEDBACK
+    # with a prose marker, and the turn the feedback starts is
+    # interrupted mid-call so the mode stays armed for phase 2.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("WORK_TURN_ONE"),
+      reply("VERIFY_PROSE_MARKER\nVERDICT: FEEDBACK: FEEDBACK_MARKER_NEXT"),
+      reply("WORK_TURN_TWO", delayMs = 8000),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    tty.expect "\u276f"
+    tty.send ":goal keep working after resume"
+    tty.send "\n"
+    tty.drain(100)
+    tty.expectInHistory "⚑ keep working after resume"
+    tty.expectInHistory "WORK_TURN_ONE"
+    # The live verdict row: the verifier's prose as a quoted step.
+    tty.expectInHistory "VERIFY_PROSE_MARKER"
+    tty.drain(300)
+    tty.send "\x03"
+    tty.expectInHistory "interrupted by user"
+    tty.drain(300)
+    tty.ctrlD()
+    tty.expectExit(0, timeoutMs = 5000)
+    # Phase 2: resume. The replayed scrollback keeps the verdict row at
+    # its position: after WORK_TURN_ONE, before the ⚑ goal-check
+    # continuation.
+    let tty2 = newTtySession(stub,
+                            args = ["-x", "-i", "-r"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty2.writeFrameArtifact(root / "frames.txt")
+      tty2.close()
+    tty2.expectIdleCaret(timeoutMs = 8000)
+    tty2.drain(300)
+    tty2.expectInHistory "VERIFY_PROSE_MARKER"
+    let hist = tty2.cleanRaw()
+    check hist.find("VERIFY_PROSE_MARKER") > hist.find("WORK_TURN_ONE")
+    check hist.find("VERIFY_PROSE_MARKER") <
+        hist.find("Verifier feedback:")
     tty2.expectAlive()

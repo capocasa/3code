@@ -610,6 +610,51 @@ suite "single active policy file":
     check (storePolicyPath(ancestor).normalizedPath) in r.readonly
     check ((ancestor / ".sandbox").normalizedPath) in r.readonly
 
+  test "writing a policy slot says only the user can change sandbox rules":
+    # The guard keeps denying, but the denial names what the file is:
+    # a policy slot no rule and no ask grant can open, only the user
+    # (:sandbox edit). Every spelling asks that way: the legacy
+    # `.sandbox`, the store `.3code/sandbox`, and the user `3code/sandbox`
+    # under the config root. A plain `readonly` rule keeps the generic
+    # read-only text, and reads of the policy stay allowed (the denial
+    # hint points the model at the file).
+    let (home, projDir) = newFixture("policyslot_msg")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let userFile = (home / "3code" / "sandbox").normalizedPath
+    createDir(userFile.parentDir)
+    writeFile(userFile, "allow /\n")
+    writeFile(repoPolicyPath(projDir),
+      "allow ./\nreadonly " & (projDir / "ro.txt").normalizedPath & "\n")
+    let wasActive = sandbox.active
+    let saved = sandbox.current
+    let savedHidden = sandbox.hiddenRules
+    let wasEnabled = sandboxEnabled
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    sandboxEnabled = true
+    try:
+      sandbox.arm(projDir)
+      for slot in [projDir / ".sandbox", repoPolicyPath(projDir), userFile]:
+        let (ok, reason) = checkRawPath(slot, needsWrite = true)
+        check not ok
+        check "can only be changed by the user" in reason
+        check ":sandbox edit" in reason
+        check "is read-only" notin reason
+      check checkRawPath(repoPolicyPath(projDir),
+        needsWrite = false).allowed
+      let (okRo, reasonRo) = checkRawPath(projDir / "ro.txt", needsWrite = true)
+      check not okRo
+      check "is read-only" in reasonRo
+      check "user" notin reasonRo
+    finally:
+      sandbox.active = wasActive
+      sandbox.current = saved
+      sandbox.hiddenRules = savedHidden
+      sandboxEnabled = wasEnabled
+      setCurrentDir(oldCwd)
+
   test "the user config and its store configs are read-only guards":
     # The security switches live in user-owned files; the model can
     # neither flip them mid-session (project stores tighten only) nor

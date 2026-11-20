@@ -1164,9 +1164,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   # reply carries unanswered tool_calls (a user message between an
   # assistant's calls and their results orphans the pairing).
   template injectRollover() =
-    let m = activeMode(session.cwd)
+    let m = activeMode(session.cwd, messages, session.goalSteps)
     if not noMode(m) and m.rolloverNote != nil:
-      let body = readModeText(m, session.cwd)
+      let body = readModeText(m, session.cwd, messages)
       let note = m.rolloverNote(body)
       messages.add note
       let counts = m.taskCounts(body)
@@ -1235,9 +1235,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   # kickoff turn that would bind them at write time, so the first check
   # after an arm still judges this turn's own delta (the boundary
   # re-baselines after each check for the next turn).
-  let startMode = activeMode(session.cwd)
+  let startMode = activeMode(session.cwd, messages, session.goalSteps)
   if not noMode(startMode):
-    session.modeSnapshot = readModeText(startMode, session.cwd)
+    session.modeSnapshot = readModeText(startMode, session.cwd, messages)
     if session.readCache == nil: session.readCache = newReadCache()
     session.changeCountStart = session.readCache.changes.len
     # The tree manifest arms with the mode and only then: outside a mode
@@ -1286,6 +1286,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           if summarized > 0: summarized
           else: applySummary(messages, OverflowFallbackSummary)
         if collapsed > 0:
+          # Compaction rewrote the history the step anchors point into;
+          # the verify rows are collateral of the collapse (like the
+          # prose they accompanied), not something to re-pin wrong.
+          session.goalSteps.setLen 0
           saveSessionReported(session, messages)
           let collapsedNotice = hintLnS(
             "· request rejected as too large; collapsed " &
@@ -1519,6 +1523,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     of caSummarize:
       let summarized = summarizeHistory(messages, p)
       if summarized > 0:
+        session.goalSteps.setLen 0
         let summarizeNotice = hintLnS(
           &"· summarized {summarized} message" &
             (if summarized == 1: "" else: "s") &
@@ -1835,6 +1840,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           session.promptState = PromptState()
           refreshSystemPrompt(messages, p, session.promptState)
           session.toolLog.setLen 0
+          session.goalSteps.setLen 0
           session.usage = Usage()
           session.lastPromptTokens = 0
           session.readCache = nil
@@ -1967,17 +1973,20 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     # verifier (same model, own message list, no tools) judges the mode's
     # text against harness-built evidence from this turn plus the
     # session change log. FEEDBACK sends the agent back in
-    # with the verifier's words; SATISFIED retires the file and idles
-    # normally. Interrupt is the pause lever: it skips the check and
-    # ends the turn; on resume the file is still there, so the mode is
-    # still on.
-    # The mode file is a project-root artifact: activation keys off the
-    # session's project dir, not the process cwd. Embedders (library,
-    # ACP) run sessions against their own cwd while the process may sit
-    # anywhere — e.g. a test harness parked in a repo that happens to
-    # carry a goal.md must not arm goal mode for every session it runs,
-    # and the end-of-turn verifier call it would fire is a real API call.
-    let mode = activeMode(session.cwd)
+    # with the verifier's words; SATISFIED retires the mode (renaming
+    # its file, or - goal mode - leaving the ✓ step as the record) and
+    # idles normally. Interrupt is the pause lever: it skips the check
+    # and ends the turn; on resume the armed state is still there, so
+    # the mode is still on.
+    # Activation keys off the session's project dir (a file mode's
+    # trigger file) and the session's own conversation (a transcript
+    # mode), never the process cwd. Embedders (library, ACP) run
+    # sessions against their own cwd while the process may sit
+    # anywhere — a test harness parked in a repo that happens to carry
+    # another project's mode file must not arm a mode for every session
+    # it runs, and the end-of-turn verifier call it would fire is a real
+    # API call.
+    let mode = activeMode(session.cwd, messages, session.goalSteps)
     if not noMode(mode):
       if isInterrupted():
         onTurnInterrupted()
@@ -1995,13 +2004,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # runs at the end of the kickoff turn.
         session.goalNotified = true
         if not modeKickoffIn(messages):
-          # A second mode's file on disk while one mode runs is a
-          # refused arming: say so once, right above the kickoff item.
-          let other = conflictingMode(mode, session.cwd)
+          # A second live mode while one mode runs is a refused arming:
+          # say so once, right above the kickoff item.
+          let other = conflictingMode(mode, session.cwd, messages,
+                                      session.goalSteps)
           if not noMode(other):
             commitHarnessNotice(
               receiptBytes(modeConflictLabel(mode, other)), messages)
-          let detectedText = readModeText(mode, session.cwd)
+          let detectedText = readModeText(mode, session.cwd, messages)
           session.modeSnapshot = detectedText
           if session.readCache == nil: session.readCache = newReadCache()
           session.changeCountStart = session.readCache.changes.len
@@ -2021,13 +2031,22 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # Verifier steps land in scrollback as they happen: same commit
       # path as the receipts around them, an item rendered like a reply
       # that speaks its verdict in color, icon first, through and
-      # through.
+      # through. Each step is also recorded on the session, anchored to
+      # the messages it judged: the next save persists it as a
+      # `goal_check` record so `3code -r` replays the verify instead of
+      # dropping it with the rest of the display-only rows. The session
+      # is a var parameter (not capturable), so the hook captures a
+      # pointer to just the seq; `msgs` re-reads the live length at
+      # fire time.
+      let stepsOut = addr session.goalSteps
+      let msgs = messages
       goalStepHook = proc (step: GoalStep) =
+        stepsOut[].add GoalStepRecord(after: msgs.len, step: step)
         let stepBytes = goalStepBytes(step)
         termengine.noteNonMessageTail(stepBytes, journalAnchorMessagesLen)
         commitTranscriptBytes(stepBytes, true)
       defer: goalStepHook = nil
-      let modeText = readModeText(mode, session.cwd)
+      let modeText = readModeText(mode, session.cwd, messages)
       # Duty 1, structure guard: a plan that lost its format mid-run
       # gets a mechanical restore-continuation and no side call (there
       # is no task list to judge). The mode stays latched.
@@ -2092,12 +2111,15 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           sendBack(note, mode.name & " update discipline (check unavailable)")
           continue
       elif check.verdict.kind == gvkSatisfied:
+        # A transcript mode retires through the very step the hook just
+        # recorded (the ✓ row IS the retirement record); a file mode
+        # renames its trigger file out of the way.
         if completeMode(mode, session.cwd):
           session.goalNotified = false
           session.modeSnapshot = ""
           session.changeCountStart = 0
           # The green ✓ verdict row is the whole display; the rename it
-          # reports is on disk.
+          # reports (file modes) is on disk.
         else:
           commitHarnessNotice(
             errLnS(mode.name & " satisfied but " & mode.fileName &
@@ -2114,6 +2136,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         if note.len > 0:
           sendBack(note, mode.name & " update discipline (no verdict)")
           continue
+      # The fall-through verdicts (satisfied, a failed or verdict-less
+      # check without a discipline note) append no message, so nothing
+      # below would save; checkpoint here so the step the hook just
+      # recorded - the ✓ row above all - reaches the .3log before the
+      # session idles or quits. The `continue` branches save inside
+      # `sendBack`.
+      saveSessionReported(session, messages)
     else:
       session.goalNotified = false
       session.modeSnapshot = ""

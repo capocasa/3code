@@ -132,13 +132,25 @@ suite "util: humanDuration":
     check humanDuration(2048) == "34:08"
 
 suite "util: clockDuration":
-  test "drops leading zero fields":
-    check clockDuration(0) == "0"
-    check clockDuration(4) == "4"
-    check clockDuration(59) == "59"
+  test "seconds carry an s suffix":
+    check clockDuration(0) == "0s"
+    check clockDuration(4) == "4s"
+    check clockDuration(59) == "59s"
+
+  test "minutes and up drop leading zero fields":
+    check clockDuration(60) == "1:00"
     check clockDuration(128) == "2:08"
     check clockDuration(2047) == "34:07"
     check clockDuration(4341) == "1:12:21"
+    check clockDuration(3599) == "59:59"
+
+  test "a day and up prefixes whole days":
+    check clockDuration(86400) == "1d 0:00:00"
+    check clockDuration(90061) == "1d 1:01:01"
+    check clockDuration(2 * 86400 + 3 * 3600 + 4 * 60 + 5) == "2d 3:04:05"
+
+  test "negative clamps to zero":
+    check clockDuration(-7) == "0s"
 
 suite "util: tokenSlot":
   test "returns icon + formatted count":

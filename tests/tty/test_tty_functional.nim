@@ -1703,9 +1703,9 @@ max-tokens = "8192"
       # message itself never lands in the bar.
       check "rate limit" notin rows[noticeRow + 2]
       # The turn timer in that same bar row counts up in clockDuration
-      # form (`4`, `2:08`, `1:12:21`).
+      # form (`33s`, `2:08`, `1:12:21`, `2d 3:04:05`).
       check rows[noticeRow + 2].contains(
-        re"\d+(:\d{2}){0,2}\s*$")
+        re"(\d+s|\d+(:\d{2}){0,2}|\d+d \d+(:\d{2}){0,2})\s*$")
       # ...and the retried reply reaches scrollback after the backoff.
       tty.expectInHistory "reply after retry"
       # The prompt is live again afterward (the footer was preserved, not

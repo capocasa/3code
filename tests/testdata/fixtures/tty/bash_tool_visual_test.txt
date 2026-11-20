@@ -144,7 +144,7 @@
 
 ● Running bash checks.
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 12 =====
 
@@ -163,7 +163,7 @@
 
 $ printf 'ok-one\nok-two\n'
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 13 =====
 
@@ -183,7 +183,7 @@ $ printf 'ok-one\nok-two\n'
 $ printf 'ok-one\nok-two\n'
   ok-one
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 14 =====
 
@@ -204,7 +204,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 15 =====
 
@@ -225,7 +225,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 16 =====
 
@@ -248,7 +248,7 @@ $ printf 'ok-one\nok-two\n'
 
 $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 17 =====
 
@@ -272,7 +272,7 @@ $ printf 'ok-one\nok-two\n'
 $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 18 =====
 
@@ -297,7 +297,7 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 19 =====
 
@@ -323,7 +323,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 20 =====
 
@@ -349,7 +349,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 21 =====
 
@@ -377,7 +377,7 @@ $ printf 'ok-one\nok-two\n'
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 22 =====
 
@@ -405,7 +405,7 @@ $ printf 'ok-one\nok-two\n'
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ :show 3█
 ===== frame 23 =====
 
@@ -433,7 +433,7 @@ $ printf 'ok-one\nok-two\n'
 
 following T3 live · :unshow or click the viewport to stop
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 24 =====
 
@@ -463,7 +463,7 @@ following T3 live · :unshow or click the viewport to stop
 
   scroll-1
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 25 =====
 
@@ -495,7 +495,7 @@ following T3 live · :unshow or click the viewport to stop
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 26 =====
 
@@ -529,7 +529,7 @@ following T3 live · :unshow or click the viewport to stop
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 27 =====
 
@@ -565,7 +565,7 @@ following T3 live · :unshow or click the viewport to stop
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 28 =====
 
@@ -603,7 +603,7 @@ following T3 live · :unshow or click the viewport to stop
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ :unshow█
 ===== frame 29 =====
 
@@ -641,7 +641,7 @@ following T3 live · :unshow or click the viewport to stop
 
 stopped following T3
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 30 =====
 
@@ -964,7 +964,7 @@ stopped following T3
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'  (0s)
   T3.log ↗
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 37 =====
 
@@ -1007,7 +1007,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
 $ printf 'slow-pre\n'; sleep 3; printf 'slow-done\n'
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 38 =====
 
@@ -1050,7 +1050,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   slow-pre
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 39 =====
 
@@ -1140,7 +1140,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   slow-done
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 41 =====
 
@@ -1282,7 +1282,7 @@ $ printf 'slow-pre\n'; sleep 3; printf 'slow-done\n'  (0s)
 $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxx
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 44 =====
 
@@ -1331,7 +1331,7 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxx
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 45 =====
 
@@ -1380,7 +1380,7 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxx
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 46 =====
 
@@ -1429,7 +1429,7 @@ $ echo ml-one
   echo ml-three
   … +2 lines · T6.cmd ↗
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 47 =====
 ❯ run bash checks
@@ -1478,7 +1478,7 @@ $ echo ml-one
   … +2 lines · T6.cmd ↗
   ml-one
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 48 =====
 
@@ -1527,7 +1527,7 @@ $ echo ml-one
   ml-one
   ml-two
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 49 =====
 ● Running bash checks.
@@ -1576,7 +1576,7 @@ $ echo ml-one
   ml-two
   ml-three
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 50 =====
 
@@ -1625,7 +1625,7 @@ $ echo ml-one
   ml-three
   ml-four
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 51 =====
 $ printf 'ok-one\nok-two\n'
@@ -1674,7 +1674,7 @@ $ echo ml-one
   ml-four
   ml-five
 
-  ○1%  ↑130  ↓18  0  0
+  ○1%  ↑130  ↓18  0s  0s
 ❯ █
 ===== frame 52 =====
   ok-one
@@ -1721,9 +1721,9 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 ❯ █
 ===== frame 53 =====
   ok-one
@@ -1770,7 +1770,7 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
 ⣿ ○1% 0
 ❯ █
@@ -1817,7 +1817,7 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
 
@@ -1866,11 +1866,11 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
 
-  ○1%  ↑210  ↓20  0
+  ○1%  ↑210  ↓20  0s
 ❯ █
 ===== frame 56 =====
 
@@ -1915,11 +1915,11 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
 
-  ○1%  ↑210  ↓20  0
+  ○1%  ↑210  ↓20  0s
 ❯ :cmd 6█
 ===== frame 57 =====
 Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
@@ -1963,10 +1963,10 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
-  ○1%  ↑210  ↓20  0
+  ○1%  ↑210  ↓20  0s
 
   ○1%
 ❯ :cmd 6█
@@ -2003,10 +2003,10 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
-  ○1%  ↑210  ↓20  0
+  ○1%  ↑210  ↓20  0s
 
 ❯ :cmd 6
 
@@ -2052,10 +2052,10 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
-  ○1%  ↑210  ↓20  0
+  ○1%  ↑210  ↓20  0s
 
 ❯ :cmd 6
 
@@ -2097,10 +2097,10 @@ $ echo ml-one
   ml-three
   ml-four
   ml-five
-  ○1%  ↑130  ↓18  0
+  ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
-  ○1%  ↑210  ↓20  0
+  ○1%  ↑210  ↓20  0s
 
 ❯ :cmd 6
 
