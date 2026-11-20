@@ -751,6 +751,19 @@ proc canonicalRules*(rules: Policy): Policy =
     if result[i].kind == rkPath:
       result[i].path = resolveRawPath(result[i].path)
 
+proc policySlotShaped*(path: string): bool =
+  ## Whether `path` names a sandbox policy slot under any prefix: the
+  ## legacy root-level `.sandbox`, or a `sandbox` file inside a `.3code`
+  ## or `3code` directory (the repo store, an ancestor's store, or the
+  ## user config root). The hidden guards deny exactly these files, so
+  ## the write denial says so instead of a generic read-only: no rule
+  ## and no ask grant can ever open them, only the user can.
+  let name = path.extractFilename
+  if name == PolicyFile: return true
+  if name != UserPolicyFile: return false
+  let holder = path.parentDir.extractFilename
+  holder == ".3code" or holder == "3code"
+
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
   ## Check a raw (possibly relative) path against the current policy,
   ## reloading the policy first when the file changed. This is the
@@ -771,7 +784,17 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   of akReadOnly:
     if not needsWrite: (true, "")
     else:
-      (false, "sandbox: " & shown & " is read-only (" & policyHint() & ")")
+      var policySlot = false
+      for r in canonicalRules(current):
+        if r.hidden and r.kind == rkPath and policySlotShaped(r.path) and
+            isPathUnder(resolved, r.path):
+          policySlot = true
+          break
+      if policySlot:
+        (false, "sandbox: " & shown & " is a policy file (sandbox rules " &
+          "can only be changed by the user, :sandbox edit)")
+      else:
+        (false, "sandbox: " & shown & " is read-only (" & policyHint() & ")")
   of akDeny, akAsk:
     # akAsk denies identically here; only the bash tool's ask flow
     # redeems it (see the ask-gate section below).
