@@ -2934,7 +2934,15 @@ proc inputThreadProc() {.thread.} =
       let modal = inputModalActive.load(moAcquire)
       let turnActive = inputTurnActive.load(moAcquire)
       let hasText = ed.line.text.len > 0
-      if turnActive and hasText and not modal and
+      # The command-prefix test must NOT also gate on `turnActive`: the
+      # flag flips false before the controller reaches the post-turn
+      # drain, and a command submitted in that window (a queued `:q`
+      # racing the turn's end) would fall through to the plain-line queue
+      # below and be run as a PROMPT - a second model call the stub had
+      # no response for, a fatal error, exit 1 (the Windows
+      # test_quit_signals flake; same signature as the OSX resize_ticker
+      # one). Command-ness is a property of the text, not of the instant.
+      if hasText and not modal and
           startsWithCommandPrefix(ed.line.text):
         let cmd = ed.line.text
         # System commands are prompt-log content like any typed line:
