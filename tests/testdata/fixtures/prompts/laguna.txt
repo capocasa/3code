@@ -61,7 +61,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. SKILLS
+Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, lay out a task list first (goal statement, steps, verification) and keep working until the goal is met. SKILLS
 
 # Output
 

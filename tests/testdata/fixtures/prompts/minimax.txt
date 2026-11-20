@@ -89,7 +89,7 @@ Calibrated to refuse rather than guess. If the answer cannot be supported by the
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, write goal.md first (goal statement, steps, verification) and keep working until the goal is met. SKILLS
+Load on demand when a skill fits the task; do not preload the catalog. For work with more than ~2 moving parts, lay out a task list first (goal statement, steps, verification) and keep working until the goal is met. SKILLS
 
 # Attribution
 

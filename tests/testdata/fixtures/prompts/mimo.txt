@@ -93,7 +93,7 @@ No command injection, XSS, SQL injection, path traversal, or unescaped shell-out
 
 # Skills
 
-Load on demand when a skill fits; never preload the catalog. More than ~2 moving parts: write goal.md first (goal statement, steps, verification) and work until it is met. SKILLS
+Load on demand when a skill fits; never preload the catalog. More than ~2 moving parts: lay out a task list first (goal statement, steps, verification) and work until it is met. SKILLS
 
 # Output
 
