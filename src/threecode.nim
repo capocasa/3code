@@ -1125,6 +1125,19 @@ proc main() =
           # as the idle empty prompt — continue the session, append nothing.
           discard runTurnsInteractive(prof, messages, session)
           continue
+        # A command that raced the same window was queued as a plain
+        # line: the input thread read it after `inputTurnActive` had
+        # flipped false but before this drain began, so the mid-turn
+        # command branch never classified it. Interpret it exactly as
+        # the idle prompt would — the command it is, never a prompt —
+        # or its text goes to the model as a second request the turn
+        # never asked for, and a queued :q exits through the error path
+        # instead of a clean quit.
+        if isQuitLine(ev.text):
+          return true
+        if startsWithCommandPrefix(ev.text):
+          runDeferredCommand(ev.text)
+          continue
         var promptText = ev.text
         pluginOnPrompt(promptText, session.savePath, prof.name, prof.model)
         if not ev.echoed:
