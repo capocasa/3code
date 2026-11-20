@@ -70,6 +70,12 @@ when defined(linux):
   # EFAULT, an empty literal is what the calls want.
   let emptyPath = cstring""
 
+  {.push header: "<sys/mount.h>".}
+  proc mount(source, target, fstype: cstring, flags: culong,
+             data: pointer): cint {.importc: "mount".}
+  {.pop.}
+  const msBind = 4096.culong
+
   proc maskRuleFilesReadOnly(paths, writable: openArray[string]) =
     ## Landlock unions rights within a layer, so the read-only guard
     ## on a rule file is invisible under a writable root: `allow ./`
@@ -123,6 +129,113 @@ when defined(linux):
         stderr.writeLine("3code sandbox: read-only bind for " & p &
           " failed (errno " & $errno & "); continuing without it")
 
+  proc maskUngrantedDevices(writable, readOnly: openArray[string]) =
+    ## Bind a private, permission-less scratch file over every /dev
+    ## device node the effective grants do not cover.
+    ##
+    ## Landlock gates open(2) but not stat(2) or faccessat(2): a
+    ## world-writable node like /dev/kvm (crw-rw-rw-) stats as a real
+    ## device, `test -w /dev/kvm` answers from DAC alone and prints
+    ## "kvm rw OK", and the owner columns read nobody:nobody because
+    ## the namespace maps only the launching user - a fenced agent
+    ## is told it holds read-write device access nothing will actually
+    ## honor, with no denial to redeem through the ask gate.
+    ##
+    ## A mode-0000 scratch bound over the node is the honest display:
+    ## `ls -l` shows a file owned by the sandboxed user with no access
+    ## bits, `test -r`/`test -w` fail, and a real open fails EACCES -
+    ## a denial-shaped error the ask gate scrapes when the policy
+    ## floors the path at ask, so `allow /dev/kvm` granted at the
+    ## prompt simply skips this mask on the next launch and the device
+    ## opens for real. Baseline nodes (/dev/null, zero, random,
+    ## urandom, /dev/dri, /dev/shm), anything under a policy
+    ## allow/readonly root, and /dev/ptmx stay unmasked: an explicit
+    ## allow is the user overriding the fence for that tree (an
+    ## accumulated `allow /dev/pts` grant does expose every live pty
+    ## slave on the box - worth narrowing, but the user's to narrow),
+    ## and ptmx plus the devpts slaves the kernel creates at runtime
+    ## are how pty allocation works, while those new slaves did not
+    ## exist when the masks were laid down.
+    ##
+    ## Only runs that entered the user namespace anyway (net fence,
+    ## rule-file binds, narrowed denies) mask devices: a
+    ## namespace-free run shows the true owner of every node and
+    ## would only lose that honesty by mapping itself into nobody.
+    ##
+    ## Degrade posture matches the other masks: unavailable user
+    ## namespaces (or a nested run whose outer Landlock domain denies
+    ## the id-map writes) print one notice and keep going.
+    try:
+      mask.ensureUserns()
+    except OSError as e:
+      stderr.writeLine("3code sandbox: " & e.msg &
+        "; continuing WITHOUT device-node masking")
+      return
+    var roots: seq[string]
+    for g in writable: roots.add g
+    for g in readOnly: roots.add g
+    for g in baselineRead: roots.add g
+    for g in baselineWrite: roots.add g
+    var grants: seq[string]
+    for g in roots:
+      try:
+        let a = absolutePath(g).normalizedPath
+        if a.len > 0 and a notin grants: grants.add a
+      except CatchableError: discard
+    proc granted(p: string): bool =
+      for g in grants:
+        if isPathUnder(p, g): return true
+    var nodes: seq[string]
+    proc scan(d: string; depth: int) =
+      # Never descend into a granted subtree: its nodes are usable by
+      # design, and /dev/dri or /dev/shm under a mask would break
+      # builds and shared memory. Symlinks are skipped outright -
+      # mount(2) follows the target path, so binding over /dev/fd
+      # would land on /proc/self/fd. The kind decides nothing else:
+      # lstat does (a mountpoint like /dev/pts does not always read
+      # back as pcDir from getdents, and only chr/blk nodes mask).
+      # The grant check must cover FILE nodes too - /dev/null,
+      # /dev/zero and /dev/urandom are file-level baseline grants,
+      # and masking them would break every `2>/dev/null`.
+      if depth > 3 or granted(d): return
+      for k, p in walkDir(d, relative = false):
+        if k in {pcLinkToFile, pcLinkToDir}: continue
+        var st: Stat
+        if lstat(p.cstring, st) != 0: continue
+        if S_ISDIR(st.st_mode):
+          scan(p, depth + 1)
+        elif (S_ISCHR(st.st_mode) or S_ISBLK(st.st_mode)) and
+            p != "/dev/ptmx" and not granted(p):
+          nodes.add p
+    # A pty slave can vanish mid-walk; a partial scan just leaves those
+    # nodes as they were, never fails the launch.
+    try:
+      if dirExists("/dev"): scan("/dev", 0)
+    except CatchableError: discard
+    if nodes.len == 0: return
+    let scratchDir = getTempDir() / ("3code-devmask-" & $getpid())
+    createDir(scratchDir)
+    let scratch = scratchDir / "node"
+    let fd = posix.open(scratch.cstring,
+        posix.O_CREAT or posix.O_WRONLY or posix.O_TRUNC, 0.Mode)
+    if fd < 0:
+      stderr.writeLine("3code sandbox: creating the device mask in " &
+        scratchDir & " failed (errno " & $errno &
+        "); continuing WITHOUT device-node masking")
+      return
+    discard posix.close(fd)
+    var failed = 0
+    for n in nodes:
+      if mount(scratch.cstring, n.cstring, nil, msBind, nil) != 0:
+        inc failed
+    # The mounts pin the inode; the scratch path itself disappears.
+    try: removeFile(scratch); removeDir(scratchDir)
+    except CatchableError: discard
+    if failed > 0:
+      stderr.writeLine("3code sandbox: masking " & $failed & " of " &
+        $nodes.len & " ungranted device nodes failed (errno " & $errno &
+        "); those keep their host identity")
+
 const usage = """
 3code sandbox - filesystem sandbox (Landlock/Seatbelt/ACL)
 
@@ -151,9 +264,12 @@ Usage:
   - and, where namespaces are unavailable, its notice printed - for
   entries that could never bite).
 
-  System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
+  System dirs (/usr, /bin, /lib, etc.) are always read-only so the
   command's binaries, libs, and device nodes stay runnable; --ro adds to
-  that set, it does not replace it.
+  that set, it does not replace it. /dev device nodes no grant covers
+  are masked with an inaccessible file (stat/faccessat cannot claim
+  access Landlock would deny); a policy allow for the node lifts the
+  mask on the next launch.
 
 Examples:
   3code sandbox restrict /tmp /home/me/work -- ls -la
@@ -493,6 +609,12 @@ proc boxRestrict(args: seq[string]): int =
         try: enterNetns()
         except OSError: discard
       maskRuleFilesReadOnly(maskRo, writable)
+      # Device masks ride the namespace the net fence, the rule-file
+      # binds, or a narrowed deny already entered; a namespace-free run
+      # shows true device owners and skips the honesty mask (see
+      # maskUngrantedDevices).
+      if fence or maskRo.len > 0 or denied.len > 0:
+        maskUngrantedDevices(writable, readOnly)
       restrict(writable, read = readOnly, denied = denied,
                fenceNet = fence, proxyPort = wallPort,
                proxySockPath = wallSock)
