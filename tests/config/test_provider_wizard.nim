@@ -17,6 +17,7 @@ proc stripAnsiCsi(line: string): string =
 proc nvidiaModels(): seq[string] =
   @[
     "z-ai/glm-5.2",
+    "z-ai/glm-5.3-flash",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
     "minimaxai/minimax-m2.5",
@@ -87,14 +88,14 @@ suite "provider wizard configuration":
     except OSError: discard
 
   test "initial bootstrap saves without a verification ping":
-    inputs = @["nvapi-initial", "gpt-oss-20b"]
+    inputs = @["nvapi-initial", "glm-5.3-flash"]
     var editor: LineEditor
 
     let prof = bootstrapProvider(editor)
 
-    check prof.name == "nvidia.openai/gpt-oss-20b"
+    check prof.name == "nvidia.z-ai/glm-5.3-flash"
     check activeProviders.len == 1
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
     check verifiedModels.len == 0
 
   test "additional add prompts for model before verifying detected provider":
@@ -103,7 +104,7 @@ suite "provider wizard configuration":
                   key: "gsk-existing", models: @["openai/gpt-oss-20b"])
     ]
     activeCurrent = "groq.openai/gpt-oss-20b"
-    inputs = @["nvapi-add", "gpt-oss-20b"]
+    inputs = @["nvapi-add", "glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -113,12 +114,12 @@ suite "provider wizard configuration":
 
     check activeProviders.len == 2
     check activeProviders[1].name == "nvidia"
-    check activeProviders[1].models == @["openai/gpt-oss-20b"]
+    check activeProviders[1].models == @["z-ai/glm-5.3-flash"]
     check activeCurrent == "groq.openai/gpt-oss-20b"
     check verifiedModels.len == 0
 
   test "add accepts provider name then api key":
-    inputs = @["nvidia", "nvapi-named", "gpt-oss-20b"]
+    inputs = @["nvidia", "nvapi-named", "glm-5.3-flash"]
     var editor: LineEditor
     var prof: Profile
     var messages = newJArray()
@@ -129,7 +130,7 @@ suite "provider wizard configuration":
     check activeProviders.len == 1
     check activeProviders[0].name == "nvidia"
     check activeProviders[0].key == "nvapi-named"
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
     check prompts.anyIt(it.startsWith("  provider or api key:"))
     check prompts.anyIt(it.startsWith("  api key"))
 
@@ -157,7 +158,7 @@ suite "provider wizard configuration":
                   key: "nvapi-existing", models: @["openai/gpt-oss-120b"])
     ]
     activeCurrent = "nvidia.openai/gpt-oss-120b"
-    inputs = @["nvapi-add", "gpt-oss-20b"]
+    inputs = @["nvapi-add", "glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -284,7 +285,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["", "", "gpt-oss-20b"]
+    inputs = @["", "", "glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -295,7 +296,7 @@ suite "provider wizard configuration":
 
     check prompts.anyIt("api key" in it)
     check activeProviders[0].key == "nvapi-old"
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
 
   test "edit prompts for model before verifying updated provider":
     activeProviders = @[
@@ -303,7 +304,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["", "", "gpt-oss-20b"]
+    inputs = @["", "", "glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -313,8 +314,8 @@ suite "provider wizard configuration":
                           editor)
 
     check activeProviders.len == 1
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
-    check activeCurrent == "nvidia.openai/gpt-oss-20b"
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
+    check activeCurrent == "nvidia.z-ai/glm-5.3-flash"
     check verifiedModels.len == 0
 
   test "add prefers known-good id over listed-but-unserved variant":
@@ -409,7 +410,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["gpt-oss-20b"]
+    inputs = @["glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -422,10 +423,10 @@ suite "provider wizard configuration":
     check activeProviders[0].name == "nvidia"
     check activeProviders[0].url == "https://integrate.api.nvidia.com/v1"
     check activeProviders[0].key == "nvapi-old"
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
     # The dropped live model (glm-5.2) falls back to the new first model.
-    check activeCurrent == "nvidia.openai/gpt-oss-20b"
-    check prof.model == "openai/gpt-oss-20b"
+    check activeCurrent == "nvidia.z-ai/glm-5.3-flash"
+    check prof.model == "z-ai/glm-5.3-flash"
     # Models-only: no name, url, or api key prompt may appear.
     check prompts.len == 1
     check prompts[0].startsWith("  models [")
@@ -434,10 +435,10 @@ suite "provider wizard configuration":
   test "update keeps the current models on enter":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["openai/gpt-oss-20b",
-                                              "z-ai/glm-5.3"])
+                  key: "nvapi-old", models: @["poolside/laguna-xs-2.1",
+                                              "z-ai/glm-5.3-flash"])
     ]
-    activeCurrent = "nvidia.z-ai/glm-5.3"
+    activeCurrent = "nvidia.z-ai/glm-5.3-flash"
     inputs = @[""]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
@@ -447,8 +448,8 @@ suite "provider wizard configuration":
     discard handleCommand(":provider update nvidia", messages, session, prof,
                           editor)
 
-    check activeProviders[0].models == @["openai/gpt-oss-20b", "z-ai/glm-5.3"]
-    check activeCurrent == "nvidia.z-ai/glm-5.3"
+    check activeProviders[0].models == @["poolside/laguna-xs-2.1", "z-ai/glm-5.3-flash"]
+    check activeCurrent == "nvidia.z-ai/glm-5.3-flash"
 
   test "update leaves the active provider alone when targeting another":
     activeProviders = @[
@@ -458,7 +459,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "groq.openai/gpt-oss-120b"
-    inputs = @["gpt-oss-20b"]
+    inputs = @["glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -467,7 +468,7 @@ suite "provider wizard configuration":
     discard handleCommand(":provider update nvidia", messages, session, prof,
                           editor)
 
-    check activeProviders[1].models == @["openai/gpt-oss-20b"]
+    check activeProviders[1].models == @["z-ai/glm-5.3-flash"]
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
     check activeCurrent == "groq.openai/gpt-oss-120b"
     check prof.model == "openai/gpt-oss-120b"
@@ -478,7 +479,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["no-such-model", "gpt-oss-20b"]
+    inputs = @["no-such-model", "glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -487,7 +488,7 @@ suite "provider wizard configuration":
     discard handleCommand(":provider update nvidia", messages, session, prof,
                           editor)
 
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
     check prompts.len == 2
     check prompts[1].startsWith("  models [")
 
@@ -505,7 +506,7 @@ suite "provider wizard configuration":
     verifyProfileHook = proc(p: Profile): (bool, string) =
       verifiedModels.add p.model
       (true, "")
-    inputs = @["gpt-oss-20b"]
+    inputs = @["glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -516,8 +517,8 @@ suite "provider wizard configuration":
 
     check fetchedKeys == @["nvapi-old"]
     check activeProviders[0].key == "nvapi-old"
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
-    check verifiedModels == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
+    check verifiedModels == @["z-ai/glm-5.3-flash"]
 
   test "update on an unknown provider errors without prompting":
     activeProviders = @[
@@ -539,9 +540,9 @@ suite "provider wizard configuration":
   test "new lists models missing from the config":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+                  key: "nvapi-old", models: @["z-ai/glm-5.3-flash"])
     ]
-    activeCurrent = "nvidia.z-ai/glm-5.3"
+    activeCurrent = "nvidia.z-ai/glm-5.3-flash"
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -550,19 +551,19 @@ suite "provider wizard configuration":
     let body = handleCommandResult(":provider new nvidia", messages, session,
                                    prof, editor).body
 
-    check body.contains("nvidia  7 new")
-    check body.contains("gpt-oss-20b")
+    check body.contains("nvidia  3 new")
+    check body.contains("laguna-xs-2.1")
     check verifiedModels.len == 0
-    check activeProviders[0].models == @["z-ai/glm-5.3"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
 
   test "new covers every configured provider":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm-5.3"]),
+                  key: "nvapi-old", models: @["z-ai/glm-5.3-flash"]),
       ProviderRec(name: "openai", url: "https://api.openai.com/v1",
                   key: "sk-old", models: @["gpt-oss-120b", "gpt-oss-20b"])
     ]
-    activeCurrent = "nvidia.z-ai/glm-5.3"
+    activeCurrent = "nvidia.z-ai/glm-5.3-flash"
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -571,7 +572,7 @@ suite "provider wizard configuration":
     let body = handleCommandResult(":provider new", messages, session,
                                    prof, editor).body
 
-    check body.contains("nvidia  7 new")
+    check body.contains("nvidia  3 new")
     let iOpenai = body.find("openai")
     check iOpenai >= 0
     check body[iOpenai .. ^1].contains("new")
@@ -599,7 +600,7 @@ suite "provider wizard configuration":
   test "new on an unknown provider errors":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+                  key: "nvapi-old", models: @["z-ai/glm-5.3-flash"])
     ]
     var editor: LineEditor
     var prof: Profile
@@ -614,9 +615,9 @@ suite "provider wizard configuration":
   test "pull appends every new model":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+                  key: "nvapi-old", models: @["z-ai/glm-5.3-flash"])
     ]
-    activeCurrent = "nvidia.z-ai/glm-5.3"
+    activeCurrent = "nvidia.z-ai/glm-5.3-flash"
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -626,20 +627,20 @@ suite "provider wizard configuration":
                           editor)
 
     check activeProviders[0].models.len == curatedFor("nvidia").len
-    check activeProviders[0].models[0] == "z-ai/glm-5.3"
-    check "openai/gpt-oss-20b" in activeProviders[0].models
+    check activeProviders[0].models[0] == "z-ai/glm-5.3-flash"
+    check "poolside/laguna-xs-2.1" in activeProviders[0].models
     check activeProviders[0].key == "nvapi-old"
-    check activeCurrent == "nvidia.z-ai/glm-5.3"
+    check activeCurrent == "nvidia.z-ai/glm-5.3-flash"
     check verifiedModels.len == 0
 
   test "pull bare covers every configured provider":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm-5.3"]),
+                  key: "nvapi-old", models: @["z-ai/glm-5.3-flash"]),
       ProviderRec(name: "openai", url: "https://api.openai.com/v1",
                   key: "sk-old", models: @["gpt-5"])
     ]
-    activeCurrent = "nvidia.z-ai/glm-5.3"
+    activeCurrent = "nvidia.z-ai/glm-5.3-flash"
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -651,47 +652,48 @@ suite "provider wizard configuration":
     check activeProviders[0].models.len == curatedFor("nvidia").len
     check activeProviders[1].models.len == curatedFor("openai").len
     check activeProviders[1].models[0] == "gpt-5"
-    check activeCurrent == "nvidia.z-ai/glm-5.3"
+    check activeCurrent == "nvidia.z-ai/glm-5.3-flash"
 
   test "pull with named models adds just those":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+                  key: "nvapi-old", models: @["z-ai/glm-5.3-flash"])
     ]
-    activeCurrent = "nvidia.z-ai/glm-5.3"
+    activeCurrent = "nvidia.z-ai/glm-5.3-flash"
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
     var session = Session()
 
-    discard handleCommand(":provider pull nvidia gpt-oss-20b glm-5.3-flash",
+    discard handleCommand(":provider pull nvidia laguna-xs-2.1 nemotron-3.5-lightning-30b-a3b",
                           messages, session, prof, editor)
 
     check activeProviders[0].models ==
-      @["z-ai/glm-5.3", "openai/gpt-oss-20b", "z-ai/glm-5.3-flash"]
+      @["z-ai/glm-5.3-flash", "poolside/laguna-xs-2.1",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"]
 
   test "pull skips named models already stored":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+                  key: "nvapi-old", models: @["z-ai/glm-5.3-flash"])
     ]
-    activeCurrent = "nvidia.z-ai/glm-5.3"
+    activeCurrent = "nvidia.z-ai/glm-5.3-flash"
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
     var session = Session()
 
-    discard handleCommand(":provider pull nvidia glm-5.3 gpt-oss-20b",
+    discard handleCommand(":provider pull nvidia glm-5.3-flash laguna-xs-2.1",
                           messages, session, prof, editor)
 
-    check activeProviders[0].models == @["z-ai/glm-5.3", "openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash", "poolside/laguna-xs-2.1"]
 
   test "pull rejects unknown models in regular mode":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+                  key: "nvapi-old", models: @["z-ai/glm-5.3-flash"])
     ]
-    activeCurrent = "nvidia.z-ai/glm-5.3"
+    activeCurrent = "nvidia.z-ai/glm-5.3-flash"
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -701,7 +703,7 @@ suite "provider wizard configuration":
                                    messages, session, prof, editor).body
 
     check body.contains("unknown known-good model: no-such-model")
-    check activeProviders[0].models == @["z-ai/glm-5.3"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
 
   test "new and pull diff against the fetched endpoint under experimental":
     experimentalEnabled = true
@@ -870,7 +872,7 @@ suite "provider wizard configuration":
            stripped[4..^1] != "detected: nvidia -> https://integrate.api.nvidia.com/v1":
           listedModels.add stripped[4..^1].shortModel()
       check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
-                             "gpt-oss-20b", "glm-5.2"]
+                             "gpt-oss-20b", "glm-5.2", "glm-5.3-flash"]
 
   test "wizard inputs are not added to history":
     # Bug 2: wizard inputs must not pollute history. readRequired/readOptional
@@ -888,7 +890,7 @@ suite "provider wizard configuration":
                   key: "nvapi-existing", models: @["openai/gpt-oss-120b"])
     ]
     activeCurrent = "nvidia.openai/gpt-oss-120b"
-    inputs = @["nvapi-add", "gpt-oss-20b"]
+    inputs = @["nvapi-add", "glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -947,7 +949,7 @@ suite "provider wizard configuration":
                     key: "nvapi-old", models: @["z-ai/glm-5.2"])
       ]
       activeCurrent = "nvidia.z-ai/glm-5.2"
-      inputs = @["", "", "gpt-oss-20b"]
+      inputs = @["", "", "glm-5.3-flash"]
       var fetchCount = 0
       fetchModelsHook = proc(url, key: string): (seq[string], string) =
         inc fetchCount
@@ -1112,7 +1114,7 @@ suite "provider wizard configuration":
 
   test "add rejects a non-listed model in regular mode":
     # The unknown model re-prompts; the follow-up curated entry saves.
-    inputs = @["nvapi-add", "totally-made-up-model", "gpt-oss-20b"]
+    inputs = @["nvapi-add", "totally-made-up-model", "glm-5.3-flash"]
     var editor: LineEditor
     var prof: Profile
     var messages = newJArray()
@@ -1121,7 +1123,7 @@ suite "provider wizard configuration":
     discard handleCommand(":provider add", messages, session, prof, editor)
 
     check activeProviders.len == 1
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
     check verifiedModels.len == 0
 
   test "add accepts a custom url with a custom name in experimental mode":
@@ -1186,7 +1188,7 @@ suite "provider wizard configuration":
     var prof: Profile
     var messages = newJArray()
     var session = Session()
-    inputs = @["gpt-oss-20b"]
+    inputs = @["glm-5.3-flash"]
 
     discard handleCommand(":provider add nvapi-prefilled", messages, session,
                           prof, editor)
@@ -1194,7 +1196,7 @@ suite "provider wizard configuration":
     check activeProviders.len == 1
     check activeProviders[0].name == "nvidia"
     check activeProviders[0].key == "nvapi-prefilled"
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
 
   test "prefilled add skips the supported list":
     # `:provider add <name>` already answered the provider question;
@@ -1242,7 +1244,7 @@ suite "provider wizard configuration":
     var session = Session()
 
     experimentalEnabled = false
-    inputs = @["nvapi-key", "gpt-oss-20b"]
+    inputs = @["nvapi-key", "glm-5.3-flash"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check prompts[0] == "  provider or api key: "
 
@@ -1250,7 +1252,7 @@ suite "provider wizard configuration":
     activeProviders = @[]
     activeCurrent = ""
     experimentalEnabled = true
-    inputs = @["nvapi-key2", "gpt-oss-20b"]
+    inputs = @["nvapi-key2", "glm-5.3-flash"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check prompts[0] == "  provider, url, or api key: "
 
@@ -1273,7 +1275,7 @@ suite "provider wizard configuration":
     var session = Session()
 
     experimentalEnabled = false
-    inputs = @["nvapi-key", "gpt-oss-20b"]
+    inputs = @["nvapi-key", "glm-5.3-flash"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check "nvidia" in firstFieldCompletions
     # mistral, commandcode (open-model gateway rows), and anthropic
@@ -1287,7 +1289,7 @@ suite "provider wizard configuration":
     activeCurrent = ""
     firstFieldCompletions = @[]
     experimentalEnabled = true
-    inputs = @["nvapi-key2", "gpt-oss-20b"]
+    inputs = @["nvapi-key2", "glm-5.3-flash"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check "anthropic" in firstFieldCompletions
 
@@ -1300,7 +1302,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["", "", "totally-made-up-model", "", "", "gpt-oss-20b"]
+    inputs = @["", "", "totally-made-up-model", "", "", "glm-5.3-flash"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -1309,13 +1311,13 @@ suite "provider wizard configuration":
     discard handleCommand(":provider edit nvidia", messages, session, prof,
                           editor)
 
-    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["z-ai/glm-5.3-flash"]
     check verifiedModels.len == 0
 
 suite "provider/model order":
-  # nvidia's curated order is gpt-oss-20b before z-ai/glm-5.3; these
-  # providers list them reversed, so any re-ranking by KnownGoodCombos
-  # would flip the results.
+  # nvidia's curated order is laguna-xs-2.1 before z-ai/glm-5.3-flash;
+  # these providers list them reversed, so any re-ranking by
+  # KnownGoodCombos would flip the results.
   var
     savedCurrent: string
     savedProviders: seq[ProviderRec]
@@ -1334,9 +1336,9 @@ suite "provider/model order":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi",
-                  models: @["openai/gpt-oss-20b", "z-ai/glm-5.3"])
+                  models: @["poolside/laguna-xs-2.1", "z-ai/glm-5.3-flash"])
     ]
-    activeCurrent = "nvidia.openai/gpt-oss-20b"
+    activeCurrent = "nvidia.poolside/laguna-xs-2.1"
 
   teardown:
     activeCurrent = savedCurrent
@@ -1356,12 +1358,12 @@ suite "provider/model order":
     var session = Session()
 
     discard handleCommand(":provider nvidia", messages, session, prof, editor)
-    check activeCurrent == "nvidia.openai/gpt-oss-20b"
-    check prof.model == "openai/gpt-oss-20b"
+    check activeCurrent == "nvidia.poolside/laguna-xs-2.1"
+    check prof.model == "poolside/laguna-xs-2.1"
 
   test ":model completion cycles in entered order":
     var completions = completionFor(":model ")
-    check completions == @["gpt-oss-20b", "glm-5.3"]
+    check completions == @["laguna-xs-2.1", "glm-5.3-flash"]
 
   test ":model list shows entered order":
     var editor: LineEditor
@@ -1371,6 +1373,6 @@ suite "provider/model order":
 
     let listing = handleCommandResult(":model", messages, session,
                                     prof, editor).body
-    let i20 = listing.find("gpt-oss-20b")
-    let iglm = listing.find("glm-5.3")
+    let i20 = listing.find("laguna-xs-2.1")
+    let iglm = listing.find("glm-5.3-flash")
     check i20 >= 0 and iglm >= 0 and i20 < iglm

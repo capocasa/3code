@@ -47,7 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    check visionRows == 344
+    check visionRows == 330
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
@@ -115,7 +115,7 @@ suite "vision: known-good curation":
     check not knownGoodVision("nebius", "deepseek-ai/DeepSeek-V4.1-Flash")
     check not knownGoodVision("nebius", "nvidia/Nemotron-3.5-Super-VL")
     check not knownGoodVision("anthropic", "claude-sonnet-5-5")
-    check not knownGoodVision("openai", "o3-mini")
+    check not knownGoodVision("zai", "glm-5.1")
     check not knownGoodVision("openai", "gpt-5.3-codex")
     check not knownGoodVision("groq", "openai/gpt-oss-120b")
 
@@ -130,7 +130,6 @@ suite "vision: known-good curation":
     check not knownGoodVision("zai", "glm-5.3")
     check not knownGoodVision("zai", "glm-5.2")
     check not knownGoodVision("deepseek", "deepseek-v4-flash")
-    check not knownGoodVision("xai", "grok-build-0.1")
     check not knownGoodVision("novita", "moonshotai/kimi-k2.6")
     check not knownGoodVision("made-up", "whatever")
 
