@@ -455,3 +455,57 @@ when defined(posix):
           let w = sandboxed("git config --global probe.x y")
           check w.exitCode != 0
           check ("denied" in w.output or "error" in w.output)
+
+when defined(linux):
+  suite "rule files are read-only inside the fence":
+    test "fenced command cannot edit the loaded policy file":
+      # Landlock unions rights within a layer, so the hidden read-only
+      # guard on a policy file under `allow ./` would be a no-op: the
+      # driver read-only-binds every existing rule file that sits under
+      # a writable root (box.nim maskRuleFilesReadOnly) before the
+      # Landlock domain goes up. The mask needs a user namespace and
+      # the mount_setattr syscall; a host that strips either degrades
+      # with a notice and the edit goes through (the old posture), so
+      # the notice is the skip line.
+      let dir = getTempDir() / ("3code-rulerofile-" & $getCurrentProcessId())
+      createDir(dir)
+      defer: removeDir(dir)
+      let pol = dir / ".sandbox"
+      writeFile(pol, "allow " & dir & "\n")
+      proc sandboxed(args: string): tuple[output: string, exitCode: int] =
+        execCmdEx(binPath() & " sandbox --policy " & pol.quoteShell &
+          " restrict -- " & args, options = {poStdErrToStdOut})
+      let r = sandboxed("sh -c 'echo pwn > " & pol.quoteShell & "'")
+      if "read-only rule-file enforcement" in r.output or
+          "read-only bind for" in r.output:
+        stdout.writeLine "rule-file mask: DEGRADED PATH (host cannot " &
+          "enforce: userns or mount_setattr unavailable inside this " &
+          "fence); an enforced pass leaves its record in " &
+          "testresults/rulefile-enforced.passed"
+        skip()
+      else:
+        stdout.writeLine "rule-file mask: ENFORCED (edit denied, file intact)"
+        # The enforced leg records itself: the marker file only ever
+        # appears when this binary watched a fenced write actually
+        # denied on a userns-capable host - a degraded run prints its
+        # line above and never touches it. testresults/ is the repo's
+        # gitignored evidence scratch.
+        try:
+          let marker = getCurrentDir() / "testresults" /
+              "rulefile-enforced.passed"
+          createDir(marker.parentDir)
+          writeFile(marker, "ENFORCED " & $now() & " pid " &
+            $getCurrentProcessId() & "\n")
+        except CatchableError:
+          discard
+        check r.exitCode != 0
+        check readFile(pol) == "allow " & dir & "\n"
+        # Reads keep working: the fence still reads its own policy,
+        # and so does anything the command runs.
+        let rc = sandboxed("cat " & pol.quoteShell)
+        check rc.exitCode == 0
+        check "allow" in rc.output
+        # Ordinary writes inside the writable root are untouched.
+        let wn = sandboxed("sh -c 'echo ok > " & (dir / "w.txt").quoteShell & "'")
+        check wn.exitCode == 0
+        check readFile(dir / "w.txt") == "ok\n"

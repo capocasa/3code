@@ -34,6 +34,20 @@ else:
   const varDir = "/var"
   const proj = "/proj"
 
+proc pollutingAncestorSlot(): string =
+  ## The first existing policy slot at or above the temp root, "" when
+  ## clean. A leftover /tmp/.3code/sandbox from some earlier session
+  ## hijacks the ancestor cascade of every fixture under getTempDir(),
+  ## so tests that assert what loads when the fixture itself has no
+  ## file cannot run on such a machine. Not a product bug - the slot
+  ## loads exactly as designed - the fixture just cannot control
+  ## machine-global ancestors, so those tests skip with the culprit
+  ## named instead of failing.
+  for d in dirsettings.ancestorsNearestFirst(getTempDir()):
+    for p in [d / StoreDirName / "sandbox", d / ".sandbox"]:
+      if fileExists(p): return p
+  ""
+
 proc newFixture(name: string): tuple[home, proj: string] =
   ## Isolated XDG config home + project dir; restores env on teardown
   ## via the caller's defer.
@@ -138,32 +152,37 @@ suite "single active policy file":
     check s.checkPath(proj) == akWritable
 
   test "repo file wins over the user file; never both":
-    let (home, projDir) = newFixture("sel")
-    defer:
-      putEnv("XDG_CONFIG_HOME", "")
-      removeDir(home.parentDir)
-    let userFile = home / "3code" / "sandbox"
-    check not fileExists(userFile)
-    # No file at all -> the built-in default is the policy text, and
-    # nothing is written into the user config dir.
-    check readPolicyText(projDir) == defaultPolicyText()
-    check not fileExists(userFile)
-    # The bash box child needs a file; the default materializes in the
-    # per-run temp area, never in the user config.
-    let mat = defaultPolicyFilePath(projDir)
-    check mat != userFile
-    check fileExists(mat)
-    check readFile(mat) == defaultPolicyText()
-    check not fileExists(userFile)
-    # A user file the user wrote is respected and never overwritten.
-    createDir(userFile.parentDir)
-    writeFile(userFile, "deny /\nallow " & opt & "\n")
-    check readPolicyText(projDir) == "deny /\nallow " & opt & "\n"
-    check defaultPolicyFilePath(projDir) == userFile
-    check activePolicyPath(projDir) == userFile
-    # Repo file appears -> it alone is active.
-    writeFile(repoPolicyPath(projDir), "allow /\n")
-    check activePolicyPath(projDir) == repoPolicyPath(projDir)
+    let dirt = pollutingAncestorSlot()
+    if dirt.len > 0:
+      echo "skip: machine ancestor slot " & dirt & " owns the cascade"
+      skip()
+    else:
+      let (home, projDir) = newFixture("sel")
+      defer:
+        putEnv("XDG_CONFIG_HOME", "")
+        removeDir(home.parentDir)
+      let userFile = home / "3code" / "sandbox"
+      check not fileExists(userFile)
+      # No file at all -> the built-in default is the policy text, and
+      # nothing is written into the user config dir.
+      check readPolicyText(projDir) == defaultPolicyText()
+      check not fileExists(userFile)
+      # The bash box child needs a file; the default materializes in
+      # the per-run temp area, never in the user config.
+      let mat = defaultPolicyFilePath(projDir)
+      check mat != userFile
+      check fileExists(mat)
+      check readFile(mat) == defaultPolicyText()
+      check not fileExists(userFile)
+      # A user file the user wrote is respected and never overwritten.
+      createDir(userFile.parentDir)
+      writeFile(userFile, "deny /\nallow " & opt & "\n")
+      check readPolicyText(projDir) == "deny /\nallow " & opt & "\n"
+      check defaultPolicyFilePath(projDir) == userFile
+      check activePolicyPath(projDir) == userFile
+      # Repo file appears -> it alone is active.
+      writeFile(repoPolicyPath(projDir), "allow /\n")
+      check activePolicyPath(projDir) == repoPolicyPath(projDir)
 
   test "materialized default keeps the project dir writable":
     let (home, projDir) = newFixture("mat")
@@ -187,27 +206,32 @@ suite "single active policy file":
     check m.checkPath(projDir) == akWritable
 
   test "appendRule materializes the repo file from the user file":
-    let (home, projDir) = newFixture("edit")
-    defer:
-      putEnv("XDG_CONFIG_HOME", "")
-      removeDir(home.parentDir)
-    let userFile = home / "3code" / "sandbox"
-    createDir(userFile.parentDir)
-    writeFile(userFile, "deny /\nallow " & opt & "\n")
-    let repoFile = repoPolicyPath(projDir)
-    check not fileExists(repoFile)
-    let oldCwd = getCurrentDir()
-    setCurrentDir(projDir)
-    try:
-      check appendRule(repoFile, varDir, akReadOnly)
-    finally:
-      setCurrentDir(oldCwd)
-    # The repo file starts from the user's baseline, then the new rule.
-    let text = readFile(repoFile)
-    check text.contains("allow " & opt.replace(DirSep, '/'))
-    check text.contains("readonly " & varDir.replace(DirSep, '/'))
-    # The user file is untouched by the repo edit.
-    check readFile(userFile) == "deny /\nallow " & opt & "\n"
+    let dirt = pollutingAncestorSlot()
+    if dirt.len > 0:
+      echo "skip: machine ancestor slot " & dirt & " owns the cascade"
+      skip()
+    else:
+      let (home, projDir) = newFixture("edit")
+      defer:
+        putEnv("XDG_CONFIG_HOME", "")
+        removeDir(home.parentDir)
+      let userFile = home / "3code" / "sandbox"
+      createDir(userFile.parentDir)
+      writeFile(userFile, "deny /\nallow " & opt & "\n")
+      let repoFile = repoPolicyPath(projDir)
+      check not fileExists(repoFile)
+      let oldCwd = getCurrentDir()
+      setCurrentDir(projDir)
+      try:
+        check appendRule(repoFile, varDir, akReadOnly)
+      finally:
+        setCurrentDir(oldCwd)
+      # The repo file starts from the user's baseline, then the new rule.
+      let text = readFile(repoFile)
+      check text.contains("allow " & opt.replace(DirSep, '/'))
+      check text.contains("readonly " & varDir.replace(DirSep, '/'))
+      # The user file is untouched by the repo edit.
+      check readFile(userFile) == "deny /\nallow " & opt & "\n"
 
   test "appendRule writes portable targets (relative, ~, absolute)":
     let (home, projDir) = newFixture("portable")
@@ -540,6 +564,51 @@ suite "single active policy file":
     # The guards are enforced but never rendered.
     check ".sandbox" notin renderSandbox(p)
     check userFile notin renderSandbox(p)
+
+  test "every loadable policy slot is guarded before it exists":
+    # activePolicyPath cascades ancestors nearest-first and prefers the
+    # store slot over the legacy file, so any ancestor's slot — not just
+    # the active file's — is a loadable policy path. Creating one was a
+    # policy hijack: the write landed under the project's `allow ./`,
+    # then the next reload parsed the attacker's file (a garbage payload
+    # even bricked the session to deny-all). Every slot rides as a
+    # read-only guard whether or not it holds a file yet.
+    let (home, projDir) = newFixture("guardslots")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let nested = projDir / "a" / "b"
+    createDir(nested / ".3code")
+    sandbox.hiddenRules = sandbox.guardRules(nested)
+    defer: sandbox.hiddenRules = @[]
+    let userFile = (home / "3code" / "sandbox").normalizedPath
+    # The active file sits in the project itself; every ancestor slot
+    # above it stays a guard even though none exists on disk yet.
+    writeFile(repoPolicyPath(nested), "allow /\n")
+    var p = loadPolicy(nested)
+    check p.checkPath(userFile) == akReadOnly
+    for d in dirsettings.ancestorsNearestFirst(nested):
+      check p.checkPath(storePolicyPath(d)) == akReadOnly
+      check p.checkPath(d / ".sandbox") == akReadOnly
+      if d == nested or d == projDir:
+        # Fixture-owned dirs only: the project's own slot holds the
+        # active test file after this write, and machine-owned
+        # ancestors like /tmp may carry unrelated leftovers.
+        check not fileExists(d / ".sandbox")
+      if d == projDir:
+        check not fileExists(storePolicyPath(d))
+    # An ancestor allow cannot free its own slot either: the appended
+    # guard wins last, in-process and in the box child's resolved set.
+    let ancestor = projDir
+    writeFile(repoPolicyPath(nested),
+      "allow /\nallow " & storePolicyPath(ancestor) &
+      "\nallow " & ancestor / ".sandbox" & "\n")
+    p = loadPolicy(nested)
+    check p.checkPath(storePolicyPath(ancestor)) == akReadOnly
+    check p.checkPath(ancestor / ".sandbox") == akReadOnly
+    let r = p.resolve()
+    check (storePolicyPath(ancestor).normalizedPath) in r.readonly
+    check ((ancestor / ".sandbox").normalizedPath) in r.readonly
 
   test "the user config and its store configs are read-only guards":
     # The security switches live in user-owned files; the model can

@@ -23,12 +23,17 @@
 ## the effective policy text, so project rules start from the user's
 ## baseline instead of from scratch.
 ##
-## The two policy file paths 3code can activate (the repo `.sandbox`
-## and `~/.config/3code/sandbox`) are always read-only, no matter what
-## the file says: they ride every load as hidden guard rules
-## (`hiddenRules`), appended last so no file rule can weaken them,
-## enforced by the in-process checks and carried through to the box
-## subprocess, but never shown in `:sandbox show`. The user-owned
+## Every policy file path the ancestor cascade can ever load — each
+## ancestor's store slot `<dir>/.3code/sandbox` and legacy
+## `<dir>/.sandbox`, plus `~/.config/3code/sandbox` — is always
+## read-only, no matter what the active file says and whether the slot
+## holds a file yet: creating an unguarded slot would hijack the next
+## reload exactly like editing the active file would (the store slot
+## beats the legacy file, nearer ancestors beat farther ones). They
+## ride every load as hidden guard rules (`hiddenRules`), appended
+## last so no file rule can weaken them, enforced by the in-process
+## checks and carried through to the box subprocess, but never shown
+## in `:sandbox show`. The user-owned
 ## settings files that carry the security switches (the user config
 ## and, under `dirconfig = "user"`, the session's store config files)
 ## ride the same way, so a project-controlled store cannot edit the
@@ -591,14 +596,16 @@ proc authorityGuardPaths*(projectDir: string): seq[string] =
       result.add dirsettings.storeFileFor(d, dirsettings.StoreConfigFile)
 
 proc guardRules*(projectDir: string): seq[Rule] =
-  ## Hidden read-only rules covering the policy file paths 3code can
-  ## make active (the repo slot `<dir>/.3code/sandbox` — the write
-  ## target even before it exists — the legacy `<dir>/.sandbox`, the
-  ## cascade-selected active file when it lives elsewhere (an
-  ## ancestor's), and the user file), so
-  ## neither the in-process tools nor the sandboxed command can change
-  ## the policy out from under 3code, no matter what the file says.
-  ## Appended last after every load; paths that collapse guard once.
+  ## Hidden read-only rules covering every policy file path the
+  ## ancestor cascade can ever load — each ancestor's store slot
+  ## `<dir>/.3code/sandbox` and legacy `<dir>/.sandbox`, guarded before
+  ## the slot exists because creating one hijacks the next reload —
+  ## plus the user file, so neither the in-process tools nor the
+  ## sandboxed command can change the policy out from under 3code, no
+  ## matter what the file says. `repoPolicyPath` and
+  ## `activePolicyPath` results are all members of this candidate set,
+  ## so they need no separate entries. Appended last after every load;
+  ## paths that collapse guard once.
   ##
   ## The user-owned settings files that carry the security switches
   ## ride along as read-only guards: the user config, and, when the
@@ -618,10 +625,15 @@ proc guardRules*(projectDir: string): seq[Rule] =
   ## re-allow it, so `allow ~/` or a rubber-stamped ask never opens it.
   ## Only `[settings] sandbox = off` (guard rules never load) lifts it.
   var guarded: seq[string]
-  var candidates = @[repoPolicyPath(projectDir),
-                     projectDir / PolicyFile,
-                     activePolicyPath(projectDir),
-                     systemPolicyPath()]
+  var candidates: seq[string]
+  # Every slot the active-policy cascade consults, existent or not:
+  # creating an unguarded slot is the same hijack as editing the
+  # active file (nearest ancestor wins, store slot beats legacy), so
+  # they all ride as guards before they ever hold a file.
+  for d in dirsettings.ancestorsNearestFirst(projectDir):
+    candidates.add storePolicyPath(d)
+    candidates.add d / PolicyFile
+  candidates.add systemPolicyPath()
   # The security-switch authority itself: never editable by the model.
   candidates.add configPath()
   if dirsettings.dirConfigLocation == "user":

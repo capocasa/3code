@@ -14,16 +14,21 @@
 ## contents: a policy edit between the parent's last check and the exec
 ## can only tighten what box applies.
 ##
-## The policy files 3code can activate (the repo `.sandbox` and the
-## user file) are read-only inside the sandbox: the parent seeds
-## `hiddenRules` with them at startup and resolvePolicy appends the
-## same guards to whatever --policy it loads, so no file rule can
-## weaken them and they never render in the rule dump. A foreign
-## --policy file (standalone box use) is force-added read-only.
+## The policy files 3code can activate (every slot the ancestor
+## cascade can load, plus the user file) are read-only inside the
+## sandbox: the parent seeds `hiddenRules` with them at startup and
+## resolvePolicy appends the same guards to whatever --policy it
+## loads, so no file rule can weaken them and they never render in
+## the rule dump. A foreign --policy file (standalone box use) is
+## force-added read-only.
 ## On Landlock a read-only rule under a writable root does not
-## subtract write (rules union within a layer), so on Linux a policy
-## file inside a writable tree is still writable from inside the
-## sandbox; that is accepted.
+## subtract write (rules union within a layer), so on Linux every
+## rule file that sits under a writable root is additionally bound
+## over itself read-only in the mount namespace before the Landlock
+## domain goes up (`maskRuleFilesReadOnly`): the fence can read its
+## policy, never edit it. A slot that does not exist yet cannot be
+## bound; creating one is what the parent-side in-process guards
+## deny.
 
 when defined(posix):
   import std/posix except Time
@@ -33,6 +38,90 @@ import sandwall
 import sandwall/baseline
 import sandbox
 import dirsettings
+
+when defined(linux):
+  import sandwall/mask
+
+  # The mount API the read-only rule-file mask needs. A classic
+  # MS_BIND self-bind plus MS_REMOUNT|MS_RDONLY fails with EINVAL in
+  # a user namespace on current kernels (the locked-mount rules); the
+  # detached-clone API is the supported shape: clone the mount, attach
+  # it at the same path, then set MOUNT_ATTR_RDONLY on the clone.
+  # Syscall numbers are the asm-generic ones every architecture uses
+  # for these (428/429/442).
+  const
+    sysOpenTree = 428
+    sysMoveMount = 429
+    sysMountSetattr = 442
+    atEmptyPath = 0x1000
+    atFDcwd = -100
+    openTreeClone = 1
+    moveMountFEmptyPath = 0x4
+    mountAttrRdonly = 1'u64
+
+  type MountAttr = object
+    attrSet, attrClr, propagation, usernsFd: uint64
+
+  proc syscall6(num: clong; a1, a2, a3, a4, a5, a6: clong): clong {.
+      importc: "syscall", header: "<unistd.h>", varargs.}
+
+  # The *_EMPTY_PATH flags stop the kernel from *using* the path
+  # string, but it is still copied from userland first: NULL earns
+  # EFAULT, an empty literal is what the calls want.
+  let emptyPath = cstring""
+
+  proc maskRuleFilesReadOnly(paths, writable: openArray[string]) =
+    ## Landlock unions rights within a layer, so the read-only guard
+    ## on a rule file is invisible under a writable root: `allow ./`
+    ## alone would leave every policy file editable from inside the
+    ## fence. A read-only self-bind in the mount namespace is the
+    ## subtraction Landlock cannot express (the read-only sibling of
+    ## maskDenied's deny masks). Only existing files under a writable
+    ## root need it: elsewhere the Landlock read grant already
+    ## excludes write. Existing store directories (`.3code`) ride
+    ## the same bind, which also denies CREATING a slot inside them;
+    ## a legacy `.sandbox` in a project root that does not exist yet
+    ## has no directory to bind - creating that one stays a
+    ## parent-side, in-process denial, and the next launch masks
+    ## whatever appears.
+    ##
+    ## Must run BEFORE restrict(): the deny masks restrict() stacks
+    ## later land on top (a path masked /dev/null by a --deny and
+    ## read-only here stays fully denied), and entering a user
+    ## namespace first would silently swallow the net fence's own
+    ## CLONE_NEWNET unshare. A confined child can unshare a mount
+    ## namespace of its own and unmount the bind; that is the same bar
+    ## maskDenied's deny masks set (caps over the userns come with the
+    ## namespace), not a new one. Unavailable user namespaces (or a
+    ## kernel without mount_setattr) degrade to notice-and-continue,
+    ## like every other backend gap.
+    if paths.len == 0: return
+    try:
+      mask.ensureUserns()
+    except OSError as e:
+      stderr.writeLine("3code sandbox: " & e.msg &
+        "; continuing WITHOUT read-only rule-file enforcement")
+      return
+    for p in paths:
+      let path = cstring(p)
+      let tfd = syscall6(sysOpenTree, atFDcwd, cast[clong](path),
+                         openTreeClone, 0, 0, 0)
+      if tfd < 0:
+        stderr.writeLine("3code sandbox: read-only bind for " & p &
+          " failed (open_tree errno " & $errno & "); continuing without it")
+        continue
+      var mounted = false
+      defer:
+        if tfd >= 0: discard close(cint(tfd))
+      if syscall6(sysMoveMount, tfd, cast[clong](emptyPath), atFDcwd,
+                  cast[clong](path), moveMountFEmptyPath, 0) == 0:
+        var ma = MountAttr(attrSet: mountAttrRdonly)
+        if syscall6(sysMountSetattr, tfd, cast[clong](emptyPath),
+                    atEmptyPath, cast[clong](addr ma), 32, 0) == 0:
+          mounted = true
+      if not mounted:
+        stderr.writeLine("3code sandbox: read-only bind for " & p &
+          " failed (errno " & $errno & "); continuing without it")
 
 const usage = """
 3code sandbox - filesystem sandbox (Landlock/Seatbelt/ACL)
@@ -119,10 +208,10 @@ proc parseBoxArgs(args: seq[string]): tuple[a: BoxArgs, err: string] =
     inc i
   (a, "")
 
-proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
-                   fence: bool] =
+proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied,
+                   maskRo: seq[string]; fence: bool] =
   ## Resolve the policy file(s) plus explicit args into the
-  ## (writable, readonly, denied) triple. The 3code policy paths ride
+  ## (writable, readonly, denied, maskRo) sets. The 3code policy paths ride
   ## the parse as hidden read-only guards; any other --policy file is
   ## force-added read-only. `denied` carries the policy's last-wins
   ## narrowing (a deny under an allowed root); the backend enforces it
@@ -130,6 +219,7 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
   var writable = a.writable
   var readonly = a.readOnly
   var denied: seq[string]
+  var maskRo: seq[string]
   var hostRules = 0
   if a.policies.len > 0:
     # Exactly one active policy file: 3code passes the repo `.sandbox`
@@ -176,6 +266,33 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     # The sandboxed command may read its policy but never change it.
     for f in a.policies:
       if fileExists(f): readonly.add absolutePath(f)
+    # Rule files under a writable root are the one set Landlock cannot
+    # keep read-only (rights union within a layer); Linux binds them
+    # read-only instead, so collect the candidates here. The hidden
+    # guards carry every loadable policy slot; the --policy files ride
+    # along even for standalone use. Existing files get the bind; the
+    # ancestor store directories get it too, so a fenced command
+    # cannot CREATE a slot either (the parent-side in-process guards
+    # are the same denial for the file tools). A store dir that a rule
+    # made a writable root of its own is skipped: an explicit `allow
+    # <store>` is the user overriding the fence for that tree.
+    for f in a.policies:
+      let fa = absolutePath(f)
+      if fileExists(fa) and fa notin maskRo: maskRo.add fa
+    for r in pol:
+      if r.hidden and r.access == akReadOnly and r.kind == rkPath and
+          fileExists(r.path) and r.path notin maskRo:
+        maskRo.add r.path
+    for d in dirsettings.ancestorsNearestFirst(projectDir):
+      let sd = storePolicyPath(d).parentDir
+      if dirExists(sd) and sd notin maskRo:
+        block notARoot:
+          for w in writable:
+            try:
+              if absolutePath(sd).normalizedPath ==
+                  absolutePath(w).normalizedPath: break notARoot
+            except CatchableError: discard
+          maskRo.add sd
   # Explicit --deny args union with the policy's denies: the backends
   # enforce both against the writable roots (mask/Seatbelt/ACL).
   denied.add a.denied
@@ -211,7 +328,15 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     if not meaningful: continue
     kept.add d
   denied = kept
-  (writable, readonly, denied, hostRules > 0)
+  # A read-only mask only bites where a writable root would otherwise
+  # win; elsewhere the Landlock read grant already excludes write.
+  var masked: seq[string]
+  for p in maskRo:
+    for root in writable:
+      if isPathUnder(absNorm(p), absNorm(root)):
+        masked.add p
+        break
+  (writable, readonly, denied, masked, hostRules > 0)
 
 proc boxRestrict(args: seq[string]): int =
   ## Parse the `box restrict` args and confine-then-exec. Returns the
@@ -221,7 +346,7 @@ proc boxRestrict(args: seq[string]): int =
     stderr.writeLine(usage)
     stderr.writeLine("\nError: " & err)
     return 2
-  let (writable, readOnly, denied, fence) = resolvePolicy(a)
+  let (writable, readOnly, denied, maskRo, fence) = resolvePolicy(a)
   if writable.len == 0 and a.policies.len == 0:
     stderr.writeLine(usage)
     stderr.writeLine("\nError: no writable paths given")
@@ -274,6 +399,15 @@ proc boxRestrict(args: seq[string]): int =
     # cancel/timeout; without setsid those signals would miss CMD's children.
     discard setsid()
     when defined(linux):
+      # The net fence's namespace must exist before any other userns
+      # setup: enterNetns no-ops once a userns is present, so a rule
+      # file mask created first would silently drop the loopback-only
+      # netns from a fenced run. restrict() retries the enter and
+      # reports when it fails; the mask degrades on its own below.
+      if fence:
+        try: enterNetns()
+        except OSError: discard
+      maskRuleFilesReadOnly(maskRo, writable)
       restrict(writable, read = readOnly, denied = denied,
                fenceNet = fence, proxyPort = wallPort,
                proxySockPath = wallSock)
