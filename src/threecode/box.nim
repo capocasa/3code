@@ -213,6 +213,81 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
   denied = kept
   (writable, readonly, denied, hostRules > 0)
 
+when defined(linux):
+  const
+    procSetgroups = "/proc/self/setgroups"
+    procGidMap = "/proc/self/gid_map"
+    procUidMap = "/proc/self/uid_map"
+
+  type IdmapFds = object
+    ## Write handles on the user-namespace id-mapping files, opened
+    ## before the restriction lands (see repairUsernsIds).
+    setgroups, gidMap, uidMap: cint
+
+  proc openIdmapFds(): IdmapFds =
+    ## Open the id-mapping files for writing while no Landlock domain
+    ## exists yet: they sit under no writable root, so once the
+    ## restriction applies, opening them for write fails with EACCES
+    ## and no repair is possible at all. Landlock gates open(2), not
+    ## writes through descriptors that were already open - but the
+    ## kernel also binds a /proc id-map file to the task's user
+    ## namespace AT OPEN TIME, so a handle opened here names the
+    ## INITIAL namespace's map, which an unprivileged writer can never
+    ## change: the repair below can only DETECT the stranded namespace
+    ## and say so. The mapping itself is sandwall's to write (fixed
+    ## 0.5.15: read the ids before unshare, self-map the user);
+    ## these handles exist so the degrade is reported, not silent.
+    ## O_CLOEXEC on all three: they must not leak into the confined
+    ## command.
+    result = IdmapFds(setgroups: -1, gidMap: -1, uidMap: -1)
+    result.setgroups = posix.open(procSetgroups,
+        posix.O_WRONLY or posix.O_CLOEXEC, 0.Mode)
+    result.gidMap = posix.open(procGidMap,
+        posix.O_WRONLY or posix.O_CLOEXEC, 0.Mode)
+    result.uidMap = posix.open(procUidMap,
+        posix.O_WRONLY or posix.O_CLOEXEC, 0.Mode)
+
+  proc writeAll(fd: cint; s: string): bool =
+    if fd < 0: return false
+    var i = 0
+    while i < s.len:
+      let n = posix.write(fd, s[i].unsafeAddr, cint(s.len - i))
+      if n < 0: return false
+      inc i, n
+    true
+
+  proc repairUsernsIds(fds: IdmapFds; outerUid, outerGid: int) =
+    ## sandwall enters a user+mount namespace for the deny masks (and
+    ## the net fence) but composes the id-mapping writes from ids read
+    ## only AFTER unshare(2) - by then they already read as the
+    ## unmapped overflow 65534, and the kernel rejects the "0 65534 1"
+    ## line (an unprivileged writer may map only its own uid). sandwall
+    ## degrades, and the command runs stranded in an UNMAPPED
+    ## namespace: every process and file reads as nobody:nobody,
+    ## getpwuid finds no home, git flags the repo as dubious ownership,
+    ## and `id` contradicts the inherited USER/HOME env - a fenced
+    ## agent misreads its own project as foreign-owned. sandwall
+    ## (0.5.15) self-maps the user before these fds were even
+    ## opened, so this normally finds a mapping and returns. When it
+    ## does not (sandwall too old to self-map, a nested run from an
+    ## already-unmapped namespace where no outer id is expressible, or
+    ## a run nested under an outer Landlock domain that denies the
+    ## map-file opens outright), the write through the handles fails
+    ## and the command keeps the nobody display - say so and continue
+    ## rather than fail the run.
+    let mapped = try: readFile(procUidMap)
+                 except CatchableError: return
+    if mapped.strip.len > 0: return
+    discard writeAll(fds.setgroups, "deny\n")
+      # one-way switch, usually already denied by sandwall; without a
+      # deny an unprivileged gid_map write is rejected outright
+    let gidLine = $outerGid & " " & $outerGid & " 1\n"
+    let uidLine = $outerUid & " " & $outerUid & " 1\n"
+    if not writeAll(fds.gidMap, gidLine) or
+        not writeAll(fds.uidMap, uidLine):
+      stderr.writeLine("3code sandbox: mapping the user namespace " &
+        "failed; commands run as nobody (uid 65534)")
+
 proc boxRestrict(args: seq[string]): int =
   ## Parse the `box restrict` args and confine-then-exec. Returns the
   ## process exit code.
@@ -274,9 +349,18 @@ proc boxRestrict(args: seq[string]): int =
     # cancel/timeout; without setsid those signals would miss CMD's children.
     discard setsid()
     when defined(linux):
+      # The real ids while they still read as themselves: inside
+      # sandwall's namespace they show as the unmapped overflow 65534,
+      # and the repair needs the pre-namespace truth (repairUsernsIds).
+      # The mapping files must be opened before restrict() applies the
+      # Landlock domain that forbids opening them.
+      let outerUid = int(getuid())
+      let outerGid = int(getgid())
+      let idmaps = openIdmapFds()
       restrict(writable, read = readOnly, denied = denied,
                fenceNet = fence, proxyPort = wallPort,
                proxySockPath = wallSock)
+      repairUsernsIds(idmaps, outerUid, outerGid)
     else:
       restrict(writable, read = readOnly, denied = denied,
                fenceNet = fence, proxyPort = wallPort)
