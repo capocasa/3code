@@ -247,11 +247,11 @@ removed from the config fall out of the running automatically.
 
 ```
 :provider nvidia
-:model gpt-oss-20b
+:model glm-5.3-flash
 ```
 
-A model name can carry its provider: `:model nvidia.gpt-oss-20b` (or
-`nvidia/gpt-oss-20b`) switches both in one step, and every id printed by
+A model name can carry its provider: `:model nvidia.glm-5.3-flash` (or
+`nvidia/z-ai/glm-5.3-flash`) switches both in one step, and every id printed by
 `3code --good` works verbatim as a `:model` argument. Tab completion
 follows suit: type the provider and the dot, get that provider's models.
 

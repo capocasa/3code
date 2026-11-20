@@ -506,15 +506,15 @@ suite "config: splitModels / formatModels":
 
 suite "config: known-good lookup with normalized pretty names":
   test "isKnownGood accepts the normalized form of a prefixed wire id":
-    let p = Profile(name: "nebius.glm-5.1", model: "glm-5.1")
+    let p = Profile(name: "novita.glm-5.1", model: "glm-5.1")
     check isKnownGood(p)
 
   test "knownGoodFamily matches on normalized name":
-    check knownGoodFamily("nebius", "glm-5.1") == "glm"
+    check knownGoodFamily("novita", "glm-5.1") == "glm"
     check knownGoodFamily("together", "kimi-k2.6") == "kimi"
 
   test "knownGoodFamily still matches the raw wire id":
-    check knownGoodFamily("nebius", "zai-org/GLM-5.1") == "glm"
+    check knownGoodFamily("novita", "zai-org/GLM-5.1") == "glm"
 
   test "unknown models stay experimental":
     check knownGoodFamily("zai", "glm-9.9-nope") == ""
