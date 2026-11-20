@@ -2,6 +2,21 @@ Changelog
 
 Unreleased
 
+- **A write to a sandbox policy file names the real rule: only the
+  user can change sandbox rules.** The policy slots ride every load
+  as hidden read-only guards no rule in the file can weaken, so a
+  read/write/patch/apply_patch aimed at one always denied - but with
+  the generic `is read-only (policy: ...)` text, which sent the model
+  digging for a rule to edit instead of asking. The denial now says
+  what the file is: `./.sandbox is a policy file (sandbox rules can
+  only be changed by the user, :sandbox edit)`. Every slot spelling
+  under any prefix asks that way - the legacy root `.sandbox`, the
+  store `.3code/sandbox`, and the user `3code/sandbox` under the
+  config root - matched against the hidden guard that denied, so a
+  plain `readonly` rule keeps the generic text and reads of the
+  policy stay allowed (the denial hint points the model at the file).
+  (`tests/core/test_sandbox_cascade.nim`)
+
 - **Catalog sweep: 98 delisted rows out, DeepInfra Hy4-preview in.**
   Every known-good row was re-checked against its provider's live
   `/models` list, and the 98 host+model pairs a provider no longer
