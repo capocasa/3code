@@ -1184,11 +1184,13 @@ proc emitTokens(s: var string, usage: JsonNode) =
 
 proc goalVerdictWord*(v: GoalVerdictKind): string =
   ## The `goal_check` record's verdict spelling: `satisfied`, `feedback`,
-  ## or `none` (an informational step - the red "check unavailable" row
-  ## included, since a check without a verdict is a failed check).
+  ## `cancelled`, or `none` (an informational step - the red "check
+  ## unavailable" row included, since a check without a verdict is a
+  ## failed check).
   case v
   of gvkSatisfied: "satisfied"
   of gvkFeedback: "feedback"
+  of gvkCancelled: "cancelled"
   of gvkNone: "none"
 
 proc goalVerdictFromWord*(w: string): GoalVerdictKind =
@@ -1197,6 +1199,7 @@ proc goalVerdictFromWord*(w: string): GoalVerdictKind =
   case w
   of "satisfied": gvkSatisfied
   of "feedback": gvkFeedback
+  of "cancelled": gvkCancelled
   else: gvkNone
 
 type SessionSaveError* = object of CatchableError

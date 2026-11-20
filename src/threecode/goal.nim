@@ -1,35 +1,40 @@
-## Harness modes: the file on disk is the protocol.
+## Harness modes: where a mode's state lives is the mode.
 ##
 ## A harness mode is one entry in the mode registry (`ModeDesc`): a
-## trigger filename, a `:` verb, an arm-time validator, the two
-## retirement names, and the mode's kickoff/feedback continuation
-## builders. The substrate below — startup scan, kickoff/FEEDBACK
-## plumbing, receipts, the rename protocol, the verifier side call —
-## walks the registry and never names a mode itself. goal mode is
-## entry #1; `cybernetic.md` is entry #2. One mode, one file, one verb.
+## `:` verb, an arm-time validator, the retirement names, and the
+## mode's kickoff/feedback continuation builders. The substrate below
+## — startup scan, kickoff/FEEDBACK plumbing, receipts, the retirement
+## protocol, the verifier side call — walks the registry and never
+## names a mode itself. goal mode is entry #1; `cybernetic.md` is
+## entry #2. One mode, one verb.
 ##
-## `goal.md` in the project root keeps a session on one goal. The file
-## IS the mode, and work starts the moment it exists: startup detection,
-## every `:goal` write path, and a turn-end detection of a file that
-## appeared mid-session all run the kickoff turn at once - the kickoff
-## item (the `⚑` flag plus the goal text alone) is the whole
-## announcement - and the stanza is fed exactly once per arming: a
-## resumed session never re-sends it (the latch is persisted, and the
-## `Goal armed:` content lead witnesses older sessions). The other hook
-## is the end-call boundary in `turns.nim`: when the turn's final model
-## call completes and the harness is about to hand the prompt back to
-## the user, it stats `goal.md`; bare existence activates (v1 waives
-## marker sniff and name-collision handling). A side-call verifier (the
-## session's own model by default; a dedicated verification-class model
-## when one is configured via `:verifier`, e.g. a System One decision
-## model like Jev) judges the
-## goal text against harness-built evidence from the just-finished
-## turn plus the session change log (net per-path deltas, shell
-## mutations folded in by the armed tree manifest — no git involved).
-## FEEDBACK sends the agent back in; SATISFIED renames the file to
-## `achieved.md` and the session idles normally. Bare `:goal!`
-## cancels into `goal-cancelled.md`. No per-tool-call checks, no
-## system-prompt changes: the continuation message carries everything.
+## Goal mode keeps its state in the conversation: the kickoff message
+## (`⚑`-marked, `Goal armed:` lead) IS the goal, and the verifier steps
+## the session paints are the retirement records. `goalActiveIn`
+## derives everything from those two: a goal is armed when the last
+## kickoff has no satisfied/cancelled step after it, so a resumed
+## session picks the mode back up from the .3log alone and a new goal
+## after a retirement arms fresh. There is no goal file - not in the
+## project root, not in the settings store - so nothing on disk can
+## arm, steer, or retire a goal, and no other session shares one.
+## Arming is `:goal <text>`: the kickoff message lands in the
+## conversation and the kickoff turn runs at once - the kickoff item
+## (the `⚑` flag plus the goal text alone) is the whole announcement -
+## and the stanza is fed exactly once per arming (the `Goal armed:`
+## content lead is the resume witness). The other hook is the
+## end-call boundary in `turns.nim`: when the turn's final model call
+## completes and the harness is about to hand the prompt back to the
+## user, it asks the registry what is armed. A side-call verifier (the
+## session's own model by default; a dedicated verification-class
+## model when one is configured via `:verifier`, e.g. a System One
+## decision model like Jev) judges the goal text against
+## harness-built evidence from the just-finished turn plus the session
+## change log (net per-path deltas, shell mutations folded in by the
+## armed tree manifest — no git involved). FEEDBACK sends the agent
+## back in; SATISFIED retires the goal (its ✓ step is the record) and
+## the session idles normally. Bare `:goal!` writes the ⊘ retirement
+## step. No per-tool-call checks, no system-prompt changes: the
+## continuation message carries everything.
 ##
 ## The side call is also the future subagent primitive, so it is kept
 ## separate: its own message list, no session mutation, no tools.
@@ -40,12 +45,6 @@ import types, util, prompts, api, config, actions
 import dirsettings
 
 const
-  GoalFileName* = "goal.md"            ## existence activates goal mode
-  GoalConfirmedName* = "achieved.md"   ## the satisfied record
-  GoalCancelledName* = "goal-cancelled.md"  ## the user-cancelled record
-  GoalGivenUpName* = "goal-given-up.md"      ## reserved: nothing writes it
-                                             ## yet; a failing harness retries
-                                             ## instead of giving up
   CyberFileName* = "cybernetic.md"           ## existence activates cybernetic mode
   CyberConfirmedName* = "cybernetic-confirmed.md"
   CyberCancelledName* = "cybernetic-cancelled.md"
@@ -98,9 +97,9 @@ and unexplained). Treat newly checked boxes as claims to verify."""
 const CyberVerifierPreamble* = StepTruthClause & "\n\n" & VerifierPreamble
 
 proc storeBaseName*(name: string): string =
-  ## The store spelling of a mode file name: `goal.md` -> `goal`,
-  ## `achieved.md` -> `achieved`. Names without the markdown suffix map
-  ## to themselves, so store and legacy families stay one rule.
+  ## The store spelling of a mode file name: `cybernetic.md` ->
+  ## `cybernetic`. Names without the markdown suffix map to themselves,
+  ## so store and legacy families stay one rule.
   if name.endsWith(".md"): name[0 ..< name.len - 3] else: name
 
 proc modePathForName*(fileName, dir: string): string =
@@ -121,13 +120,6 @@ proc modeLabelForName*(fileName: string; dir = "."): string =
     StoreDirName / storeBaseName(fileName)
   else:
     fileName
-
-proc goalModeActive*(dir = "."): bool =
-  fileExists(modePathForName(GoalFileName, dir))
-
-proc readGoalText*(dir = "."): string =
-  try: readFile(modePathForName(GoalFileName, dir))
-  except CatchableError: ""
 
 const
   VerdictSatWords = ["VERDICT", ":", "SATISFIED"]
@@ -209,8 +201,7 @@ proc goalFeedbackMessage*(feedback: string): JsonNode =
   ## item, no provider ever sees either marker, and nothing mistakes it
   ## for user input.
   %*{"role": "user", "agentSent": true, "goalSent": true,
-     "content": "Goal check: the goal in " &
-       modeLabelForName(GoalFileName, getCurrentDir()) & " is not yet " &
+     "content": "Goal check: the session's goal is not yet " &
        "satisfied. Verifier feedback:\n\n" & feedback &
        "\n\nAddress it and keep working toward the goal; the " &
        "satisfaction check runs again when this turn ends."}
@@ -243,6 +234,54 @@ proc kickoffDisplayText*(content: string): string =
   let body = if parts.len >= 3: parts[1 .. ^2] else: parts[1 .. ^1]
   body.join("\n\n").strip
 
+# ---------- goal state: the conversation is the protocol ----------
+
+proc isGoalKickoffMsg*(m: JsonNode): bool =
+  ## The goal's arm record: a harness-autosent user message whose
+  ## `Goal armed:` lead announces a goal (not a plan - cybernetic's
+  ## kickoff borrows the same lead, so its own file name is the
+  ## divider). The `goalSent` marker narrows it for sessions saved
+  ## since the marker existed; the content lead covers older ones.
+  if m == nil or m.kind != JObject: return false
+  if m{"role"}.getStr != "user" or not m{"agentSent"}.getBool(false):
+    return false
+  let c = m{"content"}.getStr("")
+  c.startsWith("Goal armed:") and not c.startsWith("Goal armed: cybernetic.md")
+
+proc lastGoalKickoff*(messages: JsonNode): int =
+  ## Index of the conversation's last goal kickoff, -1 when none ever
+  ## armed. The LAST one is the live goal: a re-arm (`:goal! TEXT`)
+  ## supersedes an older kickoff without retiring it first.
+  if messages == nil or messages.kind != JArray: return -1
+  for i in countdown(messages.len - 1, 0):
+    if isGoalKickoffMsg(messages[i]): return i
+  -1
+
+proc goalActiveIn*(messages: JsonNode; steps: seq[GoalStepRecord]): bool =
+  ## Is a goal armed? The last kickoff with no retirement step after
+  ## it: a `gvkSatisfied` check retires (its ✓ row is the record), a
+  ## `gvkCancelled` step is the `:goal!` exit, and FEEDBACK steps keep
+  ## the goal live. Both inputs are exactly what the .3log reloads, so
+  ## a resumed session derives the same mode state the live one had.
+  ## Compaction clears the step anchors with the history they pointed
+  ## into; a kickoff that survives a collapse without its retirement
+  ## step re-arms once and the next check retires it again - display
+  ## collateral, the same class of loss the prose rows take.
+  let k = lastGoalKickoff(messages)
+  if k < 0: return false
+  for s in steps:
+    if s.after > k and s.step.verdict in {gvkSatisfied, gvkCancelled}:
+      return false
+  true
+
+proc goalTextFromMessages*(messages: JsonNode): string =
+  ## The live goal's text: the kickoff's display body (the wire
+  ## scaffold dropped). "" when no goal is armed - callers treat that
+  ## as no mode.
+  let k = lastGoalKickoff(messages)
+  if k < 0: return ""
+  kickoffDisplayText(messages[k]{"content"}.getStr(""))
+
 proc goalKickoffMessage*(goalText: string): JsonNode =
   ## The harness-autosent prompt that starts goal achievement the
   ## moment the mode is armed or detected, instead of waiting for the
@@ -250,9 +289,7 @@ proc goalKickoffMessage*(goalText: string): JsonNode =
   ## feedback continuation, so replay renders it as a `⚑` item and no
   ## provider ever sees the markers.
   %*{"role": "user", "agentSent": true, "goalSent": true,
-     "content": "Goal armed: " &
-       modeLabelForName(GoalFileName, getCurrentDir()) & " in this repository now " &
-       "states the session's goal:\n\n" & goalText.strip &
+     "content": "Goal armed: the session's goal is now:\n\n" & goalText.strip &
        "\n\nStart working toward it now. A satisfaction check runs when " &
        "each turn ends and sends you back in with feedback until the " &
        "goal is met."}
@@ -520,12 +557,16 @@ proc cyberFeedbackMessage*(body, feedback: string): JsonNode =
 # extend it.
 type
   ModeDesc* = object
-    ## One harness mode: the trigger file that arms it, the `:` verb
-    ## that writes that file, the retirement names, and the mode's
-    ## kickoff/feedback continuation builders. Modes are mutually
-    ## exclusive — one mode, one file, one verb.
+    ## One harness mode: the `:` verb that arms it, the retirement
+    ## names, and the mode's kickoff/feedback continuation builders.
+    ## Modes are mutually exclusive — one mode, one verb. A mode's
+    ## state lives in its trigger file (`transcript = false`) or in
+    ## the conversation itself (`transcript = true`, goal mode: the
+    ## kickoff message is the arm, the verifier steps are the
+    ## retirements).
     name*: string          ## short name for receipts and the profile row
-    fileName*: string      ## the trigger file; bare existence arms
+    fileName*: string      ## the trigger file; "" for transcript modes
+    transcript*: bool      ## state in the conversation, not on disk
     verb*: string          ## the `:` command that arms it
     confirmedName*: string  ## rename target on a SATISFIED verdict
     cancelledName*: string  ## rename target on user cancel
@@ -569,45 +610,69 @@ template noMode*(m: ModeDesc): bool =
   m.name.len == 0
 
 proc modeFilePath*(m: ModeDesc; dir: string): string =
-  modePathForName(m.fileName, dir)
+  if m.transcript: "" else: modePathForName(m.fileName, dir)
+
+proc modeArmed*(m: ModeDesc; dir: string; messages: JsonNode;
+                steps: seq[GoalStepRecord]): bool =
+  ## The one armed-question: file modes ask the disk, transcript modes
+  ## ask the conversation. Every walk (startup scan, turn boundary,
+  ## arming's mutual exclusion) goes through here so the two state
+  ## models can never disagree about what is live.
+  if m.transcript: goalActiveIn(messages, steps)
+  else: fileExists(modeFilePath(m, dir))
 
 proc modeFileLabel*(m: ModeDesc; dir = "."): string =
   modeLabelForName(m.fileName, dir)
 
-proc activeMode*(dir = "."): ModeDesc =
-  ## The mode whose trigger file sits in `dir` — the settings store's
-  ## copy or the legacy root-level file — first registry hit; a zero
-  ## `ModeDesc` (`noMode`) when none is armed.
+proc activeMode*(dir = "."; messages: JsonNode = nil;
+                 steps: seq[GoalStepRecord] = @[]): ModeDesc =
+  ## The armed mode — first registry hit; a zero `ModeDesc` (`noMode`)
+  ## when none is armed. File modes arm from `dir`'s trigger file
+  ## (store copy or legacy root-level), goal mode from the
+  ## conversation: a session resumed from the .3log answers with the
+  ## same mode the live one had.
   for m in modeRegistry:
-    if fileExists(modeFilePath(m, dir)): return m
+    if modeArmed(m, dir, messages, steps): return m
 
-proc readModeText*(m: ModeDesc; dir = "."): string =
-  try: readFile(modeFilePath(m, dir))
-  except CatchableError: ""
+proc readModeText*(m: ModeDesc; dir = "."; messages: JsonNode = nil): string =
+  if m.transcript: goalTextFromMessages(messages)
+  else:
+    try: readFile(modeFilePath(m, dir))
+    except CatchableError: ""
 
-proc startMode*(m: ModeDesc; text: string; force = false;
-                dir = "."): tuple[ok: bool, err: string] =
-  ## The arming path behind every mode's verb: compose the file body
-  ## from the command-line text, check the mode's format contract, and
-  ## write it. A live file of the same mode refuses without `force`
-  ## (`:goal!` carries the same force-past-the-guardrail meaning as
-  ## `:q!`). A live file of any OTHER mode refuses outright: modes are
-  ## mutually exclusive, and force replaces a mode's own file, never
-  ## another mode's session.
+proc startMode*(m: ModeDesc; text: string; force = false; dir = ".";
+                messages: JsonNode = nil;
+                steps: seq[GoalStepRecord] = @[]): tuple[ok: bool, err: string] =
+  ## The arming path behind every mode's verb: compose the body from
+  ## the command-line text and check the mode's format contract. A
+  ## live mode of the same kind refuses without `force` (`:goal!`
+  ## carries the same force-past-the-guardrail meaning as `:q!`); a
+  ## live OTHER mode refuses outright: modes are mutually exclusive,
+  ## and force replaces a mode's own state, never another mode's
+  ## session. A file mode writes its trigger file here; a transcript
+  ## mode arms when the controller appends the kickoff message, so for
+  ## those this is validation only.
   if text.strip.len == 0:
     return (false, "usage: " & m.verb & " <text>")
   for other in modeRegistry:
-    if other.name != m.name and fileExists(modeFilePath(other, dir)):
-      return (false, modeFileLabel(other, dir) & " (" & other.name & " mode) is " &
+    if other.name != m.name and modeArmed(other, dir, messages, steps):
+      let label =
+        if other.transcript: other.name & " mode"
+        else: modeFileLabel(other, dir) & " (" & other.name & " mode)"
+      return (false, label & " is " &
         "already active; harness modes are mutually exclusive - cancel " &
         "it first with " & other.verb & "!")
-  if fileExists(modeFilePath(m, dir)) and not force:
-    return (false, modeFileLabel(m, dir) & " is already active; use " & m.verb &
+  if modeArmed(m, dir, messages, steps) and not force:
+    let label =
+      if m.transcript: "a " & m.name else: modeFileLabel(m, dir)
+    return (false, label & " is already active; use " & m.verb &
       "! to replace it")
   let body = m.composeBody(text)
   let verr = m.validate(body)
   if verr.len > 0:
     return (false, verr)
+  if m.transcript:
+    return (true, "")
   try:
     let path = modeFilePath(m, dir)
     createDir(path.parentDir)
@@ -618,10 +683,10 @@ proc startMode*(m: ModeDesc; text: string; force = false;
 
 proc retireTarget*(m: ModeDesc; dir, legacyName: string): string =
   ## Where a trigger file retires to: the same family it lives in. A
-  ## store file renames within the store (`goal` -> `achieved`), a
-  ## legacy root-level file keeps the legacy names (`goal.md` ->
-  ## `achieved.md`), so a session armed before the store existed
-  ## retires the way it always did.
+  ## store file renames within the store (`cybernetic` ->
+  ## `cybernetic-confirmed`), a legacy root-level file keeps the legacy
+  ## names, so a session armed before the store existed retires the way
+  ## it always did.
   let active = modePathForName(m.fileName, dir)
   if fileExists(active) and active ==
       dirsettings.storeFileFor(dir, storeBaseName(m.fileName)):
@@ -632,7 +697,10 @@ proc retireTarget*(m: ModeDesc; dir, legacyName: string): string =
 proc completeMode*(m: ModeDesc; dir = "."): bool =
   ## The retirement path on SATISFIED: `mv <file> <confirmedName>`. The
   ## confirmed file stays as the record; the mode is off until a new
-  ## trigger file appears.
+  ## trigger file appears. A transcript mode has nothing to move - the
+  ## satisfied step the check just painted IS the retirement record -
+  ## so retirement cannot fail.
+  if m.transcript: return true
   try:
     moveFile(modeFilePath(m, dir), retireTarget(m, dir, m.confirmedName))
     true
@@ -654,11 +722,9 @@ proc cancelMode*(m: ModeDesc; dir = "."): tuple[ok: bool, err: string] =
 
 let goalMode* = ModeDesc(
   name: "goal",
-  fileName: GoalFileName,
+  fileName: "",
+  transcript: true,
   verb: ":goal",
-  confirmedName: GoalConfirmedName,
-  cancelledName: GoalCancelledName,
-  givenUpName: GoalGivenUpName,
   validate: proc (body: string): string = "",
   composeBody: proc (text: string): string = text.strip & "\n",
   kickoffMessage: goalKickoffMessage,
@@ -713,37 +779,47 @@ proc harnessNote*(content: string): JsonNode =
   ## ever sees the marker.
   %*{"role": "user", "agentSent": true, "content": content}
 
-proc conflictingMode*(m: ModeDesc; dir = "."): ModeDesc =
-  ## The first OTHER registry mode whose trigger file also sits in `dir`
-  ## while `m` is the active one: a second file on disk is a refused
-  ## arming, and the refusal must reach the prompt, never pass silently.
+proc conflictingMode*(m: ModeDesc; dir = "."; messages: JsonNode = nil;
+                     steps: seq[GoalStepRecord] = @[]): ModeDesc =
+  ## The first OTHER registry mode that is also armed while `m` is the
+  ## active one (its trigger file on disk, or its conversation state):
+  ## a second live mode is a refused arming, and the refusal must reach
+  ## the prompt, never pass silently.
   for other in modeRegistry:
-    if other.name != m.name and fileExists(modeFilePath(other, dir)): return other
+    if other.name != m.name and modeArmed(other, dir, messages, steps):
+      return other
 
 proc modeConflictLabel*(m, other: ModeDesc): string =
   ## The one-line receipt for that refusal, shared by the startup scan
   ## and the turn-boundary detection so the two cannot drift apart.
-  modeFileLabel(other) & " is also on disk but " & m.name & " mode is active; " &
+  let otherLabel =
+    if other.transcript: other.name & " mode"
+    else: modeFileLabel(other) & " on disk"
+  otherLabel & " is also active but " & m.name & " mode is active; " &
     "harness modes are mutually exclusive (" & m.verb & "! cancels " &
     m.name & " mode, then " & other.verb & " arms the plan)"
 
 # The goal-mode entry points: the registry walk for entry #1.
 
-proc startGoal*(text: string; force = false; dir = "."): tuple[ok: bool,
+proc startGoal*(text: string; force = false; messages: JsonNode = nil;
+                steps: seq[GoalStepRecord] = @[]): tuple[ok: bool,
     err: string] =
-  ## The arming path behind `:goal`: write `goal.md` with the command-line
-  ## text. A live goal refuses without `force`; the file is the whole
-  ## protocol, bare existence arms goal mode at the next turn boundary,
-  ## so there is nothing else to do here.
-  startMode(goalMode, text, force, dir)
+  ## The validation path behind `:goal <text>`: refuse an empty text,
+  ## a live goal (without `force`), or a live other mode. The arm
+  ## itself is the kickoff message the controller appends right after
+  ## this returns ok.
+  startMode(goalMode, text, force, ".", messages, steps)
 
-proc completeGoal*(dir = "."): bool =
-  ## The retirement path: `mv goal.md achieved.md`.
-  completeMode(goalMode, dir)
-
-proc cancelGoal*(dir = "."): tuple[ok: bool, err: string] =
-  ## The user exit behind bare `:goal!`: `mv goal.md goal-cancelled.md`.
-  cancelMode(goalMode, dir)
+proc retireGoalCancelled*(session: var Session; messages: JsonNode): bool =
+  ## The user exit behind bare `:goal!` and `:goal cancel`: append the
+  ## ⊘ retirement step to the session's step list. Persisted as a
+  ## `goal_check` record, it is the witness that ends goal mode - a
+  ## resumed session derives "not armed" from it - and it replays as
+  ## the row the live session paints for the cancel.
+  if not goalActiveIn(messages, session.goalSteps): return false
+  session.goalSteps.add GoalStepRecord(after: messages.len,
+    step: GoalStep(verdict: gvkCancelled))
+  true
 
 # ---------- evidence ----------
 
@@ -925,9 +1001,15 @@ proc buildSessionDiff*(cache: ReadCache): string =
   result = result.strip(chars = {'\n'})
 
 proc verifierPrompt*(goalText, evidence: string;
-                    sourceFile = GoalFileName; planFeed = "";
+                    sourceFile = ""; planFeed = "";
                     sessionDiff = ""): string =
-  result = "Goal (from " & sourceFile & " in the repo root):\n\n" &
+  # `sourceFile` names where the goal text lives for file modes
+  # ("cybernetic.md in the repo root"); a transcript mode's goal needs
+  # no file citation.
+  result = (if sourceFile.len > 0:
+              "Goal (from " & sourceFile & " in the repo root):\n\n"
+            else:
+              "Goal (the session's goal, armed with :goal):\n\n") &
     goalText.strip &
     "\n\nEvidence from the agent's just-finished turn (harness-built from " &
     "the transcript; the agent's prose is excluded):\n\n" & evidence

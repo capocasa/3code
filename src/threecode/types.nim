@@ -274,6 +274,7 @@ type
     gvkNone      ## output carried no contract line; never counts as satisfied
     gvkSatisfied
     gvkFeedback
+    gvkCancelled ## the user ended the mode (`:goal!`); never a model verdict
   GoalVerdict* = object
     kind*: GoalVerdictKind
     feedback*: string  ## the text after "VERDICT: FEEDBACK:"
@@ -281,7 +282,9 @@ type
     ## One visible verifier step. The toolless verifier produces exactly
     ## one: its reply minus the verdict line, whose verdict rides the
     ## step so scrollback can show it as an icon instead of the contract
-    ## text. Everything the check says is scrollback material - the
+    ## text. A `gvkCancelled` step is harness-written instead (the
+    ## `:goal!` exit) and doubles as the goal's retirement record.
+    ## Everything the check says is scrollback material - the
     ## check must never look silent. Defined here (not goal.nim) so the
     ## session codec can persist steps without importing the mode logic.
     prose*: string  ## the verifier's reply without its verdict line

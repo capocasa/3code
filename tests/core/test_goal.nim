@@ -1,8 +1,9 @@
-## Goal mode v1: activation on bare `goal.md` existence, the verdict-line
-## contract, the completion rename, the harness-autosent continuation
-## marking, and the transcript-only evidence builder. The verdict being a
-## text line plus the `goalCheckHook` seam make the whole loop testable
-## with canned verdicts and no provider.
+## Goal mode: transcript-state activation (the kickoff message arms,
+## verifier steps retire), the verdict-line contract, the
+## harness-autosent continuation marking, and the transcript-only
+## evidence builder. The verdict being a text line plus the
+## `goalCheckHook` seam make the whole loop testable with canned
+## verdicts and no provider.
 
 import std/[json, os, sequtils, strutils, tempfiles, unittest]
 import threecode/goal
@@ -23,20 +24,54 @@ proc withGoalDir(body: proc (dir: string)) =
   body(dir)
 
 suite "goal mode":
-  test "activation is bare existence of goal.md in the cwd":
-    withGoalDir proc (dir: string) =
-      check not goalModeActive()
-      check buildGoalEvidence(%*[{"role": "user", "content": "hi"}]) ==
-        "(no tool calls this turn)"
-      writeFile(GoalFileName, "# anything\n")
-      check goalModeActive()
-      check readGoalText() == "# anything\n"
+  test "activation is the kickoff message in the conversation":
+    check not goalActiveIn(nil, @[])
+    check buildGoalEvidence(%*[{"role": "user", "content": "hi"}]) ==
+      "(no tool calls this turn)"
+    let msgs = %*[{"role": "system", "content": "sys"},
+                  goalKickoffMessage("# anything\n")]
+    check goalActiveIn(msgs, @[])
+    check goalTextFromMessages(msgs) == "# anything"
+    check lastGoalKickoff(msgs) == 1
 
-  test "activation ignores retired goal files":
-    withGoalDir proc (dir: string) =
-      for retired in [GoalConfirmedName, GoalCancelledName, GoalGivenUpName]:
-        writeFile(retired, "done\n")
-      check not goalModeActive()
+  test "a satisfied or cancelled step after the kickoff retires it":
+    let msgs = %*[{"role": "system", "content": "sys"},
+                  goalKickoffMessage("ship it")]
+    # FEEDBACK and informational steps keep the goal live.
+    check goalActiveIn(msgs, @[GoalStepRecord(after: 2,
+      step: GoalStep(prose: "not yet", verdict: gvkFeedback))])
+    check goalActiveIn(msgs, @[GoalStepRecord(after: 2,
+      step: GoalStep(prose: "check unavailable", verdict: gvkNone))])
+    check not goalActiveIn(msgs, @[GoalStepRecord(after: 2,
+      step: GoalStep(prose: "all done", verdict: gvkSatisfied))])
+    check not goalActiveIn(msgs, @[GoalStepRecord(after: 2,
+      step: GoalStep(verdict: gvkCancelled))])
+
+  test "steps before the last kickoff retire only the older goal":
+    # A re-arm supersedes: the older goal's retirement step anchors
+    # before the new kickoff, so the new goal is live.
+    let msgs = %*[goalKickoffMessage("first"),
+                 {"role": "assistant", "content": "did it"},
+                 goalKickoffMessage("second")]
+    check goalActiveIn(msgs, @[GoalStepRecord(after: 1,
+      step: GoalStep(prose: "", verdict: gvkSatisfied))])
+    check goalTextFromMessages(msgs) == "second"
+    check not goalActiveIn(msgs, @[GoalStepRecord(after: 3,
+      step: GoalStep(prose: "", verdict: gvkSatisfied))])
+
+  test "a cybernetic kickoff is not a goal kickoff":
+    check not isGoalKickoffMsg(cyberKickoffMessage(
+      "- [ ] x\n\n## Current state\n\ns"))
+    check not isGoalKickoffMsg(%*{"role": "user", "agentSent": true,
+      "content": "Goal armed: cybernetic.md in this repository now " &
+        "states the session's plan:\n\nbody"})
+    check isGoalKickoffMsg(goalKickoffMessage("mine"))
+    # A session saved before the goalSent marker: the content lead is
+    # the witness.
+    var old = goalKickoffMessage("old school")
+    old.delete("goalSent")
+    check isGoalKickoffMsg(old)
+    check goalActiveIn(%*[old], @[])
 
   test "verdict contract: final non-empty line decides":
     check parseVerdict("prose about the repo.\nVERDICT: SATISFIED").kind ==
@@ -115,17 +150,23 @@ suite "goal mode":
     check parseVerdict(
       "I write VERDICT : SATISFIED only with proof").kind == gvkNone
 
-  test "completion renames goal.md to achieved.md":
-    withGoalDir proc (dir: string) =
-      writeFile(GoalFileName, "the goal\n")
-      check completeGoal()
-      check not goalModeActive()
-      check readFile(GoalConfirmedName) == "the goal\n"
-      check not completeGoal()
-
-  test "completion rename fails cleanly when goal.md is gone":
-    withGoalDir proc (dir: string) =
-      check not completeGoal()
+  test "completion is the satisfied step; a new goal arms again":
+    # The retirement record a SATISFIED check writes through the step
+    # hook is exactly what goalActiveIn reads back on resume: the
+    # whole state machine round-trips through the .3log's two inputs.
+    var session: Session
+    let msgs = %*[goalKickoffMessage("the goal")]
+    check goalActiveIn(msgs, session.goalSteps)
+    session.goalSteps.add GoalStepRecord(after: msgs.len,
+      step: GoalStep(prose: "all done", verdict: gvkSatisfied))
+    check not goalActiveIn(msgs, session.goalSteps)
+    # completeMode on a transcript mode cannot fail: there is no file
+    # to rename, the step is the record.
+    check completeMode(goalMode)
+    # The next goal arms in the same conversation, after the record.
+    var again = msgs
+    again.add goalKickoffMessage("the next goal")
+    check goalActiveIn(again, session.goalSteps)
 
   test "feedback continuation is marked harness-autosent":
     let msg = goalFeedbackMessage("write the tests")
@@ -148,6 +189,7 @@ suite "goal mode":
     check msg{"agentSent"}.getBool(false)
     check msg{"goalSent"}.getBool(false)
     let content = msg{"content"}.getStr
+    check content.startsWith("Goal armed: the session's goal is now:")
     check "ship the feature" in content
     check "Start working toward it now" in content
     # The markers never reach a provider (same strip as flail notes).
@@ -281,7 +323,10 @@ suite "goal mode":
     let p = verifierPrompt("ship it", "bash: ran tests\n  => ok")
     check "ship it" in p
     check "bash: ran tests" in p
-    check GoalFileName in p
+    check "the session's goal, armed with :goal" in p
+    # A file mode's prompt still cites its file.
+    check "from cybernetic.md in the repo root" in
+      verifierPrompt("ship it", "", sourceFile = CyberFileName)
     # No change log yet: the section is absent, not an empty header, and
     # no git feed exists to fall back to — the change log is the record.
     check "diff" notin p
@@ -304,48 +349,56 @@ suite "goal mode":
     check p.find("Changes this session") > p.find("bash: ran tests")
     check "Working-tree diff vs HEAD" notin p
 
-suite "startGoal (the :goal writer)":
+suite "startGoal (the :goal arm validation)":
   test "empty text is a usage error":
-    withGoalDir proc (dir: string) =
-      let r = startGoal("   ")
-      check not r.ok
-      check r.err.startsWith("usage")
-      check not fileExists(GoalFileName)
+    let r = startGoal("   ")
+    check not r.ok
+    check r.err.startsWith("usage")
 
-  test "writes goal.md, text stripped and newline-terminated":
+  test "arms against the conversation, writes nothing to disk":
     withGoalDir proc (dir: string) =
       check startGoal("  make it so  ").ok
-      # New arms land in the settings store (.3code/goal).
-      check readFile(".3code" / "goal") == "make it so\n"
+      # No file is the protocol: the arm lands when the controller
+      # appends the kickoff message; nothing appears in the store.
+      check not fileExists(".3code" / "goal")
+      check not fileExists("goal.md")
 
   test "refuses to clobber a live goal without force":
-    withGoalDir proc (dir: string) =
-      discard startGoal("first")
-      let r = startGoal("second")
-      check not r.ok
-      check ":goal!" in r.err
-      check readFile(".3code" / "goal").strip == "first"
+    let msgs = %*[goalKickoffMessage("first")]
+    let r = startGoal("second", messages = msgs)
+    check not r.ok
+    check r.err == "a goal is already active; use :goal! to replace it"
+    check goalTextFromMessages(msgs) == "first"
 
   test "force replaces the live goal":
-    withGoalDir proc (dir: string) =
-      discard startGoal("first")
-      check startGoal("second", force = true).ok
-      check readFile(".3code" / "goal").strip == "second"
+    let msgs = %*[goalKickoffMessage("first")]
+    check startGoal("second", force = true, messages = msgs).ok
 
-suite "cancelGoal (the :goal! exit)":
-  test "cancel retires goal.md to goal-cancelled.md":
-    withGoalDir proc (dir: string) =
-      discard startGoal("doomed")
-      check cancelGoal().ok
-      check not goalModeActive()
-      check not fileExists(".3code" / "goal")
-      check readFile(".3code" / "goal-cancelled").strip == "doomed"
+suite "retireGoalCancelled (the :goal! exit)":
+  test "cancel writes the retirement step the resume state reads":
+    var session: Session
+    let msgs = %*[goalKickoffMessage("doomed")]
+    check retireGoalCancelled(session, msgs)
+    check not goalActiveIn(msgs, session.goalSteps)
+    check session.goalSteps.len == 1
+    check session.goalSteps[0].step.verdict == gvkCancelled
+    check session.goalSteps[0].after == msgs.len
+    # The step persists as a goal_check record and replays as a row.
+    check "goal_check verdict=cancelled" in
+      renderSession(session, msgs)
 
-  test "cancel without a live goal is an error":
-    withGoalDir proc (dir: string) =
-      let r = cancelGoal()
-      check not r.ok
-      check r.err == "no goal active"
+  test "cancel without a live goal is a no-op":
+    var session: Session
+    check not retireGoalCancelled(session, %*[])
+
+  test "a goal after a cancel is active again":
+    var session: Session
+    let msgs = %*[goalKickoffMessage("doomed")]
+    check retireGoalCancelled(session, msgs)
+    # The next goal arms in the same conversation, after the record.
+    var re = msgs
+    re.add goalKickoffMessage("the next one")
+    check goalActiveIn(re, session.goalSteps)
 
 suite "goal check loop (canned verdicts, no provider)":
   let prof = Profile(name: "stub", family: "glm", model: "stub-model")
@@ -357,7 +410,7 @@ suite "goal check loop (canned verdicts, no provider)":
       check preamble == VerifierPreamble
       check "ship it" in prompt
       check "evidence line" in prompt
-      check GoalFileName in prompt
+      check "the session's goal, armed with :goal" in prompt
       (true, "looks complete\nVERDICT: SATISFIED", "")
     defer: goalCheckHook = nil
     let r = runGoalCheck(prof, goalMode, "ship it", "evidence line", "")

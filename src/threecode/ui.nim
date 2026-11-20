@@ -83,6 +83,11 @@ type
     startGoalTurn*: bool
       ## A harness mode was armed: the controller kicks the mode's work
       ## off immediately instead of waiting for the next turn boundary.
+    armMode*: ModeDesc
+      ## The armed mode itself: the kickoff builder to run (a transcript
+      ## mode is not armed yet at this point - the kickoff IS the arm).
+    armText*: string
+      ## The armed text for a transcript mode's kickoff message.
     preNewlineRows*: int
       ## Volatile rows the modal greeting newline opened above the cursor
       ## (written before a modal dispatch). A command converted to a
@@ -2268,16 +2273,21 @@ proc readInput*(editor: var minline.LineEditor, done: var bool,
 # ---------- Command dispatcher ----------
 
 proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
-                    forced: bool): tuple[ok: bool, line: string, armed: bool] =
+                    forced: bool; session: var Session;
+                    messages: JsonNode): tuple[ok: bool, line: string,
+                                               armed: bool,
+                                               armText: string] =
   ## The whole `:<verb>` grammar, one mode descriptor in, one response
   ## line out: bare = status, bare with `!` or `cancel` = retire,
   ## `new TEXT` / bare TEXT = arm (balking at a live mode without `!`),
-  ## `edit` = revise the live file in $VISUAL/$EDITOR. A successful arm
-  ## answers with no line at all - the `⚑` kickoff item the controller
-  ## commits is the arm's whole announcement, and an echoed command or
-  ## receipt line would only repeat the goal text. `armed` marks every
-  ## arm/re-arm path so the controller starts the mode's kickoff turn
-  ## immediately.
+  ## `edit` = revise the live text in $VISUAL/$EDITOR (the mode's own
+  ## file for file modes, a scratch copy of the goal text for a
+  ## transcript mode). A successful arm answers with no line at all -
+  ## the `⚑` kickoff item the controller commits is the arm's whole
+  ## announcement, and an echoed command or receipt line would only
+  ## repeat the goal text. `armed` with `armText` marks every
+  ## arm/re-arm path so the controller appends the kickoff message and
+  ## starts the mode's turn immediately.
   result.ok = true
   # Captured before any mutation: the retire/clear messages print after
   # the file is renamed away, when the live-file label lookup would
@@ -2287,8 +2297,8 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
     if label != m.fileName: storeBaseName(m.cancelledName)
     else: m.cancelledName
   if parts.len == 0 and not forced:
-    if fileExists(modeFilePath(m, ".")):
-      result.line = readModeText(m).strip
+    if modeArmed(m, ".", messages, session.goalSteps):
+      result.line = readModeText(m, ".", messages).strip
     else:
       result.ok = false
       result.line = "no " & m.name & " active; arm one with " & m.verb &
@@ -2297,7 +2307,20 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
     if parts.len > 1:
       result.ok = false
       result.line = m.verb & " cancel takes no argument (cancel retires " &
-        "the whole " & label & ")"
+        "the whole " & (if m.transcript: m.name else: label) & ")"
+    elif m.transcript:
+      if retireGoalCancelled(session, messages):
+        # Saved right here, not at the next turn: the retirement step
+        # is the goal's whole persisted state, so a kill before another
+        # save must not resurrect the goal on resume.
+        try:
+          saveSession(session, messages)
+          result.line = m.name & " cancelled"
+        except SessionSaveError as e:
+          result.line = e.msg
+      else:
+        result.ok = false
+        result.line = "no " & m.name & " active"
     else:
       let (cok, cerr) = cancelMode(m)
       if not cok:
@@ -2312,7 +2335,8 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
       result.line = "usage: " & m.verb & " new <text>"
     else:
       let text = arg[parts[0].len .. ^1].strip
-      let (gok, gerr) = startMode(m, text, force = forced)
+      let (gok, gerr) = startMode(m, text, force = forced, ".",
+                                  messages, session.goalSteps)
       if not gok:
         result.ok = false
         result.line = gerr
@@ -2320,75 +2344,128 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
         # No response line of the verb's own: the controller's arm
         # receipt is the announcement.
         result.armed = true
+        if m.transcript: result.armText = text
   elif parts[0] == "edit" and parts.len == 1:
-    # `edit` opens the file even when it has to be created: an empty
-    # buffer in $VISUAL/$EDITOR beats a usage error. Creating the file is
-    # still an arm-shaped write, so a live OTHER mode refuses exactly
-    # like `new` would; and a file this command created that the editor
-    # leaves empty (or removes) is dropped, not renamed - there is no
-    # mode to retire, and a stray empty file would arm one anyway
-    # (bare existence is the whole protocol).
-    var created = false
-    let modePath = modeFilePath(m, ".")
-    if not fileExists(modePath):
-      let other = conflictingMode(m)
-      if other.name != "":
+    if m.transcript:
+      # `:goal edit`: there is no goal file to open, so the live text
+      # round-trips through a scratch copy in $VISUAL/$EDITOR. A
+      # changed text re-arms (the new kickoff supersedes the old
+      # goal), an emptied or removed buffer retires the live goal, an
+      # unchanged one is a no-op.
+      let before = goalTextFromMessages(messages)
+      let scratch = getTempDir() / "3code-goal-edit.md"
+      let other = conflictingMode(m, ".", messages, session.goalSteps)
+      if not noMode(other):
         result.ok = false
-        result.line = modeFileLabel(other) & " (" & other.name & " mode) is " &
-          "already active; harness modes are mutually exclusive - cancel " &
-          "it first with " & other.verb & "!"
+        result.line = other.name & " mode is already active; harness " &
+          "modes are mutually exclusive - cancel it first with " &
+          other.verb & "!"
       else:
         try:
-          createDir(modePath.parentDir)
-          writeFile(modePath, "")
-          created = true
+          writeFile(scratch, before)
+          let editor = getEnv("VISUAL", getEnv("EDITOR",
+            when defined(windows): "notepad" else: "vi"))
+          let code = execShellCmd(editor & " " & quoteShell(scratch))
+          let after = try: readFile(scratch) except CatchableError: ""
+          discard tryRemoveFile(scratch)
+          if code != 0:
+            result.ok = false
+            result.line = "editor exited with status " & $code
+          elif after.strip == before.strip and
+              goalActiveIn(messages, session.goalSteps):
+            result.line = m.name & " unchanged"
+          elif after.strip.len == 0:
+            if retireGoalCancelled(session, messages):
+              try:
+                saveSession(session, messages)
+                result.line = m.name & " cleared"
+              except SessionSaveError as e:
+                result.line = e.msg
+            else:
+              result.line = m.name & " not armed (nothing written)"
+          else:
+            let (gok, gerr) = startMode(m, after, force = true, ".",
+                                        messages, session.goalSteps)
+            if not gok:
+              result.ok = false
+              result.line = gerr
+            else:
+              result.armed = true
+              result.armText = after
         except OSError, IOError:
           result.ok = false
           result.line = getCurrentExceptionMsg()
-    if result.ok:
-      let before = readModeText(m)
-      let editor = getEnv("VISUAL", getEnv("EDITOR",
-        when defined(windows): "notepad" else: "vi"))
-      let code = execShellCmd(editor & " " & quoteShell(modePath))
-      proc createdLeftEmpty(): bool =
-        created and (not fileExists(modePath) or
-          readModeText(m).strip.len == 0)
-      if code != 0:
-        result.ok = false
-        result.line = "editor exited with status " & $code
-        if createdLeftEmpty(): discard tryRemoveFile(modePath)
-      elif createdLeftEmpty():
-        if fileExists(modePath): discard tryRemoveFile(modePath)
-        result.line = m.name & " not armed (nothing written to " &
-          label & ")"
-      elif not fileExists(modePath):
-        result.line = m.name & " cancelled (" & label &
-          " removed in the editor)"
-      elif readModeText(m).strip.len == 0:
-        let (cok, cerr) = cancelMode(m)
-        if not cok:
+    else:
+      # `edit` opens the file even when it has to be created: an empty
+      # buffer in $VISUAL/$EDITOR beats a usage error. Creating the file is
+      # still an arm-shaped write, so a live OTHER mode refuses exactly
+      # like `new` would; and a file this command created that the editor
+      # leaves empty (or removes) is dropped, not renamed - there is no
+      # mode to retire, and a stray empty file would arm one anyway
+      # (bare existence is the whole protocol).
+      var created = false
+      let modePath = modeFilePath(m, ".")
+      if not fileExists(modePath):
+        let other = conflictingMode(m)
+        if other.name != "":
           result.ok = false
-          result.line = cerr
+          result.line = modeFileLabel(other) & " (" & other.name & " mode) is " &
+            "already active; harness modes are mutually exclusive - cancel " &
+            "it first with " & other.verb & "!"
         else:
-          result.line = m.name & " cleared (" & label &
-            " renamed to " & retiredName & ")"
-      else:
-        let after = readModeText(m)
-        let verr = m.validate(after)
-        if verr.len > 0:
+          try:
+            createDir(modePath.parentDir)
+            writeFile(modePath, "")
+            created = true
+          except OSError, IOError:
+            result.ok = false
+            result.line = getCurrentExceptionMsg()
+      if result.ok:
+        let before = readModeText(m)
+        let editor = getEnv("VISUAL", getEnv("EDITOR",
+          when defined(windows): "notepad" else: "vi"))
+        let code = execShellCmd(editor & " " & quoteShell(modePath))
+        proc createdLeftEmpty(): bool =
+          created and (not fileExists(modePath) or
+            readModeText(m).strip.len == 0)
+        if code != 0:
           result.ok = false
-          result.line = verr
-        elif after != before:
-          result.armed = true
+          result.line = "editor exited with status " & $code
+          if createdLeftEmpty(): discard tryRemoveFile(modePath)
+        elif createdLeftEmpty():
+          if fileExists(modePath): discard tryRemoveFile(modePath)
+          result.line = m.name & " not armed (nothing written to " &
+            label & ")"
+        elif not fileExists(modePath):
+          result.line = m.name & " cancelled (" & label &
+            " removed in the editor)"
+        elif readModeText(m).strip.len == 0:
+          let (cok, cerr) = cancelMode(m)
+          if not cok:
+            result.ok = false
+            result.line = cerr
+          else:
+            result.line = m.name & " cleared (" & label &
+              " renamed to " & retiredName & ")"
         else:
-          result.line = label & " unchanged"
+          let after = readModeText(m)
+          let verr = m.validate(after)
+          if verr.len > 0:
+            result.ok = false
+            result.line = verr
+          elif after != before:
+            result.armed = true
+          else:
+            result.line = label & " unchanged"
   else:
-    let (gok, gerr) = startMode(m, arg, force = forced)
+    let (gok, gerr) = startMode(m, arg, force = forced, ".",
+                                messages, session.goalSteps)
     if not gok:
       result.ok = false
       result.line = gerr
     else:
       result.armed = true
+      if m.transcript: result.armText = arg
 
 proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
                    prof: var Profile, editor: var minline.LineEditor): bool =
@@ -2470,6 +2547,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   var ok = true
   var body = ""
   var armGoal = false
+  var armMode: ModeDesc
+  var armText = ""
   template resp(b: string) = body.add cmdResponseS(b)
   template respErr(b: string) = body.add cmdErrorS(b)
   block dispatch:
@@ -2532,12 +2611,14 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           ok = false
           respErr ":cyber is not compiled into this build"
           break dispatch
-      let r = modeVerbResult(m, parts, arg, forced)
+      let r = modeVerbResult(m, parts, arg, forced, session, messages)
       if not r.ok:
         ok = false
         respErr r.line
       elif r.armed:
         armGoal = true
+        armMode = m
+        armText = r.armText
       elif r.line.len > 0:
         resp r.line
     of ":help", ":?":
@@ -2914,4 +2995,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                 plainBody: ok,
                 clearFooter: ok and title == "profile",
                 disposition: disposition,
-                startGoalTurn: armGoal)
+                startGoalTurn: armGoal,
+                armMode: armMode,
+                armText: armText)
