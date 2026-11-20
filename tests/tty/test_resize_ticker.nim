@@ -223,7 +223,15 @@ suite "fat prompt on terminal resize":
     tty.advanceTicker()
     tty.advanceTicker()
     tty.drain(500)
-    let bars = tty.barRowCount()
+    # Poll the settle instead of one sample after the fixed drain: the
+    # repaint converges (that is the contract) but a loaded runner can
+    # still be mid-convergence at 500ms (one OSX CI flake).
+    var bars = tty.barRowCount()
+    for i in 0 ..< 15:
+      if bars == 1:
+        break
+      tty.drain(100)
+      bars = tty.barRowCount()
     if bars > 1:
       doAssert false, "footer did not settle to one row after shrink: " &
         $bars & " bar rows on screen.\n" & tty.dumpFramesAround("○0%")
