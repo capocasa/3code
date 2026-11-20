@@ -2,6 +2,24 @@ Changelog
 
 Unreleased
 
+- **Catalog sweep: 98 delisted rows out, DeepInfra Hy4-preview in.**
+  Every known-good row was re-checked against its provider's live
+  `/models` list, and the 98 host+model pairs a provider no longer
+  serves are gone, so `3code --good` stops recommending ids that 404.
+  The aggregator hosts took the deepest cuts (33 rows across tensorx,
+  opencodego and opencode: kimi k2.5 through k2.7, glm 5 to 5.2,
+  minimax m2.5 to m3, mimo v2.5, the older qwen ids). OpenAI
+  first-party retired o1, o3-mini, o4-mini, gpt-4.1-nano and the base
+  gpt-5.6 (the sol/terra/luna splits stay), xAI and OpenRouter
+  dropped grok-build-0.1, xiaomi delisted its first-party mimo v2.5,
+  and nebius dropped its GLM-5.1. Every model survives on each host
+  that still lists it - only the dead pairs left the table. One
+  addition: DeepInfra joins OpenRouter and tencent for
+  `tencent/Hy4-preview` (DeepInfra's capital-H spelling, the same
+  quirk as its Hy3 row) with the catalog's full 1,048,576-token
+  window and the same high/no_think reasoning ladder
+  (`tests/api/test_api.nim`, `tests/config/test_provider_wizard.nim`).
+
 - **A resume replays the goal verify, not just its consequences.**
   The turn-end satisfaction check's verdict row (the `✓`/`✗` quote
   block) was display-only: nothing persisted it, so `3code -r` -
