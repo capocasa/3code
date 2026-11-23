@@ -110,6 +110,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("zai", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false, false),
     ("zai", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbNone, false, 1_000_000, false, false),
     ("zai", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbNone, false, 1_000_000, false, true),
+    # glm-5.4 (Nov 2026): vision reaches the flagship, 1M window (the
+    # launch tag is glm-5.4[1m]), 1.5x Coding Plan quota over 5.3. Live
+    # on /v1/models of both the coding and the general endpoint; the
+    # price list and docs lag, so the zai row rides undocumented rates.
+    # Effort low/high/max like 5.3, but unlike 5.3 it takes a true off
+    # (thinking disabled answers 200); default stays high.
+    ("zai", "glm-5.4", "glm", "5", "4", "high", 0.2, 65536, tbNone, false, 1_000_000, false, true),
     ("zaicode", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("zaicode", "glm-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
     ("zaicode", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
@@ -122,6 +129,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # high/max is one keystroke away); big 5.3 keeps high.
     ("zaicode", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
     ("zaicode", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
+    ("zaicode", "glm-5.4", "glm", "5", "4", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
 
     # qwen: modern 3.x line kept here for openrouter and first-party gateways.
     ("deepinfra", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, false, false),
@@ -4390,7 +4398,7 @@ proc maxOutputTokensFor*(p: Profile): int =
     if "haiku-5-5" in m or "haiku-5.5" in m: return 131_072
     if "haiku" in m or "4-5" in m or "4.5" in m: return 65_536
     return 131_072
-  if "glm-5.3" in m: return 131_072
+  if "glm-5.3" in m or "glm-5.4" in m: return 131_072
   # qwen4 caps thinking + answer together at 262,144 inside its 1M window
   if "qwen4" in m: return 262_144
   if "deepseek" in m and "v4" in m: return 384_000
@@ -4472,10 +4480,13 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
       if fam == "glm":
         # 5.2 (variant "2") exposes a graded effort knob (high/max); older
         # GLM is on/off only. 5.3 / 5.3-flash force thinking: low/high/max,
-        # no off. Variant encodes the minor version digit (4.7 -> "7",
+        # no off. 5.4 grades the same low/high/max but takes a true off
+        # again (thinking disabled answers 200 on first-party). Variant
+        # encodes the minor version digit (4.7 -> "7",
         # 5.1 -> "1", 5.2 -> "2", 5.3 -> "3") and may carry a suffix.
         if combo.version == "5" and combo.variant.startsWith("2"): return @["off", "high", "max"]
         if combo.version == "5" and combo.variant.startsWith("3"): return @["low", "high", "max"]
+        if combo.version == "5" and combo.variant.startsWith("4"): return @["off", "low", "high", "max"]
         return @["off", "on"]
       if fam == "0xalpha":
         # Stealth preview: reasoning is always on (no off); graded effort

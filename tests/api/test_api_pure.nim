@@ -421,6 +421,43 @@ suite "api: applyReasoning — darkbloom":
     check d.maxTokens == 65536
     check maxTokensField(Profile(family: "glm")) == "max_tokens"
 
+suite "api: applyReasoning — zai/zaicode glm-5.4":
+  # glm-5.4 keeps the 5.3 effort ladder (low/high/max -> top-level
+  # reasoning_effort) and, unlike 5.3, takes a true off again:
+  # thinking.type disabled answers 200 on both z.ai endpoints (probed
+  # live 2026-11-23).
+  test "levels ride reasoning_effort, off disables thinking":
+    for prov in ["zai", "zaicode"]:
+      for level in ["low", "high", "max"]:
+        var body = %*{"stream": true}
+        let p = Profile(name: prov & ".glm-5.4", family: "glm",
+                        model: "glm-5.4", version: "5", variant: "4",
+                        reasoning: level)
+        applyReasoning(p, body)
+        check body{"reasoning_effort"}.getStr == level
+        check not body.hasKey("thinking")
+      block off:
+        var body = %*{"stream": true}
+        let p = Profile(name: prov & ".glm-5.4", family: "glm",
+                        model: "glm-5.4", version: "5", variant: "4",
+                        reasoning: "off")
+        applyReasoning(p, body)
+        check body{"thinking"}{"type"}.getStr == "disabled"
+        check not body.hasKey("reasoning_effort")
+
+  test "catalog row: vision, window, budgets, think-back":
+    let d = knownGoodGeneration("zaicode", "glm-5.4")
+    check d.temperature == 0.2
+    check d.maxTokens == 65536
+    check knownGoodContextWindow("zai", "glm-5.4") == 1_000_000
+    check knownGoodVision("zai", "glm-5.4")
+    check knownGoodVision("zaicode", "glm-5.4")
+    check knownGoodReasonings("zaicode", "glm-5.4") ==
+        @["off", "low", "high", "max"]
+    check knownGoodThinkBack("zai", "glm-5.4") == tbNone
+    check knownGoodThinkBack("zaicode", "glm-5.4") == tbAllTurns
+    check maxOutputTokensFor(Profile(family: "glm", model: "glm-5.4")) == 131_072
+
 suite "api: applyReasoning — qwen4":
   # qwen4-max is a graded-reasoning hybrid, unlike the binary qwen3.x
   # line: DashScope takes a top-level reasoning_effort (low/high/xhigh)
