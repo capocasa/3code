@@ -60,6 +60,7 @@ import types
 import util
 import dirsettings
 import config
+import terminal
 from shell import bashMutationPath
 
 export sandwall.AccessKind, sandwall.Rule,
@@ -1113,9 +1114,7 @@ proc editPolicy*(sandboxFile: string): string =
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(getCurrentDir()):
       return "error: could not create sandbox file at " & sandboxFile
-  let editor = getEnv("VISUAL", getEnv("EDITOR",
-    when defined(windows): "notepad" else: "vi"))
-  let code = execShellCmd(editor & " " & quoteShell(sandboxFile))
+  let code = runExternalEditor(sandboxFile)
   if code != 0:
     return "error: editor exited with status " & $code
   current = loadPolicy(getCurrentDir())

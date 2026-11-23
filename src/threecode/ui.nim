@@ -13,7 +13,7 @@ import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
   auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins,
-  images, goal, screen, dirsettings, btwthread
+  images, goal, screen, dirsettings, btwthread, terminal as termui
 
 # `:computer` stays out of the list in undocumented builds so tab
 # completion, prefix resolution and typo suggestions do not advertise
@@ -219,6 +219,19 @@ proc modeArmWrite*(cmd: string): bool =
     let parts = (if sp < 0: "" else: c[sp+1 .. ^1]).splitWhitespace()
     parts.len > 0 and parts[0] notin ["cancel", "edit"]
   else: false
+
+proc isGoalEdit*(cmd: string): bool =
+  ## `:goal edit` in any accepted spelling (`:g edit`, `:goal! edit`): the
+  ## one mode-verb write whose editor opens mid-turn (`openGoalEditNow`).
+  let c = colonForm(cmd).strip
+  if c.len == 0 or c[0] != ':':
+    return false
+  let sp = c.find(Whitespace)
+  var name = if sp < 0: c else: c[0 ..< sp]
+  if name.endsWith("!"): name = name[0 ..< ^1]
+  let (canon, ambig) = canonicalCommandName(name)
+  if canon != ":goal" or ambig.len > 0: return false
+  (if sp < 0: "" else: c[sp+1 .. ^1]).splitWhitespace() == @["edit"]
 
 proc pathCompletions*(frag: string): seq[string] =
   let base = safeCwd()
@@ -2280,6 +2293,47 @@ proc readInput*(editor: var minline.LineEditor, done: var bool,
 
 # ---------- Command dispatcher ----------
 
+proc goalEditScratch*(): string =
+  ## The scratch copy `:goal edit` round-trips the goal text through.
+  getTempDir() / "3code-goal-edit.md"
+
+var inlineEdits: seq[tuple[path: string, code: int]]
+  ## Editors the input thread already ran (see `openGoalEditNow`), as
+  ## (file, exit status): the command's own run picks the status up here
+  ## instead of opening the editor a second time. Written from the input
+  ## thread and consumed by the controller's drain, strictly in that
+  ## order (the queued command is what carries the order).
+
+proc takeInlineEdit*(path: string): int =
+  ## The exit status of an editor already run over `path`, removed from
+  ## the record; -1 when none was.
+  result = -1
+  for i, e in inlineEdits:
+    if e.path == path:
+      result = e.code
+      inlineEdits.delete(i)
+      break
+
+proc openGoalEditNow*(messages: JsonNode; steps: seq[GoalStepRecord]): bool =
+  ## `:goal edit` typed mid-turn: put the editor in front of the user at
+  ## once, on the input thread (which owns stdin), the way a prompt typed
+  ## mid-turn is read at once - not at the turn boundary, which in goal
+  ## mode can be minutes away. Only the editor runs here: the file it
+  ## leaves is what the command's own run at the drain decides on (re-arm,
+  ## clear, unchanged), so the conversation is only ever mutated by the
+  ## controller's thread. False when the verb refuses before any editor
+  ## would open (a conflicting mode): the refusal then prints at the drain
+  ## as before.
+  let scratch = goalEditScratch()
+  if not noMode(conflictingMode(goalMode, ".", messages, steps)):
+    return false
+  try:
+    writeFile(scratch, goalTextFromMessages(messages))
+  except OSError, IOError:
+    return false
+  inlineEdits.add (scratch, runExternalEditor(scratch))
+  true
+
 proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
                     forced: bool; session: var Session;
                     messages: JsonNode): tuple[ok: bool, line: string,
@@ -2361,19 +2415,25 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
       # goal), an emptied or removed buffer retires the live goal, an
       # unchanged one is a no-op.
       let before = goalTextFromMessages(messages)
-      let scratch = getTempDir() / "3code-goal-edit.md"
+      let scratch = goalEditScratch()
+      # Typed mid-turn, the input thread already opened the editor over the
+      # scratch (`openGoalEditNow`); its exit status is all that is left to
+      # pick up - taken here, so a refusal below never leaves it for a
+      # later edit to pick up.
+      let inlineCode = takeInlineEdit(scratch)
       let other = conflictingMode(m, ".", messages, session.goalSteps)
       if not noMode(other):
         result.ok = false
         result.line = other.name & " mode is already active; harness " &
           "modes are mutually exclusive - cancel it first with " &
           other.verb & "!"
+        if inlineCode >= 0: discard tryRemoveFile(scratch)
       else:
         try:
-          writeFile(scratch, before)
-          let editor = getEnv("VISUAL", getEnv("EDITOR",
-            when defined(windows): "notepad" else: "vi"))
-          let code = execShellCmd(editor & " " & quoteShell(scratch))
+          var code = inlineCode
+          if code < 0:
+            writeFile(scratch, before)
+            code = runExternalEditor(scratch)
           let after = try: readFile(scratch) except CatchableError: ""
           discard tryRemoveFile(scratch)
           if code != 0:
@@ -2430,9 +2490,7 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
             result.line = getCurrentExceptionMsg()
       if result.ok:
         let before = readModeText(m)
-        let editor = getEnv("VISUAL", getEnv("EDITOR",
-          when defined(windows): "notepad" else: "vi"))
-        let code = execShellCmd(editor & " " & quoteShell(modePath))
+        let code = runExternalEditor(modePath)
         proc createdLeftEmpty(): bool =
           created and (not fileExists(modePath) or
             readModeText(m).strip.len == 0)

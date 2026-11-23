@@ -4,7 +4,7 @@
 ## Scrollback content is appended once as ordinary terminal output; only the
 ## volatile fat-prompt region is cleared and repainted around those appends.
 
-import std/[locks, terminal]
+import std/[locks, os, osproc, terminal]
 import minline
 import ./syncoutput
 
@@ -143,6 +143,30 @@ proc ensureOutputProcessing*() =
       var patched = mode
       patched.c_oflag = wanted
       discard fd.tcSetAttr(TCSANOW, addr patched)
+
+var externalEditorHook*: proc(command: string): int {.gcsafe.}
+  ## The interactive runtime's handoff: parks the input thread, returns
+  ## stdin to cooked mode and runs the editor as the terminal's only
+  ## reader. nil in headless and test contexts, where a plain shell run is
+  ## all an editor needs.
+
+proc editorCommand*(path: string): string =
+  ## The shell command opening `path` in $VISUAL/$EDITOR (vi / notepad
+  ## fallback). The editor string goes through the shell unquoted like git
+  ## does, so `VISUAL="code -w"` reaches it as flags; a path with spaces in
+  ## $VISUAL must be quoted by the user.
+  let editor = getEnv("VISUAL", getEnv("EDITOR",
+    when defined(windows): "notepad" else: "vi"))
+  editor & " " & quoteShell(path)
+
+proc runExternalEditor*(path: string): int =
+  ## Open `path` in $VISUAL/$EDITOR and block until it exits; returns its
+  ## exit status.
+  let command = editorCommand(path)
+  if externalEditorHook != nil:
+    externalEditorHook(command)
+  else:
+    execShellCmd(command)
 
 proc setSteadyCursor*() =
   ## Use a steady block cursor while 3code is active.
