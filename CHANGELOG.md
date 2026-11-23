@@ -2,6 +2,24 @@ Changelog
 
 Unreleased
 
+- **`:goal edit` opens the editor at once, on a terminal an editor can
+  work with.** Typed while a turn runs, which in goal mode is nearly
+  always, the command queued behind the turn like any mutating write,
+  so the editor only came up minutes later, at the boundary. The input
+  thread now runs the editor the moment the command is submitted (the
+  decision over the edited text still runs at the drain, so only the
+  controller's thread touches the conversation). Every external editor
+  (`:goal edit`, `:sandbox edit`, `:cmd N edit`, Alt+E) also goes
+  through one handoff: stdin back in cooked mode with bracketed paste
+  and the kitty keyboard protocol switched off (an editor that does not
+  know the protocol received its key codes as stray escapes and
+  commands), the input thread parked for the editor's lifetime (it used
+  to keep polling the same stdin and repaint the prompt over the
+  editor's screen), and SIGINT ignored while the editor runs (Ctrl-C
+  inside vim reaches the whole foreground process group, and the
+  interrupt hook cancelled the running turn or quit at the prompt
+  afterwards). 3code's raw mode is restored the moment the editor exits.
+
 - **Vi editing mode.** A conceptual port of readline's `vi_mode.c` —
   the machinery behind bash's `set -o vi` — as a new `threecode/vim`
   module layered on the line editor. `editing = vim` or
