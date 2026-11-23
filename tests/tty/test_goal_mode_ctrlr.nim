@@ -303,7 +303,7 @@ suite "goal mode (interactive)":
     tty.expectInHistory "↑14  ↓5"
     tty.expectAlive()
 
-  test "ctrl-c during the verifier call interrupts the check, goal stays":
+  test "ctrl-c during the verifier call cancels the goal":
     let root = newFixture("goal_verify_interrupt")
     writeConfiguredProvider(root)
     writeFile(root / "run" / "stub_responses.json", $(%*[
@@ -335,18 +335,20 @@ suite "goal mode (interactive)":
     # turn-end verifier's slow model call (8000ms delay) then runs.
     tty.expectInHistory "GOAL_WORK_DONE"
     tty.expectNeverInHistory "detected implementing"
-    # Ctrl-C while the verifier's slow model call runs: the interrupt is
-    # honored after the side call returns, skips the satisfaction check,
-    # and ends the turn. The goal survives - in the conversation.
+    # Ctrl-C while the verifier's slow model call runs: the interrupt
+    # ends the mode itself - the user overrides - with the same ⊘
+    # retirement record a bare `:goal!` writes.
     tty.drain(400)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
+    tty.expectInHistory "goal cancelled"
     tty.drain(300)
-    # No retirement record, and the verb still reports the live goal.
-    check not sessionLogHas(root, "verdict=satisfied")
+    check sessionLogHas(root, "goal_check verdict=cancelled")
+    # The verb reports no live goal.
     tty.send ":goal"
-    tty.expect "work toward it"
+    tty.expect ":goal"
     tty.send "\n"
+    tty.expect "no goal active"
     tty.drain(200)
     tty.expectAlive()
 
@@ -536,12 +538,11 @@ suite "goal mode resume (interactive)":
     let root = newFixture("goal_resume_no_refeed")
     writeConfiguredProvider(root)
     # Phase 1 arms the goal and leaves the mode live: the kickoff turn
-    # answers, the turn-end verifier is Ctrl-C'd mid-call (the check is
-    # skipped, no retirement record lands), and the session exits with
-    # the kickoff stanza already in the conversation.
+    # is Ctrl-C'd mid-call (an interrupt mid-call never reaches the
+    # end-call boundary, so the mode stays armed), and the session exits
+    # with the kickoff stanza already in the conversation.
     writeFile(root / "run" / "stub_responses.json", $(%*[
-      reply("WORK_TURN_ONE"),
-      reply("never reached\nVERDICT: SATISFIED", delayMs = 8000),
+      reply("WORK_TURN_ONE", delayMs = 8000),
     ]))
     let stub = ensureStubBinary()
     let tty = newTtySession(stub,
@@ -553,7 +554,6 @@ suite "goal mode resume (interactive)":
     tty.send "\n"
     tty.drain(100)
     tty.expectInHistory "⚑ keep working after resume"
-    tty.expectInHistory "WORK_TURN_ONE"
     tty.drain(400)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
