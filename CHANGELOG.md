@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **GLM-5.4 joins the catalog on both first-party z.ai endpoints.**
+  `zai.glm-5.4` and `zaicode.glm-5.4` are curated: vision reaches the
+  flagship GLM for the first time (5.3 needed its flash sibling for
+  images), the window is 1M (launch tag `glm-5.4[1m]`), and the Coding
+  Plan quota is 1.5x 5.3's. Reasoning keeps the 5.3 effort ladder -
+  `low`/`high`/`max` ride top-level `reasoning_effort` - but 5.4 takes
+  a true `off` again: `thinking {"type": "disabled"}` answers 200 on
+  both endpoints where 5.3 hard-rejects it, so `:reasoning off` is a
+  real knob instead of a silent no-op. Compaction treats it as a
+  1M-context model and the output cap stays 131,072 like 5.3. Weights
+  are closed, so hosted providers (openrouter & co.) get no rows.
+  (`tests/api/test_api_pure.nim`)
+
 - **The sandbox ask gate counts down and answers with `:a`/`:d`
   commands.** The ask card is one line - `:a to allow <path>, :d or
   wait Ns to deny` - with the deadline ticking down on it, and the
