@@ -652,6 +652,26 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("together", "thinkingmachines/Inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 1_000_000, true, true),
     ("fireworks", "accounts/fireworks/models/inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 1_040_000, true, true),
 
+    # inkling 2 (second generation, Apache 2.0 open weights). Inkling 2
+    # Small is a 594B / 17B-active multimodal MoE with a 1M context,
+    # served together and fireworks alongside the original inkling, and
+    # openrouter. Inkling 2 Mini is a 26.4B / 3.4B-active looped
+    # transformer (~20GB, runs on a 32GB laptop), on openrouter and as
+    # open weights for local serving. Same wire shape as inkling 1:
+    # reasoning_effort (low/medium/high), reasoning_content back.
+    # NanoGPT has not picked up either model.
+    ("together", "thinkingmachines/Inkling-2-Small", "inkling", "2", "small", "medium", 0.2, 8192, tbNone, false, 1_000_000, true, true),
+    ("fireworks", "accounts/fireworks/models/inkling-2-small", "inkling", "2", "small", "medium", 0.2, 8192, tbNone, false, 1_040_000, true, true),
+    ("openrouter", "thinkingmachines/inkling-2-small", "inkling", "2", "small", "medium", 0.2, 8192, tbNone, false, 1_048_576, false, true),
+    ("openrouter", "thinkingmachines/inkling-2-mini", "inkling", "2", "mini", "medium", 0.2, 8192, tbNone, false, 1_048_576, false, true),
+    # Inkling 2 Mini self-hosted on the user's own vLLM (vllm serve
+    # thinkingmachines/Inkling-2-Mini; also llama.cpp/Ollama with
+    # OpenAI-compatible surfaces). allowPrivate: weights run locally,
+    # nothing leaves the machine. Curated window is the practical
+    # single-GPU recipe (262144, e.g. one 32GB RTX 5090 or a pair of
+    # 3090s); bigger stacks can raise it toward the card's 1M.
+    ("inkling-local", "thinkingmachines/Inkling-2-Mini", "inkling", "2", "mini", "medium", 0.2, 8192, tbNone, false, 262_144, true, true),
+
     # mimo (Xiaomi MiMo: V2.6-Pro is the 1.02T MoE / 42B active flagship,
     # V2.6-Flash the 309B / 15B active sibling; both 1M context, 128K max
     # output, full-modal input. The V2.5 pair rides the same wire shapes

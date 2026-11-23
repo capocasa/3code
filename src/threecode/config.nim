@@ -2358,6 +2358,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("huggingface", "https://router.huggingface.co/v1"),
   ("hyperbolic",  "https://api.hyperbolic.xyz/v1"),
   ("inceptron",   "https://api.inceptron.io/v1"),
+  ("inkling-local", "http://localhost:8000/v1"),
   ("jarvislabs",  "https://models.jarvislabs.net/v1"),
   ("kimi",        "https://api.moonshot.ai/v1"),
   ("kimicode",    "https://api.kimi.com/coding/v1"),
