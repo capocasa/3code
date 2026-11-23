@@ -259,6 +259,13 @@ proc stubCallModel(messages: JsonNode): JsonNode =
     quit 1
   result = responses[stubResponseIdx]
   inc stubResponseIdx
+  # {"crash": "..."}: raise a plain ValueError out of the transport, the
+  # shape of an unexpected internal failure that is neither an ApiError
+  # (retry/steer paths) nor an interrupt. Exercises the last-resort net's
+  # survival behavior (turn failed, program stays up).
+  let crash = result{"crash"}.getStr
+  if crash.len > 0:
+    raise newException(ValueError, crash)
 
 proc stubUsage(node: JsonNode, content: string): Usage =
   # `"noUsage": true` on a response emulates a provider whose stream ends

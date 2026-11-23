@@ -2305,16 +2305,23 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # runTurns, so we don't re-save here either. In debug builds we
     # re-raise so the developer sees the full stack via Nim's
     # unhandled-exception printer. In release builds we render a
-    # one-line notice plus the stack trace to stderr and quit cleanly
-    # so the user isn't left staring at a dead prompt after a crash
-    # that would otherwise vanish silently.
+    # one-line notice plus the stack trace to stderr, save the session,
+    # and report the turn as failed instead of ending the program: a
+    # crash raised while committing a tool result (odd bytes in child
+    # output, a broken viewport paint) must not take 3code down with
+    # it. The next REPL iteration repaints the prompt; the partial
+    # batch's unpaired tool_call ids are repaired by the session loader
+    # on the next save/resume. Debug builds still re-raise so the
+    # developer sees the full stack via Nim's unhandled-exception
+    # printer.
     when defined(release):
       let trace = e.getStackTrace()
+      try: saveSessionReported(session, messages) except CatchableError: discard
       stderr.writeLine "3code: internal error during turn: " & e.msg
       if trace.len > 0:
         stderr.writeLine trace
-      stderr.writeLine "3code: session saved at " & session.savePath &
-        ". Please open an issue with the lines above."
-      quit()
+      stderr.writeLine "3code: turn failed, session saved at " &
+        session.savePath & ". Please open an issue with the lines above."
+      return false
     else:
       raise
