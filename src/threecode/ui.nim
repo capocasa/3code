@@ -1863,7 +1863,7 @@ proc cmdComputerStatus(prof: Profile, session: Session): string =
     result.add hintLnS("model         " & prof.model &
       (if prof.vision: "  (vision)"
        else: "  (cannot see images — :computer needs a vision model, " &
-             "e.g. glm-5.3-flash on zai)"))
+             "e.g. glm-5.4 on zai)"))
 
 proc cmdComputer(arg: string, prof: Profile, session: Session): string =
   let parts = arg.splitWhitespace()
@@ -1878,7 +1878,7 @@ proc cmdComputer(arg: string, prof: Profile, session: Session): string =
     return errLnS("computer use is not compiled into this build")
   if not prof.vision:
     return errLnS("computer use needs a vision model — " & prof.model &
-      " cannot see images. Switch to a vision model (glm-5.3-flash on " &
+      " cannot see images. Switch to a vision model (glm-5.4 on " &
       "zai) first.")
   let (ok, err) = screen.ensureComputerUse(sessionIdFromPath(session.savePath))
   if not ok:
@@ -2132,7 +2132,7 @@ proc inlineAtFiles*(msg: string, vision: bool, imgDir: string,
           else:
             blocks.add "\n\n[image ignored: " & raw &
               " — this model cannot see images; a vision model " &
-              "(glm-5.3-flash on zai) can inspect it]"
+              "(glm-5.4 on zai) can inspect it]"
         else:
           const Cap = 64 * 1024
           let content =

@@ -64,7 +64,7 @@ when not stubbed:
       let (outp, code, _) = runAction(act)
       check code == 1
       check "cannot see" in outp
-      check "glm-5.3-flash" in outp
+      check "glm-5.4" in outp
       check "zai" in outp
 else:
   suite "read on image (stub e2e)":
@@ -208,7 +208,7 @@ else:
       for m in s.messages:
         if m{"content"}.kind == JArray: sawArray = true
         if m{"role"}.getStr == "tool":
-          check "glm-5.3-flash" in m{"content"}.getStr
+          check "glm-5.4" in m{"content"}.getStr
           check "cannot see" in m{"content"}.getStr
       check not sawArray
       s.close()

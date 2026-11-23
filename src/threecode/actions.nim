@@ -432,7 +432,7 @@ proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
     if isImagePath(path):
       if not vision:
         return (&"error: {path} is an image and this model cannot see " &
-          "images. Switch to a vision model (glm-5.3-flash on zai) to " &
+          "images. Switch to a vision model (glm-5.4 on zai) to " &
           "have images described, or inspect it another way (file, identify).", 1, "")
       let (info, encErr) =
         encodeForVision(path, visionDir, nextImageIndex(visionDir))
@@ -737,7 +737,7 @@ proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
         "turn computer use on (`:computer on`) first", 1, "")
     if not vision:
       return ("error: this model cannot see images, so a screenshot would " &
-        "be wasted. Switch to a vision model (glm-5.3-flash on zai).", 1, "")
+        "be wasted. Switch to a vision model (glm-5.4 on zai).", 1, "")
     # The capture runs in this process (execCmdEx), outside the wall
     # proxy that fences bash children — a capture must reach the real X
     # server, the same standing exemption web_fetch has for HTTP.

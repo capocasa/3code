@@ -1215,7 +1215,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         computerUseEnabled = false
         commitTranscriptBytes(errLnS(
           "computer use unavailable: " & p.model & " cannot see images — " &
-          "a vision model (glm-5.3-flash on zai) is required"), true)
+          "a vision model (glm-5.4 on zai) is required"), true)
         break computerGate
       let (ok, err) = screen.ensureComputerUse(sessionIdFromPath(session.savePath))
       if not ok:

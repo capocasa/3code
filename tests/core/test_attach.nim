@@ -61,7 +61,7 @@ suite "buildUserMessage: @image attach":
       let text = m.getStr
       check "@tiny.png describe this" in text
       check "[image ignored: tiny.png" in text
-      check "glm-5.3-flash" in text
+      check "glm-5.4" in text
       check "zai" in text
       check "=== tiny.png ===" notin text
       check "base64" notin text

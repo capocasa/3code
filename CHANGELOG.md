@@ -40,6 +40,11 @@ Unreleased
   are closed, so hosted providers (openrouter & co.) get no rows.
   (`tests/api/test_api_pure.nim`)
 
+  The image hints follow: every "cannot see" message (`@img` on a
+  text-only model, `read` on an image, `:computer` on a non-vision
+  profile) now names `glm-5.4 on zai` instead of the 5.3 flash sibling.
+  (`tests/api/test_vision_read.nim`, `tests/core/test_attach.nim`)
+
 - **The sandbox ask gate counts down and answers with `:a`/`:d`
   commands.** The ask card is one line - `:a to allow <path>, :d or
   wait Ns to deny` - with the deadline ticking down on it, and the
