@@ -2,6 +2,25 @@ Changelog
 
 Unreleased
 
+- **The sandbox ask gate counts down and answers with `:a`/`:d`
+  commands.** The ask card is one line - `:a to allow <path>, :d or
+  wait Ns to deny` - with the deadline ticking down on it, and the
+  a/f/d one-key shortcuts are gone: typing flows to the editor while
+  an ask waits, so a draft is never interrupted, and the answer is a
+  submitted command. `:a` allows the path the card names (flipping an
+  identical ask rule in place, appending otherwise) and retries;
+  `:d` - or the countdown hitting zero - denies, persisting an
+  explicit deny rule the same way, so an unanswered ask and a denied
+  one leave the same policy behind. `:a` and `:d` double as
+  shorthands for `:sandbox allow|deny @d` (the last path an ask
+  requested) at the idle prompt, an explicit path standing in for
+  `@d`; a `:sandbox allow|readonly|deny|ask` command now prints
+  itself to the model without the colon as an agent-sent user
+  message, so the next turn sees the policy change, and every sandbox
+  edit lands in scrollback as a one-cell `▤` icon row carrying the
+  phrase and the edit's patch-style diff.
+  (`tests/tty/test_sandbox_ask_prompt.nim`)
+
 - **Ungranted /dev device nodes are masked, not merely unopenable.**
   Landlock gates open(2) but not stat(2) or faccessat(2), so a fenced
   command probing a world-writable node like /dev/kvm saw the live
