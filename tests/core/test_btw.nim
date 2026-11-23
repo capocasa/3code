@@ -162,6 +162,37 @@ suite ":btw side questions":
     check sent["model"].getStr == h.prof.model
     check sent["max_tokens"].getInt == BtwMaxTokens
 
+  test "btwContext strips the tool exchange from the aside payload":
+    # The meta-call carries no tools parameter, so replaying tool_calls
+    # and tool results made the model mimic them and answer with tool
+    # calls instead of prose.
+    let messages = %* [
+      {"role": "system", "content": "sysprompt"},
+      {"role": "user", "content": "list the files"},
+      {"role": "assistant", "content": "naming them", "tool_calls":
+        [{"id": "c1", "type": "function", "function":
+          {"name": "bash", "arguments": "{\"command\":\"ls\"}"}}]},
+      {"role": "tool", "tool_call_id": "c1", "content": "a.nim"},
+      {"role": "assistant", "content": "there is one file"},
+    ]
+    let ctx = btwContext(messages)
+    check ctx.len == 4
+    check ctx[0] == messages[0]
+    check ctx[1] == messages[1]
+    # The tool-call turn survives as plain prose, without tool_calls.
+    check ctx[2]{"role"}.getStr == "assistant"
+    check ctx[2]{"content"}.getStr == "naming them"
+    check ctx[2]{"tool_calls"} == nil
+    check ctx[3]{"role"}.getStr == "assistant"
+    check ctx[3]{"content"}.getStr == "there is one file"
+    # A tool-call assistant turn with no prose drops out entirely.
+    let silent = %* [
+      {"role": "user", "content": "run ls"},
+      {"role": "assistant", "content": "", "tool_calls": []},
+      {"role": "tool", "tool_call_id": "c1", "content": "out"},
+    ]
+    check btwContext(silent).len == 1
+
   test "meta-call carries the family reasoning knob":
     # Regression: the meta-call used to omit the per-family reasoning
     # wire mapping the main turn sends. On forced-thinking GLM-5.3 the

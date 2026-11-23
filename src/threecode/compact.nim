@@ -215,7 +215,27 @@ const
   # Forced-thinking models spend this budget on reasoning before the
   # first answer token, so it is headroom, not just answer length.
   BtwMaxTokens* = 8192
-  BtwSystemPrompt* = """You are answering a side question ("btw") about an ongoing coding session. The messages below are the conversation so far, followed by the user's question as the final user message. Answer that question from the conversation's content. Be brief and direct; no filler, no follow-up questions. This exchange is a private aside: it never enters the conversation, so the next real turn will not have seen it."""
+  BtwSystemPrompt* = """You are answering a side question ("btw") about an ongoing coding session. The messages below are the conversation so far, followed by the user's question as the final user message. Answer that question from the conversation's content. Be brief and direct; no filler, no follow-up questions. You have no tools and cannot run anything: reply with plain prose only, never tool calls. This exchange is a private aside: it never enters the conversation, so the next real turn will not have seen it."""
+
+proc btwContext*(messages: JsonNode): JsonNode =
+  ## The `:btw` payload's context: the live history stripped of the tool
+  ## interplay. The meta-call carries no `tools` parameter, so replaying
+  ## `tool_calls`/`tool` messages invites the model to mimic them and emit
+  ## tool calls instead of an answer. Assistant tool-call messages keep
+  ## only their prose; tool results are dropped outright.
+  result = newJArray()
+  if messages == nil or messages.kind != JArray: return
+  for m in messages:
+    if m.kind != JObject: continue
+    let role = m{"role"}.getStr
+    if role == "tool": continue
+    if role == "assistant" and m.contains("tool_calls"):
+      let text = if m{"content"}.kind == JArray: userTextContent(m)
+                 else: m{"content"}.getStr("")
+      if text.len == 0: continue
+      result.add %*{"role": "assistant", "content": text}
+      continue
+    result.add m
 
 type
   MetaRequest* = object
@@ -431,8 +451,8 @@ proc askBtw*(question: string, messages: JsonNode, p: Profile): MetaReply =
   ## message. The answer (and the call's usage) comes back for display
   ## only — callers must not append it (or the question) to `messages`.
   ## `answer` is "" on any failure; `usage` is zeroed with it.
-  let req = buildMetaRequest(p, messages, BtwSystemPrompt, question,
-                             BtwMaxTokens)
+  let req = buildMetaRequest(p, btwContext(messages), BtwSystemPrompt,
+                             question, BtwMaxTokens)
   if req.endpoint == "": return ("", Usage())
   runMetaRequest(addr req, "btw")
 
