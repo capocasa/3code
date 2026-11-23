@@ -50,6 +50,13 @@ current = "ollama.qwen3-coder:480b"
 ;   opt in with ": /" to make /start a command exactly like :start — every enabled prefix recognizes,
 ;   dispatches and completes identically (: stays canonical in help and docs)
 ;
+; editing = both ; editor keymap: readline (default), vim, or both.
+; `vim`/`both` layer bash-style vi command mode on the editor: ESC
+; enters command mode (h l w b f t x r d c y p u ...). In `both`, all
+; readline keys keep working and ESC is claimed by vi mode — rebind
+; with `[shortcuts] vi-mode = ESC` (the default) or any other key to
+; leave ESC to readline.
+;
 ; [shortcuts] remaps editor commands. Value is a space-separated list of
 ; keys; empty string unbinds. Defaults match today's hardcoded behaviour.
 ; Key syntax: ESC / Escape, CtrlX, AltX, CmdX (mac Command, kitty
@@ -72,7 +79,8 @@ current = "ollama.qwen3-coder:480b"
 ; isearch-backward, isearch-forward, nonincremental-search-backward,
 ; nonincremental-search-forward, history-begin, history-end, set-mark,
 ; exchange-point-and-mark, quoted-insert, char-search,
-; char-search-backward, delete-horizontal-space, tab-insert, retry.
+; char-search-backward, delete-horizontal-space, tab-insert, retry,
+vi-mode.
 ; `retry` (default CtrlShiftR) cuts a retry backoff short or resends a
 ; data-less in-flight request, like `:retry`; distinct from Ctrl+R only
 ; on kitty-protocol terminals. `clear` also adds the discarded text to

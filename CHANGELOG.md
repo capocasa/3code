@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **Vi editing mode.** A conceptual port of readline's `vi_mode.c` —
+  the machinery behind bash's `set -o vi` — as a new `threecode/vim`
+  module layered on the line editor. `editing = vim` or
+  `editing = both` in `[settings]` (readline stays the default); ESC
+  (or a rebound `[shortcuts] vi-mode` key) enters command mode with
+  the bash vi-mode set: h l 0 ^ $ w b e W B E f F t T ; , %, x X r ~
+  D C s S, d/c/y operators with counts, cc dd yy p P u J, i a I A R,
+  and `/` / `?` history search. In `both` mode every readline binding
+  survives and ctrl keys keep their meaning; when the vi-mode key is
+  ESC it is withdrawn from readline's cancel/clear so the same key
+  switches modes, while any other `vi-mode` key leaves ESC alone.
+  (`tests/core/test_vim.nim`)
+
 - **Ask answers gain spelled-out commands and one-key shortcuts.**
   `:allow`/`:deny` are the spelled-out forms of `:a`/`:d`, and
   `:allow-dir` grants the path's directory (basename shaved when the

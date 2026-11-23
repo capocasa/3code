@@ -18,7 +18,7 @@ when defined(posix):
   import std/posix except SocketHandle
 when defined(windows):
   import std/winlean
-import types, prompts, util, auth_openai, modelname, minline
+import types, prompts, util, auth_openai, modelname, minline, threecode/vim
 import dirsettings
 import runtime
 
@@ -438,6 +438,15 @@ proc applySettingsValue*(key, raw: string) =
   ## or it would grant itself authority).
   let v = raw
   case key
+  of "editing-mode", "editing_mode", "editing":
+    # Editor keymap: readline (default), vim, or both. Applied where the
+    # shortcuts land (see configureEditing): ESC routing changes when vi
+    # claims it.
+    case v.strip.toLowerAscii
+    of "readline", "emacs": vim.editingMode = vim.emReadline
+    of "vim", "vi": vim.editingMode = vim.emVim
+    of "both": vim.editingMode = vim.emBoth
+    else: discard
   of "notify":
     case v.toLowerAscii
     of "on", "true", "yes", "1": notifyEnabled = true
@@ -582,7 +591,9 @@ type
 const
   PermittedSections = ["settings", "search", "colors", "provider",
                        "params", "shortcuts", "plugins", "test"]
-  SettingsKeys = ["current", "notify", "streaming", "sandbox",
+  EditingModes = ["readline", "vim", "both"]
+  SettingsKeys = ["editing-mode", "editing_mode", "editing",
+                  "current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn", "max_timeout", "max-timeout",
                   "force_timeout", "force-timeout",
@@ -707,6 +718,10 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin ColorModes:
         return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
                "(expected one of: auto, dark, light)"
+      if ent.key in ["editing-mode", "editing_mode", "editing"] and
+          ent.value.strip.toLowerAscii notin EditingModes:
+        return &"{path}:{ent.line}: unknown editing mode '{ent.value}' " &
+               "(expected one of: readline, vim, both)"
       if ent.key == "dirconfig" and
           ent.value.strip.toLowerAscii notin DirConfigValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for 'dirconfig' " &
@@ -1773,7 +1788,7 @@ proc tryLoadStateOrEmpty*(path: string): tuple[current: string,
   activeSearchKeys = searchKeys
   activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
   activeShortcuts = shortcuts
-  minline.configuredShortcuts = activeShortcuts
+  vim.configureEditing(activeShortcuts)
   (current, providers, colors, "")
 
 proc printConfigWarnings*() =
@@ -1895,7 +1910,7 @@ proc tryLoadStateLayers*(paths: seq[string]): tuple[current: string,
   activeSearchKeys = searchKeys
   activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
   activeShortcuts = shortcuts
-  minline.configuredShortcuts = activeShortcuts
+  vim.configureEditing(activeShortcuts)
   activeParams = params
   (current, providers, colors, "")
 
@@ -2287,7 +2302,7 @@ proc loadProfile*(wanted: string): Profile =
   activeSearchKeys = searchKeys
   activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
   activeShortcuts = shortcuts
-  minline.configuredShortcuts = activeShortcuts
+  vim.configureEditing(activeShortcuts)
   if providers.len == 0:
     die &"no [provider] section in {path}", ExitConfig
   var pick = wanted

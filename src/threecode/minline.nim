@@ -48,6 +48,7 @@ import
 
 import signals
 import threecode/unicodewidth as ucwidth
+import threecode/readline
 import threecode/syncoutput
 import threecode/clipboard
 
@@ -118,6 +119,7 @@ const ShortcutNames* = [
   "exchange-point-and-mark",
   "quoted-insert",
   "char-search",
+  "vi-mode",
   "allow",
   "allow-dir",
   "deny",
@@ -1609,7 +1611,7 @@ proc breakChains(ed: var LineEditor) =
   ed.yankCont = false
   ed.lastArgCont = false
 
-proc killSave(ed: var LineEditor; text: string; atFront: bool; wasAt, nowAt: int) =
+proc killSave*(ed: var LineEditor; text: string; atFront: bool; wasAt, nowAt: int) =
   ## Add killed `text` to the kill ring, readline-style: a kill issued
   ## with the cursor at the seat the previous kill left (`wasAt ==
   ## killPt`, no command in between) extends the head entry: backward
@@ -1627,7 +1629,7 @@ proc killSave(ed: var LineEditor; text: string; atFront: bool; wasAt, nowAt: int
   ed.killCont = true
   ed.killPt = nowAt
 
-proc pushUndo(ed: var LineEditor; typing: bool) =
+proc pushUndo*(ed: var LineEditor; typing: bool) =
   ## Snapshot the pre-mutation buffer for undo (C-_). `typing` marks a
   ## single-rune insert; one such continuing at the seat the previous
   ## run ended (`undoGroupEnd`) extends that group instead of stacking
@@ -2971,95 +2973,11 @@ when defined(posix):
     fullRedraw(ed)
 
 var
-  DefaultShortcuts*: Table[string, string] = {
-    # ESC and CtrlC clear a non-empty line (discarding the text into
-    # history) and only cancel when the line is empty. So a cancel key
-    # pressed mid-turn with a typed draft edits the draft instead of
-    # interrupting the turn. Up/Down move by visual row and fall through
-    # to history at the boundary; CtrlP/CtrlN are history-only.
-    "cancel": "ESC CtrlC",
-    "clear": "ESC CtrlC",
-    "quit-if-empty": "CtrlD",
-    "home": "Home CtrlA",
-    "end": "End CtrlE",
-    "left": "Left CtrlB",
-    "right": "Right CtrlF",
-    "word-left": "AltB CtrlLeft",
-    "word-right": "AltF CtrlRight",
-    "up": "Up",
-    "down": "Down",
-    "history-previous": "CtrlP",
-    "history-next": "CtrlN",
-    "backspace": "Backspace",
-    "delete": "Delete",
-    "insert": "Insert",
-    "delete-word-left": "CtrlW",
-    "delete-to-boundary-left": "AltH",
-    "clear-screen": "CtrlL",
-    "suspend": "CtrlZ",
-    "complete": "Tab",
-    "reverse-complete": "ShiftTab",
-    "edit-in-editor": "AltE CtrlX>CtrlE",
-    "insert-newline": "ShiftEnter AltEnter",
-    "select-left": "ShiftLeft",
-    "select-right": "ShiftRight",
-    "select-up": "ShiftUp",
-    "select-down": "ShiftDown",
-    "select-home": "ShiftHome",
-    "select-end": "ShiftEnd",
-    "select-word-left": "CtrlShiftLeft",
-    "select-word-right": "CtrlShiftRight",
-    "select-all": "CmdA",
-    "select-buffer-start": "CtrlShiftHome",
-    "select-buffer-end": "CtrlShiftEnd",
-    "buffer-start": "",
-    "buffer-end": "",
-    "cut": "CtrlX",
-    "copy": "AltW",
-    "paste": "CtrlV",
-    "yank": "CtrlY",
-    "yank-pop": "AltY",
-    "yank-last-arg": "Alt.",
-    "delete-word-right": "AltD CtrlDelete",
-    "delete-to-boundary-right": "",
-    "delete-to-eol": "CtrlK",
-    "delete-to-bol": "CtrlU",
-    "transpose-chars": "CtrlT",
-    "undo": "Ctrl_ Ctrl/",
-    "revert-line": "AltR",
-    "isearch-backward": "CtrlR",
-    "isearch-forward": "CtrlS",
-    "nonincremental-search-backward": "AltP",
-    "nonincremental-search-forward": "AltN",
-    "history-begin": "Alt<",
-    "history-end": "Alt>",
-    "transpose-words": "AltT",
-    "upcase-word": "AltU",
-    "downcase-word": "AltL",
-    "capitalize-word": "AltC",
-    "set-mark": "Ctrl@ AltSpace",
-    "exchange-point-and-mark": "",
-    "quoted-insert": "CtrlQ",
-    "char-search": "Ctrl]",
-    "char-search-backward": "",
-    "delete-horizontal-space": "",
-    "tab-insert": "",
-    # The browser hard-reload analogue: retry the in-flight request now.
-    # Kitty-protocol terminals report Ctrl+digit distinctly; legacy
-    # terminals fold it into the digit itself (typed as text) or the
-    # classic control bytes, so the press stays a harmless no-op there.
-    # The app installs the handler.
-    "retry": "Ctrl9",
-    # Sandbox ask answers, armed only while an ask waits (the handlers
-    # gate on the ask gate): fire the matching typed command. Distinct
-    # keys only on kitty-protocol terminals; legacy terminals fold
-    # Ctrl+digit into the digit itself, the classic control bytes, or
-    # on Windows consoles the Ctrl+letter byte, so the presses stay
-    # harmless no-ops there and the typed :allow/:deny remain.
-    "allow": "Ctrl1",
-    "allow-dir": "Ctrl2",
-    "deny": "Ctrl4"
-  }.toTable
+  DefaultShortcuts*: Table[string, string] = ReadlineShortcuts
+  ## The readline keymap, owned by ``threecode/readline``: command
+  ## names and default bindings shared by every mode. ``[shortcuts]``
+  ## user overrides merge over this in ``applyShortcuts``; vi mode
+  ## strips ESC from ``cancel``/``clear`` there when vi claims the key.
 
 var CommandProcs*: Table[string, KeyCallback]
 var CommandProcsAll* {.threadvar.}: Table[string, KeyCallback]
@@ -3443,6 +3361,13 @@ var configuredShortcuts*: Table[string, string]
   ## [shortcuts] section. Read-only after startup; every thread that
   ## calls initKeyTables() picks it up, so the input thread and wizard
   ## share the same bindings without locks.
+
+var selfInsertHook*: proc(ed: var LineEditor, c1: int): bool {.closure.}
+  ## Installed by threecode/vim when vi editing is active. Called for
+  ## each printable byte before the readline self-insert path; returning
+  ## true consumes the byte. A plain (shared) global rather than a
+  ## threadvar: the hook itself dispatches on per-thread vi state, and
+  ## it is assigned once at startup before input threads exist.
 
 proc runEscCommands(ed: var LineEditor) =
   ## Run ESCMAP commands. Default: ESC clears a non-empty line (adding
@@ -3881,6 +3806,11 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.complPrefix = ""
   ed.selAnchor = -1
   ed.chordBuf = @[]
+  # New session: vi (threecode/vim) starts every line in insert mode,
+  # like readline's vi-mode. The sentinel c1 = -1 tells the installed
+  # self-insert hook a fresh read is beginning.
+  if selfInsertHook != nil:
+    discard selfInsertHook(ed, -1)
   clearUndo(ed)
   ed.isearchActive = false
   if ed.getWidth != nil:
@@ -4479,6 +4409,9 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
           inc ed.line.position
           ed.write "*"
         else:
+          if selfInsertHook != nil and selfInsertHook(ed, c1):
+            paintIfCleared(ed, suffixJustCleared)
+            continue
           ed.printChar(c1)
         continue
       if c1 in ESCAPES:
