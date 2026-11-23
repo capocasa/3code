@@ -1429,6 +1429,14 @@ proc main() =
         continue
       let t = line.strip
       if isQuitLine(t): break
+      if startsWithCommandPrefix(line):
+        # Unpark before the command runs: an idle `:!` can block in the
+        # sandbox ask gate for the whole ask window, and the parked input
+        # thread would never read the typed `:a`/`:d` that answers it.
+        # The command's own echo commit below clears the editor the same
+        # way it does for the queued mid-turn path, which also runs
+        # unparked.
+        releaseIdleSubmittedInput()
       let commandResult = handleCommandResult(line, messages, session, prof, editor)
       if commandResult.recognized:
         if commandResult.disposition == cdModal:

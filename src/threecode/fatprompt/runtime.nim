@@ -2883,7 +2883,7 @@ proc inputThreadProc() {.thread.} =
       let modal = inputModalActive.load(moAcquire)
       let turnActive = inputTurnActive.load(moAcquire)
       let hasText = ed.line.text.len > 0
-      if turnActive and hasText and not modal and
+      if (turnActive or askGateArmed()) and hasText and not modal and
           startsWithCommandPrefix(ed.line.text):
         let cmd = ed.line.text
         # System commands are prompt-log content like any typed line:
@@ -2938,6 +2938,15 @@ proc inputThreadProc() {.thread.} =
           # Park the input thread so keystrokes don't append to the
           # uncleared editor before the controller drains this event.
           inputIdleLinePending.store(true, moRelease)
+          # A command can block on the sandbox ask gate (an idle `:!`),
+          # and the answer is a submitted `:a`/`:d`: the buffer must be
+          # empty the moment typing resumes, or the answer lands appended
+          # to the command text and never matches. Drop only the text:
+          # the row model stays for the controller's echo commit walk-up
+          # over the rows the terminal still shows.
+          if startsWithCommandPrefix(ed.line.text):
+            ed.line.text = ""
+            ed.line.position = 0
       elif not hasText and not modal and not turnActive and
           allowEmptyPromptEnabled:
         # Empty Enter at the idle prompt: an empty submit, queued and parked

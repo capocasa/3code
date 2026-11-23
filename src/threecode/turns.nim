@@ -699,7 +699,7 @@ proc toolAskGateApplies(act: Action): bool =
     false
 
 proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
-    visionDir: string): tuple[output: string, code: int, diff: string] =
+    visionDir: string; idx = 0): tuple[output: string, code: int, diff: string] =
   ## The file-tool ask flow: ask first, run once. A grant retries (here:
   ## runs) the action under the widened policy; anything else runs it
   ## under the ask rule so the denial itself reaches the model, with the
@@ -712,7 +712,9 @@ proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
   ## the editor stays live for the `:a`/`:d` answer; the fold at the
   ## tool-item commit replaces the card, and the marker (plus the
   ## sandbox item the answer commits) is the durable record.
-  var view = initStreamingView(StreamMaxLines, 0, bannerFor(act))
+  # A nonzero idx keeps the snapshot out of the live-follow banner-only
+  # paint (followIdx is 0 at rest), which would drop the ask card's rows.
+  var view = initStreamingView(StreamMaxLines, idx, bannerFor(act))
   view.setSymbol("?")
 
   proc renderView() =
@@ -1755,7 +1757,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
                   stubToolCallResult(toolStub)
                 elif toolAskGateApplies(act):
                   runActionWithAskGate(act, session.readCache, p.vision,
-                                       sessionImageDir(session.savePath))
+                                       sessionImageDir(session.savePath), idx)
                 else:
                   runAction(act, session.readCache, p.vision,
                             sessionImageDir(session.savePath))
