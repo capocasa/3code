@@ -118,6 +118,26 @@ suite "flail detector":
     check det.observeCall("bash", "X") == fvOk
     check det.escalations == 0
 
+  test "identical poll with fresh output each time is not flagged":
+    # 20261123T121757: a build-watcher re-ran `sleep 570; tail -1
+    # build.log` back to back; every result carried a new build-progress
+    # line. Signal 1 is progress-gated, so the poll stays quiet until the
+    # output stops moving.
+    var det: FlailDetector
+    let args = "{\"command\":\"sleep 570; tail -1 /tmp/llama-build.log\"}"
+    check det.observeCall("bash", args) == fvOk
+    det.noteResult("bash", args, true,
+      "[ 21%] Building CUDA object ggml/src/ggml-cuda/template-instances/mmq-instance-q3_k.cu.o")
+    check det.observeCall("bash", args) == fvOk
+    det.noteResult("bash", args, true,
+      "[ 89%] Building CXX object common/CMakeFiles/llama-common.dir/ngram-mod.cpp.o")
+    check det.observeCall("bash", args) == fvOk
+    check det.escalations == 0
+    # Output stops moving: the same call is now a stuck repeat.
+    det.noteResult("bash", args, true, "[ 89%] Building CXX object common/CMakeFiles/llama-common.dir/ngram-mod.cpp.o")
+    check det.observeCall("bash", args) == fvEscalate
+    check det.escalations == 1
+
   test "re-trying a no-op mutation flags on first repeat":
     var det: FlailDetector
     check det.observeCall("patch", "{\"path\":\"a\"}") == fvOk

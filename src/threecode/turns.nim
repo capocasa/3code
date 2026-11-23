@@ -88,6 +88,7 @@ type
     streakLen*: int           ## length of the current same-tool run
     streakTokens*: seq[HashSet[string]]  ## ring of per-call distinctive tokens
     staleStreak*: int         ## consecutive executed streak calls that added no new output line
+    lastResultFresh*: bool    ## the previous executed call's result added a new output line
     seenLines*: HashSet[string]  ## output lines (normalized) already delivered in this run
     flaggedInBatch*: bool     ## a loop already fired in this model batch (one rung per batch)
 
@@ -326,6 +327,7 @@ proc noteResult*(det: var FlailDetector, name, argsStr: string, madeChange: bool
       det.seenLines.incl n
   if det.seenLines.len > FlailSeenLinesMax:
     det.seenLines.clear()
+  det.lastResultFresh = fresh
   if fresh:
     det.staleStreak = 0
   else:
@@ -401,6 +403,8 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   # 1. Identical consecutive repeat: the model re-emitted the exact call it
   #    just made. Strongest signal; flags on the first repeat. This is the
   #    classic GLM identical-call loop and the cheap MTP-duplication case.
+  #    Progress-gated: if the first call's result delivered a new output
+  #    line, the repeat is a legitimate poll and is not flagged.
   # 2. No-progress re-try: the previous mutating call made no change
   #    (`lastNoProgress`) AND the model is re-trying a call it already made
   #    in this window.
@@ -421,8 +425,16 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   #    walked over successive windows of a file tokenizes every call
   #    identically but delivers fresh lines each time, which is progress,
   #    not a loop.
+  # Signal 1 is progress-gated like signals 3 and 4: an identical
+  # consecutive repeat whose previous result delivered a new output line is
+  # a legitimate poll (20261123T121757: `sleep 570; tail -1 build.log`
+  # re-run while a compile ground forward, fresh progress line each time),
+  # not a stuck emission. A repeat over a stale result - or with no result
+  # observed yet, the unit-test path and the first call of a run - flags
+  # exactly as before.
+  let consecutiveStuck = consecutive and not det.lastResultFresh
   let knownFailing = not det.progress.getOrDefault(fp, true)
-  let isLoop = consecutive or (det.lastNoProgress and seen >= 1) or
+  let isLoop = consecutiveStuck or (det.lastNoProgress and seen >= 1) or
     (knownFailing and seen >= FlailSpacedThreshold - 1) or stuckStreak
   if not isLoop:
     # Genuinely new or harmless: a clearly novel call resets the ladder -
@@ -2293,16 +2305,23 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # runTurns, so we don't re-save here either. In debug builds we
     # re-raise so the developer sees the full stack via Nim's
     # unhandled-exception printer. In release builds we render a
-    # one-line notice plus the stack trace to stderr and quit cleanly
-    # so the user isn't left staring at a dead prompt after a crash
-    # that would otherwise vanish silently.
+    # one-line notice plus the stack trace to stderr, save the session,
+    # and report the turn as failed instead of ending the program: a
+    # crash raised while committing a tool result (odd bytes in child
+    # output, a broken viewport paint) must not take 3code down with
+    # it. The next REPL iteration repaints the prompt; the partial
+    # batch's unpaired tool_call ids are repaired by the session loader
+    # on the next save/resume. Debug builds still re-raise so the
+    # developer sees the full stack via Nim's unhandled-exception
+    # printer.
     when defined(release):
       let trace = e.getStackTrace()
+      try: saveSessionReported(session, messages) except CatchableError: discard
       stderr.writeLine "3code: internal error during turn: " & e.msg
       if trace.len > 0:
         stderr.writeLine trace
-      stderr.writeLine "3code: session saved at " & session.savePath &
-        ". Please open an issue with the lines above."
-      quit()
+      stderr.writeLine "3code: turn failed, session saved at " &
+        session.savePath & ". Please open an issue with the lines above."
+      return false
     else:
       raise
