@@ -721,6 +721,41 @@ suite "prompts: inkling family":
     check knownGoodContextWindow("fireworks",
       "accounts/fireworks/models/inkling") == 1_040_000
 
+  test "inkling 2 known-good on the providers that carried inkling 1":
+    check knownGoodFamily("together",
+      "thinkingmachines/Inkling-2-Small") == "inkling"
+    check knownGoodFamily("fireworks",
+      "accounts/fireworks/models/inkling-2-small") == "inkling"
+    check knownGoodFamily("openrouter",
+      "thinkingmachines/inkling-2-small") == "inkling"
+    check knownGoodFamily("openrouter",
+      "thinkingmachines/inkling-2-mini") == "inkling"
+    # nanogpt carries inkling 1 but has not listed inkling 2
+    check knownGoodFamily("nanogpt", "thinkingmachines/inkling-2-small") == ""
+
+  test "inkling 2 version/variant tags":
+    let (f, v, vr) = knownGoodTags("together",
+      "thinkingmachines/Inkling-2-Small")
+    check f == "inkling"
+    check v == "2"
+    check vr == "small"
+    let (_, v2, vr2) = knownGoodTags("local",
+      "thinkingmachines/Inkling-2-Mini")
+    check v2 == "2"
+    check vr2 == "mini"
+    # ollama-shaped configs resolve onto the same local rows
+    let (_, _, vr3) = knownGoodTags("ollama",
+      "thinkingmachines/Inkling-2-Mini")
+    check vr3 == "mini"
+
+  test "inkling 2 context windows":
+    check knownGoodContextWindow("together",
+      "thinkingmachines/Inkling-2-Small") == 1_000_000
+    check knownGoodContextWindow("openrouter",
+      "thinkingmachines/inkling-2-mini") == 1_048_576
+    check knownGoodContextWindow("local",
+      "thinkingmachines/Inkling-2-Mini") == 262_144
+
 suite "compact: decideContextAction":
   test "returns caNone when under threshold":
     check decideContextAction(1000, 128_000, 10) == caNone
