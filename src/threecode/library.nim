@@ -218,15 +218,21 @@ proc resolveSessionProfile*(wanted, resumeProfile: string): Profile =
   ## model > resumed session's profile > config current. An explicit
   ## config current is the user's word and runs as-is; known-good
   ## curation gates interactive `:provider`/`:model` picks
-  ## (`gateExperimental`), not what the config file says. Empty Profile
-  ## when nothing resolves (first run, unknown model); callers decide
-  ## how to surface that (CLI: provider wizard; library: AgentError).
+  ## (`gateExperimental`), not what the config file says. A resumed
+  ## session's profile that no longer resolves (its provider or model
+  ## left the config since) falls through to the config current, the
+  ## same way `:resume` keeps what is running; an explicit model that
+  ## does not resolve still yields an empty Profile. Empty Profile when
+  ## nothing resolves (first run, unknown model); callers decide how to
+  ## surface that (CLI: provider wizard; library: AgentError).
   ## The `limitproviders` whitelist narrows the pool: a current
   ## outside it would leave the profile empty, so the resolver falls
   ## back to the first allowed provider instead of refusing to run —
   ## and aligns `activeCurrent` so `currentProvider()`, `:model` and
   ## completion all agree with the profile actually running.
   result = buildProfile(activeCurrent, selectableProviders(), wanted)
+  if result.name.len == 0 and wanted != "" and wanted == resumeProfile:
+    result = buildProfile(activeCurrent, selectableProviders(), "")
   if providerWhitelist.len > 0 and result.name.len == 0:
     let dot = activeCurrent.find('.')
     let cur = if dot < 0: activeCurrent else: activeCurrent[0 ..< dot]
