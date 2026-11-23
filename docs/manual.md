@@ -550,6 +550,25 @@ after a turn you want more of. On a fresh session with no turns yet it
 does nothing. `allow-empty-prompt = off` in `[settings]` turns the gesture
 off (it is on by default).
 
+### Vi editing mode
+
+`editing = both` in `[settings]` layers vi command mode on top of the
+readline bindings, the way `set -o vi` does in bash: ESC (or a rebound
+`[shortcuts] vi-mode` key) enters command mode, `i a I A R` return to
+insert mode, and every logical line starts in insert mode. The
+implemented set is readline's vi-mode (`vi_mode.c`), not full vim:
+motions `h l 0 ^ $ w b e W B E f{c} F{c} t{c} T{c} ; , %`, edits
+`x X r{c} ~ D C s S cc dd yy d{motion} c{motion} y{motion} p P u J`,
+counts like `3dw`, and `/` / `?` for history search. Ctrl keys keep
+their readline meaning in every mode.
+
+`editing = vim` is the same command set with the readline letter
+bindings out of the way; `editing = readline` (the default) is the
+classic keymap. When the vi-mode key is ESC, ESC is withdrawn from
+readline's cancel/clear so one key switches modes; bind
+`[shortcuts] vi-mode` to any other key and ESC keeps its readline
+role.
+
 The defaults are the same readline-style Ctrl keys everywhere, including
 macOS. If you want the Mac editing keys instead, bind the `Cmd` names in
 the config; they arrive through the kitty keyboard protocol (kitty,
@@ -633,7 +652,7 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `nonincremental-search-backward`, `nonincremental-search-forward`,
 `history-begin`, `history-end`, `set-mark`, `exchange-point-and-mark`,
 `quoted-insert`, `char-search`, `char-search-backward`,
-`delete-horizontal-space`, `tab-insert`, `retry`.
+`delete-horizontal-space`, `tab-insert`, `retry`, `vi-mode`.
 
 `retry` is the `:retry` command as a key: it queues the same empty
 submit Enter on an empty prompt produces, so a fresh request goes out
