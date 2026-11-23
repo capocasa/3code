@@ -104,8 +104,8 @@ proc startBtw*(question: string, messages: JsonNode, p: Profile): bool =
   ## thread could not spawn. The payload is a snapshot of the live
   ## history taken here, on the caller's thread — the answer speaks to
   ## the conversation as it stood when the question was asked.
-  let req = buildMetaRequest(p, messages, BtwSystemPrompt, question,
-                             BtwMaxTokens)
+  let req = buildMetaRequest(p, btwContext(messages), BtwSystemPrompt,
+                             question, BtwMaxTokens)
   if req.endpoint == "": return false
   let job = create(BtwJobState)
   job.lock.initLock()
