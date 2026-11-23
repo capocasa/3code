@@ -1004,6 +1004,28 @@ proc commitHarnessNotice(bytes: string; messages: JsonNode) =
   termengine.noteNonMessageTail(bytes, messages.len)
   commitTranscriptBytes(bytes, true)
 
+proc interruptRetiresMode(session: var Session; mode: ModeDesc;
+                          messages: JsonNode) =
+  ## The user overrides: an interrupt that reaches the mode's end-call
+  ## boundary ends the mode, not just the satisfaction check - the same
+  ## retirement a bare `:verb!` takes, so the loop cannot keep running
+  ## after the user said stop.
+  let label = mode.name
+  if mode.transcript:
+    if retireGoalCancelled(session, messages):
+      commitHarnessNotice(errLnS(label & " cancelled"), messages)
+  else:
+    let (cok, cerr) = cancelMode(mode, session.cwd)
+    if not cok:
+      commitHarnessNotice(errLnS(label & " interrupted but " &
+        mode.fileName & " could not be cancelled: " & cerr), messages)
+    else:
+      commitHarnessNotice(errLnS(label & " cancelled"), messages)
+  session.goalNotified = false
+  session.modeSnapshot = ""
+  session.changeCountStart = 0
+  saveSessionReported(session, messages)
+
 proc commitAssistantItem(content: string; restoreEditor = true;
                          attachReceipt = true) =
   # Emptiness is judged on the visible content, not the raw string: a
@@ -2002,9 +2024,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     # session change log. FEEDBACK sends the agent back in
     # with the verifier's words; SATISFIED retires the mode (renaming
     # its file, or - goal mode - leaving the ✓ step as the record) and
-    # idles normally. Interrupt is the pause lever: it skips the check
-    # and ends the turn; on resume the armed state is still there, so
-    # the mode is still on.
+    # idles normally. Interrupt is the user's stop lever: it ends the
+    # mode itself - the same retirement a bare `:verb!` takes - so the
+    # loop cannot keep executing after the user said stop.
     # Activation keys off the session's project dir (a file mode's
     # trigger file) and the session's own conversation (a transcript
     # mode), never the process cwd. Embedders (library, ACP) run
@@ -2017,6 +2039,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     if not noMode(mode):
       if isInterrupted():
         onTurnInterrupted()
+        interruptRetiresMode(session, mode, messages)
         turnEnded = true
         return true
       if not session.goalNotified:
@@ -2100,6 +2123,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
                            contextWindowFor(p))
       if isInterrupted():
         onTurnInterrupted()
+        interruptRetiresMode(session, mode, messages)
         turnEnded = true
         return true
       # Duty 2, update discipline: work happened (content-aware: the

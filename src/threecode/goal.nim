@@ -32,8 +32,9 @@
 ## change log (net per-path deltas, shell mutations folded in by the
 ## armed tree manifest — no git involved). FEEDBACK sends the agent
 ## back in; SATISFIED retires the goal (its ✓ step is the record) and
-## the session idles normally. Bare `:goal!` writes the ⊘ retirement
-## step. No per-tool-call checks, no system-prompt changes: the
+## the session idles normally. Bare `:goal!` - or an interrupt that
+## reaches the mode's end-call boundary: the user overrides - writes the
+## ⊘ retirement step. No per-tool-call checks, no system-prompt changes: the
 ## continuation message carries everything.
 ##
 ## The side call is also the future subagent primitive, so it is kept
@@ -708,9 +709,9 @@ proc completeMode*(m: ModeDesc; dir = "."): bool =
     false
 
 proc cancelMode*(m: ModeDesc; dir = "."): tuple[ok: bool, err: string] =
-  ## The user exit behind bare `:<verb>!`: `mv <file> <cancelledName>`.
-  ## Interrupt only skips one satisfaction check; this ends the mode,
-  ## keeping the text as the record.
+  ## The user exit behind bare `:<verb>!` (an interrupt at the mode's
+  ## end-call boundary takes this path too): `mv <file> <cancelledName>`.
+  ## This ends the mode, keeping the text as the record.
   if not fileExists(modeFilePath(m, dir)):
     return (false, "no " & m.name & " active")
   try:
