@@ -4,7 +4,7 @@
 ## turn is running. The turn controller calls these helpers directly and also
 ## registers them as API stream hooks. `api.nim` must not import this module.
 
-import std/[atomics, json, locks, os, osproc, strformat, strutils, tables,
+import std/[atomics, json, locks, os, strformat, strutils, tables,
   terminal, times, unicode]
 when defined(posix):
   import std/posix except SocketHandle
@@ -36,7 +36,7 @@ from ../toolstream import StreamMaxLines, initStreamingView, addLine,
   viewportRowsAt, bannerRowCountAt
 from ../api import ApiStreamHooks, requestTurnInterrupt, requestQuietShutdown,
   setApiStreamHooks, setInterrupted, QuietTooLongMs,
-  clearNetworkQuiet
+  clearNetworkQuiet, installInterruptHook
 
 
 when defined(windows):
@@ -153,6 +153,12 @@ var inputIdleLinePending: Atomic[bool]
   ## `inputModalActive == false`) so the controller has a chance
   ## to drain the event; the wizard's `getCh` deliberately ignores
   ## it. See the wizard protocol header above `wizardRequest`.
+var inputEditorHandoff: Atomic[bool]
+  ## True while an external editor runs (`runInHandoffTerminal`): it owns
+  ## stdin and the screen, so the input thread parks in `getCh` - no poll,
+  ## no repaint - and acks with `inputEditorParked` once its last
+  ## in-flight keystroke is done, before the editor draws.
+var inputEditorParked: Atomic[bool]
 var replParkedAtInput*: Atomic[bool]
   ## True only while the main thread is parked in the input wait. The
   ## rebreak window's content source (`transcriptTailRows`) reads the live
@@ -2495,6 +2501,63 @@ proc installApiHeadlessHooks*(hooks: HeadlessStreamHooks) =
     retryNotice: proc(msg: string) =
       (if headlessStreamHooks.retryNotice != nil:
         headlessStreamHooks.retryNotice(msg))))
+var onInputThread {.threadvar.}: bool
+  ## True on the persistent prompt's own thread: a handoff started there
+  ## (Alt+E, a mid-turn `:goal edit`) needs no park - that thread is the
+  ## one running the editor, so it is not polling stdin itself.
+
+proc runInHandoffTerminal*(command: string): int {.gcsafe.} =
+  ## Run `command` (an $VISUAL/$EDITOR invocation) as the terminal's only
+  ## client and return its exit status. While it runs the input thread is
+  ## parked (it would otherwise poll the same stdin and repaint over the
+  ## editor), stdin is back in cooked mode with bracketed paste and the
+  ## kitty keyboard protocol off (the editor wants plain keys: a protocol
+  ## it does not know arrives as stray escapes and commands), the cursor
+  ## is shown, and SIGINT is ignored: Ctrl-C in the editor goes to the
+  ## whole foreground process group, and the interrupt hook would
+  ## otherwise cancel the running turn or quit at the prompt afterwards.
+  inputEditorHandoff.store(true, moRelease)
+  setControlCHook(proc() {.noconv.} = discard)
+  try:
+    if not onInputThread and inputThreadRunning:
+      # Give an in-flight keystroke (echo, repaint) time to finish before
+      # the editor draws; bounded, since a thread that already exited
+      # would never ack.
+      inputEditorParked.store(false, moRelease)
+      let deadline = epochTime() + 1.0
+      while not inputEditorParked.load(moAcquire) and epochTime() < deadline:
+        sleep(2)
+    when defined(posix):
+      # Suspend raw mode so the editor sees a cooked terminal: snapshot the
+      # current (raw) mode, restore the cooked original, run the editor,
+      # then re-apply the raw snapshot. The cooked snapshot itself must
+      # survive: it is what exit cleanup restores, and overwriting it with
+      # the raw mode here left the shell in no-echo mode after :q.
+      var raw: Termios
+      let haveRaw = tcGetAttr(STDIN_FILENO.cint, addr raw) == 0
+      let hadCookedSnapshot = inputOrigTermiosValid
+      restoreInputTermios()
+      termui.writeRaw("\x1b[?2004l\x1b[?25h" & minline.kittyKeyboardOff)
+      result = execShellCmd(command)
+      if haveRaw: discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr raw)
+      inputOrigTermiosValid = hadCookedSnapshot
+      recordRawMode()
+      termui.writeRaw("\x1b[?2004h\x1b[?25l" & minline.kittyKeyboardOn)
+    else:
+      let h = getStdHandle(STD_INPUT_HANDLE)
+      var rawMode: int32 = 0
+      discard getConsoleMode(h, addr rawMode)
+      let hadCookedSnapshot = inputOrigConsoleModeValid
+      restoreInputTermios()
+      result = execShellCmd(command)
+      discard setConsoleMode(h, rawMode and not
+        (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
+      inputOrigConsoleModeValid = hadCookedSnapshot
+  finally:
+    installInterruptHook()
+    inputEditorParked.store(false, moRelease)
+    inputEditorHandoff.store(false, moRelease)
+
 proc editBufferInExternalEditor(ed: var minline.LineEditor) =
   ## Alt+E / Ctrl+X Ctrl+E: copy the prompt buffer to a temp file, hand the
   ## terminal back to $VISUAL/$EDITOR, then replace the buffer with the
@@ -2503,35 +2566,9 @@ proc editBufferInExternalEditor(ed: var minline.LineEditor) =
   let tmpFile = tempDir() / ("3code_edit_" & $getCurrentProcessId())
   writeFile(tmpFile, ed.line.text)
   defer: removeFile(tmpFile)
-  let editor = getEnv("VISUAL", getEnv("EDITOR",
-    when defined(windows): "notepad" else: "vi"))
   when defined(posix):
     discard chmod(tmpFile.cstring, 0o600)
-    # Suspend raw mode so the editor sees a cooked terminal: snapshot the
-    # current (raw) mode, restore the cooked original, run the editor,
-    # then re-apply the raw snapshot. The cooked snapshot itself must
-    # survive: it is what exit cleanup restores, and overwriting it with
-    # the raw mode here left the shell in no-echo mode after :q.
-    var raw: Termios
-    discard tcGetAttr(STDIN_FILENO.cint, addr raw)
-    let hadCookedSnapshot = inputOrigTermiosValid
-    restoreInputTermios()
-    termui.writeRaw("\x1b[?2004l\x1b[?25h" & minline.kittyKeyboardOff)
-    discard execShellCmd(editor & " " & quoteShell(tmpFile))
-    discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr raw)
-    inputOrigTermiosValid = hadCookedSnapshot
-    recordRawMode()
-    termui.writeRaw("\x1b[?2004h\x1b[?25l" & minline.kittyKeyboardOn)
-  else:
-    let h = getStdHandle(STD_INPUT_HANDLE)
-    var rawMode: int32 = 0
-    discard getConsoleMode(h, addr rawMode)
-    let hadCookedSnapshot = inputOrigConsoleModeValid
-    restoreInputTermios()
-    discard execShellCmd(editor & " " & quoteShell(tmpFile))
-    discard setConsoleMode(h, rawMode and not
-      (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
-    inputOrigConsoleModeValid = hadCookedSnapshot
+  discard runInHandoffTerminal(termui.editorCommand(tmpFile))
   let edited = try: readFile(tmpFile) except CatchableError: ""
   var text = edited
   if text.endsWith("\n"):
@@ -2549,6 +2586,7 @@ proc inputThreadProc() {.thread.} =
     if inputEditor == nil:
       return
     let edPtr = inputEditor
+    onInputThread = true
     # Draft debounce state, owned by this thread (only it mutates the
     # buffer). `onMutate` arms a save as each key press changes the text;
     # the no-key-waiting paths in `getCh` below fire it once typing has
@@ -2656,6 +2694,15 @@ proc inputThreadProc() {.thread.} =
 
       let getCh: minline.GetChProc = proc(): int =
         while inputRunning():
+          # An external editor owns stdin and the screen (runInHandoffTerminal):
+          # stay parked - no poll, no repaint - until it exits, and say so
+          # once, so the handoff knows the last in-flight keystroke is done
+          # before the editor draws. Otherwise this thread would take the
+          # editor's keys and paint the prompt over its screen.
+          if inputEditorHandoff.load(moAcquire):
+            inputEditorParked.store(true, moRelease)
+            sleep(5)
+            continue
           # Yield to a modal wizard if one is pending AND the wizard
           # hasn't actually started yet (i.e. the persistent prompt
           # is the active reader). The wizard's own readLineWith
@@ -3342,6 +3389,10 @@ proc inputThreadProc() {.thread.} =
 
 proc ensureInputThreadStarted*() =
   if inputEditor != nil and not inputThreadRunning:
+    # From here on every external editor ($VISUAL/$EDITOR: Alt+E, `:goal
+    # edit`, `:sandbox edit`, `:cmd N edit`) runs through the handoff, so
+    # this thread never competes with it for stdin.
+    termui.externalEditorHook = runInHandoffTerminal
     acquire inputStateLock
     try:
       inputState.shutdown = false

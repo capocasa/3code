@@ -1016,6 +1016,12 @@ proc main() =
         # queue behind whatever precedes it, echoed to scrollback with the
         # hourglass exactly like a queued prompt, and the post-turn drain
         # runs it (in order) before any later queued prompt is sent.
+        # `:goal edit` is the one write whose editor opens at once: the
+        # user is at the keyboard asking to edit now, and in goal mode the
+        # running turn can be minutes away. The decision over the edited
+        # text still runs at the drain.
+        if isGoalEdit(cmd) and inputMessages != nil and inputSession != nil:
+          discard ui.openGoalEditNow(inputMessages[], inputSession[].goalSteps)
         commitQueuedEcho(cmd)
       else:
         let bytes = plainCommandBodyBytes(

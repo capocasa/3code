@@ -3960,7 +3960,8 @@ commands:
                       retires it (its ✓ row is the record), a new :goal
                       arms the next one
   :goal new TEXT      same, but bawks when a goal is already active
-  :goal edit          revise the goal text in $VISUAL/$EDITOR (a changed
+  :goal edit          revise the goal text in $VISUAL/$EDITOR; the editor
+                      opens at once, even while a turn runs (a changed
                       text re-arms and restarts the work at once)
   :goal cancel        cancel the active goal (same as :goal!)
   :goal! TEXT         replace an active goal and restart toward it
