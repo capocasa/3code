@@ -80,6 +80,8 @@ names, model names, and paths where supported.
 | `:verifier on/off` | toggle the verifier without losing the selection |
 | `:notify` | show notify mode |
 | `:notify on/off` | toggle the desktop notification that fires when a turn ends |
+| `:allow [P]` / `:deny [P]` | spelled-out forms of `:a`/`:d`: allow/deny P (bare: `@d`, the path the waiting ask named) |
+| `:allow-dir [P]` | allow P's directory (basename shaved when P names a file); the bare form answers the waiting ask with the directory grant |
 | `:retry` | send the current state as a request, like Enter on an empty prompt |
 | `:retry list` | show patient-retry mode |
 | `:retry on/off` | toggle patient retry of 429/5xx/network errors |
@@ -139,7 +141,10 @@ Default keys at the prompt. `:help` prints the ones in effect;
 | Ctrl+] | jump to the next occurrence of the next typed character |
 | Ctrl+@ or Alt+Space | set the mark (binds `exchange-point-and-mark` to swap back) |
 | Ctrl+R / Ctrl+S | incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts |
-| Ctrl+Shift+R | send the current state as a request, like Enter on an empty prompt; the `retry` shortcut, distinct from Ctrl+R only on kitty-protocol terminals |
+| Ctrl+9 | send the current state as a request, like Enter on an empty prompt; the `retry` shortcut, distinct on kitty-protocol terminals only (legacy terminals type the digit) |
+| Ctrl+1 | answer the waiting sandbox ask with `:allow` (kitty-protocol terminals; inert elsewhere, typed commands remain) |
+| Ctrl+2 | answer it with `:allow-dir` (same reachability) |
+| Ctrl+4 | answer it with `:deny` (same reachability) |
 | Alt+P / Alt+N | history search completed at Enter |
 | Alt+< / Alt+> | jump to the oldest entry / back to the draft |
 | Ctrl+L | clear the screen |

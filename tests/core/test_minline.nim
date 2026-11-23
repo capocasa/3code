@@ -1864,17 +1864,21 @@ suite "minline editor: kitty keyboard protocol":
     d.push Enter
     check d.run(ed, prompt = "> ") == "abY"
 
-  test "CSI u ctrl+shift+r is the retry key by default":
-    # CSI 114;6 u. DefaultShortcuts binds "retry" to CtrlShiftR; with no
+  test "CSI u ctrl+9 is the retry key by default":
+    # CSI 57;5 u. DefaultShortcuts binds "retry" to Ctrl9; with no
     # retry handler installed (minline alone never installs one) the
-    # fallback rule applies and the press opens isearch like Ctrl+R.
+    # fallback rule applies and the press is inert (ctrl+9 has no
+    # ctrl+letter meaning to fall back to).
     var ed = initEditor()
     let d = newDriver()
     ed.history.entries.addLast "older entry"
-    d.push @[27, 91, 49, 49, 52, 59, 54, 117]
+    d.push @[27, 91, 53, 55, 59, 53, 117]
     d.pushString "older"
     d.push Enter
-    check d.run(ed, prompt = "> ") == "older entry"
+    # No handler: the retry command is a no-op and the typed text is
+    # the whole line (the old Ctrl+Shift+R spelling used to fall back
+    # to isearch; Ctrl+9 has no such fallback).
+    check d.run(ed, prompt = "> ") == "older"
     # Same press with a handler installed runs the handler instead.
     var fired = false
     let retryKey: minline.KeyCallback = proc(ed: var minline.LineEditor) =
@@ -1883,7 +1887,7 @@ suite "minline editor: kitty keyboard protocol":
     minline.CommandProcsAll["retry"] = retryKey
     var ed2 = initEditor()
     let d2 = newDriver()
-    d2.push @[27, 91, 49, 49, 52, 59, 54, 117]
+    d2.push @[27, 91, 53, 55, 59, 53, 117]
     d2.push Enter
     discard d2.run(ed2, prompt = "> ")
     check fired
@@ -1985,6 +1989,25 @@ suite "minline editor: selection":
     # Left cleared the anchor; the text is intact.
     check ed.selAnchor == -1
     check ed.line.text == "hello"
+
+  test "CSI u ctrl+digit keys bind (ctrl+1/2/4 ask-answer defaults)":
+    # CSI 49;5 u = ctrl+1. DefaultShortcuts binds "allow" to Ctrl1; with
+    # no handler installed the press is inert; with one installed it
+    # runs, and typing after it is untouched text.
+    var fired = false
+    let allowKey: minline.KeyCallback = proc(ed: var minline.LineEditor) =
+      fired = true
+    minline.CommandProcs["allow"] = allowKey
+    minline.CommandProcsAll["allow"] = allowKey
+    var ed = initEditor()
+    let d = newDriver()
+    d.push @[27, 91, 52, 57, 59, 53, 117]  # CSI 49;5 u = ctrl+1
+    d.pushString "x"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "x"
+    check fired
+    minline.CommandProcs.del("allow")
+    minline.CommandProcsAll.del("allow")
 
   test "ctrl+x cuts the selection":
     var ed = initEditor()

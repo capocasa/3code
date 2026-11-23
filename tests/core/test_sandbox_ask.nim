@@ -11,6 +11,7 @@ discard """
 """
 import std/[unittest, os, strutils]
 import threecode/sandbox
+import threecode/ui
 
 proc newFixture(name: string): tuple[base, proj: string] =
   let base = getTempDir() / ("3code_asktest_" & name & "_" & $getCurrentProcessId())
@@ -174,3 +175,26 @@ suite "grant":
       check "allow ./" in text
       check "allow /etc/hosts" in text
       check sandbox.checkRawPath("/etc/hosts", needsWrite = false).allowed
+
+suite "allow-dir path shaping":
+  test "dirComponent: existing dir stays, file yields parent, bare name dots":
+    let (base, proj) = newFixture("dircomp")
+    defer: removeDir(base)
+    check sandbox.dirComponent(proj / "vault") == proj / "vault"
+    check sandbox.dirComponent(proj / "vault" / "k.txt") == proj / "vault"
+    check sandbox.dirComponent("k.txt") == "."
+    check sandbox.dirComponent("") == "."
+
+suite "spelled ask-answer commands":
+  test "askAnswerOf accepts :allow, :allow-dir, :deny and keeps deferrals":
+    # The gate answers only bare forms; any explicit path defers like
+    # the ordinary mutating command it defers to.
+    check askAnswerOf(":allow") == 'a'
+    check askAnswerOf(":a") == 'a'
+    check askAnswerOf(":allow-dir") == 'A'
+    check askAnswerOf(":deny") == 'd'
+    check askAnswerOf(":d") == 'd'
+    check askAnswerOf(":allow ./x") == '\0'
+    check askAnswerOf(":allow-dir ./x") == '\0'
+    check askAnswerOf(":deny ./x") == '\0'
+    check askAnswerOf(":sandbox allow ./x") == '\0'

@@ -118,6 +118,9 @@ const ShortcutNames* = [
   "exchange-point-and-mark",
   "quoted-insert",
   "char-search",
+  "allow",
+  "allow-dir",
+  "deny",
   "char-search-backward",
   "delete-horizontal-space",
   "tab-insert",
@@ -3042,10 +3045,20 @@ var
     "delete-horizontal-space": "",
     "tab-insert": "",
     # The browser hard-reload analogue: retry the in-flight request now.
-    # Distinct from Ctrl+R (isearch) only on terminals that report the
-    # kitty keyboard protocol; legacy terminals send both as 0x12 and
-    # the press stays history search. The app installs the handler.
-    "retry": "CtrlShiftR"
+    # Kitty-protocol terminals report Ctrl+digit distinctly; legacy
+    # terminals fold it into the digit itself (typed as text) or the
+    # classic control bytes, so the press stays a harmless no-op there.
+    # The app installs the handler.
+    "retry": "Ctrl9",
+    # Sandbox ask answers, armed only while an ask waits (the handlers
+    # gate on the ask gate): fire the matching typed command. Distinct
+    # keys only on kitty-protocol terminals; legacy terminals fold
+    # Ctrl+digit into the digit itself, the classic control bytes, or
+    # on Windows consoles the Ctrl+letter byte, so the presses stay
+    # harmless no-ops there and the typed :allow/:deny remain.
+    "allow": "Ctrl1",
+    "allow-dir": "Ctrl2",
+    "deny": "Ctrl4"
   }.toTable
 
 var CommandProcs*: Table[string, KeyCallback]
@@ -3151,6 +3164,11 @@ proc normalizeKeyToken(token: string): string =
   for l in 'a' .. 'z':
     if t == "ctrlshift" & l:
       return "ctrl+shift+" & l
+  # Ctrl+digit likewise kitty-only (legacy folds them per the table in
+  # the DefaultShortcuts comment).
+  for d in '0' .. '9':
+    if t == "ctrl" & d:
+      return "ctrl+" & d
   if t == "ctrlshiftleft": return "ctrl+shift+left"
   if t == "ctrlshiftright": return "ctrl+shift+right"
   if t == "ctrlshiftup": return "ctrl+shift+up"
@@ -3921,6 +3939,7 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   of 127: base = "backspace"
   of 29: base = "]"
   of 47: base = "/"
+  of 48..57: base = $key.char
   of 60: base = "<"
   of 64: base = "@"
   of 62: base = ">"
@@ -3937,7 +3956,8 @@ proc dispatchKittyKey(ed: var LineEditor, nums: seq[int]) =
   if (bits and 4) != 0 and (bits and 1) != 0 and (bits and 2) == 0 and
       (bits and 8) == 0:
     # ctrl+shift+letter is a distinct key under this protocol (retry
-    # lives on Ctrl+Shift+R). When nothing binds the distinct name, the
+    # lives on the kitty-only ctrl+shift spellings). When nothing binds
+    # the distinct name, the
     # shift bit drops and the press keeps its readline ctrl+letter
     # meaning, so C-S-e still ends the line on a kitty-protocol terminal.
     if dispatchKeyName(ed, "ctrl+shift+" & base):

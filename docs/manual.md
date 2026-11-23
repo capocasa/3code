@@ -530,7 +530,7 @@ The daily keys:
 | Up / Down | history |
 | Ctrl+Arrow | move by word |
 | Ctrl+R / Ctrl+S | search history as you type |
-| Ctrl+Shift+R | send the current state as a request, like Enter on an empty prompt (`:retry` as a key; needs a kitty-protocol terminal, see below) |
+| Ctrl+9 | send the current state as a request, like Enter on an empty prompt (`:retry` as a key; needs a kitty-protocol terminal, see below) |
 | Alt+E | edit the input in $VISUAL/$EDITOR |
 | Ctrl+C or Esc | clear input; cancel the turn when it is empty |
 | Ctrl+D | exit |
@@ -638,11 +638,11 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `retry` is the `:retry` command as a key: it queues the same empty
 submit Enter on an empty prompt produces, so a fresh request goes out
 on the conversation exactly as it stands (the half-typed draft is kept
-for the next prompt). It defaults to Ctrl+Shift+R because Ctrl+R is
-history search, and a terminal can only tell the two apart when it
-speaks the kitty keyboard protocol (kitty, ghostty, foot, WezTerm,
-recent xterm). Elsewhere the terminal sends one byte for both and the
-press stays history search — the same readline behavior as before.
+for the next prompt). It defaults to Ctrl+9, which a terminal reports
+distinctly only when it speaks the kitty keyboard protocol (kitty,
+ghostty, foot, WezTerm, recent xterm). Elsewhere the terminal folds
+Ctrl+digit into the digit itself and the press types a 9 — the `:retry`
+command remains the spelling that works everywhere.
 
 Keys joined by `>` form a chord: pressed in sequence, they run the
 command once. The default `edit-in-editor` binding is exactly that:

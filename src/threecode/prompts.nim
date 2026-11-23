@@ -4021,7 +4021,12 @@ commands:
   :sandbox edit       open the policy file in $VISUAL/$EDITOR, reload on quit
   :a [P]              allow P (bare: @d, the path the waiting ask named)
                       - shorthand for :sandbox allow; answers that ask
+  :allow [P]          the spelled-out form of :a
+  :allow-dir [P]      allow P's directory (basename shaved when P names
+                      a file); bare form answers the waiting ask with
+                      the directory grant
   :d [P]              deny P / @d likewise - the deny twin of :a
+  :deny [P]           the spelled-out form of :d
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny, ask; see .sandbox)
@@ -4048,6 +4053,10 @@ input:
                 retries, :d or the elapsed countdown denies it (both
                 persist as sandbox rules); other typing reaches the
                 editor as usual
+  quick answer  while an ask waits: ctrl+1 = :allow, ctrl+2 =
+                :allow-dir, ctrl+4 = :deny (rebindable in [shortcuts];
+                kitty-protocol terminals; elsewhere the press is a
+                no-op and the typed commands remain)
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -4067,9 +4076,9 @@ input:
   ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
-  ctrl+shift+r  retry now: cut a backoff wait or resend a data-less
+  ctrl+9        retry now: cut a backoff wait or resend a data-less
                 in-flight request (kitty-protocol terminals; elsewhere
-                ctrl+shift+r reports as ctrl+r)
+                ctrl+9 types a digit and the :retry command remains)
   alt+p / n     history search completed at enter
   alt+< / >     jump to the oldest entry / back to your draft
   tab           complete :commands, provider names, model names

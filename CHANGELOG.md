@@ -2,6 +2,17 @@ Changelog
 
 Unreleased
 
+- **Ask answers gain spelled-out commands and one-key shortcuts.**
+  `:allow`/`:deny` are the spelled-out forms of `:a`/`:d`, and
+  `:allow-dir` grants the path's directory (basename shaved when the
+  path names a file); all three answer a waiting ask in bare form like
+  the shorthands do. While an ask waits, Ctrl+1 fires `:allow`,
+  Ctrl+2 `:allow-dir` and Ctrl+4 `:deny` (rebindable in `[shortcuts]`;
+  kitty-protocol terminals, inert elsewhere), and `retry` moves from
+  Ctrl+Shift+R to Ctrl+9. A mid-draft answer stashes the draft and the
+  next prompt brings it back.
+  (`tests/core/test_sandbox_ask.nim`, `tests/core/test_minline.nim`)
+
 - **First run means no config file.** The provider wizard opened
   whenever no profile resolved, so a config that existed but defined
   no working provider (no url, no key, no models) landed in a wizard

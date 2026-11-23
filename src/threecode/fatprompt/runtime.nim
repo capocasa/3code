@@ -377,9 +377,10 @@ proc askGateArmed*(): bool =
 
 proc postAskAnswer*(answer: char) =
   ## Input-thread side: deliver a submitted ask answer to the waiting
-  ## controller. 'a' allows, 'd' denies; anything else is ignored so a
-  ## bogus recognition can never answer a real ask.
-  if answer notin {'a', 'd'}: return
+  ## controller. 'a' allows, 'A' allows the directory component,
+  ## 'd' denies; anything else is ignored so a bogus recognition can
+  ## never answer a real ask.
+  if answer notin {'a', 'A', 'd'}: return
   askGateAnswer.store(answer.ord, moRelaxed)
   askGateAnswered.store(true, moRelease)
 
@@ -2948,7 +2949,7 @@ proc inputThreadProc() {.thread.} =
         inputIdleLinePending.store(true, moRelease)
       ed.renderSuffix = ""
       ed.renderSuffixCursor = false
-    # Ctrl+Shift+R (kitty keyboard protocol; `retry` in DefaultShortcuts,
+    # Ctrl+9 (kitty keyboard protocol; `retry` in DefaultShortcuts,
     # rebindable via [shortcuts]): the `:retry` command as a key — same
     # empty submit. At idle the submit transition resets the editor like
     # Enter on an empty buffer does, so a draft is stashed into
@@ -2964,6 +2965,30 @@ proc inputThreadProc() {.thread.} =
           ed.clearLine()
         queueEmptySubmit()
     minline.CommandProcs["retry"] = retryKey
+    # Ctrl+1 / Ctrl+2 / Ctrl+4 (kitty-protocol terminals; `allow`,
+    # `allow-dir`, `deny` in DefaultShortcuts, rebindable via
+    # [shortcuts]): the :allow / :allow-dir / :deny commands as keys.
+    # Armed only while an ask waits, so a mid-draft press answers the
+    # card and nothing else can ever fire them; the stashed draft rides
+    # out the answer commit the way the mid-turn Ctrl-C path stashes
+    # text across an editor reset.
+    let askCommandKey = proc(cmd: string): minline.KeyCallback =
+      result = proc(ed: var minline.LineEditor) =
+        {.cast(gcsafe).}:
+          if inputModalActive.load(moAcquire): return
+          if not askGateArmed(): return
+          if ed.line.text.len > 0:
+            # Record the draft, then stash it across the answer commit's
+            # editor clear: the next prompt comes back with it.
+            ed.historyAdd()
+            ed.prefillText = ed.line.text
+            ed.clearLine()
+          pushInputEvent(InputEvent(kind: ieCommand, text: cmd))
+          if activeCommandHook != nil:
+            activeCommandHook(cmd)
+    minline.CommandProcs["allow"] = askCommandKey(":allow")
+    minline.CommandProcs["allow-dir"] = askCommandKey(":allow-dir")
+    minline.CommandProcs["deny"] = askCommandKey(":deny")
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].painter = proc(ed: var minline.LineEditor) =

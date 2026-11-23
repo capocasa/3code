@@ -1004,6 +1004,15 @@ proc lastAskDisplayPath*(): string = lastAskDisplay
 
 proc lastAskTargetPath*(): string = lastAskTarget
 
+proc dirComponent*(p: string): string =
+  ## `:allow-dir`'s grant path: an existing directory stays itself,
+  ## anything else (a file, a not-yet-existing path) yields its parent,
+  ## `.` for a bare filename. Canonicaled forms from askCanonical keep
+  ## working here since they are absolute.
+  if dirExists(p): return p
+  let d = parentDir(p)
+  if d.len == 0: "." else: d
+
 
 proc pathLike(s: string): bool =
   ## Loose predicate for tokens scraped from an error line. Over-matching

@@ -31,7 +31,8 @@ const CommandNames* = @[":help", ":tokens", ":clear", ":goal"] & CyberCommandNam
                       ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":verifier",
                       ":show", ":unshow", ":cmd", ":log", ":sessions", ":session", ":resume", ":rename", ":summarize", ":btw",
-                      ":version", ":sandbox", ":sb", ":a", ":d", ":retry", ":private",
+                      ":version", ":sandbox", ":sb", ":a", ":d", ":allow", ":allow-dir",
+                      ":deny", ":retry", ":private",
                       ":quit", ":exit"] & ComputerCommandNames
 
 proc canonicalCommandName*(name: string): tuple[canon, ambig: string] =
@@ -173,7 +174,7 @@ proc classifyCommand*(cmd: string): CommandKind =
     # verbs append to the sandbox file and reload, so they mutate.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "show"): ckSafeImmediate
     else: ckMutating
-  of ":a", ":d":
+  of ":a", ":d", ":allow", ":allow-dir", ":deny":
     # Ask-answer shorthands for `:sandbox allow|deny @d`: policy writes
     # plus a model message, so they queue behind a turn like the verbs
     # they expand to - except while an ask is armed, where the command
@@ -2491,9 +2492,13 @@ proc askAnswerOf*(cmd: string): char =
   let (canon, ambig) = canonicalCommandName(name)
   if ambig.len > 0: return '\0'
   case canon
-  of ":a":
+  of ":a", ":allow":
     if arg.len == 0: 'a' else: '\0'
-  of ":d":
+  of ":allow-dir":
+    # 'A': allow the directory component; the waiting gate widens the
+    # grant to the parent dir (basename shaved when the ask names a file).
+    if arg.len == 0: 'A' else: '\0'
+  of ":d", ":deny":
     if arg.len == 0: 'd' else: '\0'
   of ":sandbox", ":sb":
     let toks = arg.splitWhitespace()
@@ -2812,13 +2817,26 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         ok = false
         respErr "unknown :sandbox verb: " & verb &
           "  (show, on, off, allow, readonly, deny, ask, edit)"
-    of ":a", ":d":
-      # `:a` is `:sandbox allow @d`, `:d` is `:sandbox deny @d` - the last
-      # path an ask requested; an explicit path stands in for @d.
-      let r = sandboxVerbBody(if name == ":a": "allow" else: "deny",
-        if arg.len > 0: arg else: "@d", messages)
-      ok = r.ok
-      body.add r.body
+    of ":a", ":d", ":allow", ":allow-dir", ":deny":
+      # `:a`/`:allow` is `:sandbox allow @d`, `:d`/`:deny` the deny
+      # twin - the last path an ask requested; an explicit path stands
+      # in for @d. `:allow-dir` allows the path's directory instead:
+      # the basename is shaved when the path names a file.
+      if name == ":allow-dir":
+        let raw = if arg.len > 0: arg else: sandbox.lastAskDisplayPath()
+        if raw.len == 0:
+          ok = false
+          respErr "no sandbox ask yet: @d is the last path an ask requested"
+        else:
+          let r = sandboxVerbBody("allow", sandbox.dirComponent(raw), messages)
+          ok = r.ok
+          body.add r.body
+      else:
+        let r = sandboxVerbBody(
+          if name in [":a", ":allow"]: "allow" else: "deny",
+          if arg.len > 0: arg else: "@d", messages)
+        ok = r.ok
+        body.add r.body
     of ":show":
       block followOrDump:
         let running = runningToolViewportIdx()

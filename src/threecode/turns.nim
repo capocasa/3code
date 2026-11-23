@@ -621,13 +621,16 @@ proc askGateDecide(deniedPath: string; cmd: string;
   # output after any retry (each side sees what was decided and
   # whether a retry happened).
   var granted = false
-  if key == 'a':
-    if sandbox.grantAskAllow(target):
+  if key in {'a', 'A'}:
+    # 'A' (:allow-dir) widens the grant to the path's directory: an
+    # existing directory stays itself, a file's basename is shaved.
+    let allowTarget = if key == 'a': target else: sandbox.dirComponent(target)
+    if sandbox.grantAskAllow(allowTarget):
       granted = true
       commitSandboxChangeItem("allow", shown)
-      renderLine("· allowed " & sandbox.askPathDisplay(target) &
+      renderLine("· allowed " & sandbox.askPathDisplay(allowTarget) &
         " - retrying")
-      marker = "sandbox allow " & sandbox.askPathDisplay(target) &
+      marker = "sandbox allow " & sandbox.askPathDisplay(allowTarget) &
         "; " & retryNoun & " retried"
     else:
       renderLine("· policy update failed; not retried")

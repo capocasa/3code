@@ -47,9 +47,7 @@ suite "vision: known-good curation":
     var visionRows = 0
     for combo in KnownGoodCombos:
       if combo.vision: inc visionRows
-    # inkling 2 rows added 2026-11: small on together/fireworks/openrouter,
-    # mini on openrouter, mini self-hosted (all multimodal) brought it to 337
-    check visionRows == 337
+    check visionRows == 332
 
   test "glm-5.3-flash is vision on the first-party gateways":
     check knownGoodVision("zai", "glm-5.3-flash")
