@@ -215,6 +215,10 @@ const
   # Forced-thinking models spend this budget on reasoning before the
   # first answer token, so it is headroom, not just answer length.
   BtwMaxTokens* = 8192
+  BtwCallArgChars* = 200
+    ## How much of a tool call's arguments the aside's flattened context
+    ## carries: a `write` body or a long script is noise for a side
+    ## question, and the whole history rides every aside.
   BtwSystemPrompt* = """You are answering a side question ("btw") about an ongoing coding session. The messages below are the conversation so far, followed by the user's question as the final user message. Answer that question from the conversation's content. Be brief and direct; no filler, no follow-up questions. This exchange is a private aside: it never enters the conversation, so the next real turn will not have seen it."""
 
 type
@@ -230,6 +234,15 @@ type
     sessionHeader*: string  ## x-opencode-session value; "" sends none
     responses*: bool       ## parse shape: output[] (Responses) vs choices[]
   MetaReply* = tuple[answer: string, usage: Usage]
+  MetaAttempt* = object
+    ## One wire attempt of a meta-request, failures itemized so a caller
+    ## with its own retry policy (the `:btw` worker) can classify them
+    ## exactly like the main transport does (`retryCategory`).
+    reply*: MetaReply    ## parsed answer + usage; "" on any failure
+    status*: int         ## HTTP status; 0 when no response arrived
+    errBody*: string     ## the provider's error body, "" when none
+    retryAfter*: string  ## the Retry-After header value, "" when absent
+    err*: string         ## 3code's own failure description, "" on a 200
 
 proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
                        trailingUser: string, maxTokens: int): MetaRequest =
@@ -332,12 +345,21 @@ proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
     result.sessionHeader =
       if conversationId != "": conversationId else: oneShotSessionId()
 
+proc metaRequestAttempt*(req: ptr MetaRequest; label: string): MetaAttempt
+
 proc runMetaRequest*(req: ptr MetaRequest; label: string): MetaReply =
+  ## One attempt of a prebuilt meta-request, answer only: the
+  ## single-shot callers (the summarizer, `askBtw`). Failures come back
+  ## as ("", zeroed usage) with the reason on stderr under `label`.
+  metaRequestAttempt(req, label).reply
+
+proc metaRequestAttempt*(req: ptr MetaRequest; label: string): MetaAttempt =
   ## Fires one prebuilt meta-request and parses the reply. Every input is
   ## read through `req` (never copied into a ref the caller owns), every
   ## allocation it makes dies on the calling thread, so this runs safely
-  ## on a worker. Returns ("", zeroed usage) on any failure; the reason
-  ## goes to stderr under `label`.
+  ## on a worker. A failed attempt reports why (`status`, `errBody`,
+  ## `err`) for the caller's retry policy and goes to stderr under
+  ## `label`; a 200 with an unparsable or error body reports `err`.
   when defined(providerStub):
     # Test stub: the canned-response queue serves the meta-call itself;
     # the payload is re-parsed from the serialized body ("messages" for
@@ -347,9 +369,10 @@ proc runMetaRequest*(req: ptr MetaRequest; label: string): MetaReply =
     let b = parseJson(req.body)
     let payload = if b{"messages"} != nil: b{"messages"} else: b{"input"}
     let answer = stubNextSummarizerReply(payload, stubUsage)
-    return (answer, stubUsage)
+    return MetaAttempt(reply: (answer, stubUsage), status: 200)
   var status = 0
   var respBody = ""
+  var retryAfter = ""
   try:
     let client = newHttpClient(timeout = 120_000,
                                userAgent = modelUserAgent(),
@@ -364,21 +387,25 @@ proc runMetaRequest*(req: ptr MetaRequest; label: string): MetaReply =
                            IOError, "fetching " & req.endpoint)
     status = resp.code.int
     respBody = resp.body
+    retryAfter = resp.headers.getOrDefault("Retry-After")
   except CatchableError as e:
     stderr.writeLine "3code: " & label & ": " & e.msg
-    return ("", Usage())
+    return MetaAttempt(status: 0, err: e.msg)
   if status != 200:
     stderr.writeLine "3code: " & label & ": api " & $status
-    return ("", Usage())
+    return MetaAttempt(status: status, errBody: respBody,
+                       retryAfter: retryAfter, err: "api " & $status)
   let j = try: parseJson(respBody)
           except CatchableError as e:
             stderr.writeLine "3code: " & label & ": " & e.msg
-            return ("", Usage())
+            return MetaAttempt(status: status, errBody: respBody, err: e.msg)
   if "error" in j:
     stderr.writeLine "3code: " & label & ": " & $j["error"]
-    return ("", Usage())
+    return MetaAttempt(status: status, errBody: respBody,
+                       err: $j["error"])
+  result.status = status
   if j{"usage"} != nil:
-    result.usage =
+    result.reply.usage =
       if req.responses: responsesUsage(j{"usage"}) else: parseUsage(j{"usage"})
   if req.responses:
     let output = j{"output"}
@@ -389,13 +416,13 @@ proc runMetaRequest*(req: ptr MetaRequest; label: string): MetaReply =
       if parts == nil or parts.kind != JArray: continue
       for c in parts:
         if c{"type"}.getStr == "output_text":
-          result.answer &= c{"text"}.getStr("")
+          result.reply.answer &= c{"text"}.getStr("")
     return
   let choices = j{"choices"}
   if choices == nil or choices.kind != JArray or choices.len == 0: return
   let msg = choices[0]{"message"}
   if msg == nil or msg.kind != JObject: return
-  result.answer = msg{"content"}.getStr("")
+  result.reply.answer = msg{"content"}.getStr("")
 
 proc metaCallOnce(p: Profile, messages: JsonNode, systemPrompt: string,
                   trailingUser: string, maxTokens: int,
@@ -425,14 +452,55 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   metaCallOnce(p, messages, SummarizerSystemPrompt, "", SummarizeMaxTokens,
                "summarize")
 
+proc btwContext*(messages: JsonNode): JsonNode =
+  ## The aside's read-only view of the live history, with every tool
+  ## exchange flattened to prose. The meta-call carries no tools
+  ## parameter, so a replayed `tool_calls` turn invited the model to
+  ## answer the question with tool calls of its own - an empty
+  ## `content`, i.e. no answer. A tool-call turn keeps its prose and
+  ## gains a `[tool call]` line per call (arguments cut to
+  ## `BtwCallArgChars`); each tool result becomes a user-role
+  ## `[tool result]` block, so the model still knows what the tools
+  ## said. Unchanged messages pass through by reference: the live
+  ## history is never mutated, only rebuilt ones are copies.
+  result = newJArray()
+  if messages == nil or messages.kind != JArray: return
+  for m in messages:
+    if m.kind != JObject or m{"role"}.getStr notin ["assistant", "tool"]:
+      result.add m
+      continue
+    var c = newJObject()
+    if m{"role"}.getStr == "tool":
+      for k, v in m.pairs:
+        if k notin ["role", "tool_call_id", "name"]: c[k] = v
+      c["role"] = %"user"
+      c["content"] = %("[tool result]\n" & userTextContent(m))
+      result.add c
+      continue
+    if m{"tool_calls"} == nil or m{"tool_calls"}.kind != JArray:
+      result.add m
+      continue
+    for k, v in m.pairs:
+      if k != "tool_calls": c[k] = v
+    let calls = m{"tool_calls"}
+    for tc in calls:
+      let fn = tc{"function"}
+      let args = fn{"arguments"}.getStr("")
+      let shown = if args.len > BtwCallArgChars: args[0 ..< BtwCallArgChars] & "..."
+                  else: args
+      c["content"] = %(c["content"].getStr("") &
+        (if c["content"].getStr("").len > 0: "\n" else: "") &
+        "[tool call: " & fn{"name"}.getStr("") & " " & shown & "]")
+    result.add c
+
 proc askBtw*(question: string, messages: JsonNode, p: Profile): MetaReply =
   ## Side-channel question about the conversation: one meta-call with the
   ## live history as read-only context and the question as the final user
   ## message. The answer (and the call's usage) comes back for display
   ## only — callers must not append it (or the question) to `messages`.
   ## `answer` is "" on any failure; `usage` is zeroed with it.
-  let req = buildMetaRequest(p, messages, BtwSystemPrompt, question,
-                             BtwMaxTokens)
+  let req = buildMetaRequest(p, btwContext(messages), BtwSystemPrompt,
+                             question, BtwMaxTokens)
   if req.endpoint == "": return ("", Usage())
   runMetaRequest(addr req, "btw")
 

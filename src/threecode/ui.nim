@@ -89,6 +89,11 @@ type
       ## mode is not armed yet at this point - the kickoff IS the arm).
     armText*: string
       ## The armed text for a transcript mode's kickoff message.
+    btwQuestion*: string
+      ## A `:btw` side question in flight: the controller echoes the
+      ## typed command as the `?`-led question item instead of the `❯`
+      ## prompt line - the command name is plumbing, the question is the
+      ## item, like a goal arm's `⚑` kickoff.
     preNewlineRows*: int
       ## Volatile rows the modal greeting newline opened above the cursor
       ## (written before a modal dispatch). A command converted to a
@@ -219,6 +224,19 @@ proc modeArmWrite*(cmd: string): bool =
     let parts = (if sp < 0: "" else: c[sp+1 .. ^1]).splitWhitespace()
     parts.len > 0 and parts[0] notin ["cancel", "edit"]
   else: false
+
+proc btwQuestionWrite*(cmd: string): bool =
+  ## True for a `:btw QUESTION` command (any accepted prefix): the typed
+  ## line is echoed as the `?`-led question item, never as a `❯` prompt
+  ## line - the command name is plumbing, the question is the item.
+  ## Bare `:btw` and a refused start stay ordinary echoed commands.
+  let c = colonForm(cmd).strip
+  if c.len == 0 or c[0] != ':': return false
+  let sp = c.find(Whitespace)
+  var name = if sp < 0: c else: c[0 ..< sp]
+  let (canon, ambig) = canonicalCommandName(name)
+  if ambig.len > 0: return false
+  canon == ":btw" and sp >= 0 and c[sp+1 .. ^1].strip.len > 0
 
 proc pathCompletions*(frag: string): seq[string] =
   let base = safeCwd()
@@ -2196,18 +2214,25 @@ proc deliverFinishedBtw*() =
   ## post-turn drain waits here until the running turn parks) — so the
   ## usage accounting below can never race a live turn. A wizard modal
   ## that owns the screen waits the answer out; the next park delivers.
-  ## Each answer
-  ## lands as its own dim 💬 quote block, and its burned tokens are
-  ## ledgered and summed onto the token bar exactly like a verifier
-  ## check's.
-  if btwJobsLive() == 0: return
+  ## Each answer lands as its own dim `!` quote block under the `?`
+  ## question item, an aside an interrupt dropped lands as a dim
+  ## `! interrupted by user`, and a failed one as the usual error line;
+  ## its burned tokens are ledgered and summed onto the token bar
+  ## exactly like a verifier check's. The poll also frees retired
+  ## (cancelled, still-socket-bound) workers, so it runs unconditionally.
   if inputModalActive.load(moAcquire): return
   if inputMessages == nil or inputSession == nil or inputProfile == nil:
     return
-  var replies: seq[MetaReply]
+  var replies: seq[BtwReply]
   pollBtw(replies)
   for r in replies:
     {.cast(gcsafe).}:
+      if r.cancelled:
+        let bytes = btwCancelledBytes()
+        termengine.noteNonMessageTail(bytes, inputMessages[].len)
+        commitTranscriptBytes(bytes, restoreEditor = true,
+                              reserveFooter = true)
+        continue
       if r.answer.strip.len == 0:
         let errBytes = errLnS(
           "btw: no answer (the side-question call failed; see stderr)")
@@ -2618,6 +2643,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   var armGoal = false
   var armMode: ModeDesc
   var armText = ""
+  var btwQuestion = ""
   template resp(b: string) = body.add cmdResponseS(b)
   template respErr(b: string) = body.add cmdErrorS(b)
   block dispatch:
@@ -3042,7 +3068,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       # snapshot of the live history, answered on a worker thread so the
       # command itself returns at once — a system command never blocks
       # the prompt. `deliverFinishedBtw` (polled from the input wait)
-      # commits the answer to scrollback under the 💬 icon and adds its
+      # commits the answer to scrollback under the `!` icon and adds its
       # burned tokens to the session and the bar. Neither the question
       # nor the answer enters `messages`, so the next real turn starts as
       # if it never happened.
@@ -3056,7 +3082,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         ok = false
         respErr "could not start the side question"
       else:
-        resp BtwIcon & "  asked — the answer lands below when it arrives"
+        # No body: the controller commits the question itself as the
+        # `?`-led item in place of the echoed command line.
+        btwQuestion = arg
     else:
       ok = false
       let suggestion = nearestCommand(name)
@@ -3077,4 +3105,5 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                 disposition: disposition,
                 startGoalTurn: armGoal,
                 armMode: armMode,
-                armText: armText)
+                armText: armText,
+                btwQuestion: btwQuestion)

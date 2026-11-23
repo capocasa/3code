@@ -11,8 +11,8 @@ import std/[json, strutils, unittest]
 import std/net except send
 from std/nativesockets import selectRead
 import std/atomics
-import threecode/[btwthread, compact, display, fatprompt, minline, turns,
-                  types, ui, util]
+import threecode/[api, btwthread, compact, display, fatprompt, minline,
+                  turns, types, ui, util]
 
 when defined(posix):
   import std/posix except SocketHandle
@@ -23,6 +23,7 @@ type
     stop: bool
     gate: Atomic[bool]  # false holds every response until the test flips it
     payloads: seq[string]  # request bodies, in arrival order
+    failFirst: Atomic[int]  # answer this many requests with a 503 first
     thread: Thread[BtwSrv]  # inside the ref: the OS trampoline keeps a
                            # pointer to this object, so it must not move
 
@@ -72,6 +73,13 @@ proc serve(s: BtwSrv) {.thread.} =
         while not s.gate.load(moAcquire) and waited < 10:
           discard sleep(1)
           inc waited
+        if s.failFirst.load(moAcquire) > 0:
+          discard s.failFirst.fetchSub(1, moAcquire)
+          let err = """{"error":"overloaded"}"""
+          send(client, "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nRetry-After: 1\r\n" &
+            "Content-Length: " & $err.len & "\r\nConnection: close\r\n\r\n" &
+            err)
+          continue
         let reply = """{"choices":[{"message":{"role":"assistant","content":"SIDE ANSWER"}}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"""
         send(client, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
           "Content-Length: " & $reply.len & "\r\nConnection: close\r\n\r\n" &
@@ -197,10 +205,13 @@ suite ":btw side questions":
     check r.recognized and r.ok
     check r.name == "btw"
     check "SIDE ANSWER" notin r.body
-    check BtwIcon in r.body
+    # No receipt line: the controller echoes the question itself as the
+    # `?`-led item (the goal kickoff's shape).
+    check r.body == ""
+    check r.btwQuestion == "what did foo.nim have?"
     check btwJobsLive() == 1
     h.srv.gate.store(true, moRelease)
-    var replies: seq[MetaReply]
+    var replies: seq[BtwReply]
     waitBtw(replies, 10_000)
     check btwJobsLive() == 0
     check replies.len == 1
@@ -245,9 +256,105 @@ suite ":btw side questions":
     check fatPromptState.footer.restingLabel == contextLabel(111, 1_000)
 
   test "the answer renders as a dim icon-led quote block":
+    # `?` asked, `!` answers: the aside's icons are the question mark
+    # and the exclamation mark.
+    check BtwQuestionIcon == "?"
+    check BtwIcon == "!"
     let bytes = btwAnswerBytes("first line\nsecond line")
-    check bytes.contains(BtwIcon)
+    check bytes.contains(GreyFg & BtwIcon & Reset & " ")
     check bytes.contains(GreyFg)
     check "first line" in bytes
     check "second line" in bytes
     check btwAnswerBytes("   ") == ""
+    let cancelled = btwCancelledBytes()
+    check cancelled.contains(BtwIcon)
+    check cancelled.contains(InterruptedByUserMsg)
+
+  test "the aside retries a 503 like a main request":
+    # Two 503s, then the answer: the worker's curve takes both failures
+    # and lands the third attempt's reply as one delivered aside.
+    let h = startBtwSrv()
+    defer: stopBtwSrv(h)
+    h.srv.failFirst.store(2, moRelease)
+    check startBtw("what did foo.nim have?", history(), h.prof)
+    var replies: seq[BtwReply]
+    waitBtw(replies, 30_000)
+    check btwJobsLive() == 0
+    check h.srv.payloads.len == 3
+    check replies.len == 1
+    check not replies[0].cancelled
+    check replies[0].answer == "SIDE ANSWER"
+    check replies[0].usage.totalTokens == 18
+
+  test "an interrupt cancels the aside instead of leaving it unanswered":
+    # The server holds its response; the interrupt lands mid-call. The
+    # poll delivers the cancellation at once (the question's `?` item
+    # gets its `! interrupted by user` row) and the registry is clear,
+    # so a later aside's answer never queues behind the abandoned call.
+    let h = startBtwSrv()
+    defer: stopBtwSrv(h)
+    h.srv.gate.store(false, moRelease)
+    check startBtw("what did foo.nim have?", history(), h.prof)
+    requestTurnInterrupt("test")
+    defer: clearInterrupted()
+    var replies: seq[BtwReply]
+    pollBtw(replies)
+    check replies.len == 1
+    check replies[0].cancelled
+    check replies[0].answer == ""
+    check btwJobsLive() == 0
+    # A fresh aside started under the interrupt is not cancelled by it:
+    # the stale flag must not read as a new interrupt.
+    h.srv.gate.store(true, moRelease)
+    check startBtw("and now?", history(), h.prof)
+    replies.setLen 0
+    waitBtw(replies, 30_000)
+    check replies.len == 1
+    check not replies[0].cancelled
+    check replies[0].answer == "SIDE ANSWER"
+    # The abandoned worker is released by its own timeout handshake and
+    # freed on a later poll.
+    h.srv.gate.store(true, moRelease)
+    for _ in 0 ..< (BtwReapWaitMs div 1000 + 4):
+      replies.setLen 0
+      pollBtw(replies)
+      if btwRetiredLive() == 0: break
+      discard sleep(1)
+    check btwRetiredLive() == 0
+
+  test "btwContext flattens the tool exchange to prose":
+    # The meta-call carries no tools parameter: replayed tool_calls made
+    # the model answer with tool calls of its own (an empty content, i.e.
+    # no answer). Prose survives, calls and results become bracketed
+    # lines, and the live history is untouched.
+    let messages = %* [
+      {"role": "system", "content": "sysprompt"},
+      {"role": "user", "content": "list the files"},
+      {"role": "assistant", "content": "naming them", "tool_calls": [
+        {"id": "c1", "type": "function", "function":
+          {"name": "bash", "arguments": "{\"command\":\"ls\"}"}}]},
+      {"role": "tool", "tool_call_id": "c1", "name": "bash", "content": "a.nim"},
+      {"role": "assistant", "content": "there is one file"},
+    ]
+    let before = $messages
+    let ctx = btwContext(messages)
+    check ctx.len == 5
+    check ctx[0] == messages[0]
+    check ctx[1] == messages[1]
+    check ctx[2]{"tool_calls"} == nil
+    check ctx[2]{"content"}.getStr == "naming them\n[tool call: bash {\"command\":\"ls\"}]"
+    check ctx[3]{"role"}.getStr == "user"
+    check ctx[3]{"tool_call_id"} == nil
+    check ctx[3]{"content"}.getStr == "[tool result]\na.nim"
+    check ctx[4]{"content"}.getStr == "there is one file"
+    # An argument longer than the cap is cut, a silent tool-call turn
+    # gets its bracket line alone.
+    let long = repeat("x", BtwCallArgChars + 50)
+    let silent = %*[
+      {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c2", "type": "function", "function":
+          {"name": "write", "arguments": long}}]}]
+    let flat = btwContext(silent)
+    check flat[0]{"content"}.getStr == "[tool call: write " &
+      long[0 ..< BtwCallArgChars] & "...]"
+    check $messages == before

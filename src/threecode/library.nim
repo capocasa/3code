@@ -578,13 +578,19 @@ proc command*(s: AgentSession; cmd: string): string =
     result = normalizeItem(promptBody(s, ""))
   # A `:btw` fires on a worker thread (the REPL command never blocks);
   # this API is synchronous by contract, so the answer is joined and
-  # folded into the returned body instead of being dropped. Its tokens
-  # are ledgered and summed onto the bar exactly as the REPL's delivery
-  # path does.
+  # folded into the returned body instead of being dropped, under the
+  # `?` question line the REPL commits in place of the echoed command.
+  # Its tokens are ledgered and summed onto the bar exactly as the
+  # REPL's delivery path does.
   if btwJobsLive() > 0:
-    var replies: seq[MetaReply]
+    if res.btwQuestion != "":
+      result = BtwQuestionIcon & " " & res.btwQuestion
+    var replies: seq[BtwReply]
     waitBtw(replies)
     for r in replies:
+      if r.cancelled:
+        result.add "\n\nbtw: " & InterruptedByUserMsg
+        continue
       if r.answer.strip.len == 0:
         result.add "\n\nbtw: no answer (the side-question call failed)"
         continue
