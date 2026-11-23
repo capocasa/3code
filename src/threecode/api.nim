@@ -2576,7 +2576,9 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ##   `thinking.effort` (`high` default, `max` deeper) on GLM-5.2 only.
   ##   GLM-5.3 replaces both: forced thinking, top-level `reasoning_effort`
   ##   (`low`/`high`/`max`); `thinking.type: disabled` is a hard error and
-  ##   `thinking.effort` is silently ignored.
+  ##   `thinking.effort` is silently ignored. GLM-5.4 keeps the 5.3 effort
+  ##   ladder and accepts `thinking.type: disabled` again (probed live,
+  ##   2026-11-23: 200 where 5.3 rejects it).
   ## - `reasoning_effort` (`high`/`max`) on Together for GLM-5.2; Together
   ##   accepts only those two effort levels and ignores the field on older
   ##   GLM (which think whenever the parameter is absent).
@@ -2604,16 +2606,22 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ##   max_tokens budget and the turn comes back as an empty `length` reply.
   ## Inert stacks (cerebras) accept nothing and always think, so `off` is
   ## silently a no-op there.
-  # GLM-5.2 and 5.3 are the GLMs with a graded effort knob (variants "2"
-  # and "3"); every other GLM is on/off. Variant encodes the minor version
-  # digit (4.7 -> "7", 5.1 -> "1", 5.2 -> "2", 5.3 -> "3").
+  # GLM-5.2 and up are the GLMs with a graded effort knob (variants "2",
+  # "3", "4"); every other GLM is on/off. Variant encodes the minor version
+  # digit (4.7 -> "7", 5.1 -> "1", 5.2 -> "2", 5.3 -> "3", 5.4 -> "4").
   # Variant may carry a suffix ("2-free", "3-flash"); compare the leading digit.
   let glm52 = p.family == "glm" and p.version == "5" and p.variant.startsWith("2")
   let glm53 = p.family == "glm" and p.version == "5" and p.variant.startsWith("3")
+  let glm54 = p.family == "glm" and p.version == "5" and p.variant.startsWith("4")
   case providerOf(p)
   of "zai", "zai-coding", "zaicode":
     if glm53:
       case p.reasoning
+      of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
+      else: discard
+    elif glm54:
+      case p.reasoning
+      of "off": body["thinking"] = %*{"type": "disabled"}
       of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
       else: discard
     else:
