@@ -96,3 +96,24 @@ suite "no-config bootstrap":
     tty.expectExit(ExitConfig.int, timeoutMs = 5000)
 
     echo "  PASS: current-without-provider config errors out, no wizard"
+
+  test "config with no usable provider warns and reaches the prompt":
+    # First run means no config file. A config that exists but defines
+    # no working provider is a config problem: warn and point at
+    # :provider add, never open the bootstrap wizard.
+    let root = newFixture("config_no_provider")
+    createDir(root / "xdg" / "3code")
+    writeFile(root / "xdg" / "3code" / "config",
+      "[settings]\nsandbox = \"off\"\n")
+    let tty = startTty(root)
+    defer: tty.close()
+    tty.expect "no usable provider"
+    tty.expect ":provider add"
+    tty.expectNo "let's add one"
+    tty.expect "\u276f"
+    tty.send ":q"
+    tty.send "\r"
+    tty.drain(300)
+    tty.expectExit(0, timeoutMs = 5000)
+
+    echo "  PASS: config without providers warns, no wizard"

@@ -1504,6 +1504,38 @@ proc configPath*(): string =
   if configLayers.len > 0: configLayers[^1]
   else: userConfigRoot() / "config"
 
+proc configCarriesUserContent(path: string): bool =
+  ## False only for a config whose every key sits in `[test]`: the tty
+  ## harness injects its IPC channel into an otherwise empty config file,
+  ## and that must not make a fresh install look configured. An empty or
+  ## comments-only file still counts: it exists because someone wrote it.
+  var section = ""
+  var sawTestKey = false
+  let raw = try: readFile(path)
+            except OSError: return true
+  for line in raw.splitLines:
+    let t = line.strip
+    if t.len == 0 or t[0] in {';', '#'}: continue
+    if t.startsWith('[') and t.endsWith(']'):
+      section = t[1 ..< t.len - 1].strip.toLowerAscii
+    elif section != "test":
+      return true
+    else:
+      sawTestKey = true
+  not sawTestKey
+
+proc firstExistingConfigFile*(): string =
+  ## The config file to name when one exists but nothing in it runs: the
+  ## first read layer with user content, else the write target (also
+  ## under `-C`, which reads none but must not make an existing config
+  ## look like a first run). "" when there is no config file anywhere,
+  ## which is the only state that counts as a first run.
+  for p in configReadPaths():
+    if fileExists(p) and configCarriesUserContent(p): return p
+  let target = configPath()
+  if fileExists(target) and configCarriesUserContent(target): return target
+  ""
+
 proc discoverProjectConfig*(startDir: string): string =
   ## The nearest `.3code/config` walking up from `startDir` to the
   ## filesystem root: the project-local config layer, "" when no
@@ -2025,6 +2057,24 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
       prof.vision = visionCapable(prof)
       return prof
   Profile()
+
+proc firstUsableProfile*(current: string;
+                         providers: seq[ProviderRec]): Profile =
+  ## The last-resort rung of profile resolution: the current provider's
+  ## first runnable model when it still has one, else the first provider
+  ## in config order that builds. Empty when no configured provider is
+  ## usable (no url, no key, no models), which is the caller's diagnosis
+  ## to make, never a reason to pretend this is a first run.
+  let dot = current.find('.')
+  let cur = if dot < 0: current else: current[0 ..< dot]
+  for pr in providers:
+    if pr.name != cur: continue
+    result = buildProfile(pr.name, providers, "")
+    if result.name.len > 0: return
+  for pr in providers:
+    result = buildProfile(pr.name, providers, "")
+    if result.name.len > 0: return
+  result = Profile()
 
 proc availableVerifiers*(providers: seq[ProviderRec]): seq[string] =
   ## The curated verification-class models whose provider section is
