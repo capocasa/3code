@@ -2,6 +2,31 @@ Changelog
 
 Unreleased
 
+- **First run means no config file.** The provider wizard opened
+  whenever no profile resolved, so a config that existed but defined
+  no working provider (no url, no key, no models) landed in a wizard
+  that refused every name with "already configured". It now opens only
+  when there is no config file anywhere; an existing config with
+  nothing usable warns `no usable provider in <file>. use :provider add
+  to configure one.` and goes straight to the prompt. The tty harness's
+  `[test]`-only config is IPC plumbing, not user configuration, and
+  does not count; an empty or comments-only file does (someone wrote
+  it), and `-C` still sees an existing user config.
+  (`tests/config/test_first_run.nim`,
+  `tests/tty/test_no_config_bootstrap.nim`)
+
+- **A profile that no longer resolves falls through the rungs instead
+  of surfacing as "no provider configured".** Resuming a session whose
+  provider or model left the config since lands on the config current,
+  the way `:resume` keeps what is running. When nothing requested
+  resolves, the last rung takes another model on the current provider,
+  then another provider in config order, and aligns `activeCurrent` so
+  `currentProvider()`, `:model` and completion agree with the profile
+  actually running; the old `limitproviders`-only fallback is that rung
+  now. An explicit model that does not resolve stays empty so the
+  caller reports it instead of silently switching.
+  (`tests/config/test_resume_profile.nim`)
+
 - **GLM-5.4 joins the catalog on both first-party z.ai endpoints.**
   `zai.glm-5.4` and `zaicode.glm-5.4` are curated: vision reaches the
   flagship GLM for the first time (5.3 needed its flash sibling for
