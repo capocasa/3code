@@ -664,13 +664,15 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("fireworks", "accounts/fireworks/models/inkling-2-small", "inkling", "2", "small", "medium", 0.2, 8192, tbNone, false, 1_040_000, true, true),
     ("openrouter", "thinkingmachines/inkling-2-small", "inkling", "2", "small", "medium", 0.2, 8192, tbNone, false, 1_048_576, false, true),
     ("openrouter", "thinkingmachines/inkling-2-mini", "inkling", "2", "mini", "medium", 0.2, 8192, tbNone, false, 1_048_576, false, true),
-    # Inkling 2 Mini self-hosted on the user's own vLLM (vllm serve
-    # thinkingmachines/Inkling-2-Mini; also llama.cpp/Ollama with
-    # OpenAI-compatible surfaces). allowPrivate: weights run locally,
-    # nothing leaves the machine. Curated window is the practical
-    # single-GPU recipe (262144, e.g. one 32GB RTX 5090 or a pair of
-    # 3090s); bigger stacks can raise it toward the card's 1M.
-    ("inkling-local", "thinkingmachines/Inkling-2-Mini", "inkling", "2", "mini", "medium", 0.2, 8192, tbNone, false, 262_144, true, true),
+    # Inkling 2 Mini served locally: the generic `local` catalog slot
+    # (localhost:11434, ollama's OpenAI-compatible surface; vLLM,
+    # llama.cpp and friends speak the same API and a `:provider add`
+    # block with a custom name resolves onto the same rows via the
+    # ollama alias). allowPrivate: weights run locally, nothing leaves
+    # the machine. Curated window is the practical single-GPU recipe
+    # (262144, e.g. one 32GB RTX 5090 or a pair of 3090s); bigger
+    # stacks can raise it toward the card's 1M.
+    ("local", "thinkingmachines/Inkling-2-Mini", "inkling", "2", "mini", "medium", 0.2, 8192, tbNone, false, 262_144, true, true),
 
     # mimo (Xiaomi MiMo: V2.6-Pro is the 1.02T MoE / 42B active flagship,
     # V2.6-Flash the 309B / 15B active sibling; both 1M context, 128K max
@@ -4130,6 +4132,7 @@ proc canonicalKnownGoodProvider*(provider: string): string =
   elif p == "claudecode": "anthropic"
   elif p == "geminicli": "google"
   elif p == "alephalpha": "kolibri"  # self-host alias, same vLLM surface
+  elif p == "ollama": "local"  # local OpenAI-compatible server (ollama et al)
   else: p
 
 # ---------------------------------------------------------------------------

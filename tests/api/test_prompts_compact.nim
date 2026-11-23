@@ -739,17 +739,21 @@ suite "prompts: inkling family":
     check f == "inkling"
     check v == "2"
     check vr == "small"
-    let (_, v2, vr2) = knownGoodTags("inkling-local",
+    let (_, v2, vr2) = knownGoodTags("local",
       "thinkingmachines/Inkling-2-Mini")
     check v2 == "2"
     check vr2 == "mini"
+    # ollama-shaped configs resolve onto the same local rows
+    let (_, _, vr3) = knownGoodTags("ollama",
+      "thinkingmachines/Inkling-2-Mini")
+    check vr3 == "mini"
 
   test "inkling 2 context windows":
     check knownGoodContextWindow("together",
       "thinkingmachines/Inkling-2-Small") == 1_000_000
     check knownGoodContextWindow("openrouter",
       "thinkingmachines/inkling-2-mini") == 1_048_576
-    check knownGoodContextWindow("inkling-local",
+    check knownGoodContextWindow("local",
       "thinkingmachines/Inkling-2-Mini") == 262_144
 
 suite "compact: decideContextAction":
