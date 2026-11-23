@@ -290,14 +290,15 @@ var inputThreadRunning* = false
 #
 # When a sandboxed bash command is denied on an `ask` rule, the
 # controller (main thread) arms this gate and paints the question into
-# the tool viewport (runBashWithViewport). The input thread, which owns
-# stdin inside its persistent poll loop, then diverts the next keypress
-# to the gate instead of the editor: f = allow (narrow), d = allow
-# (broad), n / Enter / Ctrl-C = deny. No second reader of stdin
-# ever exists, so nothing races. While armed the gate is modal: it
-# consumes every byte, so stray typing never lands in the prompt draft.
-# The controller waits with a timeout (default 60s, override with the
-# [settings] ask_timeout_ms config key) and treats silence as deny.
+# the tool viewport (runBashWithViewport). Typing is never diverted:
+# the editor stays live, and the answer arrives as a submitted command
+# (`:a` / `:d`, the shorthands for `:sandbox allow|deny @d` - @d being
+# the pending ask path). The command hook recognizes an ask answer
+# while the gate is armed and posts the decision here; the wait then
+# returns and the controller grants (and retries) or denies. Silence
+# until the timeout (default 60s, override with the [settings]
+# ask_timeout_ms config key) counts as deny, with the deadline ticking
+# down on the card the whole while.
 var
   askGatePending: Atomic[bool]
   askGateAnswer: Atomic[int]
@@ -339,49 +340,48 @@ proc armAskGate*(): bool =
   askGatePending.store(true, moRelease)
   true
 
-proc waitAskKey*(timeoutMs = -1): char =
-  ## Block for one decisive keypress of an armed gate. Returns 'a', 'f',
-  ## 'd', or 'n'; '\0' when the wait timed out. 'd'/'n'/'\0' all map to
-  ## "deny, do not retry" at the call site, so callers may treat '\0' as n.
+proc waitAskKey*(timeoutMs = -1; onSecond: proc(remainS: int) = nil): char =
+  ## Block for the answer of an armed gate. Returns 'a' (allow) or 'd'
+  ## (deny); '\0' when the wait timed out - which also denies at the
+  ## call site. `onSecond` fires whenever the whole seconds left on the
+  ## deadline change (starting with the full budget), so the card can
+  ## repaint its countdown.
   let cap = if timeoutMs > 0: timeoutMs else: askTimeoutMs()
   let deadline = epochTime() + cap.float / 1000.0
-  while epochTime() < deadline:
+  var shownS = -1
+  while true:
+    let now = epochTime()
     if askGateAnswered.load(moAcquire): break
     if not inputThreadRunning: break
+    if now >= deadline: break
+    let remainS = max(0, int((deadline - now) * 1000.0 + 999.0) div 1000)
+    if remainS != shownS:
+      shownS = remainS
+      if onSecond != nil: onSecond(remainS)
     sleep(20)
   askGatePending.store(false, moRelease)
   if not askGateAnswered.load(moAcquire): return '\0'
   char(askGateAnswer.load(moRelaxed))
 
-proc requestAskKey*(timeoutMs = -1): char =
-  ## Arm the ask gate and block for one decisive keypress. Returns
-  ## 'a', 'f', 'd', or 'n'; '\0' when the gate is unavailable (headless)
-  ## or the wait timed out.
+proc requestAskKey*(timeoutMs = -1; onSecond: proc(remainS: int) = nil): char =
+  ## Arm the ask gate and block for its answer. Returns 'a' or 'd';
+  ## '\0' when the gate is unavailable (headless) or the wait timed out.
   if not armAskGate(): return '\0'
-  waitAskKey(timeoutMs)
+  waitAskKey(timeoutMs, onSecond)
 
-proc askGateConsume(b: int): bool =
-  ## Input-thread side: called for each stdin byte while the gate is
-  ## armed. Always consumes the byte (returns true); decisive keys also
-  ## post the answer, non-decisive ones are swallowed so the editor
-  ## draft stays clean. Runs inside the persistent getCh loop, before
-  ## the editor sees anything. ESC is deliberately not decisive: an
-  ## arrow key's lead byte would otherwise deny the ask.
-  case b
-  of 'a'.ord, 'A'.ord:
-    askGateAnswer.store('a'.ord, moRelaxed)
-    askGateAnswered.store(true, moRelease)
-  of 'f'.ord, 'F'.ord:
-    askGateAnswer.store('f'.ord, moRelaxed)
-    askGateAnswered.store(true, moRelease)
-  of 'd'.ord, 'D'.ord:
-    askGateAnswer.store('d'.ord, moRelaxed)
-    askGateAnswered.store(true, moRelease)
-  of 'n'.ord, 'N'.ord, 0x03, 0x0d, 0x0a:
-    askGateAnswer.store('n'.ord, moRelaxed)
-    askGateAnswered.store(true, moRelease)
-  else: discard
-  true
+proc askGateArmed*(): bool =
+  ## Whether an ask is waiting for a command answer right now. The
+  ## command hook consults this to run `:a`/`:d` inline (posting the
+  ## decision) instead of queueing them behind the blocked turn.
+  askGatePending.load(moAcquire)
+
+proc postAskAnswer*(answer: char) =
+  ## Input-thread side: deliver a submitted ask answer to the waiting
+  ## controller. 'a' allows, 'd' denies; anything else is ignored so a
+  ## bogus recognition can never answer a real ask.
+  if answer notin {'a', 'd'}: return
+  askGateAnswer.store(answer.ord, moRelaxed)
+  askGateAnswered.store(true, moRelease)
 
 func structuralTailByte(b: int): bool =
   ## Structural tail bytes of CSI / OSC replies that can land before the
@@ -2707,14 +2707,6 @@ proc inputThreadProc() {.thread.} =
               result = mousePushback[0]
               mousePushback.delete(0)
               return
-          # The ask gate outranks the idle-submit park: a sandbox ask is
-          # modal, and its 60s window must not be eaten by a parked
-          # prompt waiting for the controller to drain a queued submit.
-          if askGatePending.load(moAcquire) and
-              (pendingInput.len > 0 or fillPending(200.cint)):
-            discard askGateConsume(pendingInput[0])
-            pendingInput.delete(0)
-            continue
           # Park the persistent prompt (not the wizard) on a stale
           # idle-submit; see the protocol header for the lifecycle.
           if inputIdleLinePending.load(moAcquire) and
@@ -2722,16 +2714,6 @@ proc inputThreadProc() {.thread.} =
             sleep(5)
             continue
           if pendingInput.len > 0 or fillPending(200.cint):
-            # A byte that lands in this poll window after the gate branch's
-            # own poll timed out must still divert: once a turn has released
-            # the idle-submit park the editor path is live, and without this
-            # re-check the ask answer races into the draft (the `:!` flow
-            # never sees it because the park keeps only the gate branch
-            # polling).
-            if askGatePending.load(moAcquire):
-              discard askGateConsume(pendingInput[0])
-              pendingInput.delete(0)
-              continue
             when defined(posix):
               # A byte that landed in this same poll window: mouse reports
               # are intercepted at the read point (a report never reaches
@@ -2836,30 +2818,6 @@ proc inputThreadProc() {.thread.} =
               drainedChar = first
               break
             startupDrainDone = true
-          # The ask gate outranks everything below, mirroring the posix
-          # branch: while it is armed every byte goes to askGateConsume
-          # and none reach the editor. VT input has an honest readiness
-          # probe (consoleVtByteReady) so the wait can poll; a legacy
-          # console has none and parks in the blocking read, and a gate
-          # that disarms mid-read hands the byte to the editor via
-          # drainedChar instead of swallowing it.
-          if askGatePending.load(moAcquire):
-            if drainedChar != -1:
-              discard askGateConsume(drainedChar)
-              drainedChar = -1
-            elif vtInputEnabled:
-              if minline.consoleVtByteReady():
-                discard askGateConsume(getchr().int)
-              else:
-                sleep(20)
-            else:
-              let b = getchr().int
-              if b != -1:
-                if askGatePending.load(moAcquire):
-                  discard askGateConsume(b)
-                else:
-                  drainedChar = b
-            continue
           if inputIdleLinePending.load(moAcquire) and
              not inputModalActive.load(moAcquire):
             sleep(5)
@@ -2875,31 +2833,21 @@ proc inputThreadProc() {.thread.} =
             # poll timeout above. `consoleVtByteReady` is the honest
             # "getchr returns a byte right now" probe; `_kbhit` counts
             # charless records (key-ups), so the legacy-console path below
-            # must keep its blocking read. The loop condition also watches
-            # the ask gate: this inner loop would otherwise spin without
-            # re-reaching the gate branch at the top, and an armed ask's
-            # answer key would reach the editor instead.
-            while inputRunning() and not askGatePending.load(moAcquire):
+            # must keep its blocking read.
+            while inputRunning():
               if minline.consoleVtByteReady():
                 draftLastKeyAt = epochTime()
                 return getchr().int
               maybeSaveDraft()
               sleep(50)
-            if inputRunning(): continue
             return -1
           # Legacy console: no honest readiness probe. Tick the debounce
           # just before parking in the blocking read — the buffer has been
           # untouched since the pause began, so a settled, sentence-complete
-          # draft saves here; a fast typist is still inside the window. A
-          # gate armed while the read was parked diverts the byte instead
-          # of handing it to the editor.
+          # draft saves here; a fast typist is still inside the window.
           maybeSaveDraft()
           draftLastKeyAt = epochTime()
-          let b = getchr().int
-          if askGatePending.load(moAcquire) and b != -1:
-            discard askGateConsume(b)
-            continue
-          return b
+          return getchr().int
         -1
       let hasPendingInput: minline.HasPendingInputProc = nil
 

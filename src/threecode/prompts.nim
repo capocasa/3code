@@ -3984,11 +3984,14 @@ commands:
   :sandbox allow T    add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
   :sandbox deny T     add a deny rule (deny T)
-  :sandbox ask P      deny P, but offer a one-key approval when a
-                      sandboxed command is blocked on P (allow on
-                      a = path, f = its folder; d/timeout keeps the
-                      denial)
+  :sandbox ask P      deny P, but a sandboxed command blocked on P
+                      raises the timed ask line (see input): :a
+                      allows the path and retries, :d or the countdown
+                      denies it; either answer persists as a rule
   :sandbox edit       open the policy file in $VISUAL/$EDITOR, reload on quit
+  :a [P]              allow P (bare: @d, the path the waiting ask named)
+                      - shorthand for :sandbox allow; answers that ask
+  :d [P]              deny P / @d likewise - the deny twin of :a
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny, ask; see .sandbox)
@@ -4010,6 +4013,11 @@ input:
                 :commands send in order at the turn's end, and backspace
                 on an empty prompt pulls the last queued line back into
                 the editor
+  ask answer    a sandbox ask shows ":a to allow <path>, :d or wait Ns
+                to deny" with a live countdown; :a allows the path and
+                retries, :d or the elapsed countdown denies it (both
+                persist as sandbox rules); other typing reaches the
+                editor as usual
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line

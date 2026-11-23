@@ -1,16 +1,25 @@
 discard """
-  ## The ask gate's one-key answers are diverted from the input thread
-  ## on a real tty (posix PTY or Windows ConPTY). The stub binary
-  ## normally skips sandbox init (REPL tests want the pre-sandbox
-  ## timing); test.stub_sandbox=1 opts this suite back in so the
-  ## ask rules are enforced for real. `:! CMD` rides the same
-  ## runBashWithViewport ask gate a model bash call takes, without
-  ## stubbing the model turn; the write-tool tests pin the file-tool
-  ## dispatch hook with a stubbed one-write model turn. The bash legs
-  ## need kernel enforcement of bash children, so they probe the
-  ## backend once and skip where it is absent (Windows CI has no
-  ## sandwall fence; a proven host runs them for real); the tool legs
-  ## are policy-driven in-process and run everywhere.
+  ## The ask gate's answers are submitted commands on a real tty (posix
+  ## PTY or Windows ConPTY): typing stays in the editor while an ask
+  ## waits, and `:a` / `:d` submitted mid-turn answer it. The card is
+  ## one line - ":a to allow <path>, :d or wait Ns to deny" - with the
+  ## deadline counting down on it; allow and deny (explicit or timeout)
+  ## both persist a rule, flipping an identical ask rule in place, and
+  ## the `[sandbox ask: ...]` marker in the tool output records the
+  ## decision for the model. The stub binary normally skips sandbox
+  ## init (REPL tests want the pre-sandbox timing);
+  ## test.stub_sandbox=1 opts this suite back in so the ask rules are
+  ## enforced for real. `:! CMD` rides the same runBashWithViewport ask
+  ## gate a model bash call takes, without stubbing the model turn; the
+  ## write-tool tests pin the file-tool dispatch hook with a stubbed
+  ## one-write model turn. The bash legs need kernel enforcement of
+  ## bash children, so they probe the backend once and skip where it is
+  ## absent (Windows CI has no sandwall fence; a proven host runs them
+  ## for real); the tool legs are policy-driven in-process and run
+  ## everywhere. The card rides the live tool viewport and the item
+  ## commit folds it away, so the durable assertions are the policy
+  ## file, the retry's effect on disk, and the marker the session
+  ## records.
 """
 import std/[json, os, osproc, strutils, times, unittest]
 import tty_expect
@@ -94,15 +103,15 @@ proc typeText(s: TtySession; text: string) =
     s.send($ch)
     s.drain(10)
 
-proc sendAskKey(s: TtySession; key: char) =
-  ## The ask gate consumes the byte before the editor sees it, so there
-  ## is no echo; send exactly one byte, no newline. The pre-send drain
-  ## keeps the byte from outrunning the gate arming (the card's last
-  ## line paints microseconds before requestAskKey blocks): a key that
-  ## lands while the editor still owns stdin would leak into the draft
-  ## instead of answering the ask.
+proc answerAsk(s: TtySession; ans: string) =
+  ## The answer is a submitted command (`:a` / `:d`), not a diverted
+  ## key: type it and press Enter while the ask waits. The pre-send
+  ## drain keeps the submit from outrunning the gate arming (the card's
+  ## last line paints microseconds before the ask arms); an early
+  ## submit would queue behind the turn instead of answering it.
   s.drain(80)
-  s.send($key)
+  s.typeText ans
+  s.send "\n"
   s.drain(30)
 
 var bashBackendCache = -1
@@ -228,7 +237,7 @@ proc waitForFileContent(tty: TtySession; path, want: string;
   false
 
 suite "sandbox ask prompt":
-  test "f allows the ask root and the retry lands":
+  test ":a allows the denied file and persists the allow":
     if bashSandboxWorks():
       let root = newFixture("allow")
       defer: removeDir(root)
@@ -240,27 +249,26 @@ suite "sandbox ask prompt":
       runShellCmd(tty, "echo granted > vault/out.txt")
 
       tty.expectInHistory "? echo granted > vault/out.txt", 30_000
-      tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
-      tty.expectInHistory "(a) allow", 30_000
-      tty.expectInHistory "(f) allow the entire folder", 30_000
-      tty.expectInHistory "(d) deny in 20s", 30_000
-      tty.expectNeverInHistory "sandbox ask:"
-      tty.expectNeverInHistory "is ask-protected"
-
-      tty.sendAskKey 'f'
-      tty.expectInHistory "allowed ./vault - retrying", 30_000
-      check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
-      tty.expectInHistory "[sandbox ask: user allowed ./vault; command retried]", 30_000
-      # The folder offer flips the ask rule itself: same line position,
-      # same neighbors, no stacked duplicate.
+      tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+      tty.answerAsk ":a"
+      tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
+      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+      # The ask rule covers more than the denied file: changing it would
+      # rewrite a rule the user aimed at other paths, so the allow lands
+      # after every existing rule instead (last-match-wins puts it above
+      # the ask rule for this file only). Whether the bash retry then
+      # lands is backend business (the Linux mount mask survives a
+      # subpath allow); this leg pins the policy file shape and marker.
       check policyLines(root) ==
-        @["deny /", "allow ./", "allow ./vault", "deny ./locked"]
+        @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+          "allow ./vault/out.txt"]
       tty.expect "\u276f"
-      echo "  PASS: f allows and retries"
+      echo "  PASS: :a allows and retries"
 
     else:
       skip()
-  test "n keeps the denial, no retry":
+
+  test ":d denies and persists the denial":
     if bashSandboxWorks():
       let root = newFixture("deny")
       defer: removeDir(root)
@@ -271,15 +279,19 @@ suite "sandbox ask prompt":
       tty.expect "\u276f"
       runShellCmd(tty, "echo nope > vault/out.txt")
 
-      tty.expectInHistory "(d) deny in 20s", 30_000
-      tty.sendAskKey 'n'
-      tty.expectInHistory "declined by user; not retried", 30_000
+      tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+      tty.answerAsk ":d"
+      tty.expectInHistory "denied; not retried", 30_000
+      tty.expectInHistory "[sandbox ask: sandbox deny ./vault/out.txt; not retried]", 30_000
       tty.drain(500)
       check not fileExists(root / "run" / "vault" / "out.txt")
+      check policyLines(root) ==
+        @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+          "deny ./vault/out.txt"]
       tty.expect "\u276f"
-      echo "  PASS: n declines"
+      echo "  PASS: :d denies"
 
-  test "a flips an exact file ask rule in place and the retry lands":
+  test ":a flips an exact file ask rule in place and the retry lands":
     # The ask rule names the denied file itself: allow is the rule
     # changing, not a new rule, so it takes the ask line's position -
     # and lifts the ask subtree's fence for the retry. The file is
@@ -300,71 +312,50 @@ suite "sandbox ask prompt":
       tty.expect "\u276f"
       runShellCmd(tty, "echo granted > vault/out.txt")
 
-      tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
-      tty.sendAskKey 'a'
+      tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+      tty.answerAsk ":a"
       tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
       check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
+      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
       check policyLines(root) ==
         @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
       tty.expect "\u276f"
-      echo "  PASS: a flips an exact file ask in place"
+      echo "  PASS: :a flips an exact file ask in place"
 
     else:
       skip()
 
-  test "a on a folder ask appends the file allow at the end":
-    # The ask rule covers more than the denied file: changing it would
-    # rewrite a rule the user aimed at other paths, so the allow lands
-    # after every existing rule instead (last-match-wins puts it above
-    # the ask rule for this file only). Whether the bash retry then
-    # lands is backend business (the Linux mount mask survives a
-    # subpath allow); this leg pins the policy file shape.
-    if bashSandboxWorks():
-      let root = newFixture("allow_append")
-      defer: removeDir(root)
-      writeConfiguredProvider(root)
-      let tty = startAskSession(root, 20_000)
-      defer: tty.close()
-
-      tty.expect "\u276f"
-      runShellCmd(tty, "echo granted > vault/out.txt")
-
-      tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
-      tty.sendAskKey 'a'
-      tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
-      tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]", 30_000
-      check policyLines(root) ==
-        @["deny /", "allow ./", "ask ./vault", "deny ./locked",
-          "allow ./vault/out.txt"]
-      tty.expect "\u276f"
-      echo "  PASS: a appends a non-exact allow"
-
-    else:
-      skip()
-  test "timeout keeps the denial":
+  test "timeout denies and persists the denial":
     if bashSandboxWorks():
       let root = newFixture("timeout")
       defer: removeDir(root)
       writeConfiguredProvider(root)
-      let tty = startAskSession(root, 300)
+      let tty = startAskSession(root, 2_000)
       defer: tty.close()
 
       tty.expect "\u276f"
       runShellCmd(tty, "echo late > vault/out.txt")
 
-      tty.expectInHistory "(a) allow", 30_000
-      tty.expectInHistory "no answer before timeout; not retried", 10_000
+      tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 2s to deny", 30_000
+      tty.expectInHistory "denied (timeout); not retried", 10_000
+      tty.expectInHistory "[sandbox ask: sandbox deny ./vault/out.txt; not retried (no answer before timeout)]", 10_000
       tty.drain(300)
       check not fileExists(root / "run" / "vault" / "out.txt")
+      # No answer is an answer: the timeout persists the same explicit
+      # deny rule a typed :d would have.
+      check policyLines(root) ==
+        @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+          "deny ./vault/out.txt"]
       tty.expect "\u276f"
-      echo "  PASS: timeout declines"
+      echo "  PASS: timeout denies"
 
     else:
       skip()
 
-  test "scripted denial shows the card":
-    # Runs on every host (no kernel backend needed): the card's shape
-    # and the viewport takeover are pure policy and viewport work.
+  test "scripted denial shows the one-line card with a live countdown":
+    # Runs on every host (no kernel backend needed): the card's shape,
+    # the countdown ticking on its own line, and the viewport takeover
+    # are pure policy and viewport work.
     let root = newFixture("card")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -375,13 +366,15 @@ suite "sandbox ask prompt":
     runShellCmd(tty, scriptedDenial())
 
     tty.expectInHistory "? sh -c \"echo ./vault/out.txt: Permission denied; exit 13\"", 30_000
-    tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
-    tty.expectInHistory "(f) allow the entire folder", 30_000
-    tty.expectInHistory "(d) deny in 20s", 30_000
-    tty.sendAskKey 'd'
-    tty.expectInHistory "declined by user; not retried", 30_000
+    tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+    # The deadline counts down on the card's own line: the next whole
+    # second replaces 20s with 19s.
+    tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 19s to deny", 30_000
+    tty.answerAsk ":d"
+    tty.expectInHistory "denied; not retried", 30_000
     check policyLines(root) ==
-      @["deny /", "allow ./", "ask ./vault", "deny ./locked"]
+      @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+        "deny ./vault/out.txt"]
     tty.expect "\u276f"
     echo "  PASS: scripted denial shows the card"
 
@@ -399,15 +392,16 @@ suite "sandbox ask prompt":
     runShellCmd(tty,
       "sh -c \"echo ./vault/out.txt: Access is denied.; exit 5\"")
 
-    tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
-    tty.sendAskKey 'd'
-    tty.expectInHistory "declined by user; not retried", 30_000
+    tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":d"
+    tty.expectInHistory "denied; not retried", 30_000
     check policyLines(root) ==
-      @["deny /", "allow ./", "ask ./vault", "deny ./locked"]
+      @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+        "deny ./vault/out.txt"]
     tty.expect "\u276f"
     echo "  PASS: scripted Windows-shape denial shows the card"
 
-  test "scripted denial a flips an exact file ask rule in place":
+  test "scripted denial :a flips an exact file ask rule in place":
     let root = newFixture("card_exact")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -419,16 +413,16 @@ suite "sandbox ask prompt":
     tty.expect "\u276f"
     runShellCmd(tty, scriptedDenial())
 
-    tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
-    tty.sendAskKey 'a'
+    tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":a"
     tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
-    tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]", 30_000
+    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
     check policyLines(root) ==
       @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
     tty.expect "\u276f"
-    echo "  PASS: scripted a flips an exact file ask"
+    echo "  PASS: scripted :a flips an exact file ask"
 
-  test "scripted denial a on a folder ask appends at the end":
+  test "scripted denial :a on a folder ask appends at the end":
     let root = newFixture("card_append")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -438,20 +432,21 @@ suite "sandbox ask prompt":
     tty.expect "\u276f"
     runShellCmd(tty, scriptedDenial())
 
-    tty.expectInHistory "allow read access to ./vault/out.txt?", 30_000
-    tty.sendAskKey 'a'
-    tty.expectInHistory "[sandbox ask: user allowed ./vault/out.txt; command retried]", 30_000
+    tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":a"
+    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked",
         "allow ./vault/out.txt"]
     tty.expect "\u276f"
-    echo "  PASS: scripted a appends under a folder ask"
+    echo "  PASS: scripted :a appends under a folder ask"
+
   test ":sandbox off lifts the fence live, :sandbox on restores it":
     # The mid-session toggle is enforcement, not bookkeeping: a write the
     # baseline denies lands cleanly while disarmed and denies again after
     # the re-arm (same session, no restart). The denied target is outside
     # the policy's only writable root, never the ask dir: a live ask gate
-    # would sit and wait for a key this test never sends.
+    # would sit and wait for an answer this test never sends.
     if restrictBaselineBites():
       let root = newFixture("toggle")
       defer: removeDir(root)
@@ -483,40 +478,8 @@ suite "sandbox ask prompt":
 
     else:
       skip()
-  when defined(posix):
-    test "f grant works with the network wall active (host rule in policy)":
-      if bashSandboxWorks():
-        let root = newFixture("fenced")
-        defer: removeDir(root)
-        writeConfiguredProvider(root)
-        # A host rule turns on the network wall (per-run proxy): the exact
-        # configuration whose ask grant crashed before the sync guard (the
-        # proxy policy file lived under the deleted per-run bash dir).
-        let sf = root / "run" / ".sandbox"
-        writeFile(sf, readFile(sf) & "deny evil.example\n")
-        # The wall proxy binds an AF_UNIX socket under TMPDIR; the fixture's
-        # deep tests/testdata path overflows sockaddr_un's 108 bytes, so the
-        # fenced launch dies before any denial. A short /tmp TMPDIR keeps the
-        # socket path legal.
-        let shortTmp = getTempDir() / ("3code_askfence_" & $getCurrentProcessId())
-        if dirExists(shortTmp): removeDir(shortTmp)
-        createDir(shortTmp)
-        let tty = startAskSession(root, 20_000, shortTmp)
-        defer: tty.close()
 
-        tty.expect "\u276f"
-        runShellCmd(tty, "echo granted > vault/fenced.txt")
-
-        tty.expectInHistory "allow write access to ./vault/fenced.txt?", 30_000
-        tty.sendAskKey 'f'
-        tty.expectInHistory "allowed ./vault - retrying", 30_000
-        check waitForFileContent(tty, root / "run" / "vault" / "fenced.txt", "granted\n")
-        tty.expect "\u276f"
-        echo "  PASS: f grant under the network wall"
-      else:
-        skip()
-
-  test "model write tool asks; f grants and the write lands":
+  test "model write tool asks; :a grants and the write lands":
     let root = newFixture("tool_allow")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -527,22 +490,19 @@ suite "sandbox ask prompt":
 
     tty.expect "\u276f"
     tty.send "save it\n"
-    tty.expectInHistory "? write vault/out.txt", 30_000
-    tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
-    tty.expectInHistory "(f) allow the entire folder", 30_000
-
-    tty.sendAskKey 'f'
-    tty.expectInHistory "allowed ./vault - retrying", 30_000
+    tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":a"
     check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
     check waitForSessionText(tty, root,
-      "[sandbox ask: user allowed ./vault; tool retried]")
+      "[sandbox ask: sandbox allow ./vault/out.txt; tool retried]")
     check policyLines(root) ==
-      @["deny /", "allow ./", "allow ./vault", "deny ./locked"]
+      @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+        "allow ./vault/out.txt"]
     tty.expectInHistory "saved"
     tty.expect "\u276f"
-    echo "  PASS: write tool f grants and retries"
+    echo "  PASS: write tool :a grants and retries"
 
-  test "model write tool a flips an exact file ask rule in place":
+  test "model write tool :a flips an exact file ask rule in place":
     let root = newFixture("tool_allow_exact")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -555,37 +515,16 @@ suite "sandbox ask prompt":
 
     tty.expect "\u276f"
     tty.send "save it\n"
-    tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
-    tty.sendAskKey 'a'
+    tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":a"
     check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
     check policyLines(root) ==
       @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
     tty.expectInHistory "saved"
     tty.expect "\u276f"
-    echo "  PASS: write tool a flips an exact file ask"
+    echo "  PASS: write tool :a flips an exact file ask"
 
-  test "model write tool a under a folder ask appends at the end":
-    let root = newFixture("tool_allow_append")
-    defer: removeDir(root)
-    writeConfiguredProvider(root)
-    writeTurnResponses(root, "vault/out.txt", "granted\n")
-    let tty = startAskSession(root, 20_000,
-                              responses = root / "run" / "stub_responses.json")
-    defer: tty.close()
-
-    tty.expect "\u276f"
-    tty.send "save it\n"
-    tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
-    tty.sendAskKey 'a'
-    check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
-    check policyLines(root) ==
-      @["deny /", "allow ./", "ask ./vault", "deny ./locked",
-        "allow ./vault/out.txt"]
-    tty.expectInHistory "saved"
-    tty.expect "\u276f"
-    echo "  PASS: write tool a appends under a folder ask"
-
-  test "model read tool asks; a grants the read":
+  test "model read tool asks; :a grants the read":
     let root = newFixture("tool_read")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -603,18 +542,19 @@ suite "sandbox ask prompt":
 
     tty.expect "\u276f"
     tty.send "show it\n"
-    tty.expectInHistory "? read vault/ro.txt", 30_000
-    tty.expectInHistory "allow read access to ./vault/ro.txt?", 30_000
-    tty.sendAskKey 'a'
+    tty.expectInHistory ":a to allow ./vault/ro.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":a"
     check waitForSessionText(tty, root, "readable")
+    check waitForSessionText(tty, root,
+      "[sandbox ask: sandbox allow ./vault/ro.txt; tool retried]")
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked",
         "allow ./vault/ro.txt"]
     tty.expectInHistory "done"
     tty.expect "\u276f"
-    echo "  PASS: read tool a grants the read"
+    echo "  PASS: read tool :a grants the read"
 
-  test "model write tool asks; n keeps the denial":
+  test "model write tool asks; :d keeps the denial":
     let root = newFixture("tool_deny")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -625,18 +565,20 @@ suite "sandbox ask prompt":
 
     tty.expect "\u276f"
     tty.send "save it\n"
-    tty.expectInHistory "allow write access to ./vault/out.txt?", 30_000
-    tty.sendAskKey 'n'
-    tty.expectInHistory "declined by user; not retried", 30_000
+    tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":d"
     check waitForSessionText(tty, root, "is denied by the policy")
     check waitForSessionText(tty, root,
-      "[sandbox ask: declined by user; not retried]")
+      "[sandbox ask: sandbox deny ./vault/out.txt; not retried]")
     tty.drain(300)
     check not fileExists(root / "run" / "vault" / "out.txt")
+    check policyLines(root) ==
+      @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+        "deny ./vault/out.txt"]
     tty.expect "\u276f"
-    echo "  PASS: write tool n declines"
+    echo "  PASS: write tool :d declines"
 
-  test "model apply_patch asks; f grants and the add lands":
+  test "model apply_patch asks; :a grants and the add lands":
     let root = newFixture("tool_apply_allow")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -648,20 +590,19 @@ suite "sandbox ask prompt":
 
     tty.expect "\u276f"
     tty.send "patch it\n"
-    tty.expectInHistory "? apply_patch vault/ap.txt", 30_000
-    tty.expectInHistory "allow write access to ./vault/ap.txt?", 30_000
-    tty.expectInHistory "(f) allow the entire folder", 30_000
-
-    tty.sendAskKey 'f'
-    tty.expectInHistory "allowed ./vault - retrying", 30_000
+    tty.expectInHistory ":a to allow ./vault/ap.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":a"
     check waitForFileContent(tty, root / "run" / "vault" / "ap.txt", "granted\n")
     check waitForSessionText(tty, root,
-      "[sandbox ask: user allowed ./vault; tool retried]")
+      "[sandbox ask: sandbox allow ./vault/ap.txt; tool retried]")
+    check policyLines(root) ==
+      @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+        "allow ./vault/ap.txt"]
     tty.expectInHistory "saved"
     tty.expect "\u276f"
-    echo "  PASS: apply_patch f grants and the add lands"
+    echo "  PASS: apply_patch :a grants and the add lands"
 
-  test "model apply_patch mixed ops; n denies only the ask root":
+  test "model apply_patch mixed ops; :d denies only the ask root":
     let root = newFixture("tool_apply_deny")
     defer: removeDir(root)
     writeConfiguredProvider(root)
@@ -674,18 +615,20 @@ suite "sandbox ask prompt":
 
     tty.expect "\u276f"
     tty.send "patch it\n"
-    tty.expectInHistory "allow write access to ./vault/ap_a.txt?", 30_000
-    tty.sendAskKey 'n'
-    tty.expectInHistory "declined by user; not retried", 10_000
+    tty.expectInHistory ":a to allow ./vault/ap_a.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":d"
     check waitForFileContent(tty, root / "run" / "open_b.txt", "yes\n")
     tty.drain(300)
     check not fileExists(root / "run" / "vault" / "ap_a.txt")
     check waitForSessionText(tty, root, "vault/ap_a.txt")
     check waitForSessionText(tty, root, "is denied by the policy")
     check waitForSessionText(tty, root,
-      "[sandbox ask: declined by user; not retried]")
+      "[sandbox ask: sandbox deny ./vault/ap_a.txt; not retried]")
+    check policyLines(root) ==
+      @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+        "deny ./vault/ap_a.txt"]
     tty.expect "\u276f"
-    echo "  PASS: apply_patch n denies only the ask root"
+    echo "  PASS: apply_patch :d denies only the ask root"
 
   test "model apply_patch two ask roots ask sequentially":
     let root = newFixture("tool_apply_multi")
@@ -703,19 +646,20 @@ suite "sandbox ask prompt":
 
     tty.expect "\u276f"
     tty.send "patch it\n"
-    tty.expectInHistory "allow write access to ./vault/ap1.txt?", 30_000
-    tty.sendAskKey 'f'
-    tty.expectInHistory "allowed ./vault - retrying", 30_000
-    tty.expectInHistory "allow write access to ./vault2/ap2.txt?", 30_000
-    tty.sendAskKey 'n'
-    tty.expectInHistory "declined by user; not retried", 30_000
+    tty.expectInHistory ":a to allow ./vault/ap1.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":a"
+    tty.expectInHistory ":a to allow ./vault2/ap2.txt, :d or wait 20s to deny", 30_000
+    tty.answerAsk ":d"
     check waitForFileContent(tty, root / "run" / "vault" / "ap1.txt", "one\n")
     tty.drain(300)
     check not fileExists(root / "run" / "vault2" / "ap2.txt")
     check waitForSessionText(tty, root,
-      "[sandbox ask: user allowed ./vault; tool retried]")
+      "[sandbox ask: sandbox allow ./vault/ap1.txt; tool retried]")
     check waitForSessionText(tty, root,
-      "[sandbox ask: declined by user; not retried]")
+      "[sandbox ask: sandbox deny ./vault2/ap2.txt; not retried]")
+    check policyLines(root) ==
+      @["deny /", "allow ./", "ask ./vault", "deny ./locked",
+        "ask ./vault2", "allow ./vault/ap1.txt", "deny ./vault2/ap2.txt"]
     tty.expect "\u276f"
     echo "  PASS: apply_patch two roots ask sequentially"
 
@@ -731,7 +675,7 @@ suite "sandbox ask prompt":
       runShellCmd(tty, "echo x > locked/out.txt")
 
       tty.expectInHistory "Permission denied"
-      tty.expectNo "allow write access"
+      tty.expectNo ":a to allow"
       tty.drain(300)
       check not fileExists(root / "run" / "locked" / "out.txt")
       tty.expect "\u276f"

@@ -31,7 +31,7 @@ const CommandNames* = @[":help", ":tokens", ":clear", ":goal"] & CyberCommandNam
                       ":provider", ":reasoning", ":streaming", ":notify", ":tab-title", ":prompt",
                       ":verifier",
                       ":show", ":unshow", ":cmd", ":log", ":sessions", ":session", ":resume", ":rename", ":summarize", ":btw",
-                      ":version", ":sandbox", ":sb", ":retry", ":private",
+                      ":version", ":sandbox", ":sb", ":a", ":d", ":retry", ":private",
                       ":quit", ":exit"] & ComputerCommandNames
 
 proc canonicalCommandName*(name: string): tuple[canon, ambig: string] =
@@ -173,6 +173,13 @@ proc classifyCommand*(cmd: string): CommandKind =
     # verbs append to the sandbox file and reload, so they mutate.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "show"): ckSafeImmediate
     else: ckMutating
+  of ":a", ":d":
+    # Ask-answer shorthands for `:sandbox allow|deny @d`: policy writes
+    # plus a model message, so they queue behind a turn like the verbs
+    # they expand to - except while an ask is armed, where the command
+    # hook runs them as the answer itself (they only post the decision;
+    # the waiting turn applies the rule).
+    ckMutating
   of ":rename":
     # Bare `:rename` shows the current name; any text (or `off`) writes the
     # session file, so it queues behind a running turn like other writes.
@@ -2467,6 +2474,63 @@ proc modeVerbResult*(m: ModeDesc; parts: seq[string]; arg: string;
       result.armed = true
       if m.transcript: result.armText = arg
 
+proc askAnswerOf*(cmd: string): char =
+  ## The ask-gate answer a submitted command carries: bare `:a` (allow)
+  ## and bare `:d` (deny) - the shorthands, whose argument is `@d` by
+  ## definition - and the explicit `:sandbox allow|deny @d` spellings.
+  ## '\0' for anything else: `:a <path>` answers with a path the waiting
+  ## ask did not name, so it defers like the ordinary mutating command it
+  ## is and runs after the turn.
+  let c = colonForm(cmd).strip
+  if c.len == 0 or c[0] != ':': return '\0'
+  let sp = c.find(Whitespace)
+  var name = if sp < 0: c else: c[0 ..< sp]
+  let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
+  let forced = not name.startsWith(":!") and name.endsWith("!")
+  if forced: name = name[0 ..< ^1]
+  let (canon, ambig) = canonicalCommandName(name)
+  if ambig.len > 0: return '\0'
+  case canon
+  of ":a":
+    if arg.len == 0: 'a' else: '\0'
+  of ":d":
+    if arg.len == 0: 'd' else: '\0'
+  of ":sandbox", ":sb":
+    let toks = arg.splitWhitespace()
+    if toks == @["allow", "@d"]: 'a'
+    elif toks == @["deny", "@d"]: 'd'
+    else: '\0'
+  else:
+    '\0'
+
+proc sandboxVerbBody(verb, argPath: string;
+    messages: var JsonNode): tuple[ok: bool, body: string] =
+  ## Apply `:sandbox <verb> <argPath>` (allow/readonly/deny/ask) and
+  ## build its answer: on success the scrollback item - icon, the
+  ## phrase, the edit's diff - and nothing else (the item IS the
+  ## receipt). The command is printed to the model too, without the
+  ## colon, as a user message: the next turn sees the policy change.
+  ## A literal `@d` expands to the last path an ask requested.
+  var path = argPath
+  if path.strip() == "@d":
+    let disp = sandbox.lastAskDisplayPath()
+    if disp.len == 0:
+      return (false, cmdErrorS("no sandbox ask yet: @d is the last " &
+        "path an ask requested"))
+    path = disp
+  let access =
+    case verb
+    of "allow": akWritable
+    of "readonly": akReadOnly
+    of "ask": akAsk
+    else: akDeny
+  let sf = sandbox.sandboxPathInCwd()
+  if not sandbox.appendRule(sf, path, access):
+    return (false, cmdErrorS("could not write sandbox file at " & sf))
+  messages.add %*{"role": "user", "agentSent": true,
+    "content": "sandbox " & verb & " " & path}
+  (true, sandboxChangeBytes(verb, path, sandbox.lastRuleDiff))
+
 proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
                    prof: var Profile, editor: var minline.LineEditor): bool =
   ## returns true if the input was a recognised command
@@ -2741,22 +2805,20 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           respErr ":sandbox " & verb & " needs a path"
         else:
           let argPath = parts[1 .. ^1].join(" ")
-          let access =
-            case verb
-            of "allow": akWritable
-            of "readonly": akReadOnly
-            of "ask": akAsk
-            else: akDeny
-          let sf = sandbox.sandboxPathInCwd()
-          if sandbox.appendRule(sf, argPath, access):
-            resp "sandbox updated: " & verb & " " & argPath
-          else:
-            ok = false
-            respErr "could not write sandbox file at " & sf
+          let r = sandboxVerbBody(verb, argPath, messages)
+          ok = r.ok
+          body.add r.body
       else:
         ok = false
         respErr "unknown :sandbox verb: " & verb &
           "  (show, on, off, allow, readonly, deny, ask, edit)"
+    of ":a", ":d":
+      # `:a` is `:sandbox allow @d`, `:d` is `:sandbox deny @d` - the last
+      # path an ask requested; an explicit path stands in for @d.
+      let r = sandboxVerbBody(if name == ":a": "allow" else: "deny",
+        if arg.len > 0: arg else: "@d", messages)
+      ok = r.ok
+      body.add r.body
     of ":show":
       block followOrDump:
         let running = runningToolViewportIdx()

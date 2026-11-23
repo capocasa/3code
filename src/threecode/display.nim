@@ -472,6 +472,23 @@ proc toolFollowLineBytes*(line: string): string =
   ## so lines that streamed into scrollback match the folded item's rows.
   wrappedSubtleBytes(line)
 
+const SandboxChangeIcon* = "▤"
+  ## Leads every sandbox policy-change item. A filled square reads as the
+  ## wall the policy is (the sandwall), and sits 1 cell wide like the other
+  ## tool icons (verified against unicodewidth: ambiguous -> narrow).
+
+proc sandboxChangeBytes*(verb, path: string;
+    diff: tuple[removed, added: seq[string]]): string =
+  ## The scrollback item for a sandbox policy edit: the icon, the phrase
+  ## (the command itself, sans colon - the same text printed to the model),
+  ## and the edit's diff in patch-command syntax without the color.
+  result = SandboxChangeIcon & " sandbox " & verb &
+    (if path.len > 0: " " & path else: "") & "\r\n"
+  for l in diff.removed:
+    result.add "  -" & l & "\r\n"
+  for l in diff.added:
+    result.add "  +" & l & "\r\n"
+
 proc toolFollowFlushBytes*(lines: openArray[string]): string =
   ## The `:show N` flush: everything the capped viewport was holding,
   ## committed to scrollback in order when the follow starts.

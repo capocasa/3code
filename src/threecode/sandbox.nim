@@ -875,17 +875,54 @@ proc upsertRule(text, target, verb: string; projectDir: string): string =
   if not replaced:
     result.add verb & (if target.len > 0: " " & target else: "") & "\n"
 
+proc policyLinesOf(f: string): seq[string] =
+  ## The policy file's lines, trailing blank dropped: every writer
+  ## terminates with a newline, so splitLines yields a phantom empty
+  ## tail that would round-trip into the diff as a removed blank.
+  result =
+    try:
+      if fileExists(f): readFile(f).splitLines() else: @[]
+    except CatchableError:
+      @[]
+  while result.len > 0 and result[^1].strip.len == 0:
+    result.setLen(result.len - 1)
+
+var lastRuleDiff*: tuple[removed, added: seq[string]] = (@[], @[])
+  ## The most recent policy edit, as diff rows for the scrollback item
+  ## (`-ask ./vault` / `+allow ./vault`). Only meaningful after a rule
+  ## write returned true; an in-place flip carries one removed and one
+  ## added row, an append only the added row.
+
+proc noteRuleChange(before, after: seq[string]) =
+  ## Minimal single-edit diff between two policy snapshots: a common
+  ## prefix and suffix walk leaves the changed span. Every policy write
+  ## is one line replaced or appended, so the span is exactly that edit.
+  var lo = 0
+  while lo < before.len and lo < after.len and before[lo] == after[lo]:
+    inc lo
+  var hiB = before.len
+  var hiA = after.len
+  while hiB > lo and hiA > lo and before[hiB - 1] == after[hiA - 1]:
+    dec hiB
+    dec hiA
+  lastRuleDiff = (before[lo ..< hiB], after[lo ..< hiA])
+
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## Set a rule in the repo policy file, materializing it from the user
   ## file first when absent. Used by `:sandbox allow|readonly|deny|ask`.
   ## A rule for the same target keeps its line's position (upsertRule);
   ## a new target appends at the end. Either way, reload so the change
-  ## is live for the next check.
+  ## is live for the next check. The edit's diff lands in `lastRuleDiff`
+  ## for the scrollback item.
   if not fileExists(sandboxFile):
     # Materialize against the cwd's slot, not `sandboxFile.parentDir`:
     # the file may be `<dir>/.3code/sandbox`, whose parent is the store
     # directory, not the project.
     if not ensureRepoPolicy(getCurrentDir()): return false
+  # Snapshot AFTER materialization: a first-ever edit materializes the
+  # whole baseline from the user file, and only the appended rule is
+  # this edit's diff.
+  let before = policyLinesOf(sandboxFile)
   let word =
     case access
     of akDeny: "deny"
@@ -900,6 +937,7 @@ proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
     writeFile(sandboxFile, upsertRule(text, t, word, getCurrentDir()))
   except CatchableError:
     return false
+  noteRuleChange(before, policyLinesOf(sandboxFile))
   current = loadPolicy(getCurrentDir())
   true
 
@@ -950,6 +988,22 @@ proc askCanonical*(rawPath: string): string =
   ## as a bogus host rule.
   resolveRawPath(rawPath)
 
+var
+  lastAskDisplay: string
+  lastAskTarget: string
+  ## `@d`, the last path an ask requested: the display form names it in
+  ## the `:a`/`:d` expansion, the canonical form is what a grant writes.
+  ## Set when the ask card renders; it survives the ask (a timed-out
+  ## deny can be redeemed at the idle prompt later).
+
+proc noteAskRequested*(rawPath: string) =
+  lastAskDisplay = askPathDisplay(rawPath)
+  lastAskTarget = askCanonical(rawPath)
+
+proc lastAskDisplayPath*(): string = lastAskDisplay
+
+proc lastAskTargetPath*(): string = lastAskTarget
+
 
 proc pathLike(s: string): bool =
   ## Loose predicate for tokens scraped from an error line. Over-matching
@@ -994,34 +1048,46 @@ proc deniedAskPath*(cmd, rawOut: string): string =
       if askCoveredPath(t): return t
   ""
 
-proc grantAskAllow*(target: string): bool =
-  ## Persist `allow <target>` into the active policy file and reload, so
+proc grantAskAccess*(target: string; access: AccessKind): bool =
+  ## Persist `<verb> <target>` into the active policy file and reload, so
   ## the grant outlives the session and the retried bash child (which
   ## re-reads the file at launch) enforces it. When the ask rule that
-  ## caused the denial names the granted target exactly (the denied
-  ## path for the (a) answer, the whole folder for the (f) answer),
-  ## that rule flips to `allow` in its own line position - rewriting
-  ## what the user wrote, not re-stacking it. Any other covering rule
-  ## keeps its meaning, so the allow appends at the end, where
+  ## caused the denial names the granted target exactly, that rule
+  ## flips to the new access in its own line position - rewriting what
+  ## the user wrote, not re-stacking it. Any other covering rule keeps
+  ## its meaning, so the new rule appends at the end, where
   ## last-match-wins puts it above the ask rule that denied the path.
   ## With no policy file anywhere the active rules are the built-in
   ## default text (readPolicyText), whose `ask /` floor is exactly what
   ## fires the gate - so the grant first materializes the repo file
-  ## from that effective text, giving the allow a home the cascade
-  ## reads. False means "no grant, treat as denied".
+  ## from that effective text, giving the rule a home the cascade
+  ## reads. False means "no write, treat as denied".
   var f = activePolicyPath(getCurrentDir())
   if not fileExists(f):
     if not ensureRepoPolicy(getCurrentDir()): return false
     f = repoPolicyPath(getCurrentDir())
   let resolved = resolveRawPath(target)
   let exact = resolved.len > 0 and askRuleRoot(resolved) == resolved
+  let before = policyLinesOf(f)
   result =
-    if exact: appendRule(f, target, akWritable)
-    else: sandwall.appendRule(f, target, akWritable, getCurrentDir())
+    if exact: appendRule(f, target, access)
+    else: sandwall.appendRule(f, target, access, getCurrentDir())
   if result:
+    noteRuleChange(before, policyLinesOf(f))
     current = loadPolicy(getCurrentDir())
     when defined(posix):
       syncWallProxyPolicy(getCurrentDir())
+
+proc grantAskAllow*(target: string): bool =
+  ## `grantAskAccess` for the allow answer: the denied path (or its
+  ## covering ask root) becomes writable.
+  grantAskAccess(target, akWritable)
+
+proc grantAskDeny*(target: string): bool =
+  ## `grantAskAccess` for the deny answer: an explicit `deny` rule for
+  ## the denied path, so the next attempt hard-denies instead of asking
+  ## again. In-place when the ask rule names the target exactly.
+  grantAskAccess(target, akDeny)
 
 proc editPolicy*(sandboxFile: string): string =
   ## Open the repo policy file in $VISUAL/$EDITOR (falling back to vi

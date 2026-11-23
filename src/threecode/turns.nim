@@ -567,68 +567,90 @@ proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
   result.code = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
   result.diff = stub{"diff"}.getStr("")
 
-proc askGateDecide(deniedPath: string; cmd: string; writeAccess: bool;
-    renderLine: proc(line: string);
+proc commitSandboxChangeItem(verb, path: string) =
+  ## The scrollback record of a policy edit an ask answer made: icon,
+  ## phrase, diff. Committed below the live viewport the card rides, so
+  ## it outlives the fold; the ask's own resolution line re-pushes the
+  ## viewport right after, the same order a live-follow line takes.
+  commitTranscriptBytes(sandboxChangeBytes(verb, path, sandbox.lastRuleDiff),
+    true)
+
+proc askGateDecide(deniedPath: string; cmd: string;
+    renderLine: proc(line: string); updateLine: proc(line: string);
     retryNoun: string): tuple[fired: bool, granted: bool, marker: string] =
-  ## The interactive half of the sandbox ask gate: render the question
-  ## card, wait for the one decisive key diverted from the input thread
-  ## (fatprompt requestAskKey), and on a/f grant the denied path (or its
-  ## whole folder) via sandbox.grantAskAllow. `cmd` names the denied
-  ## action (`? <cmd>` headline); empty when the caller's viewport
-  ## already paints it. `writeAccess` picks the access the question
-  ## names. No retry runs here: callers that have something to rerun
-  ## use runAskGate, callers that ask pre-emptively (apply_patch) run
-  ## their single action after all asks are decided. The marker records
-  ## the decision for the tool output; the zero-init result (fired=false)
-  ## is the not-covered verdict the callers break on.
+  ## The interactive half of the sandbox ask gate: render the one-line
+  ## question (`:a to allow <path>, :d or wait <N>s to deny`), count the
+  ## deadline down on it, and wait for the answer - a submitted `:a`/`:d`
+  ## the input-thread command hook posts to the gate, or the timeout,
+  ## which denies too. Allow persists an allow rule via
+  ## sandbox.grantAskAllow; deny (explicit or timeout) persists an
+  ## explicit deny rule via sandbox.grantAskDeny; both flip an ask rule
+  ## that names the target exactly in place. No retry runs here:
+  ## callers that have something to rerun use runAskGate, callers that
+  ## ask pre-emptively (apply_patch) run their single action after all
+  ## asks are decided. The marker records the decision for the tool
+  ## output as the command that was answered with, sans the colon - the
+  ## same text `:sandbox allow` prints to the model. The zero-init
+  ## result (fired=false) is the not-covered verdict callers break on.
   let rootPath = sandbox.askRuleRoot(deniedPath)
   if rootPath.len == 0: return
-  # Folder offer = the ask rule root when it names a directory, the
-  # root's parent when the rule names a single file ("the entire
-  # folder" of an ask-protected file is the directory holding it).
-  let folderPath = if dirExists(rootPath): rootPath else: parentDir(rootPath)
-  # Arm before painting: the paced tty harness makes the first card line
-  # visible several ack rounds before a paint-then-arm order would block
-  # for the key, and a decisive key sent in that window must divert, not
-  # leak into the editor draft. Unavailable gate: paint as before, the
-  # wait degrades to an immediate timeout like it always did.
+  let target = sandbox.askCanonical(deniedPath)
+  let shown = sandbox.askPathDisplay(deniedPath)
+  # `@d` from here on: the shorthands answer the path this card names.
+  sandbox.noteAskRequested(deniedPath)
+  # Arm before painting: the answer is a submitted command now, but the
+  # arm must still precede the card - a `:a` typed the moment the
+  # question shows must post to THIS ask, never queue behind the turn.
+  # Unavailable gate: paint as before, the wait degrades to an immediate
+  # timeout, and no rule is written (a headless session never asked a
+  # user anything, so it must not rewrite the policy either).
   let armed = armAskGate()
   if cmd.len > 0:
     renderLine("? " & cmd)
     renderLine("")
-  renderLine("  allow " & (if writeAccess: "write" else: "read") &
-    " access to " & sandbox.askPathDisplay(deniedPath) & "?")
-  renderLine("  (a) allow")
-  renderLine("  (f) allow the entire folder")
-  renderLine("  (d) deny in " & $(askTimeoutMs() div 1000) & "s")
-  let key = if armed: waitAskKey() else: '\0'
+  proc askLine(remainS: int): string =
+    ":a to allow " & shown & ", :d or wait " & $remainS & "s to deny"
+  renderLine(askLine(askTimeoutMs() div 1000))
+  let key =
+    if armed:
+      waitAskKey(onSecond = proc(remainS: int) = updateLine(askLine(remainS)))
+    else:
+      '\0'
   var marker = ""
   # The model-visible record of the decision, appended to the tool
   # output after any retry (each side sees what was decided and
   # whether a retry happened).
   var granted = false
-  if key == 'a' or key == 'f':
-    let target = sandbox.askCanonical(
-      if key == 'f': folderPath else: deniedPath)
+  if key == 'a':
     if sandbox.grantAskAllow(target):
       granted = true
+      commitSandboxChangeItem("allow", shown)
       renderLine("· allowed " & sandbox.askPathDisplay(target) &
         " - retrying")
-      marker = "user allowed " & sandbox.askPathDisplay(target) &
+      marker = "sandbox allow " & sandbox.askPathDisplay(target) &
         "; " & retryNoun & " retried"
     else:
       renderLine("· policy update failed; not retried")
       marker = "policy update failed; not retried"
   else:
-    let why =
-      if key == '\0': "no answer before timeout"
-      else: "declined by user"
-    renderLine("· " & why & "; not retried")
-    marker = why & "; not retried"
+    # Deny: the explicit `:d` and the timeout both deny, and both persist
+    # the explicit deny rule - flipping an identical ask rule in place,
+    # appending otherwise - but only when a user could have answered.
+    let wrote = armed and sandbox.grantAskDeny(target)
+    if armed and not wrote:
+      renderLine("· policy update failed; not retried")
+      marker = "policy update failed; not retried"
+    else:
+      if wrote: commitSandboxChangeItem("deny", shown)
+      renderLine("· denied" & (if key == '\0': " (timeout)" else: "") &
+        "; not retried")
+      marker = "sandbox deny " & sandbox.askPathDisplay(target) &
+        "; not retried" &
+        (if key == '\0': " (no answer before timeout)" else: "")
   (true, granted, marker)
 
-proc runAskGate*(deniedPath: string; cmd: string; writeAccess: bool;
-    renderLine: proc(line: string);
+proc runAskGate*(deniedPath: string; cmd: string;
+    renderLine: proc(line: string); updateLine: proc(line: string);
     retry: proc(): tuple[output: string, code: int, diff: string];
     retryNoun: string): tuple[fired: bool, granted: bool, marker: string,
     result: tuple[output: string, code: int, diff: string]] =
@@ -637,7 +659,7 @@ proc runAskGate*(deniedPath: string; cmd: string; writeAccess: bool;
   ## (an ask-covered denied path) and how the marker lands in the tool
   ## output; on anything but a grant the original denial stands and the
   ## caller's unretried result is the verdict.
-  let decide = askGateDecide(deniedPath, cmd, writeAccess, renderLine,
+  let decide = askGateDecide(deniedPath, cmd, renderLine, updateLine,
                              retryNoun)
   if not decide.fired: return
   var retried: tuple[output: string, code: int, diff: string]
@@ -673,23 +695,6 @@ proc toolAskGateApplies(act: Action): bool =
   else:
     false
 
-proc askGateCmd(act: Action; deniedPath: string): string =
-  ## The `? <cmd>` headline of the ask card for the file tools: the
-  ## tool verb and its target (apply_patch carries its paths per-op, so
-  ## the denied op's path headlines). Empty for anything else - the
-  ## bash viewport paints its own headline from the command itself.
-  case act.kind
-  of akRead: "read " & act.path
-  of akWrite: "write " & act.path
-  of akPatch: "patch " & act.path
-  of akApplyPatch: "apply_patch " & deniedPath
-  else: ""
-
-proc askGateWrites(act: Action): bool =
-  ## Whether the denied access the ask card names is a write (the read
-  ## tool reads; every file-mutating tool writes).
-  act.kind != akRead
-
 proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
     visionDir: string): tuple[output: string, code: int, diff: string] =
   ## The file-tool ask flow: ask first, run once. A grant retries (here:
@@ -699,12 +704,28 @@ proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
   ## apply_patch asks once per DISTINCT ask rule root before any op
   ## executes, so nothing partial hits the disk and a declined root
   ## fails only its own ops in the per-op denial below. The question
-  ## renders as committed transcript lines: unlike bash there is no
-  ## live viewport to ride, and the line must be on screen before the
-  ## user can answer.
-  let renderLine = proc(line: string) =
-    commitTranscriptBytes(noteLnS(line), true)
+  ## rides the same live tool viewport bash uses (tool banner under the
+  ## `?` symbol, ask lines, the countdown ticking on the last one), so
+  ## the editor stays live for the `:a`/`:d` answer; the fold at the
+  ## tool-item commit replaces the card, and the marker (plus the
+  ## sandbox item the answer commits) is the durable record.
+  var view = initStreamingView(StreamMaxLines, 0, bannerFor(act))
+  view.setSymbol("?")
+
+  proc renderView() =
+    pushAnimViewport(view.banner, view.buf, view.exitCode, view.idx,
+                     view.maxLines, icon = "?")
+    requestViewportPaint()
+
+  proc renderLine(line: string) =
+    view.addLine(line)
+    renderView()
     emitTestFrameEvent()
+
+  proc updateLine(line: string) =
+    if view.buf.len > 0: view.buf[^1] = line
+    renderView()
+
   var markers: seq[string]
   if act.kind == akApplyPatch:
     var ops: seq[V4AOp]
@@ -724,12 +745,12 @@ proc runActionWithAskGate(act: Action; cache: ReadCache; vision: bool;
         roots.add r
         display.add op.path
     for deniedPath in display:
-      let decide = askGateDecide(deniedPath, askGateCmd(act, deniedPath),
-        askGateWrites(act), renderLine, "tool")
+      let decide = askGateDecide(deniedPath, "", renderLine, updateLine,
+        "tool")
       if decide.fired: markers.add decide.marker
   else:
-    let decide = askGateDecide(act.path, askGateCmd(act, act.path),
-      askGateWrites(act), renderLine, "tool")
+    let decide = askGateDecide(act.path, "", renderLine, updateLine,
+      "tool")
     if decide.fired: markers.add decide.marker
   result = runAction(act, cache, vision, visionDir)
   if result.output.len > 0 and not result.output.endsWith("\n"):
@@ -820,12 +841,13 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
       # Sandbox ask gate: a failed command that smells like an EACCES
       # from the sandbox, whose denied target is covered by an `ask`
       # rule (not a hard deny), can be redeemed by the user once. The
-      # question card rides the tool viewport; the answer is a single
-      # key diverted from the input thread (fatprompt requestAskKey).
-      # On a/f the denied path (or its whole folder) lands in the
-      # active policy file as `allow` and the command is retried once;
-      # on d, an undecided key, or a timeout the denial stands and the
-      # result goes back to the model unretried.
+      # question line rides the tool viewport with its deadline ticking
+      # down; the answer is the submitted `:a`/`:d` the command hook
+      # posts to the gate (typing is never diverted). On allow the
+      # denied path lands in the active policy file as `allow` and the
+      # command is retried once; on deny or a timeout an explicit deny
+      # rule is persisted and the denial stands, the result going back
+      # to the model unretried.
       block askGate:
         if result.code == 0: break askGate
         if not sandboxEnabled or not sandbox.active: break askGate
@@ -843,9 +865,11 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
         renderView()
         emitTestFrameEvent()
         let gate = runAskGate(deniedPath, "",
-          bashMutationPath(act.body).len > 0,
           proc(line: string) =
             view.addLine(line)
+            renderView(),
+          proc(line: string) =
+            if view.buf.len > 0: view.buf[^1] = line
             renderView(),
           proc(): tuple[output: string, code: int, diff: string] =
             runActionStreaming(act, cache, onLine),

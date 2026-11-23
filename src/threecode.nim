@@ -967,6 +967,19 @@ proc main() =
   startupTrace("warnNoBash")
   setActiveCommandHook(proc(cmd: string) {.gcsafe.} =
     {.cast(gcsafe).}:
+      if fatprompt.askGateArmed():
+        let ans = askAnswerOf(cmd)
+        if ans != '\0':
+          # The waiting turn applies the rule, paints the sandbox item and
+          # retries; here only the decision is posted, plus the typed line's
+          # echo so the answer is visible in scrollback.
+          let echoBytes = formatItem(userPromptItem(cmd))
+          termengine.noteNonMessageTail(echoBytes, inputMessages[].len)
+          commitTranscriptBytes(echoBytes, restoreEditor = true,
+                                reserveFooter = true, clearEditor = true)
+          fatprompt.postAskAnswer(ans)
+          dropQueuedCommand(cmd)
+          return
       let kind = classifyCommand(cmd)
       case kind
       of ckSafeImmediate:
