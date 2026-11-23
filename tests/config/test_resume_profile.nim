@@ -45,3 +45,22 @@ suite "config: resumed session profile resolution":
 
   test "an explicit model that does not resolve stays empty":
     check resolveSessionProfile("zai.glm-9.9", "zai.glm-5.4").name == ""
+
+  test "a broken current falls back to another model on the same provider":
+    activeCurrent = "zai.glm-5.3"
+    let prof = resolveSessionProfile("", "")
+    check prof.name == "zai.glm-5.4"
+    check activeCurrent == "zai.glm-5.4"
+
+  test "a broken current provider falls back to another provider":
+    activeCurrent = "gone.glm-5.4"
+    let prof = resolveSessionProfile("", "")
+    check prof.name == "zai.glm-5.4"
+    check activeCurrent == "zai.glm-5.4"
+
+  test "no usable provider stays empty":
+    activeProviders = @[
+      ProviderRec(name: "zai", url: "https://api.z.ai/v1", key: "",
+                  models: @["glm-5.4"])]
+    activeCurrent = "zai.glm-5.4"
+    check resolveSessionProfile("", "").name == ""

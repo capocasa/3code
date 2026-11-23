@@ -958,7 +958,16 @@ proc main() =
   # thread while the input thread is parked between wizard prompts.
   wizardVerifyCancelHook = installWizardVerifyCancel
   if prof.name == "":
-    prof = bootstrapProvider(editor)
+    # First run means no config file anywhere. An existing config with
+    # no usable provider is a config problem, not a first run: the
+    # wizard would just refuse every name with "already configured".
+    let cfgFile = firstExistingConfigFile()
+    if cfgFile == "":
+      prof = bootstrapProvider(editor)
+    else:
+      stdout.styledWriteLine fgYellow,
+        "no usable provider in " & cfgFile &
+        ". use :provider add to configure one.", resetStyle
   session.profileName = prof.name
   # Bash warning (Windows): after the first-run provider wizard, so a fresh
   # user saves their provider before being told to install a bash. The tool
