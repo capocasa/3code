@@ -2,6 +2,22 @@ Changelog
 
 Unreleased
 
+- **Flail detector's identical-consecutive signal is progress-gated.**
+  A back-to-back re-run of the exact same call no longer flags when the
+  first call's result delivered a new output line: a legitimate poll
+  (20261123T121757: `sleep 570; tail -1 build.log` re-run while a compile
+  ground forward, fresh progress line each time, escalation 1 fired
+  anyway). A repeat over a stale result still flags on the first repeat
+  as before; the mistral doom-loop session 20261007T100839 still
+  escalates and aborts on replay.
+
+- **An internal error mid-turn no longer ends the program.** The
+  release-build last-resort net used to `quit()` on any exception that
+  escaped the turn loop, so one bad turn took 3code down with it. The
+  net now saves the session, reports the failed turn and its stack
+  trace on stderr, and returns to the prompt; the next turn runs
+  normally. Debug builds still re-raise for developers.
+
 - **`:btw` reads as a question and its answer, and answers reliably.**
   The typed line lands as a `?`-led item holding the question alone
   (the `:btw` dropped, the goal kickoff's shape) and the answer lands
