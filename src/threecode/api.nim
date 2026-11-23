@@ -139,11 +139,23 @@ var sigintIdleExitFlag: Atomic[bool]
   ## consumes this flag to exit through the normal quit path instead:
   ## terminal restored by the exit procs, draft flushed, locks released.
 
+var interruptCount: Atomic[int32]
+  ## How many interrupts the process has seen. The flag is cleared when
+  ## the next turn starts, so a worker that outlives the interrupt (the
+  ## `:btw` side call) must compare counts, not read the flag: a stale
+  ## flag would cancel an aside asked after the interrupt, and a cleared
+  ## one would hide an interrupt that landed mid-call.
+
 proc isInterrupted*(): bool {.gcsafe.} =
   interruptedFlag.load(moAcquire)
 
+proc interruptsSeen*(): int32 {.gcsafe.} =
+  interruptCount.load(moAcquire)
+
 proc setInterrupted*(value: bool) {.gcsafe.} =
   interruptedFlag.store(value, moRelease)
+  if value:
+    discard interruptCount.fetchAdd(1, moAcquire)
 
 plugins.pluginInterruptedProbe = proc (): bool {.gcsafe.} = isInterrupted()
 

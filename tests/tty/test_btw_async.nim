@@ -4,10 +4,12 @@ discard """
   ## delivery timing assertions need a real PTY's frame cadence.
 """
 ## `:btw` never blocks the prompt (the dev-guidelines rule): the command
-## returns its receipt at once, the side-question meta-call runs on a
-## worker thread, and the answer lands in scrollback afterwards — dim,
-## led by the 💬 icon, with its burned tokens added onto the token bar so
-## the resting bar is the SUM of the turn's request and the aside's.
+## returns at once, the typed line landing in scrollback as the `?`-led
+## question item (the command name dropped), the side-question meta-call
+## runs on a worker thread, and the answer lands in scrollback afterwards
+## — dim, led by the `!` icon, with its burned tokens added onto the
+## token bar so the resting bar is the SUM of the turn's request and the
+## aside's.
 ## Neither the question nor the answer ever enters the conversation: the
 ## next prompt's turn runs as if the aside never happened.
 import std/[json, os, strutils, unittest]
@@ -55,7 +57,7 @@ proc assistantReply(text: string; usage: JsonNode;
      "content": text, "contentChunks": [text], "usage": usage}
 
 suite ":btw is async":
-  test "receipt at once, dim 💬 answer later, bar shows the sum":
+  test "? question at once, dim ! answer later, bar shows the sum":
     let root = newFixture("btw_async")
     writeConfiguredProvider(root)
     # Turn 1 spends 6000/5; the aside (held 900ms so the test can see the
@@ -85,17 +87,18 @@ suite ":btw is async":
     tty.drain(300)
 
     # The aside: the command returns while its answer is still being
-    # held by the stub — the receipt is already in history, the answer
-    # is not, and the idle prompt is alive (nothing blocked).
+    # held by the stub — the question is already in history as the `?`
+    # item in place of the echoed command line, the answer is not, and
+    # the idle prompt is alive (nothing blocked).
     tty.send ":btw what did I say?"
     tty.send "\n"
-    tty.expectInHistory "asked"
+    tty.expectInHistory "? what did I say?"
     tty.expectPromptLive()
     tty.expectNo "a side answer", settleMs = 400
 
-    # Then the answer lands: the aside's own icon, dim, in history.
+    # Then the answer lands: the aside's own `!` icon, dim, in history.
     tty.expectInHistory "a side answer"
-    tty.expectInHistory "💬"
+    tty.expectInHistory "! │"
     tty.drain(300)
 
     # The bar rests on the SUM of both requests: 6000+40 in, 5+6 out.

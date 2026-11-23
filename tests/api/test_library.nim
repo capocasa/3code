@@ -183,9 +183,9 @@ suite "library: AgentSession":
       # aside's burned tokens land on the session ledger like a main
       # call's.
       let body = s.command(":btw what did I say?")
-      check "asked" in body
+      check "? what did I say?" in body
       check "a side answer" in body
-      check "💬" in body
+      check "!" in body
       check s.usage.totalTokens == spentBefore + 18
       check s.usage.promptTokens == 111
       check s.usage.completionTokens == 27

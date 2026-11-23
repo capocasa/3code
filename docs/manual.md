@@ -1335,9 +1335,14 @@ context:
 :btw why did we skip the cache in that last change?
 ```
 
-The command returns at once — the answer runs on a background request and
-lands under a dim `💬` block as soon as it arrives, so the prompt never
-waits for it. The question and its answer are printed to your terminal
+The command returns at once: the typed line lands in scrollback as a
+`?`-led item holding the question alone (the `:btw` is plumbing, the
+question is the item), and the answer runs on a background request and
+lands under a dim `!` block as soon as it arrives, so the prompt never
+waits for it. The request retries like a normal one (a 429 or 5xx backs
+off and goes again), and an interrupt cancels it along with the running
+turn: the question then gets a dim `! interrupted by user` row instead of
+an answer. The question and its answer are printed to your terminal
 only. Neither becomes a message: the next turn the model sees is exactly
 the conversation you had before asking, so a `:btw` costs no context window
 — but its burned tokens are real spend: they are added to the session and

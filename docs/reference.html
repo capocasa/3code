@@ -112,6 +112,8 @@
 <tr><td><tt class="docutils literal"><span class="pre">:verifier on/off</span></tt></td><td>toggle the verifier without losing the selection</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:notify</span></tt></td><td>show notify mode</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:notify on/off</span></tt></td><td>toggle the desktop notification that fires when a turn ends</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:allow [P]</span></tt> / <tt class="docutils literal"><span class="pre">:deny [P]</span></tt></td><td>spelled-out forms of <tt class="docutils literal"><span class="pre">:a</span></tt>/<tt class="docutils literal"><span class="pre">:d</span></tt>: allow/deny P (bare: <tt class="docutils literal"><span class="pre">@d</span></tt>, the path the waiting ask named)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:allow-dir [P]</span></tt></td><td>allow P's directory (basename shaved when P names a file); the bare form answers the waiting ask with the directory grant</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:retry</span></tt></td><td>send the current state as a request, like Enter on an empty prompt</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:retry list</span></tt></td><td>show patient-retry mode</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:retry on/off</span></tt></td><td>toggle patient retry of 429/5xx/network errors</td></tr>
@@ -127,7 +129,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">:session</span></tt></td><td>show this session's ID (for <tt class="docutils literal"><span class="pre">--resume=ID</span></tt>)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:resume</span></tt></td><td>list this directory's sessions; <tt class="docutils literal"><span class="pre">:resume ID</span></tt> swaps the running 3code onto that session</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:summarize</span></tt></td><td>collapse old turns into a synthetic recap</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">:btw Q</span></tt></td><td>ask the model a side question about the conversation; answered async under a dim <tt class="docutils literal"><span class="pre">💬</span></tt> block, never enters the context, its tokens added to the bar</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:btw Q</span></tt></td><td>ask the model a side question about the conversation; the <tt class="docutils literal"><span class="pre">?</span></tt> question item lands at once, the dim <tt class="docutils literal"><span class="pre">!</span></tt> answer async; never enters the context, its tokens added to the bar</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:version</span></tt></td><td>show the running 3code version</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox</span></tt> / <tt class="docutils literal"><span class="pre">:sb</span></tt></td><td>the sandbox state line, then the active rules when it enforces (<tt class="docutils literal"><span class="pre">:sandbox show</span></tt> is the same dump)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox on/off</span></tt></td><td>toggle sandbox enforcement</td></tr>
@@ -166,7 +168,10 @@
 <tr><td>Ctrl+]</td><td>jump to the next occurrence of the next typed character</td></tr>
 <tr><td>Ctrl+@ or Alt+Space</td><td>set the mark (binds <tt class="docutils literal"><span class="pre">exchange-point-and-mark</span></tt> to swap back)</td></tr>
 <tr><td>Ctrl+R / Ctrl+S</td><td>incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts</td></tr>
-<tr><td>Ctrl+Shift+R</td><td>send the current state as a request, like Enter on an empty prompt; the <tt class="docutils literal"><span class="pre">retry</span></tt> shortcut, distinct from Ctrl+R only on kitty-protocol terminals</td></tr>
+<tr><td>Ctrl+9</td><td>send the current state as a request, like Enter on an empty prompt; the <tt class="docutils literal"><span class="pre">retry</span></tt> shortcut, distinct on kitty-protocol terminals only (legacy terminals type the digit)</td></tr>
+<tr><td>Ctrl+1</td><td>answer the waiting sandbox ask with <tt class="docutils literal"><span class="pre">:allow</span></tt> (kitty-protocol terminals; inert elsewhere, typed commands remain)</td></tr>
+<tr><td>Ctrl+2</td><td>answer it with <tt class="docutils literal"><span class="pre">:allow-dir</span></tt> (same reachability)</td></tr>
+<tr><td>Ctrl+4</td><td>answer it with <tt class="docutils literal"><span class="pre">:deny</span></tt> (same reachability)</td></tr>
 <tr><td>Alt+P / Alt+N</td><td>history search completed at Enter</td></tr>
 <tr><td>Alt+&lt; / Alt+&gt;</td><td>jump to the oldest entry / back to the draft</td></tr>
 <tr><td>Ctrl+L</td><td>clear the screen</td></tr>
@@ -309,7 +314,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-19 20:22:39 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-23 16:21:07 UTC</small>
       </div>
     </div>
   </div>

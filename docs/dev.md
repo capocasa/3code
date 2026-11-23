@@ -73,10 +73,18 @@ sum of both requests), not dropped because the call was async.
 
 `:btw` is the pattern (see `btwthread.nim`): the command builds its
 request from the live history on the controller thread (the only place
-the history is stable), hands plain strings to a worker, and answers with
-a receipt. The controller polls the job from its input wait
-(`ui.deliverFinishedBtw`) and commits the answer — dim, under the aside's
-own icon — between keystrokes. Synchronous-by-contract surfaces (the
+the history is stable), hands plain strings to a worker, and answers
+with no body of its own: the controller commits the `?`-led question
+item in place of the echoed command line. The controller polls the job from its input wait
+(`ui.deliverFinishedBtw`) and commits the answer — dim, under the
+aside's `!` icon, beneath the `?` question item that replaced the echoed
+command line — between keystrokes. The worker's wire policy
+(`btwRequest`) is the main transport's in miniature: 429/5xx/transport
+failures and an empty 200 back off and retry, and an interrupt cancels
+the aside by comparing `interruptsSeen()` counts (the flag itself is
+cleared when the next turn starts); a cancelled worker's blocked HTTP
+call runs out on the retired list so later answers never queue behind
+it. Synchronous-by-contract surfaces (the
 library's `command()`) are the one exception: they join the worker and
 fold the answer into their return value, because their whole API blocks
 by design.

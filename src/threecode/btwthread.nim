@@ -25,9 +25,23 @@
 ## practice the controller thread for the REPL and the embedder's thread
 ## for the library. Every field crossing threads goes through the locked
 ## accessors below; no lock is held while a thread joins.
+##
+## Wire policy (`btwRequest`): an aside retries exactly like a main
+## request — 429, 5xx and transport failures back off power-of-two and
+## go again, a 200 that produced no answer counts as one — and an
+## "interrupted by user" cancels it along with the main request. The
+## worker compares the process interrupt count it started under
+## (`interruptsSeen`), never the flag: the flag is cleared when the next
+## turn starts, so a stale one would cancel an aside asked after the
+## interrupt and a cleared one would hide one that landed mid-call. A
+## blocked HTTP read cannot be aborted from outside, so a cancelled
+## aside's worker finishes its call unseen: the poll moves the entry to
+## the retired list at once (later answers never queue behind it) and
+## frees it once the worker reports `workerGone`.
 
-import std/[locks, json, os, times]
+import std/[locks, json, os, strutils, times]
 import types
+import api
 import compact
 
 const BtwReapWaitMs* {.intdefine.} = 5_000
@@ -37,12 +51,21 @@ const BtwReapWaitMs* {.intdefine.} = 5_000
   ## never polls (process exiting, session dropped) so the thread can
   ## still finish. An `intdefine` so tests can shrink it.
 
+const
+  BtwMaxAttempts* = 5
+    ## Wire attempts per aside, failures included: the main transport's
+    ## short curve (a 429/5xx blip recovers well inside it).
+  BtwBackoffCapS* = 16
+    ## Ceiling on one backoff step, an explicit Retry-After included: an
+    ## aside is never worth a long hold.
+
 type
   BtwJobState* = object
     lock*: Lock
     done*: bool        ## answer+usage are written; ready to copy out
     answer*: string    ## worker-owned until the spawner copies + reaps
     usage*: Usage
+    cancelled*: bool   ## an interrupt dropped the aside before an answer
     reaped*: bool      ## spawner took its copy; the worker may release
     workerGone*: bool  ## set by the worker as its LAST access to the job
 
@@ -53,18 +76,34 @@ type
     ## reads them (never copies them into refs it frees).
     job*: BtwJob
     req*: MetaRequest
+    interrupts: int32 ## `interruptsSeen()` when the aside was asked
 
   BtwEntry = object
     job*: BtwJob
     args: ptr BtwWorkerArgs
     thread: ptr Thread[ptr BtwWorkerArgs]
 
-var btwJobs: seq[BtwEntry]
+  BtwReply* = object
+    ## One delivered aside. `cancelled` is set instead of an answer when
+    ## an "interrupted by user" dropped it; `usage` is zeroed with it.
+    answer*: string
+    usage*: Usage
+    cancelled*: bool
+
+var
+  btwJobs: seq[BtwEntry]
+  btwRetired: seq[BtwEntry]
+    ## Cancelled entries whose worker is still inside its HTTP call.
 
 proc btwJobsLive*(): int =
   ## Jobs spawned but not yet delivered. Lets frontends cheaply skip
   ## polling (and the library notice a pending `:btw` to drain).
   btwJobs.len
+
+proc btwRetiredLive*(): int =
+  ## Cancelled asides whose worker is still inside its HTTP call; the
+  ## next poll frees each once its worker reports gone.
+  btwRetired.len
 
 proc rawCopy(src: string): string =
   ## Byte-wise copy that never touches `src`'s refcount (netthread.nim's
@@ -73,16 +112,50 @@ proc rawCopy(src: string): string =
   result = newString(src.len)
   copyMem(result[0].addr, src[0].unsafeAddr, src.len)
 
+proc btwCancelled(interrupts: int32): bool {.gcsafe.} =
+  interruptsSeen() != interrupts
+
+proc btwRequest(req: ptr MetaRequest; interrupts: int32): BtwReply =
+  ## The aside's wire policy: the main transport's, in miniature. Every
+  ## failure the main loop retries (429, 5xx, a transport error with no
+  ## response) backs off power-of-two off the attempt number and goes
+  ## again, an explicit Retry-After winning; so does a 200 that carried
+  ## no answer, the main loop's empty-reply resend. Anything else (a 4xx,
+  ## an error object) is final: retrying cannot change the request.
+  ## An interrupt seen at any check ends the aside as cancelled.
+  for attempt in 1 .. BtwMaxAttempts:
+    if btwCancelled(interrupts): return BtwReply(cancelled: true)
+    let a = metaRequestAttempt(req, "btw")
+    if btwCancelled(interrupts): return BtwReply(cancelled: true)
+    if a.status == 200 and a.reply.answer.strip.len > 0:
+      return BtwReply(answer: a.reply.answer, usage: a.reply.usage)
+    if attempt >= BtwMaxAttempts: break
+    let category =
+      if a.status == 200: "server"
+      else: retryCategory(a.err, nil, a.status)
+    if category == "": break
+    var backoff = min(1 shl (attempt - 1), BtwBackoffCapS)
+    let retryAfter = try: parseInt(a.retryAfter) except CatchableError: 0
+    if retryAfter > 0: backoff = min(retryAfter, BtwBackoffCapS)
+    var remaining = backoff * 1000
+    while remaining > 0:
+      if btwCancelled(interrupts): return BtwReply(cancelled: true)
+      let step = min(100, remaining)
+      sleep(step)
+      remaining -= step
+  BtwReply()
+
 proc btwWorker(a: ptr BtwWorkerArgs) {.thread.} =
   ## Runs the side-question meta-call off the prompt thread. Publishes
   ## the reply, then holds the reap handshake: the spawner copies the
   ## answer out and signals, and only then does this thread drop its own
   ## string and make its final job access.
   {.cast(gcsafe).}:
-    let reply = runMetaRequest(addr a.req, "btw")
+    let reply = btwRequest(addr a.req, a.interrupts)
     acquire(a.job.lock)
     a.job.answer = reply.answer
     a.job.usage = reply.usage
+    a.job.cancelled = reply.cancelled
     a.job.done = true
     release(a.job.lock)
     var waited = 0
@@ -110,7 +183,8 @@ proc startBtw*(question: string, messages: JsonNode, p: Profile): bool =
   let job = create(BtwJobState)
   job.lock.initLock()
   let args = create(BtwWorkerArgs)
-  args[] = BtwWorkerArgs(job: job, req: req)
+  args[] = BtwWorkerArgs(job: job, req: req,
+                         interrupts: interruptsSeen())
   let t = create(Thread[ptr BtwWorkerArgs])
   try:
     createThread(t[], btwWorker, args)
@@ -140,30 +214,52 @@ proc freeBtwEntry(e: var BtwEntry) =
   dealloc(e.args)
   dealloc(e.thread)
 
-proc pollBtw*(into: var seq[MetaReply]) =
+proc pollBtw*(into: var seq[BtwReply]) =
   ## Non-blocking drain, in spawn order: every job whose worker has
   ## published is copied out (byte-wise, spawner-owned), reaped, joined,
   ## and freed. Stops at the first job still in flight so answers can
-  ## never overtake each other. Spawning thread only.
+  ## never overtake each other — except an aside an interrupt cancelled:
+  ## its reply is delivered at once (the worker's call runs out unseen
+  ## on the retired list) so later answers never wait behind it. Retired
+  ## entries are freed here once their worker reports `workerGone`.
+  ## Spawning thread only.
   var i = 0
   while i < btwJobs.len:
     let e = addr btwJobs[i]
     acquire(e.job.lock)
     let ready = e.job.done
     release(e.job.lock)
-    if not ready: break
+    if not ready:
+      if btwCancelled(e.args.interrupts):
+        into.add BtwReply(cancelled: true)
+        btwRetired.add btwJobs[i]
+        btwJobs.delete(i)
+        continue
+      break
     acquire(e.job.lock)
-    into.add (rawCopy(e.job.answer), e.job.usage)
+    into.add BtwReply(answer: rawCopy(e.job.answer), usage: e.job.usage,
+                      cancelled: e.job.cancelled)
     e.job.reaped = true
     release(e.job.lock)
     freeBtwEntry(e[])
     btwJobs.delete(i)
+  var j = 0
+  while j < btwRetired.len:
+    acquire(btwRetired[j].job.lock)
+    let gone = btwRetired[j].job.workerGone
+    release(btwRetired[j].job.lock)
+    if gone:
+      var e = btwRetired[j]
+      freeBtwEntry(e)
+      btwRetired.delete(j)
+    else:
+      inc j
 
-proc waitBtw*(into: var seq[MetaReply]; timeoutMs = 130_000) =
+proc waitBtw*(into: var seq[BtwReply]; timeoutMs = 130_000) =
   ## Blocking drain for frontends whose API is synchronous (the library):
   ## poll until every live job has landed, bounded well past the
-  ## meta-call's own HTTP timeout so a wedged call ends in the ordinary
-  ## "no answer" failure instead of a hang.
+  ## meta-call's own HTTP timeout and retry curve so a wedged call ends
+  ## in the ordinary "no answer" failure instead of a hang.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while btwJobs.len > 0 and epochTime() < deadline:
     pollBtw(into)

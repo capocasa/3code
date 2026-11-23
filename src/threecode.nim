@@ -1053,7 +1053,9 @@ proc main() =
     # repeat the goal text; refused, the echo commits above the refusal
     # like any command's. These handlers paint and spawn nothing, so
     # running one before the echo commit is safe.
-    let deferEcho = modeArmWrite(cmd)
+    # A `:btw` question defers its echo the same way: committed as the
+    # `?` item below when the start succeeded, echoed plainly otherwise.
+    let deferEcho = modeArmWrite(cmd) or btwQuestionWrite(cmd)
     if not deferEcho:
       termengine.noteNonMessageTail(formatQueuedPromptItem(cmd), messages.len)
       commitQueuedEchoSend(cmd)
@@ -1079,7 +1081,7 @@ proc main() =
         emitFatPromptEvent clearPendingHintEvent()
         emitFatPromptEvent clearBarEvent()
     if deferEcho:
-      if res.ok and res.startGoalTurn:
+      if res.ok and (res.startGoalTurn or res.btwQuestion != ""):
         dropQueuedEcho()
       else:
         termengine.noteNonMessageTail(formatQueuedPromptItem(cmd), messages.len)
@@ -1090,6 +1092,12 @@ proc main() =
       commitTranscriptBytes(bodyBytes,
                             restoreEditor = true,
                             beforeRepaint = clearSubmittedCommandFooter,
+                            reserveFooter = true)
+    if res.btwQuestion != "":
+      let questionBytes = formatItem(
+        agentPromptItem(res.btwQuestion, BtwQuestionIcon))
+      termengine.noteNonMessageTail(questionBytes, messages.len)
+      commitTranscriptBytes(questionBytes, restoreEditor = true,
                             reserveFooter = true)
     if res.startGoalTurn:
       # A mid-turn mode arm (e.g. a queued `:goal`): work starts as soon
@@ -1478,12 +1486,20 @@ proc main() =
         # and commits nothing, and the kickoff lands in their place.
         let suppressEcho = commandResult.ok and commandResult.startGoalTurn and
           modeArmWrite(line)
+        # A `:btw` question in flight is its own `?`-led item (the goal
+        # kickoff's shape): the command name is dropped, the question
+        # stands where the echoed prompt line would have.
+        let questionEcho = commandResult.ok and commandResult.btwQuestion != ""
         let echoBytes =
           if suppressEcho: ""
+          elif questionEcho:
+            formatItem(agentPromptItem(commandResult.btwQuestion,
+                                       BtwQuestionIcon))
           else: formatItem(userPromptItem(line))
         let commandBytes = plainCommandBodyBytes(commandResult.body)
         let bytes =
           if suppressEcho: commandBytes
+          elif questionEcho and commandBytes.len == 0: echoBytes
           else: echoBytes & "\r\n\r\n" & commandBytes
         proc clearSubmittedCommandEditor() =
           # No editor model reset here: the commit's walk-up must still see

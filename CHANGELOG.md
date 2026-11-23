@@ -2,6 +2,23 @@ Changelog
 
 Unreleased
 
+- **`:btw` reads as a question and its answer, and answers reliably.**
+  The typed line lands as a `?`-led item holding the question alone
+  (the `:btw` dropped, the goal kickoff's shape) and the answer lands
+  under a dim `!` block instead of the speech balloon. An aside that
+  came back empty did so because the meta-call replayed the history's
+  `tool_calls` with no tools parameter and the model answered with tool
+  calls of its own: the aside's context now flattens every tool
+  exchange to prose (`[tool call]` / `[tool result]` lines). The side
+  request retries like a normal one (429, 5xx and transport failures
+  back off power-of-two, Retry-After honored, an empty 200 counts as a
+  failure) and an "interrupted by user" cancels it along with the
+  running turn, the question then closing with a dim
+  `! interrupted by user` row. The library's `command()` returns the
+  `?` line with the answer and reports a cancelled aside as
+  `btw: interrupted by user`.
+  (`tests/core/test_btw.nim`, `tests/tty/test_btw_async.nim`)
+
 - **`:goal edit` opens the editor at once, on a terminal an editor can
   work with.** Typed while a turn runs, which in goal mode is nearly
   always, the command queued behind the turn like any mutating write,
