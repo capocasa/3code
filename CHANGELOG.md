@@ -2,6 +2,26 @@ Changelog
 
 Unreleased
 
+- **A `:btw` answer can no longer be a tool call, and the aside stops
+  re-paying the whole history.** The side-question request used to ride
+  a dedicated system prompt over a history flattened to prose, tools
+  omitted — and the model still came back with tool calls (an empty
+  content, i.e. no answer), twice prompting a “never tool calls” sentence
+  in the prompt that nothing honored. Worse, that reshaped payload
+  shares no byte with the conversation's own wire prefix, so on a
+  cache-keyed provider every aside re-billed the entire history as fresh
+  input. The aside now rides the live history through the main call's
+  exact wire transforms — same system message, same tool roster (prefix
+  content on cache-keyed providers), internal fields stripped — and
+  forbids its own tool calls where the turn's request allows them:
+  `tool_choice: "none"` on both the chat-completions and Responses
+  shapes, plus the conversation's `prompt_cache_key` so the aside lands
+  on the cache shard the main call warmed (gh #58). The question rides
+  as a trailing user message, framed once in prose. An aside on a long
+  session now costs roughly the question and the answer; the history is
+  cached-input. (`tests/core/test_btw.nim`,
+  `tests/tty/test_btw_async.nim`)
+
 - **The `[image attached]` echo marker is now `🖼`.** The transcript
   echo of a prompt whose `@image` tokens attached ends in U+1F5BC,
   the framed picture — the image icon, at the end of the echoed line.
