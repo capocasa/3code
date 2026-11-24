@@ -77,6 +77,9 @@ proc waitForTestContinue() =
         var ch: array[1, char]
         if posix.read(fd, addr ch[0], 1) > 0:
           break
+      # The stub's streaming wait stands in for the real one, so it
+      # carries the same in-turn beat (a `:btw` typed mid-turn).
+      hookNetPollTick()
   elif defined(windows):
     # Same bounded wait on a named pipe: PeekNamedPipe in a 100ms poll
     # loop, mirroring the POSIX poll cadence so interrupt checks stay
@@ -94,6 +97,7 @@ proc waitForTestContinue() =
         var got: int32 = 0
         if readFile(h, addr ch[0], 1, addr got, nil) != 0 and got > 0:
           break
+      hookNetPollTick()
       sleep(100)
 
 type StubFailure* = enum
@@ -432,6 +436,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
       let step = min(100, remaining)
       sleep(step)
       remaining -= step
+      hookNetPollTick()
   if testFrameMode() and result{"waitForTestContinue"}.getBool(false):
     waitForTestContinue()
   let stubContent = result{"content"}.getStr("")
@@ -461,6 +466,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
           let step = min(50, remaining)
           sleep(step)
           remaining -= step
+          hookNetPollTick()
       slurped += chunk.len
       hookProgress(stubBaseLabel, slurped)
       contentStarted = hookContentDelta(chunk, stubBaseLabel, slurped)

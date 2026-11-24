@@ -21,6 +21,21 @@ when defined(windows):
 
 var wallWarnShown = false  ## one Windows wall warning per run
 
+var toolWaitTickHook: proc() {.closure.}
+  ## The controller's in-turn beat while a tool runs: called once per
+  ## poll window of the output wait below. A long tool (a build, a test
+  ## run) is a turn's other long blocking phase, so the owner of the live
+  ## history gets the same moment it gets from the streaming wait (see
+  ## api.nim's `setNetPollTickHook`). POSIX only: the Windows reader has
+  ## no poll window, so an aside typed there fires at the tool boundary.
+  ## Nil until a frontend installs one.
+
+proc setToolWaitTickHook*(hook: proc() {.closure.}) =
+  toolWaitTickHook = hook
+
+proc hookToolWaitTick() =
+  if toolWaitTickHook != nil: toolWaitTickHook()
+
 var cachedPosixShell* {.threadvar.}: string
   ## Memoized ambient POSIX-shell resolution (the part of shPath below
   ## the config overrides). Tests reset it to pin `$SHELL`.
@@ -464,6 +479,8 @@ when defined(posix):
           processExited = true
       elif p.peekExitCode != -1:
         processExited = true
+
+      hookToolWaitTick()
 
       if acc.phys.len > 0 and
           (epochTime() - lastActivity) * 1000 >= PartialLineFlushMs.float:

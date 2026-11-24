@@ -580,7 +580,11 @@ proc command*(s: AgentSession; cmd: string): string =
   # this API is synchronous by contract, so the answer is joined and
   # folded into the returned body instead of being dropped. Its tokens
   # are ledgered and summed onto the bar exactly as the REPL's delivery
-  # path does.
+  # path does. The command only posts the question (it may run on a
+  # thread that does not own the history, in the REPL); this API is the
+  # owner and no turn is running here, so it fires the question itself.
+  for question in takePostedBtw():
+    discard startBtw(question, s.messages, s.profile)
   if btwJobsLive() > 0:
     var replies: seq[MetaReply]
     waitBtw(replies)

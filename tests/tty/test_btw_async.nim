@@ -111,3 +111,53 @@ suite ":btw is async":
     tty.expectTokenBar(["◑", "↑6.1k", "↓4"])
     tty.send ":q\n"
     tty.expectExit(0)
+
+  test "typed while the turn runs: receipt, answer and ledger all land":
+    # A `:btw` is orthogonal to a running turn, so it must not queue for
+    # the next boundary like a mutating command. The stub holds the main
+    # reply for 2.5s; the aside is typed inside that window and must fire
+    # at once (the controller services it on the stream's poll beat), land
+    # its answer WHILE the turn is still running, and join the bar only
+    # once the turn rests — the running turn owns the bar until then.
+    let root = newFixture("btw_midturn")
+    writeConfiguredProvider(root)
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      assistantReply("main reply", %*{"promptTokens": 6000,
+        "completionTokens": 5, "totalTokens": 6005, "cachedTokens": 0},
+        preStreamDelayMs = 3000),
+      assistantReply("midturn answer", %*{"promptTokens": 40,
+        "completionTokens": 6, "totalTokens": 46, "cachedTokens": 0})
+    ]))
+    let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root,
+                              root / "run" / "stub_responses.json"))
+    defer: tty.close()
+    tty.expect "❯"
+
+    # The turn starts and is held by the stub before any content exists.
+    tty.send "hello"
+    tty.send "\n"
+    tty.drain(400)
+    tty.expectNo "main reply", settleMs = 100
+
+    # The aside, typed mid-turn: the receipt is immediate.
+    tty.send ":btw what is happening?"
+    tty.send "\n"
+    tty.expectInHistory "asked"
+
+    # The answer lands while the turn is still running — before the
+    # model's own reply, which the stub is holding.
+    tty.expectInHistory "midturn answer", timeoutMs = 2000
+    tty.expectInHistory "💬"
+    tty.expectNo "main reply", settleMs = 100
+    tty.expectAlive()
+
+    # The turn finishes; the rest ledgers the aside onto the same bar:
+    # 6000+40 in, 5+6 out (ledgered only now, never mid-turn: the running
+    # turn owns the bar until it rests).
+    tty.expectInHistory "main reply", timeoutMs = 8000
+    tty.expectInHistory "↓11"
+    tty.expectPromptLive()
+    tty.send ":q\n"
+    tty.expectExit(0)

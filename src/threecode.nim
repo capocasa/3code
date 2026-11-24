@@ -974,6 +974,9 @@ proc main() =
   # itself stays reachable and reports the disable on call.
   warnNoBash()
   startupTrace("warnNoBash")
+  # `:btw` typed mid-turn fires and lands on the controller's in-turn
+  # beats (stream, backoff, tool waits), not at the next turn boundary.
+  installAsideTicks()
   setActiveCommandHook(proc(cmd: string) {.gcsafe.} =
     {.cast(gcsafe).}:
       if fatprompt.askGateArmed():

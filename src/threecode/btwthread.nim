@@ -25,6 +25,18 @@
 ## practice the controller thread for the REPL and the embedder's thread
 ## for the library. Every field crossing threads goes through the locked
 ## accessors below; no lock is held while a thread joins.
+##
+## A `:btw` typed while a turn runs cannot build its request where it was
+## typed: the input thread submits mid-turn commands, and the live history
+## is readable only on the thread that owns the turn (the one the turn loop
+## appends on). So the command only *posts* the question (`postBtw`, any
+## thread) and the owner fires it at its next tick (`takePostedBtw`) —
+## the request speaks to the conversation as it stood at that tick, and
+## the history is never read from a thread that does not own it. An
+## answer that lands while a turn still runs is painted at once but its
+## tokens wait for the rest (`stashBtwUsage`/`takeStashedBtwUsage`): the
+## running turn owns the session's counters and the token bar until it
+## parks, so ledgering mid-flight would race its own usage accounting.
 
 import std/[locks, json, os, times]
 import types
@@ -60,6 +72,50 @@ type
     thread: ptr Thread[ptr BtwWorkerArgs]
 
 var btwJobs: seq[BtwEntry]
+
+var postedAsks: seq[string]
+var postedAsksLock: Lock
+initLock(postedAsksLock)
+
+var stashedUsage: seq[Usage]
+  ## Controller thread only, like the job registry.
+
+proc postBtw*(question: string) =
+  ## Hand a side question to the thread that owns the live history. Never
+  ## blocks, never reads the history, safe from any thread.
+  acquire(postedAsksLock)
+  try:
+    postedAsks.add question
+  finally:
+    release(postedAsksLock)
+
+proc takePostedBtw*(): seq[string] =
+  ## Questions posted since the last call, in posting order.
+  acquire(postedAsksLock)
+  try:
+    result = postedAsks
+    postedAsks = @[]
+  finally:
+    release(postedAsksLock)
+
+proc postedBtwLive*(): int =
+  ## Questions posted but not yet fired.
+  acquire(postedAsksLock)
+  try:
+    result = postedAsks.len
+  finally:
+    release(postedAsksLock)
+
+proc stashBtwUsage*(usage: Usage) =
+  ## Park a delivered aside's tokens until the session rests. Controller
+  ## thread only.
+  if usage.totalTokens > 0:
+    stashedUsage.add usage
+
+proc takeStashedBtwUsage*(): seq[Usage] =
+  ## Oldest first. Controller thread only.
+  result = stashedUsage
+  stashedUsage = @[]
 
 proc btwJobsLive*(): int =
   ## Jobs spawned but not yet delivered. Lets frontends cheaply skip

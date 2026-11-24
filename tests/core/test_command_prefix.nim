@@ -47,6 +47,21 @@ suite "command prefix resolution":
     check canonicalCommandName(":compact") == (":compact", "")
     check canonicalCommandName(":!ls") == (":!ls", "")
 
+  test "commands orthogonal to a turn are safe mid-turn":
+    # A `ckMutating` verdict queues the command for the next turn
+    # boundary. The ones that touch no conversation, session or profile
+    # state must not queue: a side question, and the two pure chrome
+    # switches (their config write waits for the rest on its own). The
+    # switches that DO steer the running turn stay queued: `:streaming
+    # off` changes the wire mode of its next request, `:retry off` would
+    # cut a backoff the turn is committed to.
+    check classifyCommand(":btw why?") == ckSafeImmediate
+    check classifyCommand(":notify off") == ckSafeImmediate
+    check classifyCommand(":tab-title on") == ckSafeImmediate
+    check classifyCommand(":streaming off") == ckMutating
+    check classifyCommand(":retry off") == ckMutating
+    check classifyCommand(":verifier off") == ckMutating
+
   test "unique prefix classifies and dispatches the full command":
     check classifyCommand(":g ship it") == ckMutating
     check classifyCommand(":g") == ckSafeImmediate

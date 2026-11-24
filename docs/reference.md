@@ -53,6 +53,14 @@ parsing limitation.
 Everything typeable at the `❯` prompt. Tab completes commands, provider
 names, model names, and paths where supported.
 
+Most commands also work while a turn is running. The exceptions queue for
+the next turn boundary, echoed with an hourglass (`⧖`), because they edit
+what the running turn is using: the conversation (`:clear`, `:summarize`,
+`:resume`, `:! CMD`), the session (`:rename X`, `:private`), the profile
+(`:model X`, `:provider X`, `:reasoning X`, `:verifier X`), the sandbox
+policy and its ask answers, or the turn's own conduct (`:streaming`,
+`:retry`, `:computer`, `:plugin`).
+
 | command | effect |
 | --- | --- |
 | `:help` / `:?` | command and key list with current bindings |
@@ -79,7 +87,9 @@ names, model names, and paths where supported.
 | `:verifier X` | run goal checks on X (a listed verifier, or any model of the current provider) |
 | `:verifier on/off` | toggle the verifier without losing the selection |
 | `:notify` | show notify mode |
-| `:notify on/off` | toggle the desktop notification that fires when a turn ends |
+| `:notify on/off` | toggle the desktop notification that fires when a turn ends (mid-turn the switch flips at once, the config is saved when the turn rests) |
+| `:tab-title` | show tab-title mode |
+| `:tab-title on/off` | toggle the brand + spinner glyph in the terminal tab (same mid-turn rule as `:notify`) |
 | `:allow [P]` / `:deny [P]` | spelled-out forms of `:a`/`:d`: allow/deny P (bare: `@d`, the path the waiting ask named) |
 | `:allow-dir [P]` | allow P's directory (basename shaved when P names a file); the bare form answers the waiting ask with the directory grant |
 | `:retry` | send the current state as a request, like Enter on an empty prompt |
@@ -97,7 +107,7 @@ names, model names, and paths where supported.
 | `:session` | show this session's ID (for `--resume=ID`) |
 | `:resume` | list this directory's sessions; `:resume ID` swaps the running 3code onto that session |
 | `:summarize` | collapse old turns into a synthetic recap |
-| `:btw Q` | ask the model a side question about the conversation; answered async under a dim `💬` block, never enters the context, its tokens added to the bar |
+| `:btw Q` | ask the model a side question about the conversation; answered async under a dim `💬` block, never enters the context, its tokens added to the bar. Works while a turn runs: the answer lands mid-turn, its tokens join the bar when the turn rests |
 | `:version` | show the running 3code version |
 | `:sandbox` / `:sb` | the sandbox state line, then the active rules when it enforces (`:sandbox show` is the same dump) |
 | `:sandbox on/off` | toggle sandbox enforcement |

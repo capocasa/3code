@@ -113,8 +113,8 @@ suite ":btw side questions":
     check canonicalCommandName(":btw") == (":btw", "")
     check canonicalCommandName(":b") == (":btw", "")
     check classifyCommand(":btw") == ckSafeImmediate
-    check classifyCommand(":btw why?") == ckMutating
-    check classifyCommand(":b why?") == ckMutating
+    check classifyCommand(":btw why?") == ckSafeImmediate
+    check classifyCommand(":b why?") == ckSafeImmediate
 
   test "bare :btw is a usage hint":
     var messages = history()
@@ -198,6 +198,15 @@ suite ":btw side questions":
     check r.name == "btw"
     check "SIDE ANSWER" notin r.body
     check BtwIcon in r.body
+    # The command only posts: it may be typed mid-turn, from the input
+    # thread, which must not read the live history. The owner fires the
+    # question at its next tick.
+    check btwJobsLive() == 0
+    check postedBtwLive() == 1
+    for question in takePostedBtw():
+      check question == "what did foo.nim have?"
+      check startBtw(question, messages, prof)
+    check postedBtwLive() == 0
     check btwJobsLive() == 1
     h.srv.gate.store(true, moRelease)
     var replies: seq[MetaReply]

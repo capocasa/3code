@@ -1318,7 +1318,10 @@ context:
 
 The command returns at once — the answer runs on a background request and
 lands under a dim `💬` block as soon as it arrives, so the prompt never
-waits for it. The question and its answer are printed to your terminal
+waits for it. That holds while a turn is running too: a `:btw` typed
+mid-turn asks right away and its answer lands under the live reply, so you
+can question the work while it happens (its tokens join the bar once the
+turn rests). The question and its answer are printed to your terminal
 only. Neither becomes a message: the next turn the model sees is exactly
 the conversation you had before asking, so a `:btw` costs no context window
 — but its burned tokens are real spend: they are added to the session and
