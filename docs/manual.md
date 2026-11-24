@@ -1317,6 +1317,11 @@ settings are covered in [settings in the reference](reference.html#settings).
 :clear
 ```
 
+`:clear` also arms a follow prompt: `:clear <text>` clears first, then sends
+`<text>` as an ordinary prompt on the fresh context. Scrollback shows the
+clear's divider and the `❯` prompt item below it — the typed `:clear` line
+itself is not echoed.
+
 `:summarize` replaces older turns with a generated recap. It is useful when the
 task must continue but the context has become expensive:
 

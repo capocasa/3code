@@ -94,6 +94,9 @@ type
       ## typed command as the `?`-led question item instead of the `❯`
       ## prompt line - the command name is plumbing, the question is the
       ## item, like a goal arm's `⚑` kickoff.
+    followPrompt*: string
+      ## A `:clear <text>` arm: the clear already ran, `text` continues
+      ## as an ordinary prompt on the fresh context.
     preNewlineRows*: int
       ## Volatile rows the modal greeting newline opened above the cursor
       ## (written before a modal dispatch). A command converted to a
@@ -201,6 +204,25 @@ proc classifyCommand*(cmd: string): CommandKind =
     ckQuit
   else:
     ckUnknown
+
+proc clearFollowText*(cmd: string): string =
+  ## The follow prompt of a `:clear <text>` line ("" otherwise, including
+  ## a bare `:clear`). The typed line itself is never echoed: the clear's
+  ## receipt lands first and the ❯ item the text becomes is the
+  ## announcement - the same echo discipline as a mode-verb arm.
+  let c = colonForm(cmd).strip
+  if c.len == 0 or c[0] != ':':
+    return ""
+  let sp = c.find(Whitespace)
+  var name = if sp < 0: c else: c[0 ..< sp]
+  if not name.startsWith(":!") and name.endsWith("!"):
+    name = name[0 ..< ^1]
+  let (canon, ambig) = canonicalCommandName(name)
+  if ambig.len > 0 or canon != ":clear":
+    return ""
+  if sp < 0:
+    return ""
+  c[sp+1 .. ^1].strip
 
 proc modeArmWrite*(cmd: string): bool =
   ## True for a mode-verb arm write (`:goal TEXT`, `:goal new TEXT`,
@@ -2701,6 +2723,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   var armMode: ModeDesc
   var armText = ""
   var btwQuestion = ""
+  var armClearFollow = ""
   template resp(b: string) = body.add cmdResponseS(b)
   template respErr(b: string) = body.add cmdErrorS(b)
   block dispatch:
@@ -2786,6 +2809,10 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           "  total " & humanTokens(session.usage.totalTokens)
         resp line
     of ":clear":
+      # A `:clear <text>` arm reports its text through `followPrompt`: the
+      # clear ran here, the controller sends `text` as the next ordinary
+      # prompt on the fresh context.
+      armClearFollow = arg
       messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
       # Fresh promptState like the akClear path: the next refresh builds
       # anew instead of resume-substituting the old conversation's
@@ -3163,4 +3190,5 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                 startGoalTurn: armGoal,
                 armMode: armMode,
                 armText: armText,
-                btwQuestion: btwQuestion)
+                btwQuestion: btwQuestion,
+                followPrompt: armClearFollow)

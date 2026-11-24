@@ -1055,7 +1055,8 @@ proc main() =
     # running one before the echo commit is safe.
     # A `:btw` question defers its echo the same way: committed as the
     # `?` item below when the start succeeded, echoed plainly otherwise.
-    let deferEcho = modeArmWrite(cmd) or btwQuestionWrite(cmd)
+    let deferEcho = modeArmWrite(cmd) or btwQuestionWrite(cmd) or
+        clearFollowText(cmd).len > 0
     if not deferEcho:
       termengine.noteNonMessageTail(formatQueuedPromptItem(cmd), messages.len)
       commitQueuedEchoSend(cmd)
@@ -1081,7 +1082,8 @@ proc main() =
         emitFatPromptEvent clearPendingHintEvent()
         emitFatPromptEvent clearBarEvent()
     if deferEcho:
-      if res.ok and (res.startGoalTurn or res.btwQuestion != ""):
+      if res.ok and (res.startGoalTurn or res.btwQuestion != "" or
+                     res.followPrompt.len > 0):
         dropQueuedEcho()
       else:
         termengine.noteNonMessageTail(formatQueuedPromptItem(cmd), messages.len)
@@ -1104,6 +1106,12 @@ proc main() =
       # as the command has yielded (now). The armed mode comes with the
       # result - a transcript mode is not armed until its kickoff lands.
       discard runModeKickoff(res.armMode, res.armText)
+    elif res.ok and res.followPrompt.len > 0:
+      # A drained `:clear <text>`: the clear's receipt committed above;
+      # the text re-enters the queue as an unechoed line so the drain's
+      # ordinary prompt path runs it on the fresh context (its turn and
+      # any further queued items drain after it, in order).
+      pushInputEvent(InputEvent(kind: ieLine, text: res.followPrompt))
 
   proc saveSessionReporting(session: Session, messages: JsonNode) =
     ## Submit-path checkpoint: a failed commit is painted into the
@@ -1451,6 +1459,24 @@ proc main() =
         # way it does for the queued mid-turn path, which also runs
         # unparked.
         releaseIdleSubmittedInput()
+      # A `:clear <text>` arm: the clear commits its receipt alone (no
+      # echo of the typed line - the ❯ item the text becomes is the
+      # announcement), then the text continues as an ordinary prompt on
+      # the fresh context by replacing the line below.
+      block:
+        let followText = clearFollowText(line)
+        if followText.len > 0:
+          let clearResult = handleCommandResult(":clear", messages, session,
+                                                prof, editor)
+          let clearBytes = plainCommandBodyBytes(clearResult.body)
+          termengine.noteNonMessageTail(clearBytes, messages.len)
+          commitTranscriptBytes(
+            clearBytes,
+            restoreEditor = true,
+            reserveFooter = true,
+            clearEditor = true)
+          releaseIdleSubmittedInput()
+          line = followText
       let commandResult = handleCommandResult(line, messages, session, prof, editor)
       if commandResult.recognized:
         if commandResult.disposition == cdModal:

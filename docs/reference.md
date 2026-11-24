@@ -57,7 +57,7 @@ names, model names, and paths where supported.
 | --- | --- |
 | `:help` / `:?` | command and key list with current bindings |
 | `:tokens` | token usage for this session (input, cached, output, total) |
-| `:clear` | reset the conversation, keep provider and model |
+| `:clear` | reset the conversation, keep provider and model; `:clear <text>` runs the text as the first prompt |
 | `:model` | list models for the current provider, `*` marks the current |
 | `:model X` | switch to model X within the current provider |
 | `:model P.X` | switch to model X on provider P in one word (the `-m` spelling) |

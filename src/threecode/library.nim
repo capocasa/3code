@@ -576,6 +576,11 @@ proc command*(s: AgentSession; cmd: string): string =
       else: readModeText(res.armMode, s.state.cwd, s.messages))
     saveSession(s.state, s.messages)
     result = normalizeItem(promptBody(s, ""))
+  # A `:clear <text>` arm: the clear ran in the handler, the text now
+  # runs as the next ordinary prompt on the fresh context and its reply
+  # is the command's answer.
+  if res.ok and res.followPrompt.len > 0:
+    result = normalizeItem(promptBody(s, res.followPrompt))
   # A `:btw` fires on a worker thread (the REPL command never blocks);
   # this API is synchronous by contract, so the answer is joined and
   # folded into the returned body instead of being dropped, under the

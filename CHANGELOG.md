@@ -52,6 +52,12 @@ Unreleased
   inside vim reaches the whole foreground process group, and the
   interrupt hook cancelled the running turn or quit at the prompt
   afterwards). 3code's raw mode is restored the moment the editor exits.
+- **`:clear` arms a follow prompt.** `:clear <text>` resets the
+  conversation and then sends `<text>` as an ordinary prompt on the
+  fresh context, in one submit. Scrollback shows the clear's divider
+  and the `❯` prompt item below it — the typed `:clear` line itself is
+  not echoed, the same discipline as a mode-verb arm write. Bare
+  `:clear` is unchanged. (`tests/tty/test_clear_follow_prompt.nim`)
 
 - **Vi editing mode.** A conceptual port of readline's `vi_mode.c` —
   the machinery behind bash's `set -o vi` — as a new `threecode/vim`

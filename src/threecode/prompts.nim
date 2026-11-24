@@ -3913,7 +3913,7 @@ const HelpText* = """
 commands:
   :help               show this message
   :tokens             show token usage for this session
-  :clear              reset conversation (keeps system prompt)
+  :clear [text]       reset conversation; text runs as the first prompt
   :model              list models for current provider (current marked with *)
   :model X            switch to model X (bare: current provider;
                       provider.model or provider/model: switch both)
