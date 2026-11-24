@@ -2,6 +2,13 @@ Changelog
 
 Unreleased
 
+- **`:clear` arms a follow prompt.** `:clear <text>` resets the
+  conversation and then sends `<text>` as an ordinary prompt on the
+  fresh context, in one submit. Scrollback shows the clear's divider
+  and the `❯` prompt item below it — the typed `:clear` line itself is
+  not echoed, the same discipline as a mode-verb arm write. Bare
+  `:clear` is unchanged. (`tests/tty/test_clear_follow_prompt.nim`)
+
 - **Vi editing mode.** A conceptual port of readline's `vi_mode.c` —
   the machinery behind bash's `set -o vi` — as a new `threecode/vim`
   module layered on the line editor. `editing = vim` or
