@@ -178,6 +178,12 @@ proc markReplParked*(parked: bool) =
   termui.withTerminalWriteLock:
     replParkedAtInput.store(parked, moRelease)
 
+proc turnActive*(): bool {.gcsafe.} =
+  ## True while a turn holds the prompt. Command handlers ask this to
+  ## tell a mid-turn run (their side effects must wait for the rest)
+  ## from one at the idle prompt.
+  inputTurnActive.load(moAcquire)
+
 var inputModalActive*: Atomic[bool]
   ## Held for the lifetime of a modal wizard, including the gaps
   ## between `wizardReadLine` calls while the wizard's caller does

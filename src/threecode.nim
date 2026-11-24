@@ -974,6 +974,9 @@ proc main() =
   # itself stays reachable and reports the disable on call.
   warnNoBash()
   startupTrace("warnNoBash")
+  # `:btw` typed mid-turn fires and lands on the controller's in-turn
+  # beats (stream, backoff, tool waits), not at the next turn boundary.
+  installAsideTicks()
   setActiveCommandHook(proc(cmd: string) {.gcsafe.} =
     {.cast(gcsafe).}:
       if fatprompt.askGateArmed():
@@ -1004,6 +1007,14 @@ proc main() =
         let bytes = plainCommandBodyBytes(res.body)
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
                               clearEditor = true)
+        if res.btwQuestion != "":
+          # The `?` question item in place of the dropped command echo,
+          # the same item the idle path commits for it.
+          let questionBytes = formatItem(
+            agentPromptItem(res.btwQuestion, BtwQuestionIcon))
+          termengine.noteNonMessageTail(questionBytes, inputMessages[].len)
+          commitTranscriptBytes(questionBytes, restoreEditor = true,
+                                reserveFooter = true)
         # Ran inline: the ieCommand copy onSubmit queued would otherwise
         # double-run at the drain and end the turn before the model's
         # follow-up call (hasQueuedAutosend counts it).

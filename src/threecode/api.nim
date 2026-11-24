@@ -228,6 +228,19 @@ var apiStreamHooks*: ApiStreamHooks
 proc setApiStreamHooks*(hooks: ApiStreamHooks) =
   apiStreamHooks = hooks
 
+var netPollTickHook: proc() {.closure.}
+  ## The controller's own in-turn beat: run once per turn of the
+  ## streaming wait below. A turn holds the prompt for as long as the
+  ## stream runs, so this is the only regular moment its owner can
+  ## service work that needs the live history (a `:btw` aside typed
+  ## mid-turn). Nil until a frontend installs one.
+
+proc setNetPollTickHook*(hook: proc() {.closure.}) =
+  netPollTickHook = hook
+
+proc hookNetPollTick() =
+  if netPollTickHook != nil: netPollTickHook()
+
 var sideCallMode* = false
   ## While true, the in-flight call is a harness side call (the goal-mode
   ## verifier): same transport, retries and tool plumbing, but no live
@@ -3561,6 +3574,9 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
     var lastActivity = epochTime()
     while not outcomeReady(job) and not isInterrupted() and not isNetworkQuiet():
       drainAndDispatch(job, baseLabel)
+      # The in-turn beat: a running stream is the controller's longest
+      # blocking phase, so the aside service point rides it.
+      hookNetPollTick()
       let now = activityCount(job)
       if now != activity:
         activity = now
@@ -3932,6 +3948,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         let step = min(100, remaining)
         sleep(step)
         remaining -= step
+        # A backoff is the controller's other long wait, and the moment a
+        # user is most likely to ask what went wrong: same beat.
+        hookNetPollTick()
         let shown = (remaining + 999) div 1000
         if shown != lastShown:
           lastShown = shown

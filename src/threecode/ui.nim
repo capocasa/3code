@@ -157,7 +157,7 @@ proc classifyCommand*(cmd: string): CommandKind =
     # editor, which must not fire while a turn holds the screen.
     if parts.len > 0 and parts[^1] == "edit": ckMutating
     else: ckSafeImmediate
-  of ":streaming", ":notify", ":retry", ":private", ":computer", ":tab-title",
+  of ":streaming", ":retry", ":private", ":computer",
      ":verifier":
     if parts.len == 0 or (parts.len == 1 and parts[0] in ["list", "status"]): ckSafeImmediate
     else: ckMutating
@@ -196,10 +196,18 @@ proc classifyCommand*(cmd: string): CommandKind =
   of ":clear", ":resume", ":summarize":
     ckMutating
   of ":btw":
-    # Bare `:btw` is a usage hint (safe); any text fires a meta-call over
-    # the live history, which must queue behind a running turn like any
-    # other network command.
-    if parts.len == 0: ckSafeImmediate else: ckMutating
+    # A side question is orthogonal to a running turn: it reads the
+    # conversation, touches no context, and its answer is printed, not
+    # sent. Bare `:btw` is a usage hint; with text the command only posts
+    # the question (the thread that owns the history fires it), so it is
+    # safe mid-turn like the introspection commands.
+    ckSafeImmediate
+  of ":notify", ":tab-title":
+    # Pure chrome settings: no conversation, session or profile state.
+    # Mid-turn the in-memory switch flips at once and the config write
+    # waits for the rest (`persistSettingConfig`), so the command is
+    # safe to run while a turn holds the prompt.
+    ckSafeImmediate
   of ":quit", ":exit":
     ckQuit
   else:
@@ -1595,6 +1603,29 @@ proc cmdReasoning(arg: string, prof: var Profile): string =
   else:
     return errLnS("usage: :reasoning [<level>]")
 
+var settingConfigWritePending = false
+  ## A settings command that ran mid-turn flipped its switch but left
+  ## the config write for the next rest.
+
+proc persistSettingConfig() =
+  ## Write the config for a settings command that may run mid-turn.
+  ## `writeConfigFile` re-parses the file and briefly swaps the settings
+  ## globals a running turn reads (the bash override, the timeouts, the
+  ## sandbox switch), so while a turn holds the prompt only the flag is
+  ## raised; `flushSettingConfig` writes at the next rest. At a rest — or
+  ## in a frontend without a turn state, like the library — write now.
+  if not turnActive():
+    writeConfigFile(configPath(), activeCurrent, activeProviders)
+  else:
+    settingConfigWritePending = true
+
+proc flushSettingConfig*() =
+  ## Run the write a mid-turn settings command deferred. Controller thread,
+  ## at a rest.
+  if settingConfigWritePending:
+    settingConfigWritePending = false
+    writeConfigFile(configPath(), activeCurrent, activeProviders)
+
 proc cmdStreamingList(): string =
   let mark = if streamingEnabled: "on" else: "off"
   hintLnS("streaming: " & mark &
@@ -1723,7 +1754,7 @@ proc cmdNotifySelect(target: string): string =
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
   claimSetting("notify")
-  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  persistSettingConfig()
   cmdNotifyList()
 
 proc cmdNotify(arg: string): string =
@@ -1747,15 +1778,17 @@ proc cmdTabTitleSelect(target: string): string =
   case target.toLowerAscii
   of "on":
     tabTitleEnabled = true
-    # Commands are idle-only, so the idle title can go up right away;
-    # otherwise the toggle looks dead until the next turn ends.
-    tabtitle.paintTabTitleIdle()
+    # At a rest the idle title goes up at once, otherwise the toggle
+    # looks dead until the next keystroke; mid-turn the running spinner
+    # owns the tab and repaints it with the new setting on its next tick.
+    if not turnActive():
+      tabtitle.paintTabTitleIdle()
   of "off":
     tabTitleEnabled = false
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
   claimSetting("tab-title")
-  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  persistSettingConfig()
   cmdTabTitleList()
 
 proc cmdTabTitle(arg: string): string =
@@ -2241,44 +2274,87 @@ proc imageAttachEcho*(): string =
   ## tokens attached: `@mockup.png rebuild this [image attached]`.
   if lastImageAttachments.len == 0: "" else: " [image attached]"
 
+proc paintBtwReply(r: BtwReply) =
+  ## Commit one finished aside to scrollback: its dim `!` quote block,
+  ## the `! interrupted by user` row when an interrupt dropped it, or the
+  ## failure line when the meta-call produced no answer. Paint only — the
+  ## caller decides when its tokens are ledgered.
+  if r.cancelled:
+    let bytes = btwCancelledBytes()
+    termengine.noteNonMessageTail(bytes, inputMessages[].len)
+    commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
+    return
+  if r.answer.strip.len == 0:
+    let errBytes = errLnS(
+      "btw: no answer (the side-question call failed; see stderr)")
+    termengine.noteNonMessageTail(errBytes, inputMessages[].len)
+    commitTranscriptBytes(errBytes, restoreEditor = true)
+    return
+  let bytes = btwAnswerBytes(r.answer)
+  termengine.noteNonMessageTail(bytes, inputMessages[].len)
+  commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
+
 proc deliverFinishedBtw*() =
-  ## Commit finished `:btw` side answers to scrollback. Runs on the
-  ## controller thread only, from `readInput`'s input wait — the one
-  ## window where the session state is stable (a `:btw` spawned at a
-  ## post-turn drain waits here until the running turn parks) — so the
-  ## usage accounting below can never race a live turn. A wizard modal
-  ## that owns the screen waits the answer out; the next park delivers.
-  ## Each answer lands as its own dim `!` quote block under the `?`
-  ## question item, an aside an interrupt dropped lands as a dim
-  ## `! interrupted by user`, and a failed one as the usual error line;
-  ## its burned tokens are ledgered and summed onto the token bar
-  ## exactly like a verifier check's. The poll also frees retired
-  ## (cancelled, still-socket-bound) workers, so it runs unconditionally.
+  ## Commit finished `:btw` side answers to scrollback.
+  ##
+  ## The `:btw` service point, on the thread that owns the live history
+  ## (the controller). Reached from every window the controller waits in:
+  ## the input wait at a rest, and — through `setNetPollTickHook` and
+  ## `setToolWaitTickHook` — the streaming, backoff and tool waits of a
+  ## running turn. Two jobs, in order:
+  ##
+  ## 1. Fire the questions posted since the last call. A `:btw` typed
+  ##    mid-turn only posts (the input thread must not read the history);
+  ##    the request is built here, so it speaks to the conversation as it
+  ##    stood when the owner got around to it — within one poll tick.
+  ## 2. Deliver finished answers. Each lands the moment it arrives, turn
+  ##    or no turn, as its own dim `!` quote block under the `?` question
+  ##    item, an aside an interrupt dropped lands as a dim
+  ##    `! interrupted by user`, and a failed one as the usual error line.
+  ##    Its burned tokens are ledgered and summed onto the token bar exactly
+  ##    like a verifier check's — but only at a rest: a running turn owns
+  ##    the session's counters and the bar until it parks, so an answer
+  ##    that lands mid-turn is painted now and ledgered (`stashBtwUsage`)
+  ##    at the next rest, oldest first.
+  ##
+  ## A wizard modal that owns the screen waits the answer out; the next
+  ## tick delivers. The poll also frees retired (cancelled, still
+  ## socket-bound) workers, so it runs unconditionally.
   if inputModalActive.load(moAcquire): return
   if inputMessages == nil or inputSession == nil or inputProfile == nil:
     return
-  var replies: seq[BtwReply]
-  pollBtw(replies)
-  for r in replies:
-    {.cast(gcsafe).}:
-      if r.cancelled:
-        let bytes = btwCancelledBytes()
-        termengine.noteNonMessageTail(bytes, inputMessages[].len)
-        commitTranscriptBytes(bytes, restoreEditor = true,
-                              reserveFooter = true)
-        continue
-      if r.answer.strip.len == 0:
-        let errBytes = errLnS(
-          "btw: no answer (the side-question call failed; see stderr)")
+  {.cast(gcsafe).}:
+    for question in takePostedBtw():
+      if not startBtw(question, inputMessages[], inputProfile[]):
+        let errBytes = errLnS("btw: could not start the side question")
         termengine.noteNonMessageTail(errBytes, inputMessages[].len)
         commitTranscriptBytes(errBytes, restoreEditor = true)
-        continue
-      accountSideCallUsage(inputSession[], inputMessages[], r.usage,
-                           contextWindowFor(inputProfile[]))
-      let bytes = btwAnswerBytes(r.answer)
-      termengine.noteNonMessageTail(bytes, inputMessages[].len)
-      commitTranscriptBytes(bytes, restoreEditor = true,
-                            reserveFooter = true)
+    var replies: seq[BtwReply]
+    pollBtw(replies)
+    if replParkedAtInput.load(moAcquire):
+      # At a rest the session is stable: ledger what the running turn
+      # made us park, then this poll's own answers, in arrival order.
+      for u in takeStashedBtwUsage():
+        accountSideCallUsage(inputSession[], inputMessages[], u,
+                             contextWindowFor(inputProfile[]))
+      for r in replies:
+        if r.answer.strip.len == 0: continue
+        accountSideCallUsage(inputSession[], inputMessages[], r.usage,
+                             contextWindowFor(inputProfile[]))
+    else:
+      for r in replies:
+        stashBtwUsage(r.usage)
+    for r in replies:
+      paintBtwReply(r)
+
+proc installAsideTicks*() =
+  ## Hand `:btw` the controller's in-turn beats. A turn holds the prompt
+  ## through three long waits — the stream, a retry backoff, a running
+  ## tool — and the owner of the live history is free in none of them
+  ## except at those poll windows. Terminal frontends only: the library
+  ## runs its commands at a rest and fulfils the question itself.
+  setNetPollTickHook(deliverFinishedBtw)
+  setToolWaitTickHook(deliverFinishedBtw)
 
 proc readInput*(editor: var minline.LineEditor, done: var bool,
                  emptySubmit: var bool): string =
@@ -2295,8 +2371,10 @@ proc readInput*(editor: var minline.LineEditor, done: var bool,
   while true:
     # The wait is also the delivery window for async side questions: a
     # finished `:btw` worker lands its answer here, between keystrokes,
-    # without the prompt ever having blocked for it.
+    # without the prompt ever having blocked for it. It is also the rest
+    # where a mid-turn settings command's deferred config write runs.
     deliverFinishedBtw()
+    flushSettingConfig()
     if not inputThreadRunning and inputEditor != nil:
       ensureInputThreadStarted()
     var line = ""
@@ -3151,23 +3229,23 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       # Side question about the conversation: one meta-call over a
       # snapshot of the live history, answered on a worker thread so the
       # command itself returns at once — a system command never blocks
-      # the prompt. `deliverFinishedBtw` (polled from the input wait)
-      # commits the answer to scrollback under the `!` icon and adds its
-      # burned tokens to the session and the bar. Neither the question
-      # nor the answer enters `messages`, so the next real turn starts as
-      # if it never happened.
+      # the prompt. The command only posts the question: it may be typed
+      # mid-turn, from the input thread, which must not read the history.
+      # `deliverFinishedBtw` (the owner's next tick) builds the request and
+      # starts the worker, then commits the answer to scrollback under the
+      # `!` icon and adds its burned tokens to the session and the bar.
+      # Neither the question nor the answer enters `messages`, so the next
+      # real turn starts as if it never happened.
       if arg.strip.len == 0:
         ok = false
         respErr "usage: :btw <question>"
       elif prof.name == "":
         ok = false
         respErr "no provider configured. use :provider add"
-      elif not startBtw(arg, messages, prof):
-        ok = false
-        respErr "could not start the side question"
       else:
         # No body: the controller commits the question itself as the
         # `?`-led item in place of the echoed command line.
+        postBtw(arg)
         btwQuestion = arg
     else:
       ok = false
