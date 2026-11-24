@@ -501,6 +501,78 @@ suite "api request shaping":
       check "reasoning_effort" notin body
       check "thinking" notin body
 
+  test "glm reasoning ladders per provider and generation":
+    # Full matrix from `knownGoodReasonings` plus the wire mapping each
+    # provider gets, checked against the verified live surfaces.
+    block zaiBinary:
+      # glm-4.7 / glm5 / glm-5.1: thinking.type toggle only.
+      check knownGoodReasonings("zai", "glm-4.7") == @["off", "on"]
+      check knownGoodReasonings("zaicode", "glm-5.1") == @["off", "on"]
+      var body = %*{"stream": true}
+      let p = Profile(name: "zai.glm-5.1", family: "glm",
+                      version: "5", variant: "1",
+                      model: "glm-5.1", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"thinking"}{"type"}.getStr == "disabled"
+      check "reasoning_effort" notin body
+    block zai52:
+      # z.ai maps low/medium->high and xhigh->max, so the distinct set is
+      # off/high/max; none/minimal skip thinking.
+      check knownGoodReasonings("zai", "glm-5.2") == @["off", "high", "max"]
+      var body = %*{"stream": true}
+      let p = Profile(name: "zaicode.glm-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "glm-5.2", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"thinking"}{"type"}.getStr == "enabled"
+      check body{"thinking"}{"effort"}.getStr == "max"
+    block together53:
+      # 5.3 is forced-thinking everywhere: top-level reasoning_effort,
+      # no off (Together rejects the literal `off` with a validator
+      # naming exactly low/high/max).
+      check knownGoodReasonings("together", "zai-org/GLM-5.3") == @["low", "high", "max"]
+      check knownGoodReasonings("together", "zai-org/GLM-5.3-Flash") == @["low", "high", "max"]
+      var body = %*{"stream": true}
+      let p = Profile(name: "together.zai-org/GLM-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "zai-org/GLM-5.3", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+      check "reasoning" notin body
+      check "thinking" notin body
+    block openrouter53:
+      check knownGoodReasonings("openrouter", "z-ai/glm-5.3") == @["low", "high", "max"]
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.z-ai/glm-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "z-ai/glm-5.3", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"effort"}.getStr == "max"
+      check "reasoning_effort" notin body
+
+  test "glm-5.4 grades low/high/max with no true off":
+    # Disabled thinking answers 200 on the coding endpoint but the model
+    # still thinks lightly (z.ai maps Claude-Code thinking-off to effort
+    # low), so off is not offered: the cheapest real setting is low.
+    check knownGoodReasonings("zaicode", "glm-5.4") == @["low", "high", "max"]
+    check knownGoodReasonings("zai", "glm-5.4") == @["low", "high", "max"]
+    block zaiOffMapsToLow:
+      var body = %*{"stream": true}
+      let p = Profile(name: "zaicode.glm-5.4", family: "glm",
+                      version: "5", variant: "4",
+                      model: "glm-5.4", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "low"
+      check "thinking" notin body
+    block zaiEffort:
+      var body = %*{"stream": true}
+      let p = Profile(name: "zaicode.glm-5.4", family: "glm",
+                      version: "5", variant: "4",
+                      model: "glm-5.4", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "max"
+      check "thinking" notin body
+
   test "glm-5.3 forces thinking: low/high/max, no off":
     # 5.3 replaced the thinking toggle with a top-level reasoning_effort
     # knob (z.ai) normalized to reasoning.effort on gateways. Off is gone.

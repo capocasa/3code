@@ -4488,15 +4488,18 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # enable_thinking: false. See `applyKolibriReasoning`.
         return @["off", "low", "medium", "high"]
       if fam == "glm":
-        # 5.2 (variant "2") exposes a graded effort knob (high/max); older
-        # GLM is on/off only. 5.3 / 5.3-flash force thinking: low/high/max,
-        # no off. 5.4 grades the same low/high/max but takes a true off
-        # again (thinking disabled answers 200 on first-party). Variant
-        # encodes the minor version digit (4.7 -> "7",
-        # 5.1 -> "1", 5.2 -> "2", 5.3 -> "3") and may carry a suffix.
+        # 5.2 (variant "2") exposes a graded effort knob, but z.ai maps
+        # low/medium to high and xhigh to max, so the distinct set is
+        # off/high/max (none/minimal skip thinking). 5.3 / 5.3-flash force
+        # thinking: low/high/max, no off. 5.4 grades the same low/high/max
+        # but has NO off: `thinking.type: disabled` answers 200 and still
+        # thinks lightly (z.ai maps Claude-Code thinking-off to effort low,
+        # verified live on the coding endpoint). Variant encodes the minor
+        # version digit (4.7 -> "7", 5.1 -> "1", 5.2 -> "2", 5.3 -> "3")
+        # and may carry a suffix.
         if combo.version == "5" and combo.variant.startsWith("2"): return @["off", "high", "max"]
         if combo.version == "5" and combo.variant.startsWith("3"): return @["low", "high", "max"]
-        if combo.version == "5" and combo.variant.startsWith("4"): return @["off", "low", "high", "max"]
+        if combo.version == "5" and combo.variant.startsWith("4"): return @["low", "high", "max"]
         return @["off", "on"]
       if fam == "0xalpha":
         # Stealth preview: reasoning is always on (no off); graded effort
