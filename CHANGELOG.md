@@ -2,6 +2,16 @@ Changelog
 
 Unreleased
 
+- **The `[image attached]` echo marker is now `🖼`.** The transcript
+  echo of a prompt whose `@image` tokens attached ends in U+1F5BC,
+  the framed picture — the image icon, at the end of the echoed line.
+  It is a text-default pictograph, so a mono symbol font (Noto Sans
+  Symbols 2) wins the fallback race and terminals paint it in the
+  text color rather than goofy multicolor; it measures one cell in
+  the project's width math. Replay paints the same mark, so
+  scrollback parity holds. (`tests/core/test_attach.nim`,
+  `tests/core/test_display.nim`)
+
 - **Flail detector's identical-consecutive signal is progress-gated.**
   A back-to-back re-run of the exact same call no longer flags when the
   first call's result delivered a new output line: a legitimate poll
