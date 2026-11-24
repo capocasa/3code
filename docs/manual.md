@@ -1358,6 +1358,14 @@ the token bar shows the sum of the rest's requests (the turn's own call,
 the verifier check, and any other side call that landed on the same
 rest, all added together).
 
+The side request carries the conversation verbatim — the same system
+prompt, tool roster, and history the turn itself sends — so the provider's
+prompt cache stays hot and the aside bills the history at cached-input
+prices, with only the question and the answer fresh. Tool use is switched
+off for that one request (`tool_choice: "none"`), so the answer is always
+prose: the model may read the tool calls in the history but cannot
+answer with a run of its own.
+
 ## Chunked mode
 
 For a large mechanical task, ask the model to split the work into files. Each
