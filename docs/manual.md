@@ -1149,7 +1149,7 @@ model:
 
 - **Attach**: put `@mockup.png` in your prompt. The image rides the message
   as an image block (not 64 KB of inlined binary), the echo shows
-  `@mockup.png [image attached]`, and the model answers about what it sees.
+  `@mockup.png 🖼`, and the model answers about what it sees.
 - **Read**: the model calls `read` on an image path — e.g. to inspect its own
   rendered output — and the image rides the next message. The tool result is
   a one-line text receipt
