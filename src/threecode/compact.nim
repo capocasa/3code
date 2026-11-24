@@ -215,11 +215,13 @@ const
   # Forced-thinking models spend this budget on reasoning before the
   # first answer token, so it is headroom, not just answer length.
   BtwMaxTokens* = 8192
-  BtwCallArgChars* = 200
-    ## How much of a tool call's arguments the aside's flattened context
-    ## carries: a `write` body or a long script is noise for a side
-    ## question, and the whole history rides every aside.
-  BtwSystemPrompt* = """You are answering a side question ("btw") about an ongoing coding session. The messages below are the conversation so far, followed by the user's question as the final user message. Answer that question from the conversation's content. Be brief and direct; no filler, no follow-up questions. You have no tools and cannot run anything: reply with plain prose only, never tool calls. You have no tools and cannot run anything: reply with plain prose only, never tool calls. This exchange is a private aside: it never enters the conversation, so the next real turn will not have seen it."""
+  BtwTrailingPrefix* = """Side question ("btw"), asked out of band: the answer is shown to the developer only and never becomes part of this conversation. Tool calls are disabled for this request — answer in plain prose, brief and direct, no filler, no follow-up questions.
+
+Question: """
+    ## Frames the question in the aside's trailing user message. The
+    ## prose-only contract lives here (not in a dedicated system prompt)
+    ## because the aside's system message is the conversation's own, kept
+    ## byte-identical so the provider's prompt cache survives the aside.
 
 type
   MetaRequest* = object
@@ -244,41 +246,80 @@ type
     retryAfter*: string  ## the Retry-After header value, "" when absent
     err*: string         ## 3code's own failure description, "" on a 200
 
+proc asideWireCacheAffinity(p: Profile, body: JsonNode, roster: JsonNode) =
+  ## The aside's cache-side body fields, mirroring the main call so both
+  ## land on one prompt-cache prefix: the profile's tool roster rides
+  ## UNCHANGED (tool definitions are prefix content — omitting them would
+  ## re-bill the whole history as fresh input), `tool_choice: "none"`
+  ## is what forbids the model to call any of them (its answer is prose,
+  ## never a tool run of its own), and the conversation's cache key pins
+  ## the shard the main call warmed (gh #58).
+  if roster != nil and roster.kind == JArray and roster.len > 0:
+    body["tools"] = roster
+    body["tool_choice"] = %"none"
+  if responsesApi(p) and conversationId != "":
+    body["prompt_cache_key"] = %conversationId
+
 proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
-                       trailingUser: string, maxTokens: int): MetaRequest =
+                       trailingUser: string, maxTokens: int,
+                       keepCachePrefix = false): MetaRequest =
   ## Assembles the payload and wire shape of a single non-streaming
   ## meta-call with a dedicated system prompt and no tools, over the live
   ## history plus an optional trailing user message. `messages` is
   ## read-only here: the payload is a copy, so the build leaves the live
   ## conversation untouched. Returns `endpoint == ""` when the profile is
   ## not usable (no provider/model configured).
+  ##
+  ## `keepCachePrefix` is the `:btw` shape: instead of a meta system
+  ## prompt over a flattened history, the payload rides the live history
+  ## through the SAME wire transforms as the main call (`repair`,
+  ## `stripInternalFields`, the think-back knob), keeps its system
+  ## message and image blocks, and carries the profile's tool roster
+  ## with `tool_choice: "none"` (plus the Responses prompt_cache_key).
+  ## A provider's prompt cache keys on the tools + messages prefix, so
+  ## anything but byte-identical fields would re-bill the whole history
+  ## as fresh input; with them, an aside costs the trailing question
+  ## alone. `systemPrompt` is unused in this mode.
   if p.name == "" or p.url == "" or p.key == "" or p.model == "": return
-  # Build a trimmed payload: the meta prompt + every non-system message
-  # from the live conversation (+ the trailing question). Tool_call
-  # messages are allowed — most OpenAI-compatible providers accept them
-  # in chat completions even without a tools parameter as long as the
-  # tool/assistant pairing is intact.
   var payload = newJArray()
-  payload.add %*{"role": "system", "content": systemPrompt}
-  if messages != nil and messages.kind == JArray:
-    for i in 0 ..< messages.len:
-      let m = messages[i]
-      if i == 0 and m.kind == JObject and m{"role"}.getStr == "system":
-        continue
-      payload.add m
+  if keepCachePrefix:
+    # The aside's context IS the conversation's wire copy — same
+    # transforms as callModel, so the bytes match the main request's
+    # cached prefix through the last message. Works on copies only: the
+    # live history is never touched from here.
+    if messages != nil and messages.kind == JArray:
+      payload = repairToolCallPairing(stripInternalFields(messages))
+      stripThinkBack(knownGoodThinkBack(p), payload)
+  else:
+    # Build a trimmed payload: the meta prompt + every non-system message
+    # from the live conversation (+ the trailing question). Tool_call
+    # messages are allowed — most OpenAI-compatible providers accept them
+    # in chat completions even without a tools parameter as long as the
+    # tool/assistant pairing is intact.
+    payload.add %*{"role": "system", "content": systemPrompt}
+    if messages != nil and messages.kind == JArray:
+      for i in 0 ..< messages.len:
+        let m = messages[i]
+        if i == 0 and m.kind == JObject and m{"role"}.getStr == "system":
+          continue
+        payload.add m
   if trailingUser.len > 0:
     payload.add %*{"role": "user", "content": trailingUser}
   # Copy before mutation: `messages` is the live history; payload entries
-  # share its JsonNode refs, so deleting fields below must not hit it.
+  # share its JsonNode refs, so the clip below and the field deletes must
+  # never hit it. (Top-level field copies are enough: clipping replaces
+  # the content node on the copy.) For keepCachePrefix the image blocks
+  # ride verbatim — the main request bills them into its cached prefix —
+  # while the summarizer's copy collapses them to their `[image WxH]`
+  # text stand-in: the bytes already live in the earlier history the
+  # summary replaces, and a meta-call must not carry megabyte blobs.
   var payload2 = newJArray()
   for m in payload:
     if m.kind == JObject:
       var c = newJObject()
       for k, v in m.pairs: c[k] = v
-      # Image blocks collapse to their `[image WxH]` text stand-in for the
-      # summarizer call: the bytes already live in the earlier history the
-      # summary replaces, and a meta-call must not carry megabyte blobs.
-      if c{"role"}.getStr == "user" and c{"content"}.kind == JArray:
+      if not keepCachePrefix and c{"role"}.getStr == "user" and
+         c{"content"}.kind == JArray:
         c["content"] = %userTextContent(c)
       payload2.add c
     else:
@@ -290,8 +331,9 @@ proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
   # just like tbNone. Same wire-safety as callModel: strict providers
   # reject unknown fields on replayed assistant messages (fireworks et
   # al.); Responses (first-party openai) rejects `reasoning_content`
-  # outright.
-  if knownGoodThinkBack(p) != tbAllTurns or useResponses:
+  # outright. keepCachePrefix payloads had the knob applied via
+  # stripThinkBack already — the main path's exact policy.
+  if not keepCachePrefix and (knownGoodThinkBack(p) != tbAllTurns or useResponses):
     for m in payload:
       if m.kind == JObject and m{"role"}.getStr == "assistant" and
          m.contains("reasoning_content"):
@@ -319,6 +361,8 @@ proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
       "max_output_tokens": maxTokens,
       "stream": false
     }
+    if keepCachePrefix:
+      asideWireCacheAffinity(p, body, responsesTools(activeTools(p)))
     # Same reasoning-effort shape responsesBody sends on the main path.
     if p.reasoning.len > 0:
       body["reasoning"] = %*{"effort": %p.reasoning}
@@ -330,6 +374,8 @@ proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
       maxTokensField(p): maxTokens,
       "stream": false
     }
+    if keepCachePrefix:
+      asideWireCacheAffinity(p, body, activeTools(p))
     # Same per-family reasoning wire mapping the main turn sends. Without
     # it a forced-thinking model (GLM-5.3 et al.) burns the meta-call's
     # whole token budget on reasoning and returns an empty answer.
@@ -452,46 +498,19 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   metaCallOnce(p, messages, SummarizerSystemPrompt, "", SummarizeMaxTokens,
                "summarize")
 
-proc btwContext*(messages: JsonNode): JsonNode =
-  ## The aside's read-only view of the live history, with every tool
-  ## exchange flattened to prose. The meta-call carries no tools
-  ## parameter, so a replayed `tool_calls` turn invited the model to
-  ## answer the question with tool calls of its own - an empty
-  ## `content`, i.e. no answer. A tool-call turn keeps its prose and
-  ## gains a `[tool call]` line per call (arguments cut to
-  ## `BtwCallArgChars`); each tool result becomes a user-role
-  ## `[tool result]` block, so the model still knows what the tools
-  ## said. Unchanged messages pass through by reference: the live
-  ## history is never mutated, only rebuilt ones are copies.
-  result = newJArray()
-  if messages == nil or messages.kind != JArray: return
-  for m in messages:
-    if m.kind != JObject or m{"role"}.getStr notin ["assistant", "tool"]:
-      result.add m
-      continue
-    var c = newJObject()
-    if m{"role"}.getStr == "tool":
-      for k, v in m.pairs:
-        if k notin ["role", "tool_call_id", "name"]: c[k] = v
-      c["role"] = %"user"
-      c["content"] = %("[tool result]\n" & userTextContent(m))
-      result.add c
-      continue
-    if m{"tool_calls"} == nil or m{"tool_calls"}.kind != JArray:
-      result.add m
-      continue
-    for k, v in m.pairs:
-      if k != "tool_calls": c[k] = v
-    let calls = m{"tool_calls"}
-    for tc in calls:
-      let fn = tc{"function"}
-      let args = fn{"arguments"}.getStr("")
-      let shown = if args.len > BtwCallArgChars: args[0 ..< BtwCallArgChars] & "..."
-                  else: args
-      c["content"] = %(c["content"].getStr("") &
-        (if c["content"].getStr("").len > 0: "\n" else: "") &
-        "[tool call: " & fn{"name"}.getStr("") & " " & shown & "]")
-    result.add c
+proc buildBtwRequest*(p: Profile, messages: JsonNode,
+                      question: string): MetaRequest =
+  ## The `:btw` aside's request, shared by the async worker (btwthread)
+  ## and the synchronous askBtw. The context is the live history
+  ## VERBATIM — byte-for-byte the main turn's wire prefix, tools roster
+  ## included, `tool_choice: "none"` instead of the turn's "auto" — so
+  ## the model answers from the conversation it already knows at
+  ## cached-input prices, and it cannot spend the answer on a tool run
+  ## of its own (the tool calls it sees are history; none may be its
+  ## reply). The question rides as a trailing user message: appended,
+  ## never merged into the shared history.
+  buildMetaRequest(p, messages, "", BtwTrailingPrefix & question,
+                   BtwMaxTokens, keepCachePrefix = true)
 
 proc askBtw*(question: string, messages: JsonNode, p: Profile): MetaReply =
   ## Side-channel question about the conversation: one meta-call with the
@@ -499,8 +518,7 @@ proc askBtw*(question: string, messages: JsonNode, p: Profile): MetaReply =
   ## message. The answer (and the call's usage) comes back for display
   ## only — callers must not append it (or the question) to `messages`.
   ## `answer` is "" on any failure; `usage` is zeroed with it.
-  let req = buildMetaRequest(p, btwContext(messages), BtwSystemPrompt,
-                             question, BtwMaxTokens)
+  let req = buildBtwRequest(p, messages, question)
   if req.endpoint == "": return ("", Usage())
   runMetaRequest(addr req, "btw")
 

@@ -1652,9 +1652,11 @@ proc responsesInput(messages: JsonNode): JsonNode =
     else:
       result.add m
 
-proc responsesTools(tools: JsonNode): JsonNode =
+proc responsesTools*(tools: JsonNode): JsonNode =
   ## Flatten chat tool schemas ({type, function:{name, ...}}) into the
   ## Responses shape ({type:"function", name, description, parameters}).
+  ## Exported for compact.nim: an aside (`:btw`) must ride the same
+  ## flattened roster as the main call or its cache prefix diverges.
   if tools == nil or tools.kind != JArray: return tools
   result = newJArray()
   for t in tools:

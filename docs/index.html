@@ -579,6 +579,7 @@ brave-key = &quot;...&quot;</pre></p>
 <p><tt class="docutils literal"><span class="pre">:btw</span></tt> asks the model a side question about the conversation — &quot;what did that error mean?&quot;, &quot;why did we pick the parser rewrite?&quot; — without touching the context:</p>
 <p><pre class="listing">:btw why did we skip the cache in that last change?</pre></p>
 <p>The command returns at once: the typed line lands in scrollback as a <tt class="docutils literal"><span class="pre">?</span></tt>-led item holding the question alone (the <tt class="docutils literal"><span class="pre">:btw</span></tt> is plumbing, the question is the item), and the answer runs on a background request and lands under a dim <tt class="docutils literal"><span class="pre">!</span></tt> block as soon as it arrives, so the prompt never waits for it. That holds while a turn is running too: a <tt class="docutils literal"><span class="pre">:btw</span></tt> typed mid-turn asks right away and its answer lands under the live reply, so you can question the work while it happens (its tokens join the bar once the turn rests). The request retries like a normal one (a 429 or 5xx backs off and goes again), and an interrupt cancels it along with the running turn: the question then gets a dim <tt class="docutils literal"><span class="pre">! interrupted by user</span></tt> row instead of an answer. The question and its answer are printed to your terminal only. Neither becomes a message: the next turn the model sees is exactly the conversation you had before asking, so a <tt class="docutils literal"><span class="pre">:btw</span></tt> costs no context window — but its burned tokens are real spend: they are added to the session and the token bar shows the sum of the rest's requests (the turn's own call, the verifier check, and any other side call that landed on the same rest, all added together).</p>
+<p>The side request carries the conversation verbatim — the same system prompt, tool roster, and history the turn itself sends — so the provider's prompt cache stays hot and the aside bills the history at cached-input prices, with only the question and the answer fresh. Tool use is switched off for that one request (<tt class="docutils literal"><span class="pre">tool_choice: &quot;none&quot;</span></tt>), so the answer is always prose: the model may read the tool calls in the history but cannot answer with a run of its own.</p>
 
 <h2 id="chunked-mode">Chunked mode</h2><p>For a large mechanical task, ask the model to split the work into files. Each chunk ends by calling the <tt class="docutils literal"><span class="pre">clear</span></tt> tool with instructions for the next one. The model carries the plan forward and leaves the spent context behind.</p>
 <p>Example:</p>
@@ -967,7 +968,7 @@ Arguments: --acp</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-24 11:14:34 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-24 17:42:07 UTC</small>
       </div>
     </div>
   </div>

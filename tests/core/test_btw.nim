@@ -100,9 +100,10 @@ proc startBtwSrv(): BtwHarness =
   let (_, port) = s.listener.getLocalAddr()
   createThread(s.thread, serve, s)
   # Provider name with a dot but not openai/chatgpt, so the meta-call takes
-  # the /chat/completions branch the canned reply above speaks.
+  # the /chat/completions branch the canned reply above speaks. The family
+  # names the tool roster the aside carries (the cache prefix's tools half).
   result = (s, Profile(name: "test.provider", url: "http://127.0.0.1:" &
-    $port.uint16, key: "k", model: "stub-chat"))
+    $port.uint16, key: "k", model: "stub-chat", family: "glm"))
 
 proc stopBtwSrv(h: BtwHarness) =
   h.srv.stop = true
@@ -144,7 +145,7 @@ suite ":btw side questions":
     check "no provider configured" in r.body
     check btwJobsLive() == 0
 
-  test "askBtw payload: aside prompt, live history, trailing question":
+  test "askBtw payload: live system prompt, verbatim history, trailing question":
     let h = startBtwSrv()
     defer: stopBtwSrv(h)
     var messages = history()
@@ -162,13 +163,18 @@ suite ":btw side questions":
     let msgs = sent["messages"]
     check msgs.len == 4
     check msgs[0]{"role"}.getStr == "system"
-    check msgs[0]{"content"}.getStr == BtwSystemPrompt
+    check msgs[0]{"content"}.getStr == "sysprompt"
     check msgs[1]{"content"}.getStr == "read foo.nim"
     check msgs[2]{"content"}.getStr == "foo.nim has 3 procs"
     check msgs[3]{"role"}.getStr == "user"
-    check msgs[3]{"content"}.getStr == "what did foo.nim have?"
+    check msgs[3]{"content"}.getStr == BtwTrailingPrefix & "what did foo.nim have?"
     check sent["model"].getStr == h.prof.model
     check sent["max_tokens"].getInt == BtwMaxTokens
+    # The cache contract: the profile's roster rides so the prefix matches
+    # the main call's, but the model may call none of it.
+    check sent["tools"].kind == JArray
+    check sent["tools"].len > 0
+    check sent["tool_choice"].getStr == "none"
 
   test "meta-call carries the family reasoning knob":
     # Regression: the meta-call used to omit the per-family reasoning
@@ -235,7 +241,7 @@ suite ":btw side questions":
     # not as an edit of the shared history.
     let sent = parseJson(h.srv.payloads[0])
     check sent["messages"].len == 4
-    check sent["messages"][^1]{"content"}.getStr == "what did foo.nim have?"
+    check sent["messages"][^1]{"content"}.getStr.endswith("what did foo.nim have?")
 
   test "the aside's tokens land on the session and the summed bar":
     # The turn's own call spent 100/20 (already ledgered, carried inline
@@ -331,11 +337,15 @@ suite ":btw side questions":
       discard sleep(1)
     check btwRetiredLive() == 0
 
-  test "btwContext flattens the tool exchange to prose":
-    # The meta-call carries no tools parameter: replayed tool_calls made
-    # the model answer with tool calls of its own (an empty content, i.e.
-    # no answer). Prose survives, calls and results become bracketed
-    # lines, and the live history is untouched.
+  test "the aside context is the conversation's verbatim wire prefix":
+    # A provider's prompt cache keys on the tools + messages prefix, so
+    # the aside rides the live history through the same transforms as the
+    # main call: system prompt, tool_calls and tool messages intact,
+    # internal bookkeeping fields gone — anything else would re-bill the
+    # whole history as fresh input. The old tools-less payload with a
+    # flattened history missed the cache AND still invited tool-call
+    # answers; here the roster rides but `tool_choice: "none"` forbids
+    # the model to use it.
     let messages = %* [
       {"role": "system", "content": "sysprompt"},
       {"role": "user", "content": "list the files"},
@@ -343,27 +353,77 @@ suite ":btw side questions":
         {"id": "c1", "type": "function", "function":
           {"name": "bash", "arguments": "{\"command\":\"ls\"}"}}]},
       {"role": "tool", "tool_call_id": "c1", "name": "bash", "content": "a.nim"},
-      {"role": "assistant", "content": "there is one file"},
+      {"role": "assistant", "content": "there is one file",
+       "usage": {"promptTokens": 5, "completionTokens": 1,
+                  "totalTokens": 6},
+       "agentSent": true},
     ]
     let before = $messages
-    let ctx = btwContext(messages)
-    check ctx.len == 5
-    check ctx[0] == messages[0]
-    check ctx[1] == messages[1]
-    check ctx[2]{"tool_calls"} == nil
-    check ctx[2]{"content"}.getStr == "naming them\n[tool call: bash {\"command\":\"ls\"}]"
-    check ctx[3]{"role"}.getStr == "user"
-    check ctx[3]{"tool_call_id"} == nil
-    check ctx[3]{"content"}.getStr == "[tool result]\na.nim"
-    check ctx[4]{"content"}.getStr == "there is one file"
-    # An argument longer than the cap is cut, a silent tool-call turn
-    # gets its bracket line alone.
-    let long = repeat("x", BtwCallArgChars + 50)
-    let silent = %*[
-      {"role": "assistant", "content": "", "tool_calls": [
-        {"id": "c2", "type": "function", "function":
-          {"name": "write", "arguments": long}}]}]
-    let flat = btwContext(silent)
-    check flat[0]{"content"}.getStr == "[tool call: write " &
-      long[0 ..< BtwCallArgChars] & "...]"
+    let h = startBtwSrv()
+    defer: stopBtwSrv(h)
+    discard askBtw("what did ls show?", messages, h.prof)
+    check h.srv.payloads.len == 1
+    let sent = parseJson(h.srv.payloads[0])
+    let msgs = sent["messages"]
+    check msgs.len == 6
+    check msgs[0]{"content"}.getStr == "sysprompt"
+    check msgs[2]{"tool_calls"}[0]{"function"}{"name"}.getStr == "bash"
+    check msgs[2]{"content"}.getStr == "naming them"
+    check msgs[3]{"role"}.getStr == "tool"
+    check msgs[3]{"tool_call_id"}.getStr == "c1"
+    check msgs[3]{"content"}.getStr == "a.nim"
+    # Wire-safe exactly like the main call's copy: the bookkeeping fields
+    # never reach the provider.
+    check "usage" notin msgs[4]
+    check "agentSent" notin msgs[4]
+    check msgs[4]{"content"}.getStr == "there is one file"
+    check msgs[5]{"content"}.getStr == BtwTrailingPrefix & "what did ls show?"
+    check sent["tool_choice"].getStr == "none"
+    # The live history is the caller's, byte for byte.
     check $messages == before
+
+  test "an oversized aside clips its own payload, never the live history":
+    # The envelope guard clips the payload in place when the body busts
+    # the gateway cap, and the verbatim context shares message nodes with
+    # the caller's history — so the clip must land on copies only, or one
+    # big session would eat its own messages out of the conversation.
+    let big = repeat("x", 400 * 1024)
+    let messages = %*[
+      {"role": "system", "content": "sysprompt"},
+      {"role": "user", "content": big},
+      {"role": "assistant", "content": big},
+    ]
+    let h = startBtwSrv()
+    defer: stopBtwSrv(h)
+    discard askBtw("still there?", messages, h.prof)
+    check h.srv.payloads.len == 1
+    let sent = parseJson(h.srv.payloads[0])
+    check "clipped for size" in sent["messages"][1]{"content"}.getStr
+    # The live history is untouched: byte for byte what the caller held.
+    check messages[1]{"content"}.getStr == big
+    check messages[2]{"content"}.getStr == big
+
+  test "on /responses the aside pins the conversation's cache key":
+    # gh #58: first-party openai shards the prompt cache by
+    # prompt_cache_key; the aside must land on the shard the main call
+    # warmed, carrying the same flattened tools array (prefix content).
+    let oldId = conversationId
+    conversationId = "conv-cache-key"
+    defer: conversationId = oldId
+    let messages = %*[
+      {"role": "system", "content": "sysprompt"},
+      {"role": "user", "content": "go"}]
+    let p = Profile(name: "openai.gpt", url: "https://api.openai.com/v1",
+                    key: "k", model: "gpt-5.6", family: "gpt")
+    let req = buildBtwRequest(p, messages, "why?")
+    check req.endpoint == "https://api.openai.com/v1/responses"
+    let body = parseJson(req.body)
+    check body{"prompt_cache_key"}.getStr == "conv-cache-key"
+    check body{"tool_choice"}.getStr == "none"
+    # Responses flattens {type, function:{...}} to {type:"function", ...},
+    # same as the main call's body.
+    check body{"tools"}[0]{"name"}.getStr.len > 0
+    check body{"tools"}[0]{"function"} == nil
+    check body{"input"}.len == 3
+    check body{"input"}[0]{"content"}.getStr == "sysprompt"
+    check body{"input"}[2]{"content"}.getStr.endswith("why?")
