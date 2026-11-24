@@ -1609,8 +1609,11 @@ proc saveDraft*(session: Session, text: string) =
   # A buffer holding only a quit line is not a draft: quitting snapshots the
   # editor before teardown, and restoring ":q" would prefill the prompt with
   # a command that exits on submit. Persist "" so the sidecar is removed,
-  # exactly like an idle editor.
-  let draft = if isQuitLine(text): "" else: text
+  # exactly like an idle editor. Whitespace-only is empty too: the teardown
+  # flush saves the buffer unconditionally, so a stray space or newline the
+  # user never meant to keep would otherwise survive as a sidecar and prefill
+  # an invisible character into the next resume's prompt.
+  let draft = if isQuitLine(text) or text.strip.len == 0: "" else: text
   if draft.len == 0:
     removeIfExists(path)
     return
@@ -1663,7 +1666,12 @@ proc loadDraft*(sessionPath: string): string =
   if sessionPath == "": return ""
   let path = draftPathFor(sessionPath)
   if not fileExists(path): return ""
-  try: readFile(path) except CatchableError: ""
+  # Whitespace-only sidecars (stray keys the pre-fix teardown flush saved)
+  # restore to an empty editor, same as absence.
+  try:
+    let text = readFile(path)
+    if text.strip.len == 0: "" else: text
+  except CatchableError: ""
 
 proc loadPendingDraft*(cwd: string): string =
   ## Read the cwd-keyed pending prompt draft for `cwd`, or "" if there is none
