@@ -86,10 +86,11 @@
 <p>A prompt given as an argument runs one turn and exits (oneshot); <tt class="docutils literal"><span class="pre">-r</span></tt> continues the directory's latest session the same way. Exit codes: 0 for a completed turn, 2 usage, 3 config, 1 crash. See <a class="reference external" href="manual.html#scripting">Scripting</a> in the manual for the pattern and its parsing limitation.</p>
 
 <h2 id="interactive-commands">Interactive commands</h2><p>Everything typeable at the <tt class="docutils literal"><span class="pre">❯</span></tt> prompt. Tab completes commands, provider names, model names, and paths where supported.</p>
+<p>Most commands also work while a turn is running. The exceptions queue for the next turn boundary, echoed with an hourglass (<tt class="docutils literal"><span class="pre">⧖</span></tt>), because they edit what the running turn is using: the conversation (<tt class="docutils literal"><span class="pre">:clear</span></tt>, <tt class="docutils literal"><span class="pre">:summarize</span></tt>, <tt class="docutils literal"><span class="pre">:resume</span></tt>, <tt class="docutils literal"><span class="pre">:! CMD</span></tt>), the session (<tt class="docutils literal"><span class="pre">:rename X</span></tt>, <tt class="docutils literal"><span class="pre">:private</span></tt>), the profile (<tt class="docutils literal"><span class="pre">:model X</span></tt>, <tt class="docutils literal"><span class="pre">:provider X</span></tt>, <tt class="docutils literal"><span class="pre">:reasoning X</span></tt>, <tt class="docutils literal"><span class="pre">:verifier X</span></tt>), the sandbox policy and its ask answers, or the turn's own conduct (<tt class="docutils literal"><span class="pre">:streaming</span></tt>, <tt class="docutils literal"><span class="pre">:retry</span></tt>, <tt class="docutils literal"><span class="pre">:computer</span></tt>, <tt class="docutils literal"><span class="pre">:plugin</span></tt>).</p>
 <table border="1" class="docutils"><tr><th>command</th><th>effect</th></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:help</span></tt> / <tt class="docutils literal"><span class="pre">:?</span></tt></td><td>command and key list with current bindings</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:tokens</span></tt></td><td>token usage for this session (input, cached, output, total)</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">:clear</span></tt></td><td>reset the conversation, keep provider and model</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:clear</span></tt></td><td>reset the conversation, keep provider and model; <tt class="docutils literal"><span class="pre">:clear &lt;text&gt;</span></tt> runs the text as the first prompt</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:model</span></tt></td><td>list models for the current provider, <tt class="docutils literal"><span class="pre">*</span></tt> marks the current</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:model X</span></tt></td><td>switch to model X within the current provider</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:model P.X</span></tt></td><td>switch to model X on provider P in one word (the <tt class="docutils literal"><span class="pre">-m</span></tt> spelling)</td></tr>
@@ -111,7 +112,9 @@
 <tr><td><tt class="docutils literal"><span class="pre">:verifier X</span></tt></td><td>run goal checks on X (a listed verifier, or any model of the current provider)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:verifier on/off</span></tt></td><td>toggle the verifier without losing the selection</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:notify</span></tt></td><td>show notify mode</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">:notify on/off</span></tt></td><td>toggle the desktop notification that fires when a turn ends</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:notify on/off</span></tt></td><td>toggle the desktop notification that fires when a turn ends (mid-turn the switch flips at once, the config is saved when the turn rests)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:tab-title</span></tt></td><td>show tab-title mode</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:tab-title on/off</span></tt></td><td>toggle the brand + spinner glyph in the terminal tab (same mid-turn rule as <tt class="docutils literal"><span class="pre">:notify</span></tt>)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:allow [P]</span></tt> / <tt class="docutils literal"><span class="pre">:deny [P]</span></tt></td><td>spelled-out forms of <tt class="docutils literal"><span class="pre">:a</span></tt>/<tt class="docutils literal"><span class="pre">:d</span></tt>: allow/deny P (bare: <tt class="docutils literal"><span class="pre">@d</span></tt>, the path the waiting ask named)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:allow-dir [P]</span></tt></td><td>allow P's directory (basename shaved when P names a file); the bare form answers the waiting ask with the directory grant</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:retry</span></tt></td><td>send the current state as a request, like Enter on an empty prompt</td></tr>
@@ -129,7 +132,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">:session</span></tt></td><td>show this session's ID (for <tt class="docutils literal"><span class="pre">--resume=ID</span></tt>)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:resume</span></tt></td><td>list this directory's sessions; <tt class="docutils literal"><span class="pre">:resume ID</span></tt> swaps the running 3code onto that session</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:summarize</span></tt></td><td>collapse old turns into a synthetic recap</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">:btw Q</span></tt></td><td>ask the model a side question about the conversation; the <tt class="docutils literal"><span class="pre">?</span></tt> question item lands at once, the dim <tt class="docutils literal"><span class="pre">!</span></tt> answer async; never enters the context, its tokens added to the bar</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">:btw Q</span></tt></td><td>ask the model a side question about the conversation; the <tt class="docutils literal"><span class="pre">?</span></tt> question item lands at once, the dim <tt class="docutils literal"><span class="pre">!</span></tt> answer async; never enters the context, its tokens added to the bar. Works while a turn runs: the answer lands mid-turn, its tokens join the bar when the turn rests</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:version</span></tt></td><td>show the running 3code version</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox</span></tt> / <tt class="docutils literal"><span class="pre">:sb</span></tt></td><td>the sandbox state line, then the active rules when it enforces (<tt class="docutils literal"><span class="pre">:sandbox show</span></tt> is the same dump)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:sandbox on/off</span></tt></td><td>toggle sandbox enforcement</td></tr>
@@ -314,7 +317,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-23 16:21:07 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-24 11:14:35 UTC</small>
       </div>
     </div>
   </div>
