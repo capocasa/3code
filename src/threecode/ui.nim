@@ -2246,7 +2246,7 @@ proc isFirstUserMessage*(messages: JsonNode): bool =
 
 var lastImageAttachments*: seq[string] = @[]
   ## Source names attached by the most recent buildUserMessage; echo sites
-  ## turn it into the `[image attached]` suffix.
+  ## turn it into the image-mark suffix.
 
 proc buildUserMessage*(messages: JsonNode, raw: string; cwd = safeCwd();
     vision = false, imgDir = ""; lastBash = "", lastPrompt = ""): JsonNode =
@@ -2271,8 +2271,8 @@ proc buildUserMessage*(messages: JsonNode, raw: string; cwd = safeCwd();
 
 proc imageAttachEcho*(): string =
   ## Suffix for the transcript echo of a submitted prompt when its @image
-  ## tokens attached: `@mockup.png rebuild this [image attached]`.
-  if lastImageAttachments.len == 0: "" else: " [image attached]"
+  ## tokens attached: `@mockup.png rebuild this 🖼`.
+  if lastImageAttachments.len == 0: "" else: " " & ImageAttachMark
 
 proc paintBtwReply(r: BtwReply) =
   ## Commit one finished aside to scrollback: its dim `!` quote block,

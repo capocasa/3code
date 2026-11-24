@@ -224,7 +224,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
     of "user":
       let raw = m{"content"}
       # Image-bearing user messages: a user @attach echoes with the same
-      # `[image attached]` marker the live path painted (array content has
+      # image mark the live path painted (array content has
       # no string to getStr); the harness-made follow-ups that ride image
       # reads and screenshots (`attached: ... (image read)` /
       # `(screenshot)`) rendered nothing live — their tool rows already
@@ -235,7 +235,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         if text.startsWith("attached: ") and
             ("(image read)" in text or "(screenshot)" in text):
           continue
-        let c = stripPreamble(text).strip & " [image attached]"
+        let c = stripPreamble(text).strip & " " & ImageAttachMark
         let bytes = formatItem(userPromptItem(c))
         stdout.write "\n"
         stdout.write bytes & "\n"
@@ -496,7 +496,7 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
         let text = userTextBlocks(raw).strip
         if text.startsWith("attached: ") and "(image read)" in text:
           continue
-        let c = stripPreamble(text).strip & " [image attached]"
+        let c = stripPreamble(text).strip & " " & ImageAttachMark
         emit anchor, formatItem(userPromptItem(c))
         continue
       let c = stripPreamble(m{"content"}.getStr("")).strip
