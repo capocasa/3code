@@ -2589,8 +2589,10 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ##   GLM-5.3 replaces both: forced thinking, top-level `reasoning_effort`
   ##   (`low`/`high`/`max`); `thinking.type: disabled` is a hard error and
   ##   `thinking.effort` is silently ignored. GLM-5.4 keeps the 5.3 effort
-  ##   ladder and accepts `thinking.type: disabled` again (probed live,
-  ##   2026-11-23: 200 where 5.3 rejects it).
+  ##   ladder but has no true off: `thinking.type: disabled` answers 200
+  ##   yet the model still thinks lightly (z.ai maps Claude-Code
+  ##   thinking-off to effort low, verified live on the coding endpoint
+  ##   2026-11-24), so `off` maps to `reasoning_effort: low`.
   ## - `reasoning_effort` (`high`/`max`) on Together for GLM-5.2; Together
   ##   accepts only those two effort levels and ignores the field on older
   ##   GLM (which think whenever the parameter is absent).
@@ -2633,7 +2635,9 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       else: discard
     elif glm54:
       case p.reasoning
-      of "off": body["thinking"] = %*{"type": "disabled"}
+      # 5.4 has no true off (disabled still thinks lightly): the cheapest
+      # real setting is effort low.
+      of "off": body["reasoning_effort"] = %"low"
       of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
       else: discard
     else:
