@@ -204,6 +204,10 @@ jobs:
     # actually aborts. Requires Nim devel, so it uses nim-version: devel
     # (the build/smoke jobs stay on stable for the shipped binary).
     runs-on: ubuntu-22.04
+    # A healthy run takes 13-17 min (devel builds from source, the tests
+    # run under qemu). The default 360 would let a hung dependency download
+    # hold a runner for six hours (observed 2026-11-25).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -217,8 +221,12 @@ jobs:
       - name: Install dependencies
         # nimble.lock pins deps for the shipped builds; this experimental
         # stress job rides devel Nim on purpose and keeps the same lock.
+        # The lock also records the stable toolchain, and nimble insists on
+        # that exact Nim when the system one differs: it prompts to download
+        # Nim 2.4.0 and the step hangs or dies on the download. --useSystemNim
+        # takes the compiler on PATH and still installs the locked deps.
         run: |
-          nimble install -y --depsOnly
+          nimble install -y --depsOnly --useSystemNim
 
       - name: Generate nimble.paths for direct nim invocations
         # Same as the build job: the lock disables nim's pkgs2 scan and the
