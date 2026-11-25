@@ -416,7 +416,9 @@ suite "sandbox ask prompt":
     tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
     tty.answerAsk ":a"
     tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
-    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+    # The retry is a second bash spawn; a loaded 2-core Windows runner has
+    # run it past 30s twice (a healthy run finishes the whole file in 45s).
+    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 60_000
     check policyLines(root) ==
       @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
     tty.expect "\u276f"
@@ -434,7 +436,7 @@ suite "sandbox ask prompt":
 
     tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
     tty.answerAsk ":a"
-    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 60_000
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked",
         "allow ./vault/out.txt"]
