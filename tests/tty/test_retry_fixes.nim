@@ -52,8 +52,11 @@ proc reply(content: string; delayMs = 50): JsonNode =
      "usage": {"promptTokens": 5, "completionTokens": 1,
                 "totalTokens": 6, "cachedTokens": 0}}
 
-const CtrlShiftR = "\x1b[114;6u"
-  ## kitty keyboard protocol: CSI 114;6 u (ctrl+shift+r, mods 5|1)
+const Ctrl9 = "\x1b[57;5u"
+  ## kitty keyboard protocol: CSI 57;5 u (ctrl+9, mods 5|1). Retry lives
+  ## on ctrl+9 since the ask-answer shortcuts landed: ctrl+digit is
+  ## kitty-protocol-distinct exactly like ctrl+shift+letter was, and
+  ## ctrl+shift+r sat one key from ctrl+R isearch.
 
 suite ":retry as empty submit":
   test "idle :retry sends the current state as a request, no hint line":
@@ -152,7 +155,7 @@ suite ":retry as empty submit":
     let hist = readFile(root / "xdg" / "3code" / "history")
     check ":retry list" in hist
 
-  test "ctrl+shift+r is the same submit without eating the draft":
+  test "ctrl+9 is the same submit without eating the draft":
     let root = newFixture("retry_key")
     writeConfiguredProvider(root)
     # Response 1 is slow (1.5s) so the draft and the key press land
@@ -177,7 +180,7 @@ suite ":retry as empty submit":
     # clears the line; the key keeps the draft riding the turns).
     tty.send "next prompt"
     tty.expect "next prompt"
-    tty.send CtrlShiftR
+    tty.send Ctrl9
     tty.expectNeverInHistory "instant retry requested"
     tty.expectInHistory "FIRST_TURN"
     tty.expectInHistory "SECOND_TURN"
