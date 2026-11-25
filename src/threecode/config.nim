@@ -2505,6 +2505,10 @@ proc echoMasksAsKey*(s: string): bool =
 proc defaultNameFromUrl*(url: string): string =
   let host = parseUri(url).hostname
   if host == "": return ""
+  # First-party Google hosts carry two different wires under one domain:
+  # name them for the provider that speaks the pasted base.
+  if host == "generativelanguage.googleapis.com": return "google"
+  if host == "cloudcode-pa.googleapis.com": return "geminicli"
   # Provider names live inside `provider.model` dot-joined ids everywhere
   # (config `current`, Profile.name, providerOf's find('.')), so a name
   # containing a dot breaks the split. Dotted-quad hosts therefore mangle

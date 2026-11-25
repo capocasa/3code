@@ -147,6 +147,12 @@ suite "config: catalog urls":
     check catalogUrl("relace") == "https://models.relace.ai/v1"
     check catalogUrl("darkbloom") == "https://api.darkbloom.dev/v1"
 
+  test "first-party google urls name their wire":
+    check defaultNameFromUrl(
+      "https://generativelanguage.googleapis.com/v1beta") == "google"
+    check defaultNameFromUrl(
+      "https://cloudcode-pa.googleapis.com") == "geminicli"
+
 suite "config: new known-good providers":
   test "glm rows ride the glm family":
     check knownGoodFamily("vercel", "zai/glm-5.3") == "glm"
