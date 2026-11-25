@@ -503,9 +503,13 @@ when defined(linux):
         # Reads keep working: the fence still reads its own policy,
         # and so does anything the command runs.
         let rc = sandboxed("cat " & pol.quoteShell)
+        if rc.exitCode != 0:
+          echo "sandboxed cat failed (", rc.exitCode, "): ", rc.output
         check rc.exitCode == 0
         check "allow" in rc.output
         # Ordinary writes inside the writable root are untouched.
         let wn = sandboxed("sh -c 'echo ok > " & (dir / "w.txt").quoteShell & "'")
+        if wn.exitCode != 0:
+          echo "sandboxed write failed (", wn.exitCode, "): ", wn.output
         check wn.exitCode == 0
         check readFile(dir / "w.txt") == "ok\n"

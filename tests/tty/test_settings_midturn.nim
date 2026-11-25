@@ -10,7 +10,7 @@ discard """
 ## `writeConfigFile` re-parses the file and briefly swaps the settings
 ## globals a running turn reads, so mid-turn the in-memory switch flips at
 ## once and the write waits for the rest.
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
 
@@ -92,7 +92,17 @@ suite "chrome settings during a turn":
     # The rest writes what the running turn made wait.
     tty.expectInHistory "main reply", timeoutMs = 8000
     tty.expectPromptLive()
-    let saved = readFile(configFile)
+    # The write is ordered with the turn finalize, not with the prompt
+    # repaint: a slow runner can surface the prompt first (osx). Poll
+    # briefly so the assertion measures the contract (the write happens)
+    # and not a paint-vs-fsync race.
+    var saved = ""
+    let deadline = epochTime() + 5.0
+    while epochTime() < deadline:
+      saved = readFile(configFile)
+      if "notify = \"off\"" in saved and "tab-title = \"off\"" in saved:
+        break
+      sleep(100)
     check "notify = \"off\"" in saved
     check "tab-title = \"off\"" in saved
     tty.send ":q\n"

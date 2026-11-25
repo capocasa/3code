@@ -42,6 +42,8 @@ when defined(linux):
       let (outp, code) = execCmdEx(binPath().quoteShell & " sandbox restrict " &
         dir.quoteShell & " --deny " & (dir / "denied").quoteShell &
         " -- sh -c 'id -u; cat /proc/self/uid_map'")
+      if code != 0:
+        echo "sandboxed id failed (", code, "): ", outp
       check code == 0
       # Warnings (sandwall's, the repair's) interleave with the child's
       # stdout in the merged capture, so assert on whole lines, never

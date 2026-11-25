@@ -164,7 +164,12 @@ suite ":btw is async":
     # 6000+40 in, 5+6 out (ledgered only now, never mid-turn: the running
     # turn owns the bar until it rests).
     tty.expectInHistory "main reply", timeoutMs = 8000
-    tty.expectInHistory "↓11"
+    # The rest-ledger lands with the turn finalize; on the 3-core macos
+    # runner the stream drip and the join repaint run seconds behind the
+    # committed reply (the reply assert above passed while the bar still
+    # showed mid-turn partials). 12s keeps the contract (the ledger does
+    # land) without measuring the runner's scheduler.
+    tty.expectInHistory "↓11", timeoutMs = 12000
     tty.expectPromptLive()
     tty.send ":q\n"
     tty.expectExit(0)
