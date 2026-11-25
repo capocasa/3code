@@ -94,11 +94,11 @@ echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}
 run_testament() {
   rc_all=0
   if [ $# -eq 0 ]; then
-    # Default selection: every non-tty test file in one worker pool, then
-    # tty alone. File-level parallelism beats category-level: core alone
-    # has 59 files and was the critical path even with the other four
-    # categories running beside it. Testament still owns each file's spec
-    # (matrix, disabled, exit codes), so this is the same coverage.
+    # Default selection: config and core folded, every other non-tty file
+    # in one worker pool, then tty alone. Testament still owns each pooled
+    # file's spec (matrix, disabled, exit codes), so coverage is unchanged;
+    # folds trade per-file process isolation for one compile per group and
+    # keep every assertion.
     # The tty PTY tests stay alone: they are scheduler-sensitive, and on
     # small runners (macos-15 is 3-core) concurrent compiles starve the
     # render threads, producing load-induced frame mismatches and
@@ -107,16 +107,25 @@ run_testament() {
     for d in tests/*/; do
       d=${d%/}
       [ "$d" = tests/tty ] && continue
-      # config is folded into one binary below: 19 compiles -> 1.
+      # config and core are folded below: 19 and 58 compiles -> 1 and 6.
       [ "$d" = tests/config ] && continue
+      [ "$d" = tests/core ] && continue
       for f in "$d"/test_*.nim; do
         [ -f "$f" ] && files="$files $f"
       done
     done
-    # Config is proven green as one process (592 tests, 0 failures), so
-    # its 19 files become one compile; every other non-tty file keeps
-    # testament's per-file spec and process isolation in the pool.
+    # Core's solo files stay per-file in the pool: the fold spec names
+    # them, so the pool list cannot drift from the spec.
+    for f in $(python3 tests/tools/fold_groups.py --list-solo core); do
+      files="$files $f"
+    done
+    # Config is proven green as one process (592 tests, 0 failures), so its
+    # 19 files become one compile. Core folds into six domain groups, one
+    # process each (1280 tests, 0 failures): grouping, not a single binary,
+    # is what keeps cross-domain state apart.
     python3 tests/tools/fold_category.py config \
+      --timeout "${PER_TEST_SECS:-720}" || rc_all=1
+    python3 tests/tools/fold_groups.py core \
       --timeout "${PER_TEST_SECS:-720}" || rc_all=1
     if [ -n "$files" ]; then
       # Word-splitting is intentional: test paths contain no spaces.

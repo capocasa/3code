@@ -1,0 +1,38 @@
+# Core fold: 59 unittest modules -> 6 binaries + 1 per-file test.
+#
+# A fold concatenates the modules in the order listed (each module's tests
+# run before the next module's top-level code), and a group runs in its own
+# process. Groups are split by domain so tests that mutate process state
+# (cwd, env, signal handlers, module-level setup) stay apart from the tests
+# that would inherit it. Re-validate a group after moving a module:
+#
+#   python3 tests/tools/fold_groups.py core --baseline --json build/core_baseline.json
+#   python3 tests/tools/fold_groups.py core --compare build/core_baseline.json
+#
+# test_session self-execs this binary (getAppFilename + --allocate/--lock*),
+# so it must be the first module of its group: the spawned child is the
+# same binary and must reach its argv dispatch before any other module's
+# tests run.
+
+# Session state, cross-process locks, drafts. test_session first: see above.
+session: test_session test_session_diff test_session_name test_terminal_lock test_ticker_cleanup
+
+# Sandbox policy, wall/cascade, per-language walls. Heavy fs + cwd + netns.
+sandbox: test_sandbox_ask test_sandbox_cascade test_sandbox_devices test_sandbox_dotnet test_sandbox_java test_sandbox_traversal test_sandbox_userns test_wall_bash test_sweep_stale_bash_dirs
+
+# Argument parsing, command verbs, completion, headless mode.
+cli: test_cli_args test_command_prefixes test_command_prefix test_completion test_headless_cli test_modes test_mode_verb test_windows_keys
+
+# Display, screen, input line, vim keys, history, search, minline parser.
+ui: test_display test_screen test_vim test_search test_history test_minline test_parser test_compact_extra test_btw test_spinner_join test_sync_frames test_rebreak_window
+
+# Goal, attach, plugins, rpc, update, web/dmail, oauth, prompt persistence.
+agent: test_goal test_attach test_acp test_plugins test_plugin_cli test_update test_rpc test_web test_webfetch_gate test_example_webserve test_oauth_loopback test_dmail test_ignore test_oneshot_prompt_persist test_draft_debounce test_runner
+
+# Pure helpers and the local stores: auth, images, prompt cache, flail.
+util: test_util test_util_extra test_auth_store test_images test_images_persist test_prompt_cache test_flail test_repro_read_banner
+
+# Kept per-file in the pool: it drives build_binary.sh with out-of-tree
+# probes and asserts provenance behavior. Nothing in it needs folding, and
+# a failure there stays attributable to the one file.
+solo: test_build_provenance
