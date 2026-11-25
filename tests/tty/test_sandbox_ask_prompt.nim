@@ -116,6 +116,7 @@ proc answerAsk(s: TtySession; ans: string) =
 
 var bashBackendCache = -1
 var restrictBaselineCache = -1
+var landlockBitesCache = -1
 
 proc restrictBaselineBites(): bool =
   ## Whether the toggle leg's denial bites on this host: it comes from
@@ -151,6 +152,40 @@ proc restrictBaselineBites(): bool =
     removeFile(probe)
   except CatchableError: discard
   restrictBaselineCache == 1
+
+proc landlockBites(): bool =
+  ## Whether the policy's hard deny bites on this host: the deny floor is
+  ## landlock on posix, and kernels that refuse prctl(NO_NEW_PRIVS)
+  ## cannot engage it (arm64 CI runners deny the prctl outright,
+  ## observed 2026-11) - sandwall degrades with a notice and the command
+  ## runs unconfined, so the hard-deny legs must skip instead of failing
+  ## on the missing denial. Mirrors the probe pattern of
+  ## bashSandboxWorks, but probes the landlock floor, not the mount mask.
+  if landlockBitesCache >= 0: return landlockBitesCache == 1
+  let tmp = getTempDir() / ("landlock_bites_" & $getCurrentProcessId())
+  try: removeDir(tmp) except CatchableError: discard
+  createDir(tmp)
+  writeFile(tmp / ".sandbox", "deny /\nallow ./\n")
+  let probe = getTempDir() / ("landlock_out_" & $getCurrentProcessId())
+  try: removeFile(probe) except CatchableError: discard
+  when defined(windows):
+    let cmd = "cmd /c echo x > " & probe.quoteShell
+  else:
+    let cmd = "sh -c " & ("echo x > " & probe).quoteShell
+  let quoted = "\"" & ensureStubBinary() & "\" sandbox --policy " &
+    (tmp / ".sandbox").quoteShell & " restrict -- " & cmd
+  try:
+    let r = execCmdEx(quoted)
+    landlockBitesCache =
+      if r.exitCode != 0 and not fileExists(probe) and
+          "denied" in r.output.toLowerAscii: 1 else: 0
+  except CatchableError:
+    landlockBitesCache = 0
+  try:
+    removeDir(tmp)
+    removeFile(probe)
+  except CatchableError: discard
+  landlockBitesCache == 1
 
 proc bashSandboxWorks(): bool =
   ## Whether the ask enforcement the bash legs depend on actually bites
@@ -664,7 +699,7 @@ suite "sandbox ask prompt":
     echo "  PASS: apply_patch two roots ask sequentially"
 
   test "hard deny never asks":
-    if bashSandboxWorks():
+    if bashSandboxWorks() and landlockBites():
       let root = newFixture("harddeny")
       defer: removeDir(root)
       writeConfiguredProvider(root)

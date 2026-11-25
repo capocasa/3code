@@ -438,7 +438,16 @@ when defined(posix):
           options = {poStdErrToStdOut}, workingDir = proj)
         let probeOk = probe.waitForExit(15_000) == 0
         probe.close()
-        if not probeOk:
+        # probeOk only proves the command exits zero; since the landlock
+        # layer degrades to a notice on kernels that refuse
+        # prctl(NO_NEW_PRIVS) (arm64 CI runners), the fence may be absent
+        # while everything still "works". The suite's contract is the
+        # fence itself - a HOME write must fail - so probe that too.
+        let leakProbe = execCmdEx(binPath() & " sandbox --policy " &
+          pol.quoteShell & " restrict -- touch " & (home / "leak").quoteShell,
+          env = env, workingDir = proj, options = {poStdErrToStdOut})
+        removeFile(home / "leak")
+        if not probeOk or leakProbe.exitCode == 0:
           skip()
         else:
           template sandboxed(args: string): tuple[output: string, exitCode: int] =
