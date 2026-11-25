@@ -10,7 +10,7 @@ so no state is shared between files beyond what the tests themselves touch.
 
 Usage: parallel_files.py [-j N] [--timeout SECS] file...
   -j N         worker count (default: max(1, cpu_count - 1))
-  --timeout S  kill a single file after S seconds (0 = no per-file cap)
+  --timeout S  kill a single file after S seconds (default 720, 0 = off)
   --quiet      only print failures and the summary
 Exit status is nonzero when any file fails or times out.
 """
@@ -61,7 +61,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-j", "--jobs", type=int,
                     default=max(1, (os.cpu_count() or 2) - 1))
-    ap.add_argument("--timeout", type=int, default=0)
+    ap.add_argument("--timeout", type=int, default=720)
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("files", nargs="+")
     args = ap.parse_args()

@@ -112,9 +112,9 @@ run_testament() {
     done
     [ -n "$files" ] || { echo 'no non-tty tests found' >&2; return 1; }
     # Word-splitting is intentional: test paths contain no spaces.
-    python3 tests/tools/parallel_files.py $files || rc_all=1
+    python3 tests/tools/parallel_files.py --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
     if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
-      sh tests/tools/test_dispatch.sh categories tty || rc_all=1
+      python3 tests/tools/parallel_tty.py --timeout "${PER_TEST_SECS:-720}" || rc_all=1
     fi
     return $rc_all
   else
