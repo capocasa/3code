@@ -993,6 +993,28 @@ proc geminicliProfile*(p: Profile): bool =
   ## auth_google) instead of OpenAI chat completions.
   providerOf(p) == "geminicli"
 
+proc googleProfile*(p: Profile): bool =
+  ## True when this profile speaks the native Gemini `generateContent`
+  ## wire with an AI Studio API key (provider `google`) instead of the
+  ## OpenAI-compatible surface.
+  providerOf(p) == "google"
+
+proc geminiWire*(p: Profile): bool =
+  ## True for both Gemini-native wires: the API-key `google` provider
+  ## and the OAuth `geminicli` Code Assist twin.
+  googleProfile(p) or geminicliProfile(p)
+
+func geminiApiBase*(p: Profile): string =
+  ## Native Gemini API base for the `google` provider. Existing configs
+  ## carry the OpenAI-compatible base
+  ## (`generativelanguage.googleapis.com/v1beta/openai`); the `/openai`
+  ## suffix selects the compat surface, so strip it. A custom url keeps
+  ## its own path.
+  result = p.url
+  while result.endsWith("/"): result = result[0 ..< ^1]
+  if result.endsWith("/openai"):
+    result = result[0 ..< result.len - "/openai".len]
+
 proc anthropicProfile*(p: Profile): bool =
   ## True when this profile speaks the Anthropic Messages wire
   ## (`/messages` with typed content blocks; see anthropic.nim) instead
@@ -1026,10 +1048,15 @@ proc requestUrl*(p: Profile): string =
 proc endpointUrl*(p: Profile, responses, streaming: bool): string =
   ## Full URL the transport POSTs to for this profile. OpenAI-shaped
   ## providers append /responses or /chat/completions to the base;
-  ## geminicli pins the Code Assist v1internal methods (the
-  ## `?alt=sse` query selects server-sent events on the stream path).
+  ## the native Gemini wire pins `/models/{model}:generateContent`
+  ## (`:streamGenerateContent?alt=sse` on the stream path), while
+  ## geminicli pins the Code Assist v1internal methods.
   let base = requestUrl(p)
-  if geminicliProfile(p):
+  if googleProfile(p):
+    geminiApiBase(p) & "/models/" & p.model &
+      (if streaming: ":streamGenerateContent?alt=sse"
+       else: ":generateContent")
+  elif geminicliProfile(p):
     if streaming: base & CodeAssistStreamPath
     else: base & CodeAssistGeneratePath
   elif anthropicProfile(p): base & AnthropicMessagesPath
@@ -1041,7 +1068,15 @@ proc requestHeaders*(p: Profile, key: string;
   ## Base headers every model request sends, plus whatever
   ## `extraHeadersHook` adds for this profile (ChatGPT Codex wants
   ## `chatgpt-account-id`, `OpenAI-Beta`, `originator`).
-  if claudecodeProfile(p):
+  if googleProfile(p):
+    # The AI Studio API key rides the native `x-goog-api-key` header;
+    # the OpenAI-compatible surface took a Bearer, but the native
+    # generateContent endpoint authenticates with this one.
+    result = @[("x-goog-api-key", key),
+               ("Content-Type", "application/json"),
+               ("Accept", accept),
+               ("User-Agent", modelUserAgent())]
+  elif claudecodeProfile(p):
     # The subscription token authenticates as a Bearer with the OAuth
     # beta opt-in; x-api-key is rejected for these credentials. The
     # drop_block thinking replay adds its own beta on models that bind
@@ -2771,9 +2806,9 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
      body.hasKey("temperature"):
     body.delete("temperature")
   # Gemini 3 deprecates temperature/top_p (the 3.8 migration guide says
-  # to strip them; the OpenAI-compat layer rejects or ignores them
-  # depending on tier). Omit so the model's own sampling applies, unless
-  # the user explicitly configured one (same rule as kimicode).
+  # to strip them; the native wire rejects or ignores them depending on
+  # tier). Omit so the model's own sampling applies, unless the user
+  # explicitly configured one (same rule as kimicode).
   if p.family == "gemini" and p.params.temperature.isNone and
      body.hasKey("temperature"):
     body.delete("temperature")
@@ -3132,17 +3167,16 @@ proc applyGrokReasoning(p: Profile, body: JsonNode) =
     body["reasoning_effort"] = %p.reasoning
 
 proc applyGeminiReasoning(p: Profile, body: JsonNode) =
-  ## Gemini 3 thinking on the OpenAI-compatible endpoint
-  ## (generativelanguage.googleapis.com/v1beta/openai). The compat layer
-  ## maps `reasoning_effort` onto thinking levels: minimal/low/medium/high
-  ## (2.5 models map to thinking_budget instead). Thinking cannot be
-  ## disabled on Gemini 3 (no off/none); 3.8 Flash additionally rejects
-  ## `minimal`, and the 4 family has no `minimal` level at all (the
-  ## compat layer maps it down to low; 3code simply does not offer it).
-  ## 4 Neon/Hydrogen add `xhigh` above high (Carbon/Argon stop at
-  ## high; the offered ladder is per-variant in knownGoodReasonings).
-  ## Thought summaries stay off (include_thoughts unset): the
-  ## raw thoughts aren't exposed, and the summary would double the stream.
+  ## Gemini thinking on the native generateContent wire. `reasoning_effort`
+  ## maps 1:1 onto `generationConfig.thinkingConfig.thinkingLevel`:
+  ## minimal/low/medium/high (2.5 models map to thinking_budget instead).
+  ## Thinking cannot be disabled on Gemini 3 (no off/none); 3.8 Flash
+  ## additionally rejects `minimal`, and the 4 family has no `minimal`
+  ## level at all (3code simply does not offer it). 4 Neon/Hydrogen add
+  ## `xhigh` above high (Carbon/Argon stop at high; the offered ladder is
+  ## per-variant in knownGoodReasonings). Thought summaries stay off
+  ## (include_thoughts unset): the raw thoughts aren't exposed, and the
+  ## summary would double the stream.
   case p.reasoning
   of "minimal", "low", "medium", "high", "xhigh":
     body["reasoning_effort"] = %p.reasoning
@@ -3556,7 +3590,7 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
   args.baseLabel = baseLabel
   args.suppressXml = suppressXml
   args.responses = responses
-  args.codeAssist = geminicliProfile(p)
+  args.codeAssist = geminiWire(p)
   args.anthropic = anthropic
   let job = args.job
   try:
@@ -3717,10 +3751,15 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         if p.reasoning.len > 0:
           applyReasoning(p, body)
         applyThinkBack(p, body)
-        if geminicliProfile(p):
-          # OpenAI-shaped body is only an intermediate: Code Assist
-          # wants the wrapped Gemini-native envelope. Project id is
-          # discovered once (loadCodeAssist/onboardUser) and persisted.
+        if googleProfile(p):
+          # OpenAI-shaped body is only an intermediate: the native
+          # generateContent wire takes the Gemini request as-is (the
+          # model rides in the URL, the key in the header).
+          sanitizeUtf8(geminiBody(body))
+        elif geminicliProfile(p):
+          # Same for Code Assist, which wants the request wrapped in the
+          # Gemini-native envelope. Project id is discovered once
+          # (loadCodeAssist/onboardUser) and persisted.
           sanitizeUtf8(codeAssistBody(p, body, auth_google.projectId()))
         elif anthropicProfile(p):
           # Same trick for the Anthropic Messages wire: the OpenAI-shaped
@@ -3801,7 +3840,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     # profiles ride the streaming transport even when the user turned
     # streaming off (the body pins "stream": true the same way).
     let streamTransport = streamingEnabled or chatgptProfile(p)
-    let useCodeAssist = geminicliProfile(p)
+    let useCodeAssist = geminiWire(p)
     let useAnthropic = anthropicProfile(p)
     outcome =
       if streamTransport:
@@ -4030,7 +4069,17 @@ proc verifyBody*(p: Profile): string =
   ## JSON body for the provider-verification ping.  Kept as a named proc
   ## so the test suite can assert it matches the streaming convention used
   ## by `callModel` (both must send `"stream": true`).
-  $(if geminicliProfile(p):
+  $(if googleProfile(p):
+    # Native Gemini ping: the same request shape as a real turn, no
+    # envelope. One output token and the lowest thinking level keep the
+    # probe cheap.
+    parseJson(geminiBody(%*{
+      "model": p.model,
+      "messages": [%*{"role": "user", "content": "ping"}],
+      "max_tokens": 1,
+      "reasoning_effort": "low"
+    }))
+  elif geminicliProfile(p):
     # Code Assist ping: wrapped Gemini-native envelope, same shape as
     # a real turn. Project id is empty until login+discovery; the
     # verify then 400s with a clear message rather than hanging.
@@ -4186,6 +4235,16 @@ proc fetchModels*(url, key: string): (seq[string], string) =
       return (stubModels(), "")
   if codexModelsHook != nil and url == auth_openai.CodexApiUrl:
     return (codexModelsHook(url), "")
+  # The native Gemini listing (`/v1beta/models`) lives on the same host
+  # as the OpenAI-compatible one; configs written before the native wire
+  # still carry the `/openai` base. Strip it for the list call, and use
+  # the native `x-goog-api-key` header, which the compat base also takes.
+  let nativeGemini = try: parseUri(url).hostname ==
+                                    "generativelanguage.googleapis.com"
+                     except CatchableError: false
+  var base = url
+  if nativeGemini and base.endsWith("/openai"):
+    base = base[0 ..< base.len - "/openai".len]
   try:
     let client = newHttpClient(timeout = 20_000,
                                userAgent = modelUserAgent(),
@@ -4196,23 +4255,46 @@ proc fetchModels*(url, key: string): (seq[string], string) =
       # Messages-protocol pair (x-api-key + pinned version).
       client.headers["x-api-key"] = key
       client.headers["anthropic-version"] = AnthropicVersionHeader
+    elif nativeGemini:
+      client.headers["x-goog-api-key"] = key
     else:
       client.headers["Authorization"] = "Bearer " & key
-    let resp = guardedHttp(client.get(url & "/models"), IOError,
-                           "fetching " & url)
+    let listUrl = if nativeGemini: base & "/models?pageSize=1000"
+                  else: base & "/models"
+    let resp = guardedHttp(client.get(listUrl), IOError,
+                           "fetching " & base)
     if resp.code.int != 200:
       return (@[], "HTTP " & $resp.code.int & " — " &
                    resp.body[0 ..< min(120, resp.body.len)])
     let j = parseJson(resp.body)
     let arr = if j.kind == JArray: j
               elif "data" in j and j["data"].kind == JArray: j["data"]
+              elif "models" in j and j["models"].kind == JArray: j["models"]
               else:
                 return (@[], "unexpected response shape: " &
                              resp.body[0 ..< min(120, resp.body.len)])
     var models: seq[string]
     for item in arr:
       if item.kind == JString: models.add item.getStr
-      elif item.kind == JObject and "id" in item: models.add item["id"].getStr
+      elif item.kind == JObject and "id" in item:
+        models.add item["id"].getStr
+      elif item.kind == JObject and "name" in item:
+        # Native listing: `models/gemini-4-neon`, with a method list that
+        # also covers embeddings, TTS, live and image models. Keep the
+        # chat models only, and strip the resource prefix.
+        var name = item["name"].getStr
+        if name.startsWith("models/"):
+          name = name["models/".len .. ^1]
+        let methods = item{"supportedGenerationMethods"}
+        var generates = true
+        if methods != nil and methods.kind == JArray:
+          generates = false
+          for m in methods:
+            if m.getStr in ["generateContent", "streamGenerateContent"]:
+              generates = true
+              break
+        if generates and geminiChatModel(name):
+          models.add name
     return (models, "")
   except CatchableError as e:
     return (@[], e.msg)

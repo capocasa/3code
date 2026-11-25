@@ -20,6 +20,8 @@ import images
 # meta-call itself (see stubNextSummarizerReply). api imports nothing
 # from compact, so this stays acyclic.
 import api
+import auth_google
+import codeassist
 
 proc contextWindowFor*(model: string): int =
   ## Heuristic fallback for models off the known-good table
@@ -235,6 +237,10 @@ type
     authKey*: string
     sessionHeader*: string  ## x-opencode-session value; "" sends none
     responses*: bool       ## parse shape: output[] (Responses) vs choices[]
+    nativeGemini*: bool   ## Gemini-native wire: x-goog-api-key, native body
+                          ## and a GenerateContentResponse to translate
+    codeAssist*: bool     ## Code Assist wire: OAuth bearer, wrapped
+                          ## envelope, same translated response shape
   MetaReply* = tuple[answer: string, usage: Usage]
   MetaAttempt* = object
     ## One wire attempt of a meta-request, failures itemized so a caller
@@ -280,7 +286,10 @@ proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
   ## anything but byte-identical fields would re-bill the whole history
   ## as fresh input; with them, an aside costs the trailing question
   ## alone. `systemPrompt` is unused in this mode.
-  if p.name == "" or p.url == "" or p.key == "" or p.model == "": return
+  if p.name == "" or p.url == "" or p.model == "": return
+  # geminicli authenticates with the OAuth token resolved below, so its
+  # config key is legitimately empty.
+  if p.key == "" and not geminicliProfile(p): return
   var payload = newJArray()
   if keepCachePrefix:
     # The aside's context IS the conversation's wire copy — same
@@ -351,6 +360,9 @@ proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
   let proBase = if providerOf(p) == "openai" and '/' notin p.model:
                   proModeWire(p.model)
                 else: ""
+  var nativeGemini = false
+  var codeAssistWire = false
+  var codeAssistToken = ""
   if useResponses:
     # Responses API (first-party openai): same role/content messages in
     # `input` (system is accepted), `max_output_tokens` budget, summary
@@ -380,10 +392,35 @@ proc buildMetaRequest*(p: Profile, messages: JsonNode, systemPrompt: string,
     # it a forced-thinking model (GLM-5.3 et al.) burns the meta-call's
     # whole token budget on reasoning and returns an empty answer.
     applyReasoning(p, body)
-    result.endpoint = p.url & "/chat/completions"
-  result.responses = useResponses
-  result.body = $body
-  result.authKey = p.key
+    if googleProfile(p):
+      # Same native wire as the main turn: the model rides in the URL and
+      # the API key in the header, and the answer comes back as a
+      # GenerateContentResponse that `metaRequestAttempt` translates.
+      nativeGemini = true
+      result.endpoint = geminiApiBase(p) & "/models/" & p.model &
+                        ":generateContent"
+    elif geminicliProfile(p):
+      # Same Code Assist wire as the main turn: the OAuth access token
+      # rides as a Bearer and the request takes the wrapped envelope. A
+      # logged-out profile yields no token, so the meta-call is unusable.
+      codeAssistToken = auth_google.accessToken()
+      if codeAssistToken == "": return
+      codeAssistWire = true
+      result.authKey = codeAssistToken
+      result.endpoint = auth_google.CloudCodeApiUrl &
+                        codeassist.CodeAssistGeneratePath
+    else:
+      result.endpoint = p.url & "/chat/completions"
+  result.responses = useResponses and not nativeGemini and not codeAssistWire
+  result.nativeGemini = nativeGemini
+  result.codeAssist = codeAssistWire
+  if nativeGemini:
+    result.body = geminiBody(body)
+  elif codeAssistWire:
+    result.body = codeAssistBody(p, body, auth_google.projectId(codeAssistToken))
+  else:
+    result.body = $body
+  if result.authKey == "": result.authKey = p.key
   # Same Zen/Go contract as the main transport: the summarizer is a
   # mid-conversation call, so it rides the conversation's session id
   # (runTurns published it); without one it mints a per-call id.
@@ -424,7 +461,10 @@ proc metaRequestAttempt*(req: ptr MetaRequest; label: string): MetaAttempt =
                                userAgent = modelUserAgent(),
                                sslContext = bundledSslContext())
     defer: client.close()
-    client.headers["Authorization"] = "Bearer " & req.authKey
+    if req.nativeGemini:
+      client.headers["x-goog-api-key"] = req.authKey
+    else:
+      client.headers["Authorization"] = "Bearer " & req.authKey
     client.headers["Content-Type"] = "application/json"
     if req.sessionHeader.len > 0:
       client.headers["x-opencode-session"] = req.sessionHeader
@@ -441,10 +481,26 @@ proc metaRequestAttempt*(req: ptr MetaRequest; label: string): MetaAttempt =
     stderr.writeLine "3code: " & label & ": api " & $status
     return MetaAttempt(status: status, errBody: respBody,
                        retryAfter: retryAfter, err: "api " & $status)
-  let j = try: parseJson(respBody)
-          except CatchableError as e:
-            stderr.writeLine "3code: " & label & ": " & e.msg
-            return MetaAttempt(status: status, errBody: respBody, err: e.msg)
+  var j = try: parseJson(respBody)
+           except CatchableError as e:
+             stderr.writeLine "3code: " & label & ": " & e.msg
+             return MetaAttempt(status: status, errBody: respBody, err: e.msg)
+  if req.nativeGemini or req.codeAssist:
+    # Both Gemini wires answer with a GenerateContentResponse (the Code
+    # Assist one inside its envelope). A provider error body is checked on
+    # the raw shape first; the success shape is translated to the
+    # OpenAI completion this parser reads.
+    let errNode = j{"error"}
+    if errNode != nil and errNode.kind == JObject:
+      stderr.writeLine "3code: " & label & ": " & $errNode
+      return MetaAttempt(status: status, errBody: respBody,
+                         err: $errNode)
+    let translated = translateResponse(respBody)
+    if translated == nil:
+      stderr.writeLine "3code: " & label & ": not a Gemini response"
+      return MetaAttempt(status: status, errBody: respBody,
+                         err: "response parse: not a Gemini response")
+    j = translated
   if "error" in j:
     stderr.writeLine "3code: " & label & ": " & $j["error"]
     return MetaAttempt(status: status, errBody: respBody,

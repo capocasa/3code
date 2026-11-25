@@ -1,16 +1,17 @@
-## Google Cloud Code Assist wire translation for the `geminicli`
-## provider (OAuth tokens from auth_google).
+## Gemini-native wire translation for the `google` (AI Studio API key)
+## and `geminicli` (OAuth subscription) providers.
 ##
-## cloudcode-pa.googleapis.com speaks Gemini-native
-## `v1internal:{generateContent,streamGenerateContent}` with the request
-## wrapped in `{model, project, request}` — not OpenAI chat completions.
-## This module translates both directions so the rest of the pipeline
-## (history, turn loop, tool dispatch, streamHttp's chunk parser) keeps
-## seeing chat-style messages:
+## generativelanguage.googleapis.com speaks `generateContent` directly;
+## cloudcode-pa.googleapis.com speaks the same
+## `v1internal:{generateContent,streamGenerateContent}` methods with the
+## request wrapped in `{model, project, request}`. This module builds the
+## shared request body and translates both response directions so the
+## rest of the pipeline (history, turn loop, tool dispatch, streamHttp's
+## chunk parser) keeps seeing chat-style messages:
 ##
 ## - request: OpenAI `messages` -> Gemini `contents` + `systemInstruction`
-##   + `tools[].functionDeclarations` + `generationConfig`, wrapped in
-##   the Code Assist envelope.
+##   + `tools[].functionDeclarations` + `generationConfig`; the API-key
+##   `google` wire sends it as-is, Code Assist wraps it in its envelope.
 ## - SSE response: each `data:` event (a GenerateContentResponse) is
 ##   translated to one or more OpenAI `chat.completion.chunk` payloads
 ##   before streamHttp's parse loop sees them.
@@ -21,7 +22,7 @@
 ## functionCall echoed back on the next turn, but accepts the documented
 ## bypass `skip_thought_signature_validator`. We always send the bypass
 ## and never echo, which keeps the OpenAI-shaped history free of
-## Gemini-only state (matches opencode-gemini-auth).
+## Gemini-only state (matches opencode-gemini-auth and LiteLLM).
 ##
 ## The envelope shape (`{model, project, request}`) is undocumented;
 ## it is reverse-engineered from gemini-cli, opencode-gemini-auth, and
@@ -55,12 +56,41 @@ proc sanitizeSchema(n: JsonNode) =
     for v in n: sanitizeSchema(v)
   else: discard
 
-proc codeAssistBody*(p: Profile, openAiBody: JsonNode, project: string): string =
-  ## Translate a callModel chat-completions body into the wrapped Code
-  ## Assist request. `openAiBody` carries the already family-processed
-  ## fields (tools, reasoning_effort, max_tokens, stream flag).
+func dataUriParts(uri: string): (string, string) =
+  ## `data:image/png;base64,AAAA` -> (`image/png`, `AAAA`). Empty pair when
+  ## the string is not a data URI (a url has no bytes to inline).
+  if not uri.startsWith("data:"): return ("", "")
+  let comma = uri.find(',')
+  if comma < 0: return ("", "")
+  var mime = uri[5 ..< comma]
+  if mime.endsWith(";base64"):
+    mime = mime[0 ..< mime.len - ";base64".len]
+  (mime, uri[comma + 1 .. ^1])
+
+func geminiChatModel*(name: string): bool =
+  ## True for the chat-capable Gemini and Gemma models served by the
+  ## native API. `/v1beta/models` also lists embeddings, TTS, live, image,
+  ## video and decision models; they are `generateContent`-capable too, but
+  ## a turn needs a chat model, so the model picker filters them out.
+  let n = name.toLowerAscii
+  if not (n.startsWith("gemini-") or n.startsWith("gemma-")): return false
+  for marker in ["-image", "-tts", "-embedding", "-live", "-audio",
+                 "-decision", "-robotics", "computer", "transcribe",
+                 "-omni", "nano-banana"]:
+    if marker in n: return false
+  true
+
+proc geminiRequest*(openAiBody: JsonNode): JsonNode =
+  ## Translate a callModel chat-completions body into the Gemini-native
+  ## `GenerateContentRequest`. `openAiBody` carries the already
+  ## family-processed fields (tools, reasoning_effort, max_tokens,
+  ## temperature when the user set one).
   var systemParts: seq[JsonNode]
   var contents = newJArray()
+  # Gemini thinking models validate the thoughtSignature of every replayed
+  # functionCall; the documented dummy bypasses the validator. Gemma has
+  # no thought signatures, so the field is left off there.
+  let wantsSignatures = not openAiBody{"model"}.getStr.toLowerAscii.startsWith("gemma")
   # tool_call_id -> function name, so `role: tool` messages become
   # functionResponse parts with the name Gemini requires.
   var callNames: seq[(string, string)]
@@ -71,8 +101,26 @@ proc codeAssistBody*(p: Profile, openAiBody: JsonNode, project: string): string 
     of "system":
       systemParts.add %*{"text": m{"content"}.getStr}
     of "user":
-      contents.add %*{"role": "user",
-                      "parts": [%*{"text": m{"content"}.getStr}]}
+      # A string content stays one text part; a content array carries
+      # text blocks plus `image_url` blocks, whose data URI becomes an
+      # inlineData part (Gemini has no URL-image block on this wire).
+      let c = m{"content"}
+      var parts = newJArray()
+      if c != nil and c.kind == JArray:
+        for b in c:
+          if b.kind != JObject: continue
+          case b{"type"}.getStr
+          of "text":
+            parts.add %*{"text": b{"text"}.getStr}
+          of "image_url":
+            let (mime, data) = dataUriParts(b{"image_url"}{"url"}.getStr(""))
+            if mime.len > 0 and data.len > 0:
+              parts.add %*{"inlineData": {"mimeType": mime, "data": data}}
+          else: discard
+      else:
+        parts.add %*{"text": c.getStr}
+      if parts.len > 0:
+        contents.add %*{"role": "user", "parts": parts}
     of "assistant":
       var parts = newJArray()
       let c = m{"content"}.getStr
@@ -88,9 +136,15 @@ proc codeAssistBody*(p: Profile, openAiBody: JsonNode, project: string): string 
           try: args = parseJson(fn{"arguments"}.getStr)
           except CatchableError: args = %*{"_raw": fn{"arguments"}.getStr}
           if args.kind != JObject: args = %*{"_value": args}
-          parts.add %*{"functionCall": {"name": name, "args": args},
-                       "thoughtSignature": ThoughtSignatureBypass}
-      contents.add %*{"role": "model", "parts": parts}
+          if wantsSignatures:
+            parts.add %*{"functionCall": {"name": name, "args": args},
+                         "thoughtSignature": ThoughtSignatureBypass}
+          else:
+            parts.add %*{"functionCall": {"name": name, "args": args}}
+      # An empty model turn (no text, no calls) has no parts to send;
+      # Gemini rejects an empty parts array.
+      if parts.len > 0:
+        contents.add %*{"role": "model", "parts": parts}
     of "tool":
       let id = m{"tool_call_id"}.getStr
       var name = ""
@@ -123,20 +177,54 @@ proc codeAssistBody*(p: Profile, openAiBody: JsonNode, project: string): string 
         decl["parameters"] = pcopy
       decls.add decl
     inner["tools"] = %*[{"functionDeclarations": decls}]
+    # `tool_choice: "none"` (the :btw aside) maps onto the native NONE
+    # mode, which forbids a tool call without dropping the cached tool
+    # roster from the prefix.
+    let choice = openAiBody{"tool_choice"}.getStr("")
     inner["toolConfig"] = %*{
-      "functionCallingConfig": {"mode": "AUTO"}}
+      "functionCallingConfig": {"mode": if choice == "none": "NONE"
+                                          else: "AUTO"}}
   var gen = newJObject()
   let mt = openAiBody{"max_tokens"}
   if mt != nil and mt.kind == JInt and mt.getInt > 0:
     gen["maxOutputTokens"] = mt
-  # reasoning_effort (minimal/low/medium/high) maps 1:1 onto Gemini 3
-  # thinking levels; the OpenAI-compat endpoint documents the same map.
+  # A user-set `[params] temperature` rides through; the table value is
+  # omitted for the gemini family (deprecated sampling knobs).
+  if openAiBody{"temperature"} != nil:
+    gen["temperature"] = openAiBody{"temperature"}
+  # reasoning_effort maps onto the model's thinking surface: Gemini 3/4
+  # take named levels (the native enum carries the same names, xhigh
+  # included), while the 2.5 line thinks in token budgets (the compat
+  # layer's documented map: minimal/low 1024, medium 8192, high 24576).
+  # Older lines (2.0 and earlier) have no thinking surface; sending one
+  # would 400, so the knob is dropped there.
   let effort = openAiBody{"reasoning_effort"}.getStr
-  if effort.len > 0:
+  let modelId = openAiBody{"model"}.getStr.toLowerAscii
+  if effort.len > 0 and modelId.startsWith("gemini-2.5"):
+    let budget = case effort
+      of "minimal", "low": 1024
+      of "medium": 8192
+      of "high": 24576
+      else: 0
+    if budget > 0:
+      gen["thinkingConfig"] = %*{"thinkingBudget": budget}
+  elif effort.len > 0 and not modelId.startsWith("gemini-2.0") and
+       not modelId.startsWith("gemini-1."):
     gen["thinkingConfig"] = %*{"thinkingLevel": effort}
   if gen.len > 0:
     inner["generationConfig"] = gen
-  $(%*{"model": p.model, "project": project, "request": inner})
+  inner
+
+proc geminiBody*(openAiBody: JsonNode): string =
+  ## The native `generateContent` body: `geminiRequest` serialized, no
+  ## envelope (the model rides in the URL, the key in the header).
+  $geminiRequest(openAiBody)
+
+proc codeAssistBody*(p: Profile, openAiBody: JsonNode, project: string): string =
+  ## The Code Assist request: the same Gemini-native request wrapped in
+  ## the reverse-engineered `{model, project, request}` envelope.
+  $(%*{"model": p.model, "project": project,
+       "request": geminiRequest(openAiBody)})
 
 type
   CodeAssistStreamState* = object
