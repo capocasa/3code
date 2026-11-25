@@ -1935,14 +1935,17 @@ proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
   ## 3. google/geminicli default → "gemini": every model they serve is
   ##    Gemini, so a not-yet-curated id (a brand-new launch before it gets
   ##    a KnownGoodCombos row) rides the right preamble and wire knobs
-  ##    under --experimental instead of the glm default
-  ## 4. default → "glm"
+  ##    under --experimental instead of the generic default
+  ## 4. default → "other" (gh #76): an off-registry pair has no verified
+  ##    family, so it rides the generic preamble and tool surface instead
+  ##    of pretending to be a GLM. A provider that IS one family's host can
+  ##    say so explicitly with the experimental `family = ...` override.
   let kg = knownGoodFamily(prof)
   if kg != "": return kg
   if experimentalEnabled and prov.family.strip != "":
     return prov.family.strip.toLowerAscii
   if canonicalKnownGoodProvider(prov.name) == "google": return "gemini"
-  "glm"
+  "other"
 
 func paramsModelMatches*(spec, model: string): bool =
   ## Same lenient matching as `ProviderRec.findModel`: exact id, short

@@ -2,6 +2,45 @@ Changelog
 
 Unreleased
 
+- **Off-registry models ride the generic `other` family, a silent
+  provider gets 90 minutes before the turn is aborted, and the context
+  window resolves from one place (gh #76).** Four changes for custom
+  providers, reported by a user proxying Claude through AWS Bedrock
+  under the heading "simplify internals". First, the family default: a
+  (provider, model) pair with no known-good row used to resolve to
+  `glm`, so a hand-written provider got GLM's system prompt, and a
+  `:reasoning` pick would emit GLM's wire fields to an endpoint that
+  was never verified to accept them; the default is now `other`, the
+  generic prompt + bash/read/write/patch surface the registry already
+  ships for models this build has not identified, and a provider that
+  really is one family's host says so with the experimental `family =
+  ...` key. Second, the quiet watchdog: a stream that sent no bytes
+  for 45s was aborted and retried into the same kill, re-billing the
+  reasoning tokens every cycle — hidden-reasoning models (Claude
+  behind Bedrock, and reports of single responses over 75 minutes)
+  legitimately stream nothing at all while they think. The quiet
+  budget and the non-streaming ceiling both move to 90 minutes, the
+  1.5h the issue asks for; a genuinely dead link now costs the same
+  wait before the retry path takes over, and Ctrl-C still interrupts
+  within ~1s. Third, the context window: the issue reported
+  hand-writing `[params] context-window` because it "ends up to be 0"
+  — the known-good lookup misses, but the name-based estimate behind
+  it never returns zero (128k floor), so a custom provider compacts
+  and gauges without any `[params]`; the reference now says so and a
+  regression test pins it. The param stays the way to pin the true
+  window when the estimate guesses low. Fourth, that estimate had
+  three copies: the full ladder in `compact.contextWindowFor`, a
+  truncated one inlined in `callModel` (api cannot import compact), and
+  a clone of that in the provider stub — and the truncated copies had
+  drifted, so an off-table gpt-6 model gauged 128k in the token bar
+  while compaction compacted at 1.05M. The ladder now lives once in
+  `prompts.nim` (the one module api, compact, and the stub all
+  import); compact re-exports it for its historical callers, and every
+  window consumer resolves through the same proc.
+  (`tests/config/test_config_pipeline.nim`,
+  `tests/api/test_api_pure.nim`, `tests/api/test_prompts_compact.nim`,
+  `tests/stream/test_http_nonstream.nim`)
+
 - **A `:btw` answer can no longer be a tool call, and the aside stops
   re-paying the whole history.** The side-question request used to ride
   a dedicated system prompt over a history flattened to prose, tools

@@ -1120,7 +1120,7 @@ proc serveNonStreamDelayed(server: SseServer; delayMs: int) =
   ## Serve one complete NON-streaming JSON completion after `delayMs` of
   ## total wire silence: exactly what every provider does with
   ## `"stream": false` while the model generates. Reasoning models hold
-  ## this silence for minutes, far past the quiet watchdog's 45s budget.
+  ## this silence for minutes, far past the quiet watchdog's budget.
   var client: Socket
   if not server.acceptWithinDeadline(client): return
   let contentLength = client.readRequestHead()
@@ -1161,7 +1161,7 @@ proc serveBlackHoleThen401(server: SseServer) {.thread.} =
 type QuietWatchSim = ref object
   ## Scaled-down stand-in for fatprompt's quietWatchLoop: fires
   ## requestQuietShutdown when the provider-activity clock goes 900ms
-  ## stale (production budget: QuietTooLongMs = 45s).
+  ## stale (production budget: QuietTooLongMs, 90min since gh #76).
   lastActivityMs: Atomic[int]
   stop: Atomic[bool]
 
@@ -1173,14 +1173,14 @@ proc quietWatchSimLoop(w: QuietWatchSim) {.thread.} =
 
 suite "non-streaming transport: provider silence is not a dead link":
   # :streaming off posts "stream": false; the provider then says NOTHING
-  # until the whole completion is ready. The 45s quiet watchdog (fed via
+  # until the whole completion is ready. The quiet watchdog (fed via
   # the providerActivity hook, which the streaming path feeds per SSE
   # line) saw that silence as a dead connection and killed the request;
   # callModel retried, the generation restarted from scratch, and the
   # watchdog killed it again: the continuous network warnings users saw
   # on every :streaming off turn past the first with slower providers
-  # (DeepSeek answers inside 45s, so it was immune). The non-streaming
-  # wait loops now feed the watchdog on every QuietRecvWakeMs tick.
+  # (DeepSeek answers well inside the old 45s budget, so it was immune). The
+  # non-streaming wait loops now feed the watchdog on every QuietRecvWakeMs tick.
 
   var savedStreaming: bool
 
@@ -1248,7 +1248,7 @@ suite "non-streaming transport: provider silence is not a dead link":
     # The feed-the-watchdog fix alone would leave a peer that holds the
     # socket open but never sends waiting forever (provider silence is
     # indistinguishable from a black hole at the transport level). The
-    # NonStreamTooLongMs ceiling (30min in production, shrunk to 5s in
+    # NonStreamTooLongMs ceiling (90min in production, shrunk to 5s in
     # this binary) bounds the wait: the stall must surface as a network
     # quiet error, retry, and terminate on the second connection's 401 —
     # not hang until the user interrupts.

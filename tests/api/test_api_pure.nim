@@ -742,6 +742,19 @@ suite "api: NetworkHealthError":
     check isNetworkQuietMsg(e.msg)
     check e.msg == "network quiet for " & $(QuietTooLongMs div 1000) & "s"
 
+  test "quiet and non-stream budgets cover a full hidden-reasoning response (gh #76)":
+    # A provider that reasons before the first token (Claude behind
+    # Bedrock and its kin) streams nothing at all while it thinks;
+    # community reports cite single responses over 75 minutes. The 45s
+    # quiet budget killed those turns mid-generation and retried them
+    # into the same kill, re-billing the reasoning tokens every cycle.
+    # Pin both budgets at 90min (the issue's 1.5h) so a regression to a
+    # short budget cannot land silently; tests that need fast firing
+    # shrink these via their intdefine.
+    check QuietTooLongMs >= 5_400_000
+    check NonStreamTooLongMs >= 5_400_000
+    check NetJoinBudgetMs > QuietTooLongMs
+
   test "isNetworkQuietMsg matches the canonical message and prefix":
     check isNetworkQuietMsg(networkQuietMsg())
     check isNetworkQuietMsg("network quiet for 45s")

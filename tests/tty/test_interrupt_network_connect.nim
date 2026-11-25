@@ -54,7 +54,7 @@ proc env(root: string): seq[EnvVar] =
 # A non-stub 3code binary with plain-HTTP transport enabled so it can talk
 # to the local mock server over `http://127.0.0.1`. The quiet variant shrinks
 # `QuietTooLongMs` so a black-holed link surfaces the network-quiet timeout
-# in ~3s instead of the production 45s (the production value is an
+# in ~3s instead of the production 90min (the production value is an
 # intdefine for exactly this). Both builds start together: each has its own
 # build lock and nimcache, so sequential waits doubled the fresh-tree cost.
 const realDefines = "-d:ssl -d:testPlainHttp --threads:on"

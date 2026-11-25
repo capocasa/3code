@@ -12,7 +12,7 @@
 ## (`-d:providerStub`) covers everything else; sum = full coverage.
 
 import std/[json, os, strutils, times, unittest]
-import threecode/[api, types, runtime]
+import threecode/[api, types, runtime, compact]
 
 suite "non-streaming body reconstruction (buildBatchAssistantMsg)":
   test "returns nil for a genuinely empty completion":
@@ -339,3 +339,49 @@ suite "non-streaming xml tool_call promotion":
     # The promoted block is stripped from content.
     check "<tool_call>" notin msg{"content"}.getStr
 
+
+suite "token-bar window (gh #76: one shared resolution)":
+  # callModel feeds the beforeCall hook the context window for the token
+  # bar. It used to carry its own truncated copy of the heuristic ladder
+  # (kept inline because api could not import compact), which had fallen
+  # behind the full one compaction used: an off-table gpt-6 model gauged
+  # 128k in the bar while compaction compacted at 1.05M. The ladder now
+  # lives once in prompts.nim and every caller (bar, compaction, stub)
+  # resolves through it.
+  var savedStreaming: bool
+
+  setup:
+    savedStreaming = streamingEnabled
+    streamingEnabled = false
+    resetHttpStubIdx()
+
+  teardown:
+    streamingEnabled = savedStreaming
+    setApiStreamHooks(ApiStreamHooks())
+    closeCachedStreamConn()
+
+  proc writeResponses(name, json: string) =
+    let path = getTempDir() / name
+    writeFile(path, json)
+    runtime.put("http_stub_responses", path)
+
+  test "callModel's token-bar window matches the compaction window":
+    writeResponses("tc_http_window.json", """[{
+      "choices": [{"index": 0, "message": {"content": "WINDOW_OK"},
+        "finish_reason": "stop"}],
+      "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+    }]""")
+    var seenWindow = -1
+    setApiStreamHooks(ApiStreamHooks(
+      beforeCall: proc(lastPromptTokens, window: int): string =
+        seenWindow = window
+        ""))
+    # A custom provider serving an off-table gpt-6 model: no known-good
+    # row, so the window is the heuristic's — the full ladder, not the
+    # truncated one the api copy used to carry.
+    let p = Profile(name: "xyz.gpt-6-sol", url: "https://api.example/v1",
+                    key: "stub-key", model: "gpt-6-sol", family: "other")
+    var usage: Usage
+    discard callModel(p, %*[{"role": "user", "content": "hi"}], usage, 0)
+    check seenWindow == 1_050_000
+    check contextWindowFor(p) == 1_050_000

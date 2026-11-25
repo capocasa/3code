@@ -249,10 +249,23 @@ suite "config: resolveFamily":
     let prof = Profile(name: "zai.glm-5.1", model: "glm-5.1")
     check resolveFamily(prov, prof) == "glm"
 
-  test "unknown model defaults to glm":
+  test "unknown model defaults to the generic other family":
+    # gh #76: an off-registry pair has no verified family, so it rides
+    # the generic `other` preamble and tool surface instead of GLM's.
     let prov = ProviderRec(name: "test", models: @["unknown-model"])
     let prof = Profile(name: "test.unknown-model", model: "unknown-model")
-    check resolveFamily(prov, prof) == "glm"
+    check resolveFamily(prov, prof) == "other"
+
+  test "buildProfile gives a custom provider the other family":
+    # The same default end to end: a hand-written custom provider (no
+    # known-good rows, no family override) resolves to `other`, whose
+    # (prompt, tools) tuple `setup` serves for unidentified models.
+    let provs = @[ProviderRec(name: "xyz",
+                               url: "https://proxy.example/v1",
+                               key: "sk-x", models: @["weird-model-9"])]
+    let prof = buildProfile("xyz.weird-model-9", provs, "")
+    check prof.name == "xyz.weird-model-9"
+    check prof.family == "other"
 
   test "uncurated google model defaults to gemini":
     let prov = ProviderRec(name: "google", models: @["gemini-9-unreleased"])

@@ -306,7 +306,7 @@ a config error.
 | `models` | space-separated model IDs offered by `:model` |
 | `current_model` | the model `:model` last picked here; switching back to the provider returns to it. Written automatically |
 | `auth` | `oauth` for browser-OAuth subscription logins (`supergrok`, `chatgpt`) |
-| `family` | experimental-only override that picks the system-prompt branch by family name, for combos off the known-good list. The same name drives the [prompt-file override](manual.html#system-prompt-override) |
+| `family` | experimental-only override that picks the system-prompt branch by family name, for combos off the known-good list (they otherwise ride the generic `other` family). The same name drives the [prompt-file override](manual.html#system-prompt-override) |
 | `model_prefix` | legacy: prepended to bare `models` names; expanded on load, never written back |
 
 ### params
@@ -323,7 +323,7 @@ wins. Unset keys keep the known-good value.
 | `temperature` | float | sampling temperature |
 | `max-tokens` | int | per-turn output budget |
 | `think-back` | `none`/`turn`/`all` | how much of the assistant's own `reasoning_content` is replayed in request history. `none` strips it everywhere (strict validators), `turn` keeps only the active tool loop, `all` keeps every turn (deepseek demands it; glm/kimi reward it) |
-| `context-window` | int, tokens | drives compaction thresholds and the context gauge |
+| `context-window` | int, tokens | drives compaction thresholds and the context gauge. Unset for a combo off the known-good list falls back to a name-based estimate (128k floor), so a custom provider works without this key; set it when the real window differs |
 | `allow-private` | bool | trust this provider (or just this model) with [private mode](manual.html#private-mode) data; model-scoped beats provider-wide, `false` revokes |
 
 ### search

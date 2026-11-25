@@ -1132,8 +1132,9 @@ match wins):
 The family name is the branch the prompt selection takes (`glm`, `gpt`,
 `claude`, and so on). `3code --good` shows each combo's family, and the
 experimental `family` provider setting picks one for combos off the
-registry. When an override matches, startup announces it on stderr, and
-`:prompt` shows the exact prompt in effect.
+registry — which otherwise ride `other`, the generic prompt for models
+this build has not identified. When an override matches, startup announces
+it on stderr, and `:prompt` shows the exact prompt in effect.
 
 Two placeholders are substituted into the file: `{{credit}}` (the
 provider credit line) and `{{skills}}` (the discovered skill catalog).

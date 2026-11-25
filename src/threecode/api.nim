@@ -100,19 +100,33 @@ const VerifyTimeoutMs* {.intdefine.} = 30_000
   ## deadline then fail cleanly instead of blocking forever. 30s is
   ## generous for a `max_tokens=1` ping that should answer in well under a
   ## second. An `intdefine` so tests can shrink it.
-const NonStreamTooLongMs* {.intdefine.} = 1_800_000
-  ## Hard ceiling for ONE non-streaming wait (30min). With `:streaming
+const NonStreamTooLongMs* {.intdefine.} = 5_400_000
+  ## Hard ceiling for ONE non-streaming wait (90min). With `:streaming
   ## off` the provider is silent by design until the whole completion is
-  ## ready, so the 45s quiet watchdog cannot tell "generating" from
+  ## ready, so the quiet watchdog cannot tell "generating" from
   ## "black-holed peer" — the wait loops feed the watchdog clock per tick
   ## and enforce this ceiling themselves instead. Long enough for the
-  ## slowest reasoning generations; past it the link is presumed dead and
-  ## the error rides the same NetworkHealthError retry path as a quiet
-  ## stream. An `intdefine` so tests can shrink it.
-const QuietTooLongMs* {.intdefine.} = 45_000
+  ## slowest reasoning generations: hidden-reasoning models (Claude via
+  ## Bedrock and its kin) can hold a whole response for over an hour, and
+  ## a ceiling below that aborted them mid-generation and retried into
+  ## the same kill, re-billing the reasoning tokens every cycle (gh #76;
+  ## the 30min it replaced also cut off reported 75min generations).
+  ## Past it the link is presumed dead and the error rides the same
+  ## NetworkHealthError retry path as a quiet stream. An `intdefine` so
+  ## tests can shrink it.
+const QuietTooLongMs* {.intdefine.} = 5_400_000
   ## If a streaming response goes this long with no data from the
-  ## provider (45s), the turn is aborted. `posix.shutdown(fd)` from another
-  ## thread does not reliably wake a blocked TLS `recv`, so the stream
+  ## provider (90min), the turn is aborted. Kept at the 1.5h the
+  ## hidden-reasoning case demands (gh #76): providers that think before
+  ## the first token — Claude behind Bedrock is the reported one, and
+  ## community reports cite single responses over 75 minutes — send
+  ## nothing at all while they reason, and a short budget killed those
+  ## turns mid-flight and retried them into the same kill, billing the
+  ## reasoning tokens again on every cycle. A genuinely dead link now
+  ## costs the same wait before the retry path takes over; ctrl-c still
+  ## interrupts within ~1s, and tests shrink this via the intdefine.
+  ## `posix.shutdown(fd)` from another thread does not reliably wake a
+  ## blocked TLS `recv`, so the stream
   ## loop instead relies on `QuietRecvWakeMs`-bounded reads to wake up
   ## and observe this threshold. That bound is enforced twice now:
   ## `poll()` bounds the wait-for-readable step, and `SO_RCVTIMEO` (set
@@ -2154,9 +2168,9 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           if getMonoTime() - waitStart >=
               initDuration(milliseconds = NonStreamTooLongMs):
             # Black-holed peer: no bytes for the whole non-streaming
-            # ceiling. The wait is bounded after all — at 30min, not 45s
-            # and not never. Surface as network quiet so callModel's
-            # NetworkHealthError path retries it like a dead stream.
+            # ceiling. The wait is bounded after all — at the ceiling, not
+            # the quiet budget and not never. Surface as network quiet so
+            # callModel's NetworkHealthError path retries it like a dead stream.
             closeCachedStreamConn()
             waitCapHit = true
             break
@@ -2165,9 +2179,9 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           # models generate for minutes — far past the quiet watchdog's
           # QuietTooLongMs. Feed the watchdog clock on every wake tick so
           # a healthy slow wait is not killed as a dead link; without this
-          # every :streaming off turn on a slow provider died at 45s and
-          # retried into the same kill. A genuinely dead conn still
-          # surfaces as EOF/IOError; Ctrl-C still interrupts within a tick.
+          # every :streaming off turn on a slow provider died at the
+          # quiet budget and retried into the same kill. A genuinely dead
+          # conn still surfaces as EOF/IOError; Ctrl-C still interrupts within a tick.
           hookProviderActivity()
           continue
       if resp.status == 0 and resp.headers.len == 0:
@@ -2204,7 +2218,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           break readLoop
         if getMonoTime() - bodyWaitStart >=
             initDuration(milliseconds = NonStreamTooLongMs):
-          # Same ceiling as the head wait: bounded, never a 45s false kill.
+          # Same ceiling as the head wait: bounded, never a quiet-budget false kill.
           closeCachedStreamConn()
           bodyCapHit = true
           break readLoop
@@ -2405,7 +2419,7 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
             waitCapHit = true
             break
           # Non-streaming silence is expected (see callHttp): feed the
-          # quiet watchdog so a long generation is not killed at 45s.
+          # quiet watchdog so a long generation is not killed at the quiet budget.
           hookProviderActivity()
           continue
       if resp.status == 0 and resp.headers.len == 0:
@@ -3744,20 +3758,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  # Context window for the token bar: known-good table first, then the
-  # heuristic. Kept inline (not compact.contextWindowFor) so api does
-  # not import compact; compact imports nothing from api either.
-  let window =
-    block:
-      let kg = knownGoodContextWindow(p)
-      if kg > 0: kg
-      else:
-        let m = p.model.toLowerAscii
-        if m == "stub-model": 12_000
-        elif "gpt-5" in m: 400_000
-        elif "gpt-4" in m: 128_000
-        elif "o1" in m or "o3" in m or "o4" in m: 200_000
-        else: 128_000
+  # Context window for the token bar: the one shared resolution in
+  # prompts.nim (table, then the name heuristic), so the bar and the
+  # compaction threshold in turns.nim always agree (gh #76; the inline
+  # copy this replaces had already drifted: off-table gpt-6 models
+  # gauged at 128k while compaction compacted at 1.05M).
+  let window = contextWindowFor(p)
   let baseLabel = hookBeforeCall(lastPromptTokens, window)
   # Cursor is hidden for the duration of the entire turn by `runTurns`
   # so the prompt placeholder is the only visible caret. callModel
@@ -3975,7 +3981,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     clearNetworkQuiet()
     # Reset the quiet watchdog's activity timer so the next attempt gets a
     # fresh QuietTooLongMs window. Without this, the watchdog's idle clock is
-    # still 45s+ stale (it only fires on provider activity, and a backoff has
+    # stale (it only fires on provider activity, and a backoff has
     # none), so it re-fires on the next tick and instantly kills attempt N+1
     # before any provider data can arrive. This was why network-quiet errors
     # burned through all retries with no backoff taken.

@@ -1,4 +1,4 @@
-import std/[json, os, strutils, unittest]
+import std/[json, os, options, strutils, unittest]
 import threecode/[prompts, compact, types]
 
 # unittest treats every argv element as an exact test-name filter, so the
@@ -614,6 +614,24 @@ suite "compact: contextWindowFor":
     check contextWindowFor("minimaxai/MiniMax-M2.7") == 204_800
 
 suite "compact: contextWindowFor (known-good)":
+  test "custom provider never gets a zero window (gh #76)":
+    # The issue reported hand-writing `[params] context-window` for every
+    # custom provider "because context-window ends up to be 0". The
+    # known-good lookup misses, but the name heuristic still answers, so
+    # compaction thresholds and the context gauge work without any
+    # `[params]`; the param stays the way to pin the true window when the
+    # heuristic guesses low.
+    let p = Profile(name: "xyz.claude-sonnet-4-5", family: "other",
+                    model: "claude-sonnet-4-5")
+    check contextWindowFor(p) > 0
+    let q = Profile(name: "xyz.unheard-model", family: "other",
+                    model: "unheard-model")
+    check contextWindowFor(q) == 128_000
+    var o = Profile(name: "xyz.unheard-model", family: "other",
+                    model: "unheard-model")
+    o.params.contextWindow = some(550_000)
+    check contextWindowFor(o) == 550_000
+
   test "glm-5.2 profile returns 1000000":
     let p = Profile(name: "zai.test", model: "glm-5.2", family: "glm")
     check contextWindowFor(p) == 1_000_000
