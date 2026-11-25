@@ -89,9 +89,19 @@ suite "chrome settings during a turn":
     check "tab-title" notin readFile(configFile)
     tty.expectAlive()
 
-    # The rest writes what the running turn made wait.
+    # The rest writes what the running turn made wait. The write is
+    # ordered with the turn's finalize, not with the prompt repaint, so
+    # wait for the file instead of reading it the moment the prompt
+    # shows (the prompt repaint can come first).
     tty.expectInHistory "main reply", timeoutMs = 8000
     tty.expectPromptLive()
+    proc savedBoth(): bool =
+      try:
+        let s = readFile(configFile)
+        "notify = \"off\"" in s and "tab-title = \"off\"" in s
+      except IOError:
+        false
+    tty.waitUntil(proc(t: TtySession): bool = savedBoth(), timeoutMs = 8000)
     let saved = readFile(configFile)
     check "notify = \"off\"" in saved
     check "tab-title = \"off\"" in saved
