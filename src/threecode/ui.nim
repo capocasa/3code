@@ -2715,7 +2715,7 @@ proc sandboxVerbBody(verb, argPath: string;
   if not sandbox.appendRule(sf, path, access):
     return (false, cmdErrorS("could not write sandbox file at " & sf))
   messages.add %*{"role": "user", "agentSent": true,
-    "content": "sandbox " & verb & " " & path}
+    "content": sandboxPhrase(verb, path)}
   (true, sandboxChangeBytes(verb, path, sandbox.lastRuleDiff))
 
 proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,

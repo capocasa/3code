@@ -61,9 +61,27 @@ suite "ask coverage":
     withPolicy(proj):
       let wr = sandbox.checkRawPath(proj / "vault" / "k.txt", needsWrite = true)
       check not wr.allowed
-      check "denied" in wr.reason
+      check "ask-gated" in wr.reason
+      check ":sandbox allow" in wr.reason
       let rd = sandbox.checkRawPath(proj / "vault" / "k.txt", needsWrite = false)
       check not rd.allowed
+
+  test "ask and hard-deny denials read differently":
+    # An ask rule is redeemable; a hard deny is not. The gate's reason
+    # must carry that difference, or the model reports a permanent
+    # denial for a path the user could grant with :sandbox allow.
+    let (base, proj) = newFixture("reasons")
+    defer: removeDir(base)
+    withPolicy(proj):
+      let ask = sandbox.checkRawPath(proj / "vault" / "k.txt",
+        needsWrite = true)
+      let hard = sandbox.checkRawPath(proj / "locked" / "x",
+        needsWrite = true)
+      check not ask.allowed
+      check not hard.allowed
+      check "ask-gated" in ask.reason
+      check "ask-gated" notin hard.reason
+      check ask.reason != hard.reason
 
 suite "denied path extraction":
   test "redirect mutation target wins":
@@ -175,6 +193,18 @@ suite "grant":
       check "allow ./" in text
       check "allow /etc/hosts" in text
       check sandbox.checkRawPath("/etc/hosts", needsWrite = false).allowed
+
+suite "ask rule round trip":
+  test "appendRule writes an ask rule the parser reads back as akAsk":
+    # sandwall 0.5.11 added akAsk; the ask verb must round-trip through
+    # the policy text so the gate asks instead of denying (issue #72).
+    let (base, proj) = newFixture("askverb")
+    defer: removeDir(base)
+    let repoFile = repoPolicyPath(proj)
+    withPolicy(proj):
+      check appendRule(repoFile, proj / "asktarget", akAsk)
+      check "ask ./asktarget" in readFile(repoFile)
+      check loadPolicy(proj).checkPath(proj / "asktarget") == akAsk
 
 suite "allow-dir path shaping":
   test "dirComponent: existing dir stays, file yields parent, bare name dots":

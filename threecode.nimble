@@ -10,7 +10,10 @@ requires "streamhttp >= 0.5.0"
 requires "ttty >= 0.5.0"
 requires "unicodedb >= 0.13.0"
 requires "tinotify >= 0.1.3"
-requires "sandwall >= 0.5.15"
+# 0.5.11 added the akAsk access kind sandbox.nim switches on; 0.5.15
+# is recommended because it self-maps the userns so fenced commands run
+# as the user (older releases fall back to the guarded degraded path).
+requires "sandwall >= 0.5.11"
 requires "libsha >= 1.0"
 requires "nimdiff >= 0.1.0"
 requires "zippy >= 0.10"
