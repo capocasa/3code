@@ -422,7 +422,11 @@ when defined(posix):
   proc debugLogLine(line: string) {.gcsafe.} =
     if debugLogFd == -2: return  # known-disabled sentinel
     if debugLogFd == -1:
-      let path = runtime.get("debug_log")
+      var path = runtime.get("debug_log")
+      if path.len == 0:
+        # An env spelling too: a session that must stay config-less (the
+        # first-run wizard path) can still carry a trace sink.
+        path = getEnv("THREECODE_DEBUG_LOG")
       if path.len == 0:
         debugLogFd = -2
         return

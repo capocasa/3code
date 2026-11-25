@@ -754,13 +754,15 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       pluginsConf.add (item.key[8 ..^ 1], item.val)
     else:
       envVars.add item
-  # TTY_EXPECT_DEBUG_LOG: arm the child's own debug_log sink (its
-  # `debugOut` trace) for every session; a failure dump then carries the
-  # trace tail next to the frames and the stall sample.
+  # TTY_EXPECT_DEBUG_LOG: arm the child's own trace sink (its `debugOut`
+  # lines, `--debug`) for every session; a failure dump then carries the
+  # trace tail next to the frames and the stall sample. Through the env,
+  # not the config: a config carrying the key would make a first-run
+  # session (no config anywhere) look configured.
   var debugLogPath = ""
   if getEnv("TTY_EXPECT_DEBUG_LOG") != "":
     debugLogPath = getTempDir() / ("tty_expect_debug_" & $gIpcSessionSeq & ".log")
-    settingsConf.add ("debug_log", debugLogPath)
+    envVars.add ("THREECODE_DEBUG_LOG", debugLogPath)
   var childArgs: seq[string] = @args
   if debugLogPath.len > 0:
     childArgs.add "--debug"  # the trace itself is gated on this flag
@@ -1072,7 +1074,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       clearEnv()
 
       var hasTerm = false
-      for item in env:
+      for item in envVars:
         if item.key == "TERM":
           hasTerm = true
         putEnv(item.key, item.val)
