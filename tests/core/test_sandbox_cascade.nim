@@ -413,8 +413,9 @@ suite "single active policy file":
         let r = handleCommandResult(":sb ask " & opt, messages, session,
                                     prof, editor)
         check r.ok
-        check r.body.contains("sandbox updated: ask " &
-          opt.replace(DirSep, '/'))
+        # The item IS the receipt: icon, the command sans colon, the
+        # edit's diff (sandboxChangeBytes).
+        check r.body.contains("sandbox ask " & opt.replace(DirSep, '/'))
         check readFile(repoFile) ==
           "ask " & opt.replace(DirSep, '/') & "\n" &
           "allow " & varDir.replace(DirSep, '/') & "\n"
