@@ -287,7 +287,9 @@ suite "sandbox ask prompt":
       tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
       tty.answerAsk ":a"
       tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
-      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+      # The sandboxed rerun spawns via CreateProcessWithLogonW, which
+      # Defender/SmartScreen can stall well past 30s on a cold runner.
+      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 90_000
       # The ask rule covers more than the denied file: changing it would
       # rewrite a rule the user aimed at other paths, so the allow lands
       # after every existing rule instead (last-match-wins puts it above
@@ -351,7 +353,9 @@ suite "sandbox ask prompt":
       tty.answerAsk ":a"
       tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
       check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
-      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+      # The sandboxed rerun spawns via CreateProcessWithLogonW, which
+      # Defender/SmartScreen can stall well past 30s on a cold runner.
+      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 90_000
       check policyLines(root) ==
         @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
       tty.expect "\u276f"
@@ -451,7 +455,9 @@ suite "sandbox ask prompt":
     tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
     tty.answerAsk ":a"
     tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
-    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+    # The sandboxed rerun spawns via CreateProcessWithLogonW, which
+    # Defender/SmartScreen can stall well past 30s on a cold runner.
+    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 90_000
     check policyLines(root) ==
       @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
     tty.expect "\u276f"
@@ -469,7 +475,9 @@ suite "sandbox ask prompt":
 
     tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
     tty.answerAsk ":a"
-    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+    # The sandboxed rerun spawns via CreateProcessWithLogonW, which
+    # Defender/SmartScreen can stall well past 30s on a cold runner.
+    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 90_000
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked",
         "allow ./vault/out.txt"]
