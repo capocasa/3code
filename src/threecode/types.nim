@@ -429,10 +429,15 @@ type
                    ## record's body; "" when unnamed
     plan*: seq[PlanItem]
     readCache*: ReadCache
-    goalNotified*: bool  ## the mode's kickoff stanza already reached the
-                         ## model. Persisted (session record `goal_notified`):
-                         ## a resumed session never re-feeds the stanza - the
-                         ## end-call boundary goes straight to the check
+    goalNotified*: bool  ## the mode's work is NOT owed right now. Set when
+                         ## a kickoff stanza reaches the model (or the user
+                         ## cancels at the end-call boundary); cleared when a
+                         ## verdict step lands in scrollback - the agent
+                         ## reported back, so the work is owed again.
+                         ## Persisted (session record `goal_notified`): a
+                         ## launch with an open goal starts work immediately
+                         ## unless this is set, and a cancelled turn is also
+                         ## left alone (`workOwedOnLaunch`)
     goalSteps*: seq[GoalStepRecord]  ## verifier steps the session painted,
                                      ## anchored to their message position:
                                      ## replayed on resume so the goal verify

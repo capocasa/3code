@@ -275,6 +275,17 @@ proc goalActiveIn*(messages: JsonNode; steps: seq[GoalStepRecord]): bool =
       return false
   true
 
+proc workOwedOnLaunch*(messages: JsonNode): bool =
+  ## May a launch start the mode's work? Only a transcript that ends on
+  ## a completed reply owes it. Anything else - an unanswered prompt, a
+  ## tool result with no reply after it - is a turn the user cancelled or
+  ## a session killed mid-turn: the harness leaves it alone instead of
+  ## restarting work the user just stopped. An open goal ending on a reply
+  ## is exactly the state `3code -r` picks up and works on at once.
+  if messages == nil or messages.kind != JArray or messages.len == 0:
+    return true
+  messages[^1]{"role"}.getStr("") == "assistant"
+
 proc goalTextFromMessages*(messages: JsonNode): string =
   ## The live goal's text: the kickoff's display body (the wire
   ## scaffold dropped). "" when no goal is armed - callers treat that
@@ -621,6 +632,29 @@ proc modeArmed*(m: ModeDesc; dir: string; messages: JsonNode;
   ## models can never disagree about what is live.
   if m.transcript: goalActiveIn(messages, steps)
   else: fileExists(modeFilePath(m, dir))
+
+proc stepLandsInScrollback*(steps: var seq[GoalStepRecord]; owed: var bool;
+                            step: GoalStep; after: int) =
+  ## The one place a verdict step enters scrollback: anchor it to the
+  ## messages it judged and re-own the work. A step is the agent
+  ## reporting back, so the goal's work is owed again - the next launch
+  ## (`3code -r`) or the next boundary starts a turn instead of waiting
+  ## for a prompt. Maintained here, so no launch has to walk the
+  ## transcript to reconstruct the state.
+  steps.add GoalStepRecord(after: after, step: step)
+  owed = false
+
+proc modeWorkOwedOnLaunch*(mode: ModeDesc; session: Session;
+                           messages: JsonNode): bool =
+  ## The launch half of the auto-start rule: an armed mode whose work is
+  ## owed starts a turn the moment the session opens, with no key
+  ## pressed. `goalNotified` is the persisted latch (set when a kickoff
+  ## stanza reaches the model or the user cancels, cleared when a verdict
+  ## step lands), and an unanswered prompt is left alone. Together they
+  ## never restart a cancelled turn or a satisfied goal, and always
+  ## pick an open goal whose last turn completed back up.
+  not noMode(mode) and not session.goalNotified and
+    workOwedOnLaunch(messages)
 
 proc modeFileLabel*(m: ModeDesc; dir = "."): string =
   modeLabelForName(m.fileName, dir)

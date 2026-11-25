@@ -1385,14 +1385,14 @@ proc main() =
     # the conversation's own unretired kickoff - a resumed session
     # picks the mode back up from the .3log. Kick the mode's work off
     # now - the same kickoff path `:goal TEXT` takes - instead of
-    # waiting for the first prompt to hit a turn-end boundary - UNLESS
-    # the kickoff stanza already reached the model (a resumed session:
-    # the latch is persisted, and the content-lead witness covers
-    # sessions saved before the latch existed). Session cwd, not
-    # process cwd: same authority as the turn-end check in turns.nim.
+    # waiting for the first prompt to hit a turn-end boundary - unless
+    # the goal's work is not owed (a cancelled turn, a satisfied goal).
+    # `modeWorkOwedOnLaunch` is that rule; a kickoff stanza already in
+    # the conversation is no reason to idle, so a resumed session with an
+    # open goal starts work. Session cwd, not process cwd: same
+    # authority as the turn-end check in turns.nim.
     let mode = activeMode(session.cwd, messages, session.goalSteps)
-    if not noMode(mode) and not session.goalNotified and
-        not modeKickoffIn(messages):
+    if modeWorkOwedOnLaunch(mode, session, messages):
       if runModeKickoff(mode):
         quit(0)
     if prompt != "" and runInitialPrompt(prompt):
