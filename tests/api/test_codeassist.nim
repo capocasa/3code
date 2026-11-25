@@ -110,6 +110,96 @@ suite "code assist translation":
     check parseJson(tc{"function"}{"arguments"}.getStr){"path"}.getStr == "a.nim"
     check chunks[^1] == "[DONE]"
 
+  test "geminiBody is the native request, no Code Assist envelope":
+    let openAi = %*{
+      "messages": [
+        {"role": "system", "content": "you are 3code"},
+        {"role": "user", "content": "hi"}
+      ],
+      "tools": [
+        {"type": "function",
+         "function": {"name": "bash", "description": "run",
+                      "parameters": {"type": "object",
+                                     "additionalProperties": false,
+                                     "properties": {"command": {"type": "string"}}}}}
+      ],
+      "max_tokens": 64,
+      "reasoning_effort": "xhigh"
+    }
+    let j = parseJson(geminiBody(openAi))
+    check not j.hasKey("model")
+    check not j.hasKey("project")
+    check not j.hasKey("request")
+    check j{"systemInstruction"}{"parts"}[0]{"text"}.getStr == "you are 3code"
+    check j{"contents"}[0]{"parts"}[0]{"text"}.getStr == "hi"
+    check j{"generationConfig"}{"maxOutputTokens"}.getInt == 64
+    check j{"generationConfig"}{"thinkingConfig"}{"thinkingLevel"}.getStr == "xhigh"
+    check j{"tools"}[0]{"functionDeclarations"}[0]{"name"}.getStr == "bash"
+
+  test "gemini-2.5 maps reasoning_effort onto thinkingBudget":
+    let openAi = %*{
+      "model": "gemini-2.5-pro",
+      "messages": [{"role": "user", "content": "hi"}],
+      "reasoning_effort": "high"
+    }
+    let j = parseJson(geminiBody(openAi))
+    let tc = j{"generationConfig"}{"thinkingConfig"}
+    check tc{"thinkingBudget"}.getInt == 24576
+    check not tc.hasKey("thinkingLevel")
+
+  test "gemini-2.0 drops the thinking knob":
+    let openAi = %*{
+      "model": "gemini-2.0-flash",
+      "messages": [{"role": "user", "content": "hi"}],
+      "reasoning_effort": "high"
+    }
+    let j = parseJson(geminiBody(openAi))
+    check j{"generationConfig"}{"thinkingConfig"} == nil
+
+  test "geminiBody maps image_url data URIs to inlineData parts":
+    let openAi = %*{
+      "messages": [
+        {"role": "user", "content": [
+          {"type": "text", "text": "what is this"},
+          {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+        ]}
+      ]
+    }
+    let j = parseJson(geminiBody(openAi))
+    let parts = j{"contents"}[0]{"parts"}
+    check parts.len == 2
+    check parts[0]{"text"}.getStr == "what is this"
+    check parts[1]{"inlineData"}{"mimeType"}.getStr == "image/png"
+    check parts[1]{"inlineData"}{"data"}.getStr == "AAAA"
+
+  test "gemma tool_calls carry no thoughtSignature":
+    let openAi = %*{
+      "model": "gemma-4-31b-it",
+      "messages": [
+        {"role": "user", "content": "edit"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [
+           {"id": "call_1", "type": "function",
+            "function": {"name": "bash", "arguments": "{\"command\":\"ls\"}"}}
+         ]},
+        {"role": "tool", "tool_call_id": "call_1", "content": "ok"}
+      ]
+    }
+    let j = parseJson(geminiBody(openAi))
+    let fc = j{"contents"}[1]{"parts"}[0]
+    check fc{"functionCall"}{"name"}.getStr == "bash"
+    check not fc.hasKey("thoughtSignature")
+
+  test "geminiChatModel filters the non-chat listing":
+    check geminiChatModel("gemini-4-neon")
+    check geminiChatModel("gemini-3.8-flash")
+    check geminiChatModel("gemma-4-31b-it")
+    check not geminiChatModel("gemini-3-pro-image")
+    check not geminiChatModel("gemini-3.8-flash-tts")
+    check not geminiChatModel("gemini-embedding-2")
+    check not geminiChatModel("gemini-3.8-live")
+    check not geminiChatModel("deep-research-preview-04-2026")
+
   test "non-streaming response translates to choices[0].message":
     let raw = $(%*{
       "response": {

@@ -417,7 +417,7 @@ login that rides on `anthropic`.
 | ★ openai | US | API key, or log in as `chatgpt` on a Plus/Pro subscription |
 | ★ xai | US | API key, or log in as `supergrok` on SuperGrok/X Premium+ |
 | anthropic | US | Claude on the Messages wire, or log in as `claudecode` on Pro/Max |
-| google | US | Gemini through the OpenAI-compatible surface |
+| google | US | Gemini on the native generateContent wire |
 | mistral | France (EU) | Mistral first-party, plus hosted GLM |
 
 ### US inference clouds

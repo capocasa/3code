@@ -775,14 +775,41 @@ suite "prompts: setup — bashToolDisabled":
       if t{"function"}{"name"}.getStr == "bash": foundBash = true
     check foundBash
 
-suite "prompts: golden fixtures":
-  # Byte-for-byte snapshots of every shipped family prompt plus its
-  # tool descriptions. Prompt text rides every request, so this locks
-  # it against accidental drift. After a deliberate prompt change,
-  # regenerate and review the diff like any source change:
-  #   <this test binary> --regen-golden
-  const GoldenDir = "tests/testdata/fixtures/prompts"
+const GoldenDir = "tests/testdata/fixtures/prompts"
+  ## Byte-for-byte snapshots of every shipped family prompt plus its tool
+  ## descriptions. Prompt text rides every request, so this locks it
+  ## against accidental drift. After a deliberate prompt change,
+  ## regenerate and review the diff like any source change:
+  ##   <this test binary> --regen-golden
 
+suite "meta requests: google native wire":
+  let google = Profile(name: "google.gemini-4-neon", family: "gemini",
+                       model: "gemini-4-neon",
+                       url: "https://generativelanguage.googleapis.com/v1beta/openai",
+                       key: "AIza-test")
+
+  test "summarizer builds the native generateContent request":
+    let req = buildMetaRequest(google,
+      %*[{"role": "user", "content": "old turn"}],
+      "summarize", "", 100)
+    check req.nativeGemini
+    check req.endpoint ==
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-neon:generateContent"
+    check not req.responses
+    let body = parseJson(req.body)
+    check body{"systemInstruction"}{"parts"}[0]{"text"}.getStr == "summarize"
+    check body{"contents"}[0]{"parts"}[0]{"text"}.getStr == "old turn"
+    check body{"generationConfig"}{"maxOutputTokens"}.getInt == 100
+
+  test "btw aside maps tool_choice none onto the native NONE mode":
+    let req = buildMetaRequest(google,
+      %*[{"role": "user", "content": "the conversation"}],
+      "", "? question", 100, keepCachePrefix = true)
+    check req.nativeGemini
+    let body = parseJson(req.body)
+    check body{"toolConfig"}{"functionCallingConfig"}{"mode"}.getStr == "NONE"
+
+suite "prompts: golden fixtures":
   test "every family prompt matches its golden fixture":
     createDir(GoldenDir)
     let regen = commandLineParams().contains("--regen-golden")

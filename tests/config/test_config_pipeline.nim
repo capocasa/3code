@@ -259,6 +259,11 @@ suite "config: resolveFamily":
     let prof = Profile(name: "google.gemini-9-unreleased", model: "gemini-9-unreleased")
     check resolveFamily(prov, prof) == "gemini"
 
+  test "uncurated google gemma model defaults to other":
+    let prov = ProviderRec(name: "google", models: @["gemma-9-it"])
+    let prof = Profile(name: "google.gemma-9-it", model: "gemma-9-it")
+    check resolveFamily(prov, prof) == "other"
+
   test "geminicli twin defaults to gemini too":
     let prov = ProviderRec(name: "geminicli", models: @["gemini-9-unreleased"])
     let prof = Profile(name: "geminicli.gemini-9-unreleased", model: "gemini-9-unreleased")

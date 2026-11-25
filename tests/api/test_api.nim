@@ -1179,6 +1179,44 @@ suite "api request shaping":
     check not geminicliProfile(Profile(name: "google.gemini-3.8-flash",
                                       model: "gemini-3.8-flash"))
 
+  test "google rides the native generateContent wire":
+    let p = Profile(name: "google.gemini-4-neon", family: "gemini",
+                    model: "gemini-4-neon",
+                    url: "https://generativelanguage.googleapis.com/v1beta/openai")
+    check googleProfile(p)
+    check geminiWire(p)
+    # The `/openai` suffix selects the compat surface; the native base is
+    # the same host without it, and existing configs keep working.
+    check endpointUrl(p, false, true) ==
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-neon:streamGenerateContent?alt=sse"
+    check endpointUrl(p, false, false) ==
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-4-neon:generateContent"
+    let hdrs = requestHeaders(p, "AIza-test", "text/event-stream")
+    check hdrs.contains(("x-goog-api-key", "AIza-test"))
+    var hasBearer = false
+    for (k, _) in hdrs:
+      if k == "Authorization": hasBearer = true
+    check not hasBearer
+
+  test "google verify ping is a native body":
+    let p = Profile(name: "google.gemini-4-neon", family: "gemini",
+                    model: "gemini-4-neon")
+    let j = parseJson(verifyBody(p))
+    check not j.hasKey("model")
+    check not j.hasKey("request")
+    check j{"contents"}[0]{"parts"}[0]{"text"}.getStr == "ping"
+    check j{"generationConfig"}{"maxOutputTokens"}.getInt == 1
+    check j{"generationConfig"}{"thinkingConfig"}{"thinkingLevel"}.getStr == "low"
+
+  test "geminicli still rides the Code Assist envelope":
+    let p = Profile(name: "geminicli.gemini-4-neon", family: "gemini",
+                    model: "gemini-4-neon")
+    check geminiWire(p)
+    check not googleProfile(p)
+    let j = parseJson(verifyBody(p))
+    check j{"model"}.getStr == "gemini-4-neon"
+    check j{"request"}{"contents"}[0]{"parts"}[0]{"text"}.getStr == "ping"
+
   test "gemini setup resolves to GeminiPreamble + bash/patch tools":
     let p = Profile(name: "google.gemini-3.8-flash", family: "gemini",
                     model: "gemini-3.8-flash")

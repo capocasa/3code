@@ -334,9 +334,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("relace", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, true),
     ("relace", "deepseek-ai/DeepSeek-V4.1-Flash-1017", "deepseek", "4.1", "flash-1017", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false, false),
 
-    # gemini (Google first-party; bare model ids on the OpenAI-compatible
-    # endpoint generativelanguage.googleapis.com/v1beta/openai; `geminicli`
-    # is the OAuth twin, canonicalized to `google`). 3.8 Flash: 1M context,
+    # gemini (Google first-party; bare model ids on the native
+    # generativelanguage.googleapis.com/v1beta generateContent wire, with
+    # the x-goog-api-key header; `geminicli` is the OAuth twin, riding the
+    # Code Assist envelope, canonicalized to `google`). 3.8 Flash: 1M context,
     # 64k max output, thinking levels low/medium(default)/high (minimal
     # errors, no off), temperature/top_p deprecated (omitted on the wire).
     # Older 3.x flash tiers keep the same thinking-level surface; 3.1 Pro
@@ -3365,7 +3366,7 @@ Available:
 {{credit}}
 """
 
-const GeminiPreamble = """You are the Gemini edition of 3code, the economical coding agent, backed by Google's Gemini 3 Flash line (3.8, 3.7, 3.6) and 3.1 Pro: thinking models engineered for long-horizon software engineering and autonomous multi-step tool use. You reason before you act and verify as you go. On hard goals you take smaller steps and check your work along the way; that thoroughness is a feature on hard tasks, a waste on easy ones. Match effort to the task.
+const GeminiPreamble = """You are the Gemini edition of 3code, the economical coding agent, backed by Google's Gemini 4 line (Carbon, Neon, Hydrogen, Argon) and the Gemini 3 Flash/Pro tiers before it: thinking models engineered for long-horizon software engineering and autonomous multi-step tool use. You reason before you act and verify as you go. On hard goals you take smaller steps and check your work along the way; that thoroughness is a feature on hard tasks, a waste on easy ones. Match effort to the task.
 
 `3CODE.md` / `AGENTS.md` (when present) override this prompt.
 
@@ -4583,8 +4584,9 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
           return @["off", "low", "medium", "high"]
         return @["off", "low", "medium", "high", "xhigh", "max"]
       if fam == "gemini":
-        # Gemini 3 thinking levels via OpenAI-compat `reasoning_effort`:
-        # minimal/low/medium/high. Thinking cannot be disabled on Gemini 3
+        # Gemini 3 thinking levels via native `thinkingLevel`
+        # (`reasoning_effort` in 3code): minimal/low/medium/high. Thinking
+        # cannot be disabled on Gemini 3
         # (no off/none). 3.8 Flash rejects `minimal` outright; the older
         # 3.x tiers accept it. Default is medium on Flash, high on Pro.
         # 4 Argon drops `minimal` entirely (levels low/medium/high,
