@@ -1,3 +1,4 @@
+## Covers: src/threecode/fatprompt/runtime.nim
 discard """
   disabled: "win"
   ## The ESC-in-wizard test fails under ConPTY: ESC in a wizard with

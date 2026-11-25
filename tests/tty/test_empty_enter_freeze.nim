@@ -1,3 +1,4 @@
+## Covers: src/threecode/fatprompt/runtime.nim
 discard """
   disabled: "win"
   ## Flaky under ConPTY in the full testament suite: the empty-Enter

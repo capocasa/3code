@@ -1,3 +1,4 @@
+## Covers: src/threecode.nim
 discard """
   # This test reproduces a broken-stdout pipe via bash + python3 and asserts
   # on the POSIX broken-pipe exit semantics. It does not use the ConPTY

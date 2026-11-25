@@ -1,3 +1,4 @@
+## Covers: src/threecode/api.nim
 discard """
   disabled: "win"
   ## Sends raw \x03 (Ctrl-C) and \x1b (ESC) to interrupt an in-flight call.

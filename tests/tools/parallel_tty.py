@@ -50,9 +50,9 @@ STUB_VARIANTS = [
 ]
 
 
-def soak_stems():
+def read_stems(path):
     try:
-        lines = open(SOAK_LIST, encoding="utf-8").read().splitlines()
+        lines = open(path, encoding="utf-8").read().splitlines()
     except OSError:
         return set()
     return {l.strip() for l in lines
@@ -148,6 +148,7 @@ def main():
                     help="run only the soak tests")
     ap.add_argument("--include-soak", action="store_true",
                     help="run the soak tests too (default: exclude)")
+    ap.add_argument("--file", help="run only the stems listed in this file")
     args = ap.parse_args()
     if args.soak and args.include_soak:
         ap.error("--soak and --include-soak are mutually exclusive")
@@ -156,12 +157,21 @@ def main():
     files = sorted(f for f in os.listdir(TTY)
                    if f.startswith("test_") and f.endswith(".nim"))
     selected, skipped, tier_skipped = [], [], []
-    soak = soak_stems()
+    soak = read_stems(SOAK_LIST)
+    only = read_stems(args.file) if args.file else None
+    if only is not None:
+        known = {f[:-4] for f in files}
+        missing = only - known
+        if missing:
+            ap.error("unknown test stem(s) in " + args.file + ": " +
+                     ", ".join(sorted(missing)))
     for f in files:
         path = os.path.join(TTY, f)
         dis = disabled_on(path)
         if here in dis:
             skipped.append((f, ",".join(dis)))
+        elif only is not None and f[:-4] not in only:
+            continue
         elif args.soak and f[:-4] not in soak:
             tier_skipped.append((f, "non-soak"))
         elif not (args.soak or args.include_soak) and f[:-4] in soak:
