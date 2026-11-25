@@ -808,10 +808,15 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
           "can only be changed by the user, :sandbox edit)")
       else:
         (false, "sandbox: " & shown & " is read-only (" & policyHint() & ")")
-  of akDeny, akAsk:
-    # akAsk denies identically here; only the bash tool's ask flow
-    # redeems it (see the ask-gate section below).
+  of akDeny:
     (false, "sandbox: " & shown & " is denied by the policy (" & policyHint() & ")")
+  of akAsk:
+    # sandwall 0.5.11 added akAsk. It denies like deny at this gate, but
+    # an ask rule is redeemable: the bash ask flow offers a one-key
+    # grant, and the user can allow the path by hand. Say so, so the
+    # model relays a grantable denial instead of a permanent one.
+    (false, "sandbox: " & shown & " is ask-gated; allow it with " &
+      ":sandbox allow " & shown & " (" & policyHint() & ")")
 
 proc ensureRepoPolicy*(dir: string): bool =
   ## Materialize `dir/.sandbox` from the effective policy text (the

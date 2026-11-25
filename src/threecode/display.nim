@@ -477,13 +477,17 @@ const SandboxChangeIcon* = "▤"
   ## wall the policy is (the sandwall), and sits 1 cell wide like the other
   ## tool icons (verified against unicodewidth: ambiguous -> narrow).
 
+proc sandboxPhrase*(verb, path: string): string =
+  ## The phrase shared by the agent-sent message and the scrollback row:
+  ## the command itself, sans colon.
+  "sandbox " & verb & (if path.len > 0: " " & path else: "")
+
 proc sandboxChangeBytes*(verb, path: string;
     diff: tuple[removed, added: seq[string]]): string =
   ## The scrollback item for a sandbox policy edit: the icon, the phrase
   ## (the command itself, sans colon - the same text printed to the model),
   ## and the edit's diff in patch-command syntax without the color.
-  result = SandboxChangeIcon & " sandbox " & verb &
-    (if path.len > 0: " " & path else: "") & "\r\n"
+  result = SandboxChangeIcon & " " & sandboxPhrase(verb, path) & "\r\n"
   for l in diff.removed:
     result.add "  -" & l & "\r\n"
   for l in diff.added:

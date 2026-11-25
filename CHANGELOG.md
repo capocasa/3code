@@ -251,7 +251,8 @@ Unreleased
   EACCES under the Landlock domain). sandwall 0.5.15 reads the
   ids BEFORE the unshare and self-maps the user onto themselves, so
   the confined tree sees the world as the user who launched it;
-  the manifest now requires sandwall >= 0.5.15. The box driver
+  the manifest now requires sandwall >= 0.5.11 (0.5.15 recommended
+  for the self-map). The box driver
   keeps a degrade guard (box.nim repairUsernsIds): it detects a
   still-unmapped namespace -
   sandwall too old, a nested run from an already-unmapped namespace
