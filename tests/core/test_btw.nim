@@ -7,7 +7,7 @@
 ## the tests also pin the async contract: the command returns a receipt
 ## while the answer is still in flight, and the reply (answer plus burned
 ## tokens) is drained from the job.
-import std/[json, strutils, unittest]
+import std/[json, strutils, unittest, times]
 import std/net except send
 from std/nativesockets import selectRead
 import std/atomics
@@ -328,13 +328,16 @@ suite ":btw side questions":
     check not replies[0].cancelled
     check replies[0].answer == "SIDE ANSWER"
     # The abandoned worker is released by its own timeout handshake and
-    # freed on a later poll.
+    # freed on a later poll. Wall-clock deadline, not an iteration count:
+    # on a loaded runner (macos-15) each poll+sleep pass stretches and the
+    # counted loop expired before the reap landed (observed 2026-11).
     h.srv.gate.store(true, moRelease)
-    for _ in 0 ..< (BtwReapWaitMs div 1000 + 4):
+    let reapDeadline = epochTime() + (BtwReapWaitMs.float / 1000.0) + 30.0
+    while epochTime() < reapDeadline:
       replies.setLen 0
       pollBtw(replies)
       if btwRetiredLive() == 0: break
-      discard sleep(1)
+      discard sleep(20)
     check btwRetiredLive() == 0
 
   test "the aside context is the conversation's verbatim wire prefix":
