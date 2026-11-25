@@ -231,10 +231,104 @@ suite "goal mode":
     check modeKickoffIn(%*[cyberKickoffMessage(
       "- [ ] first\n\n## Current state\n\nNot begun.\n")])
 
+  test "a verdict step landing in scrollback re-owns the work":
+    # `stepLandsInScrollback` is the one place a step enters scrollback,
+    # so the work-owed latch changes nowhere else: the step is anchored
+    # to the messages it judged and the latch clears.
+    var steps: seq[GoalStepRecord] = @[]
+    var owed = true
+    stepLandsInScrollback(steps, owed,
+      GoalStep(prose: "not yet", verdict: gvkFeedback), after = 4)
+    check steps.len == 1
+    check steps[0].after == 4
+    check steps[0].step.verdict == gvkFeedback
+    check not owed
+    # The cleared latch survives the session round trip: a launch reads
+    # the state the live session left, not a reconstruction.
+    var session = Session(cwd: ".")
+    stepLandsInScrollback(session.goalSteps, session.goalNotified,
+      GoalStep(prose: "not yet", verdict: gvkFeedback), after = 1)
+    check not ("goal_notified=1" in renderSession(session, newJArray()).
+      splitLines()[0])
+
+  test "the launch rule: open goal and a completed reply start work":
+    # The four states a goal session can be reopened in, as one rule:
+    # work starts for an open goal whose last turn completed, and never
+    # for a cancelled turn or a satisfied goal.
+    let goal = %*[
+      {"role": "system", "content": "sys"},
+      goalKickoffMessage("ship it"),
+      {"role": "assistant", "content": "work done"}]
+    let cancelledTurn = %*[
+      {"role": "system", "content": "sys"},
+      goalKickoffMessage("ship it"),
+      {"role": "assistant", "content": "work done"},
+      goalFeedbackMessage("keep going"),
+      {"role": "user", "content": "interrupted"}]
+    # `launchOwes` is the production call: the armed mode the session
+    # derives from its own scrollback, plus the persisted latch.
+    proc launchOwes(session: Session; msgs: JsonNode): bool =
+      modeWorkOwedOnLaunch(
+        activeMode(session.cwd, msgs, session.goalSteps), session, msgs)
+    var open = Session(cwd: ".")
+    # An open goal, last turn completed: work is owed.
+    check goalActiveIn(goal, open.goalSteps)
+    check launchOwes(open, goal)
+    # A verdict step (an unsuccessful check) re-owns the work: the
+    # launch picks it up again.
+    var failed = Session(cwd: ".", goalNotified: true)
+    stepLandsInScrollback(failed.goalSteps, failed.goalNotified,
+      GoalStep(prose: "check unavailable", verdict: gvkNone), after = 3)
+    check goalActiveIn(goal, failed.goalSteps)
+    check launchOwes(failed, goal)
+    # A cancelled turn: the user's stop stands, the launch idles - both
+    # because the prompt went unanswered and because the cancel latched.
+    var cancelled = Session(cwd: ".")
+    check not launchOwes(cancelled, cancelledTurn)
+    cancelled.goalNotified = true
+    check not launchOwes(cancelled, goal)
+    # A satisfied goal is retired: no mode, no work.
+    var retired = Session(cwd: ".")
+    stepLandsInScrollback(retired.goalSteps, retired.goalNotified,
+      GoalStep(prose: "all good", verdict: gvkSatisfied), after = 3)
+    check not goalActiveIn(goal, retired.goalSteps)
+    check not launchOwes(retired, goal)
+    # A cancelled goal is retired the same way.
+    var givenUp = Session(cwd: ".")
+    stepLandsInScrollback(givenUp.goalSteps, givenUp.goalNotified,
+      GoalStep(prose: "", verdict: gvkCancelled), after = 3)
+    check not launchOwes(givenUp, goal)
+    # No mode at all: nothing to start.
+    check not modeWorkOwedOnLaunch(ModeDesc(), open, goal)
+
+  test "a launch owes the work unless the last prompt went unanswered":
+    # `workOwedOnLaunch` is the resume half of the auto-start rule: only a
+    # transcript ending on a completed reply owes the work. An unanswered
+    # prompt or a tool result with no reply after it is a turn the user
+    # cancelled, or a session killed mid-turn - left alone.
+    check workOwedOnLaunch(nil)
+    check workOwedOnLaunch(newJArray())
+    check not workOwedOnLaunch(%*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "go"}])
+    check not workOwedOnLaunch(%*[
+      {"role": "user", "content": "go", "agentSent": true,
+       "goalSent": true}])
+    check not workOwedOnLaunch(%*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c1", "type": "function",
+         "function": {"name": "bash", "arguments": "{}"}}]},
+      {"role": "tool", "tool_call_id": "c1", "content": "out"}])
+    check workOwedOnLaunch(%*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "done"}])
+
   test "the goalNotified latch round-trips through the session file":
-    # Once the kickoff stanza reached the model, a resumed session must
-    # not feed it again: the latch persists in the session record and
-    # restores on load.
+    # The latch says the goal's work is not owed right now; it persists
+    # in the session record and restores on load.
     proc loadTmp(text: string): Session =
       let (f, path) = createTempFile("goal-latch-", ".3log")
       f.write text

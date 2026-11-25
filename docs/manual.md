@@ -1488,9 +1488,12 @@ Arming starts work immediately: `:goal <text>` lands the kickoff in the
 conversation and runs the kickoff turn with no echoed command line and no
 receipt — the kickoff item is the arm's whole announcement, and repeating
 the goal text above it would say it twice. The kickoff speaks as one
-scrollback item — the `⚑` flag plus the goal text alone — and the stanza
-is fed exactly once per arming: resuming a session never re-feeds it, the
-check just runs at the next turn end. Each turn end runs the check; the
+scrollback item — the `⚑` flag plus the goal text alone. Work also starts
+on its own when you reopen a session whose goal is still open: `3code -r`
+lands the kickoff again and runs its turn, so a goal you left unfinished is
+picked up the moment you come back. It does not start on its own after you
+cancel a turn (your stop stands until you prompt again) or after a satisfied
+check (the goal is retired). Each turn end runs the check; the
 verifier's reply is the whole display, a dim quote block led by a green
 `✓` or a red `✗` (the verdict line itself is stripped; a failed or
 unreadable check shows the same red `✗` row). A satisfied verdict

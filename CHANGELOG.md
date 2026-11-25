@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **Goal mode starts work again when you reopen an open goal.** A launch
+  with `3code -r` used to idle on a session whose goal was still armed:
+  the kickoff stanza was already in the scrollback, and the resume guard
+  read that as "nothing to do" even when the last check had said the goal
+  was not met. The work-owed state is now a session flag maintained where
+  it changes - a verdict step landing in scrollback clears it, a kickoff
+  stanza reaching the model or a user cancellation sets it - so no launch
+  walks the transcript to reconstruct it. Result: work starts on its own at
+  the two points where nobody has to press a key, the arm itself and a
+  reopen into an open goal, and never on its own after a user cancellation
+  (an unanswered prompt is left alone) or after a satisfied check (the
+  goal is retired).
+
 - **Flail detector's identical-consecutive signal is progress-gated.**
   A back-to-back re-run of the exact same call no longer flags when the
   first call's result delivered a new output line: a legitimate poll

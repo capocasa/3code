@@ -1035,7 +1035,8 @@ proc interruptRetiresMode(session: var Session; mode: ModeDesc;
         mode.fileName & " could not be cancelled: " & cerr), messages)
     else:
       commitHarnessNotice(errLnS(label & " cancelled"), messages)
-  session.goalNotified = false
+  # The user said stop: nothing is owed until a new prompt or a new arm.
+  session.goalNotified = true
   session.modeSnapshot = ""
   session.changeCountStart = 0
   saveSessionReported(session, messages)
@@ -2057,17 +2058,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         turnEnded = true
         return true
       if not session.goalNotified:
-        # Detection: the file appeared during the turn, so the work the
-        # verifier would judge was never aimed at the goal - unless the
-        # kickoff stanza already reached the model in an earlier run (a
-        # resumed session: the kickoff fires once per arming, never per
-        # run), in which case the boundary goes straight to the check.
-        # Bind the discipline baselines and send the kickoff - the same
-        # immediate start a startup detection and a `:verb` arm take;
-        # the flag-led item is the whole announcement. The check first
-        # runs at the end of the kickoff turn.
-        session.goalNotified = true
+        # The goal's work is owed: the mode appeared mid-session (a file
+        # written during the turn), or the last verdict step reported
+        # back and the turn it started never finished. Bind the discipline
+        # baselines and send the kickoff - the same immediate start a
+        # startup detection and a `:verb` arm take; the flag-led item is
+        # the whole announcement, and the check first runs at the end of
+        # the kickoff turn. A stanza that already reached the model in an
+        # earlier run is not fed twice: the boundary goes straight to the
+        # check.
         if not modeKickoffIn(messages):
+          session.goalNotified = true
           # A second live mode while one mode runs is a refused arming:
           # say so once, right above the kickoff item.
           let other = conflictingMode(mode, session.cwd, messages,
@@ -2103,9 +2104,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # pointer to just the seq; `msgs` re-reads the live length at
       # fire time.
       let stepsOut = addr session.goalSteps
+      let owedOut = addr session.goalNotified
       let msgs = messages
       goalStepHook = proc (step: GoalStep) =
-        stepsOut[].add GoalStepRecord(after: msgs.len, step: step)
+        stepLandsInScrollback(stepsOut[], owedOut[], step, msgs.len)
         let stepBytes = goalStepBytes(step)
         termengine.noteNonMessageTail(stepBytes, journalAnchorMessagesLen)
         commitTranscriptBytes(stepBytes, true)
