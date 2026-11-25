@@ -163,8 +163,10 @@ suite ":btw is async":
     # The turn finishes; the rest ledgers the aside onto the same bar:
     # 6000+40 in, 5+6 out (ledgered only now, never mid-turn: the running
     # turn owns the bar until it rests).
-    tty.expectInHistory "main reply", timeoutMs = 8000
-    tty.expectInHistory "↓11"
+    # macOS CI runners stream the held reply well past 8s; the bar sum
+    # repaint follows the park, so both waits need slow-runner headroom.
+    tty.expectInHistory "main reply", timeoutMs = 20000
+    tty.expectInHistory "↓11", timeoutMs = 15000
     tty.expectPromptLive()
     tty.send ":q\n"
     tty.expectExit(0)
