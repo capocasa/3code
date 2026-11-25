@@ -224,6 +224,30 @@ jobs:
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
 
+      - name: Pre-seed the locked Nim package
+        # The lock pins nim 2.4.0 (sandwall requires nim >= 2.0.0) and this
+        # job's devel toolchain does not satisfy that pin, so nimble
+        # downloads Nim 2.4.0 from nim-lang.org - a download that has been
+        # failing silently mid-transfer (2026-11-25, URL healthy from
+        # outside). The downloaded toolchain is never used: the
+        # cross-compiles ride the devel toolchain above, so a
+        # metadata-only seed satisfies the pin without the network.
+        run: |
+          SHA=$(python3 -c "import json; print(json.load(open('nimble.lock'))['packages']['nim']['checksums']['sha1'])")
+          DIR="$HOME/.nimble/pkgs2/nim-2.4.0-$SHA"
+          mkdir -p "$DIR"
+          python3 - "$DIR/nimblemeta.json" <<'PYEOF2'
+          import json, sys
+          meta = {"version": 1, "metaData": {
+              "url": "https://github.com/nim-lang/Nim.git",
+              "downloadMethod": "git",
+              "vcsRevision": "",
+              "files": [],
+              "binaries": [],
+              "specialVersions": ["2.4.0"]}}
+          open(sys.argv[1], "w").write(json.dumps(meta, indent=2))
+          PYEOF2
+
       - name: Install dependencies
         # nimble.lock pins deps for the shipped builds; this experimental
         # stress job rides devel Nim on purpose and keeps the same lock.
