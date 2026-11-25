@@ -16,11 +16,12 @@
 import tables
 
 const ReadlineShortcuts* = {
-    # ESC and CtrlC clear a non-empty line (discarding the text into
-    # history) and only cancel when the line is empty. So a cancel key
-    # pressed mid-turn with a typed draft edits the draft instead of
-    # interrupting the turn. Up/Down move by visual row and fall through
-    # to history at the boundary; CtrlP/CtrlN are history-only.
+    # ESC and CtrlC cancel the ongoing request even when the line holds
+    # a typed draft (the app preserves the draft across the interrupt);
+    # at the idle prompt they clear a non-empty line (discarding the
+    # text into history) and only cancel when it is empty. Up/Down move
+    # by visual row and fall through to history at the boundary;
+    # CtrlP/CtrlN are history-only.
     "cancel": "ESC CtrlC",
     "clear": "ESC CtrlC",
     "quit-if-empty": "CtrlD",

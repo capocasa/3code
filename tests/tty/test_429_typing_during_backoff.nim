@@ -49,13 +49,13 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   ]
 
 suite "429 backoff with buffered typing":
-  test "ESC during 429 backoff clears the draft, does not interrupt":
+  test "ESC during 429 backoff cancels the retrying request, draft survives":
     let root = newFixture("429_typed_esc")
     writeConfiguredProvider(root)
     # 1x 429 then a normal reply. The 429 triggers one rate backoff (~1s
-    # under fastStubRetries); ESC with a typed draft must clear the draft
-    # (like Ctrl-C) instead of interrupting the turn, so the stub retries
-    # and the turn recovers on its own.
+    # under fastStubRetries); ESC with a typed draft cancels the
+    # retrying request outright - the user's stop - and the draft comes
+    # back prefilled on the prompt that follows the interrupt.
     writeFile(root / "run" / "stub_responses.json", $(%*[
       {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
       {"role": "assistant", "preStreamDelayMs": 50,
@@ -86,19 +86,17 @@ suite "429 backoff with buffered typing":
     tty.send "next prompt"
     tty.expect "next prompt"
     tty.drain(100)
-    # ESC with a non-empty draft clears the draft (like Ctrl-C) and must
-    # NOT interrupt the turn: the 429 backoff keeps retrying.
+    # ESC with a non-empty draft cancels the request mid-backoff.
     tty.send "\x1b"
     tty.drain(300)
     tty.expectAlive()
-    tty.expectNeverInHistory "interrupted by user"
-    # The draft is gone from the live prompt row.
-    check "next prompt" notin tty.screenText()
-    # The backoff runs to completion and the turn recovers on its own.
-    tty.expectInHistory "recovered"
-    # The cleared line was recorded in history, exactly like a Ctrl-C clear.
-    check "next prompt" in readFile(root / "xdg" / "3code" / "history")
-    echo "  PASS: 429+ESC cleared the draft without interrupting the backoff"
+    tty.expectInHistory "interrupted by user"
+    # The draft comes back prefilled on the prompt after the interrupt:
+    # the user keeps what they typed, the request stays cancelled (the
+    # turn does not resume into "recovered").
+    tty.expectTypedAtPrompt "next prompt"
+    tty.expectNeverInHistory "recovered"
+    echo "  PASS: 429+ESC cancelled the request and preserved the draft"
 
   test "429 budget exhaustion preserves the typed follow-up prompt":
     let root = newFixture("429_typed_exhaust")

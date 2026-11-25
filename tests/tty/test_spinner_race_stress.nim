@@ -107,14 +107,22 @@ suite "spinner runs through backoff while typing":
       let root = newFixture("cancel_stream_" & $iteration)
       writeConfiguredProvider(root)
       var chunks = newJArray()
-      for i in 0 ..< 80:
+      for i in 0 ..< 20:
         chunks.add %*("chunk-" & $i & " ")
-      let responses = %*[
-        {"role": "assistant", "preStreamDelayMs": 200,
-         "content": "done", "contentChunks": chunks,
-         "contentChunkDelayMs": 80,
-         "usage": {"promptTokens": 5, "completionTokens": 1,
-                   "totalTokens": 6, "cachedTokens": 0}}]
+      # A cancel now interrupts the turn and its queued prompt fires as
+      # the next request, so every burst consumes a fresh stub response
+      # (the stub quits the process on an out-of-range index); a burst
+      # whose ESC lands before the first chunk also triggers the
+      # empty-reply resend, so keep a generous pool.
+      let oneResponse = %*{
+        "role": "assistant", "preStreamDelayMs": 200,
+        "content": "done", "contentChunks": chunks,
+        "contentChunkDelayMs": 80,
+        "usage": {"promptTokens": 5, "completionTokens": 1,
+                  "totalTokens": 6, "cachedTokens": 0}}
+      var responses = newJArray()
+      for i in 0 ..< 24:
+        responses.add oneResponse
       writeFile(root / "run" / "stub_responses.json", $responses)
       let stub = ensureStubBinary()
       let tty = newTtySession(stub,
@@ -139,14 +147,15 @@ suite "spinner runs through backoff while typing":
         tty.drain(60, recordFrame = false)
         rawSend(tty, "abcd")
         tty.drain(40, recordFrame = false)
-        if burst mod 2 == 1:
-          rawSend(tty, "\x1b")
-        else:
-          rawSend(tty, "\x03")
+        # Cancel mid-stream: the interrupt tears the request down with the
+        # buffered draft on the line, and the queued prompt fires as the
+        # next turn (which the next burst then interrupts the same way).
+        rawSend(tty, if burst mod 2 == 1: "\x1b" else: "\x03")
         tty.drain(120, recordFrame = false)
+        tty.expectInHistory "interrupted by user"
         tty.expectAlive()
-      # Let the turn finish and the idle prompt return.
-      tty.drain(2000, recordFrame = false)
+      # Let the last queued turn finish and the idle prompt return.
+      tty.drain(4000, recordFrame = false)
       tty.expectAlive()
     echo "  PASS: cancel during live stream did not crash"
 

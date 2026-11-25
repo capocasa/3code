@@ -84,7 +84,9 @@ vi-mode.
 ; `retry` (default Ctrl9) cuts a retry backoff short or resends a
 ; data-less in-flight request, like `:retry`; distinct from the digit
 ; only on kitty-protocol terminals (legacy ones type a 9). `clear`
-; also adds the discarded text to history. Key tokens beyond
+; also adds the discarded text to history. While a request runs,
+; cancel keys interrupt it even with a typed draft; the draft comes
+; back prefilled on the next prompt. Key tokens beyond
 ; the obvious: Ctrl_ (C-_), Ctrl/ (C-/), Ctrl@ (C-@), Ctrl] (C-]),
 ; Alt< Alt> (M-< M->), Alt. (M-.), AltSpace (M-SPC), AltY, AltR,
 ; AltP, AltN, AltT, AltU, AltL, AltC, AltQ, CtrlR, CtrlS.

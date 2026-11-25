@@ -175,7 +175,7 @@ suite "quit signals":
       assertNoTrace(tty)
       echo "  PASS: Ctrl-D during a turn was inert; Ctrl-C interrupted; Ctrl-D quit"
 
-  test "Ctrl-C with text clears the prompt without interrupting the turn":
+  test "Ctrl-C with text cancels the turn; the draft comes back prefilled":
     let root = newFixture("ctrl_c_clears_during_turn")
     writeConfiguredProvider(root)
     writeStubResponses(root, slowResponses())
@@ -188,21 +188,16 @@ suite "quit signals":
     tty.drain(400)               # turn running
     for ch in "draft":           # type into the buffered editor mid-turn
       tty.send($ch); tty.drain(10)
-    tty.send "\x03"              # Ctrl-C with text: clear only, no interrupt
-    tty.drain(300)
-    tty.expectNo "interrupted by user"
-    # The typed draft must be gone from the live prompt row (it remains in
-    # the raw byte history from when it was echoed while typing, so check
-    # the settled screen, not the byte stream).
-    check "draft" notin tty.screenText()
-    # The turn is still running and the line is empty, so a bare ESC now
-    # interrupts it (ESC with text would clear instead).
-    tty.send "\x1b"
+    # Ctrl-C with text cancels the ongoing request anyway - the user's
+    # stop gesture - and the draft returns prefilled on the prompt that
+    # follows the interrupt.
+    tty.send "\x03"
     tty.expectInHistory "interrupted by user"
     tty.expectIdleCaret()
     tty.expectAlive()
+    tty.expectTypedAtPrompt "draft"
     assertNoTrace(tty)
-    echo "  PASS: Ctrl-C cleared the draft without interrupting; ESC interrupted"
+    echo "  PASS: Ctrl-C with text cancelled the turn and kept the draft"
 
   test ":q quits from an idle prompt":
     let root = newFixture("colon_q_quits")
@@ -424,6 +419,46 @@ suite "quit signals":
     tty.expectExit(0, timeoutMs = 5000)
     assertNoTrace(tty)
     echo "  PASS: Ctrl-C interrupt then Ctrl-D quit cleanly"
+
+  test "cancel keys interrupt a running turn even with a typed draft":
+    # The cancel contract: ESC and Ctrl-C cancel the ongoing request,
+    # draft or not - the typed follow-up comes back prefilled on the
+    # prompt that follows the interrupt. (The 2026-11 behavior that
+    # cleared the draft and left the request running is the regression
+    # this guards against.)
+    let root = newFixture("draft_cancel_interrupt")
+    writeConfiguredProvider(root)
+    # Response 1 holds the turn open (gets interrupted); response 2 answers
+    # the prefilled draft's follow-up turn.
+    writeStubResponses(root, %*[
+      {"role": "assistant", "preStreamDelayMs": 15000, "content": "done.",
+       "contentChunks": ["done."],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                 "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 100, "content": "done.",
+       "contentChunks": ["done."],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                 "totalTokens": 7, "cachedTokens": 0}}])
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "\u276f"
+    for ch in "go":
+      tty.send($ch); tty.drain(10)
+    tty.send "\n"
+    tty.drain(400)               # turn running
+    tty.send "follow-up "        # draft typed into the live editor
+    tty.expectTypedAtPrompt "follow-up "
+    tty.ctrlC()
+    tty.expectInHistory "interrupted by user"
+    tty.expectIdleCaret()
+    tty.expectAlive()
+    # The draft rides out the interrupt: the next prompt comes back with
+    # it prefilled, cursor after the last rune.
+    tty.expectTypedAtPrompt "follow-up "
+    tty.send "\n"
+    tty.expectInHistory "follow-up"
+    tty.expectInHistory "done."
+    echo "  PASS: cancel with a draft interrupts and keeps the draft"
 
   when defined(posix):
     template sigintKill(tty: TtySession) =
