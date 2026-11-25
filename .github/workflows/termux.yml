@@ -38,6 +38,16 @@ jobs:
         # install honors it, so rebuilds of the same commit get identical
         # dependency trees (bump requires -> `nimble lock` to update).
         run: |
+          # The lock pins the Nim package (sandwall requires nim >= 2.0.0),
+          # so nimble downloads Nim 2.4.0 from nim-lang.org here. That
+          # download has been failing silently mid-transfer (2026-11-25,
+          # three runs in a row while the URL stayed healthy from outside):
+          # retry the whole resolution before giving up.
+          for i in 1 2 3 4; do
+            nimble install -y --depsOnly && break
+            echo "nimble install attempt $i failed; retrying"
+            sleep 20
+          done
           nimble install -y --depsOnly
 
       - name: Generate nimble.paths for direct nim invocations
