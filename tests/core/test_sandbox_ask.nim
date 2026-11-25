@@ -11,6 +11,7 @@ discard """
 """
 import std/[unittest, os, strutils]
 import threecode/sandbox
+import threecode/dirsettings
 import threecode/ui
 
 proc newFixture(name: string): tuple[base, proj: string] =
@@ -168,6 +169,13 @@ suite "grant":
     let prevCfg = getEnv("XDG_CONFIG_HOME")
     putEnv("XDG_CONFIG_HOME", base / "cfg")
     defer: putEnv("XDG_CONFIG_HOME", prevCfg)
+    # Isolate the ancestor cascade too: the fixture lives under /tmp, and
+    # a real /tmp/.3code/sandbox (any session that ever ran with cwd=/tmp)
+    # would otherwise win the cascade and absorb the grant. dirconfig=user
+    # routes every store slot through the isolated config root instead.
+    let prevDirCfg = dirsettings.dirConfigLocation
+    dirsettings.dirConfigLocation = "user"
+    defer: dirsettings.dirConfigLocation = prevDirCfg
     withPolicy(proj):
       check sandbox.askCoveredPath("/etc/hosts")
       check sandbox.grantAskAllow("/etc/hosts")
