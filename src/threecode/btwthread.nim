@@ -213,14 +213,17 @@ proc btwWorker(a: ptr BtwWorkerArgs) {.thread.} =
     a.job.cancelled = reply.cancelled
     a.job.done = true
     release(a.job.lock)
-    var waited = 0
-    while waited < BtwReapWaitMs:
+    # Wall-clock bound, not a sleep count: a 1ms sleep is a request the
+    # OS may grant late (macOS coalesces it by tens of milliseconds), and
+    # counting sleeps stretched the wait to minutes there, so a cancelled
+    # aside's worker held its thread long past the bound.
+    let reapDeadline = epochTime() + BtwReapWaitMs / 1000
+    while epochTime() < reapDeadline:
       acquire(a.job.lock)
       let r = a.job.reaped
       release(a.job.lock)
       if r: break
       sleep 1
-      inc waited
     acquire(a.job.lock)
     a.job.answer = ""
     a.job.workerGone = true
