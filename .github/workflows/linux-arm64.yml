@@ -237,14 +237,14 @@ jobs:
         # is propagated. The old `for c in ...; testament cat` loop ran
         # categories sequentially and, worse, a single hung test stalled
         # the pipe so the step showed nothing after it.
-        # 5400s, not 3600: the suite kept growing and both linux runners
-        # tipped over the 3600 cap (amd64's step died at GitHub's 65-min
-        # kill, arm64's Run tests ran past 60m, Nov 19), failing the job
-        # on the timeout, not a test. Same class of bump as 1800->2400
-        # (Oct 6) and 2400->3600 (Nov 5). timeout-minutes keeps a 5-min
+        # 2400s, not 5400: the last measured full run on this 4-core
+        # runner took 15m45s (Nov 25, before core folding), and the fold
+        # replaces 58 per-file compiles with 6. 40 min keeps 2x headroom.
+        # Same class of cut as 1800->2400 (Oct 6) and 2400->3600 (Nov 5),
+        # now that the suite is faster. timeout-minutes keeps a 5-min
         # attribution window above the watchdog so the cap self-reports.
-        run: sh tests/tools/ci_tests.sh 5400
-        timeout-minutes: 95
+        run: sh tests/tools/ci_tests.sh 2400
+        timeout-minutes: 45
 
   # The dev-server upload is its own job, not a build step: a
   # deploy-endpoint hiccup (a mid-migration web root 404ing upload.nim,

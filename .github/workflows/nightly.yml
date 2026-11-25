@@ -33,5 +33,7 @@ jobs:
           cat nimble.paths
 
       - name: Run full suite including the soak tier
-        run: SOAK=1 sh tests/tools/ci_tests.sh 5400
-        timeout-minutes: 95
+        # 2700s: the soak tier adds ~5 min (four stress tests, 287s) to
+        # the ~14-16 min per-change suite; 45 min keeps 2x headroom.
+        run: SOAK=1 sh tests/tools/ci_tests.sh 2700
+        timeout-minutes: 50

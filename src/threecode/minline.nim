@@ -2720,6 +2720,20 @@ KEYSEQS["shift+delete"]  = @[27, 91, 51, 59, 50, 126]
 
 var KEYMAP* {.threadvar.}: CritBitTree[KeyCallback]
 
+var cancelInterruptsTurn*: proc(): bool {.closure.}
+  ## Installed by the REPL frontend: true while an ongoing request holds
+  ## the prompt. A key bound to cancel then interrupts even when the
+  ## line holds a draft - the caller stashes the draft across the
+  ## interrupt - while at the idle prompt the same key keeps its editing
+  ## meaning (clear the draft, cancel only an empty line). A plain
+  ## (shared) global like selfInsertHook: assigned once at startup,
+  ## before input threads exist.
+
+proc cancelTurnsNow(): bool =
+  ## The runCommandList/ctrl+c gate: a bound cancel key interrupts the
+  ## ongoing request even with a draft on the line.
+  cancelInterruptsTurn != nil and cancelInterruptsTurn()
+
 KEYMAP["backspace"] = proc(ed: var LineEditor) = ed.deletePrevious()
 KEYMAP["delete"]    = proc(ed: var LineEditor) = ed.deleteNext()
 KEYMAP["insert"]    = proc(ed: var LineEditor) =
@@ -2754,7 +2768,7 @@ KEYMAP["alt+b"]     = proc(ed: var LineEditor) = ed.wordLeft()
 KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
 KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
 KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
-  if ed.line.text.len > 0:
+  if ed.line.text.len > 0 and not cancelTurnsNow():
     ed.clearLine()
   else:
     ed.canceled = true
@@ -3266,10 +3280,16 @@ proc runCommandList(ed: var LineEditor, cmds: seq[string]): bool =
   ## Run an ordered command list. Deterministic order: clear before
   ## cancel so a key bound to both (ESC and CtrlC by default) clears
   ## when the line has text and cancels when empty; a key bound only to
-  ## cancel always cancels. Returns true if at least one command acted.
+  ## cancel always cancels. While an ongoing request holds the prompt
+  ## (cancelTurnsNow) a bound cancel key interrupts instead, draft or
+  ## not: the app preserves the draft across the interrupt. Returns
+  ## true if at least one command acted.
   var ordered: seq[string] = @[]
-  if "clear" in cmds: ordered.add "clear"
-  if "cancel" in cmds: ordered.add "cancel"
+  if "cancel" in cmds and cancelTurnsNow():
+    ordered.add "cancel"
+  else:
+    if "clear" in cmds: ordered.add "clear"
+    if "cancel" in cmds: ordered.add "cancel"
   for cmd in cmds:
     if cmd != "clear" and cmd != "cancel": ordered.add cmd
   var ran = false
@@ -3372,8 +3392,10 @@ var selfInsertHook*: proc(ed: var LineEditor, c1: int): bool {.closure.}
 
 proc runEscCommands(ed: var LineEditor) =
   ## Run ESCMAP commands. Default: ESC clears a non-empty line (adding
-  ## the text to history) and cancels only an empty one. Double-ESC
-  ## requires two presses. Unbound ESC still cancels (historical).
+  ## the text to history) and cancels only an empty one - unless an
+  ## ongoing request holds the prompt (cancelTurnsNow), when it cancels
+  ## outright. Double-ESC requires two presses. Unbound ESC still
+  ## cancels (historical).
   if runCommandsForKey(ed, "esc"): return
   cmdCancel(ed)
 
@@ -3490,10 +3512,11 @@ proc initKeyTables*() =
   KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
   KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
   KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
-    # Ctrl-C clears the line if text is present, otherwise cancels
-    # (at idle: nothing to cancel; during a turn / in the wizard:
-    # aborts the turn / wizard).
-    if ed.line.text.len > 0:
+    # Ctrl-C clears the line if text is present, otherwise cancels.
+    # While an ongoing request holds the prompt (cancelTurnsNow) it
+    # cancels regardless of the draft: the app preserves the draft
+    # across the interrupt.
+    if ed.line.text.len > 0 and not cancelTurnsNow():
       ed.clearLine()
     else:
       ed.canceled = true

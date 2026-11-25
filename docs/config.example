@@ -87,7 +87,9 @@ current = "ollama.qwen3-coder:480b"
 ; `expand-shell` (default Ctrl5) toggles the running live shell viewport
 ; between its capped tail and an expanded tail a bit less than the
 ; terminal height; inert when nothing streams. `clear`
-; also adds the discarded text to history. Key tokens beyond
+; also adds the discarded text to history. While a request runs,
+; cancel keys interrupt it even with a typed draft; the draft comes
+; back prefilled on the next prompt. Key tokens beyond
 ; the obvious: Ctrl_ (C-_), Ctrl/ (C-/), Ctrl@ (C-@), Ctrl] (C-]),
 ; Alt< Alt> (M-< M->), Alt. (M-.), AltSpace (M-SPC), AltY, AltR,
 ; AltP, AltN, AltT, AltU, AltL, AltC, AltQ, CtrlR, CtrlS.

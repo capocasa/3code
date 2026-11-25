@@ -1399,7 +1399,8 @@ proc waitUntil*(s: TtySession; ready: proc(s: TtySession): bool {.closure.};
     if ready(s): return
     doAssert not s.exited, "waitUntil: child exited before readiness"
     let remaining = int((deadline - epochTime()) * 1000)
-    doAssert remaining > 0, "waitUntil: readiness deadline expired"
+    doAssert remaining > 0, "waitUntil: readiness deadline expired\n" &
+      s.dumpFramesAround("")
     discard s.waitForOutput(min(remaining, 50))
 
 proc writeRawArtifact*(s: TtySession; path: string) =
