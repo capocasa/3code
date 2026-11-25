@@ -603,8 +603,11 @@ when defined(posix):
                      probeDir / "f", "--", "true"],
             options = {poStdErrToStdOut})
           let outp = readAll(p.outputStream)
+          # Any sandwall notice (the unshare degrade, or the landlock
+          # prctl degrade on kernels that refuse NO_NEW_PRIVS) means the
+          # fence cannot engage cleanly on this host.
           maskWorks = p.waitForExit() == 0 and
-            "unshare" notin outp
+            "sandwall:" notin outp
           p.close()
         except CatchableError:
           maskWorks = false
@@ -642,7 +645,7 @@ when defined(posix):
         # e2e in tests/core/test_wall_bash.
         let (probeOut, probeCode, _) =
           runStreamingBash(Action(kind: akBash, body: "true\n"), nil, nil)
-        if probeCode != 0 or "unshare" in probeOut:
+        if probeCode != 0 or "sandwall:" in probeOut:
           skip()
         else:
           let body = "(exit 3) | cat\n" &
@@ -673,23 +676,39 @@ when defined(posix):
       if not fileExists(bin) or not sandbox.backendWorks(bin):
         skip()
       else:
-        let dir = getTempDir() /
-          ("3code-implied-deny-" & $getCurrentProcessId() & "-" &
-            $epochTime().int64)
-        createDir(dir)
-        writeFile(dir / ".sandbox", "deny /\nallow " & dir & "\n")
-        defer: removeDir(dir)
-        let guarded = "/nonexistent/3code-implied-deny/config"
-        let cmd = bin.quoteShell & " sandbox --policy " &
-          (dir / ".sandbox").quoteShell & " restrict " & dir.quoteShell &
-          " --deny " & guarded.quoteShell & " -- sh -c " &
-          quoteShell("echo boxed-ok; cat " & guarded)
-        let (merged, code) = execCmdEx(cmd, options = {poStdErrToStdOut})
-        check "boxed-ok" in merged
-        check "sandwall:" notin merged
-        # The implied deny must not loosen anything: the covered path
-        # stays unreachable, so the trailing cat fails the command.
-        check code != 0
+        # The silence assertion assumes an engaged fence: on hosts whose
+        # kernel refuses prctl(NO_NEW_PRIVS) the landlock layer degrades
+        # with a notice (arm64 CI runners, observed 2026-11) and the
+        # premise of this regression is gone. Skip, like the
+        # backendWorks false cases.
+        let probeDir = getTempDir() /
+          ("3code-implied-deny-probe-" & $getCurrentProcessId())
+        createDir(probeDir)
+        let (probeMerged, probeCode) = execCmdEx(
+          bin.quoteShell & " sandbox restrict " & probeDir.quoteShell &
+          " -- true", options = {poStdErrToStdOut})
+        removeDir(probeDir)
+        if probeCode != 0 or "sandwall:" in probeMerged:
+          skip()
+        else:
+          let dir = getTempDir() /
+            ("3code-implied-deny-" & $getCurrentProcessId() & "-" &
+              $epochTime().int64)
+          createDir(dir)
+          writeFile(dir / ".sandbox", "deny /\nallow " & dir & "\n")
+          defer: removeDir(dir)
+          let guarded = "/nonexistent/3code-implied-deny/config"
+          let cmd = bin.quoteShell & " sandbox --policy " &
+            (dir / ".sandbox").quoteShell & " restrict " & dir.quoteShell &
+            " --deny " & guarded.quoteShell & " -- sh -c " &
+            quoteShell("echo boxed-ok; cat " & guarded)
+          let (merged, code) = execCmdEx(cmd, options = {poStdErrToStdOut})
+          check "boxed-ok" in merged
+          check "sandwall:" notin merged
+          # The implied deny must not loosen anything: the covered path
+          # stays unreachable, so the trailing cat fails the command.
+          check code != 0
+
 else:
   suite "streamexec: sandboxed bash parity":
     test "posix-only contract":

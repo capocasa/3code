@@ -681,13 +681,23 @@ suite "sandbox subcommand (built-in sandwall)":
     boxTmp = getTempDir() / ("3code-box-" & $getCurrentProcessId() & "deny" &
                               $epochTime().int64)
     createDir(boxTmp)
-    # Probe once: run a trivial confined command. If the OS-native backend
-    # (Landlock/Seatbelt/ACL) can't restrict on this host (e.g. a kernel
-    # built without Landlock, or a CI container lacking the syscall), box
-    # exits nonzero and the confinement assertions below are skipped rather
-    # than reported as failures. The dispatch/arg-parsing assertions stay
-    # unconditional since they don't depend on the backend.
-    backendWorks = run(["sandbox", "restrict", boxTmp, "--", "true"]).code == 0
+    # Probe once: run a trivial confined command AND verify the fence
+    # actually holds (a write outside the writable root must fail). Since
+    # sandwall's landlock degrade a failed layer prints a notice and lets
+    # the command run unconfined, a zero exit no longer proves the backend
+    # applied: on hosts where the kernel refuses (arm64 CI runners deny
+    # prctl(NO_NEW_PRIVS), observed 2026-11) the exit is 0 but the fence
+    # is absent, and the confinement assertions below must skip instead
+    # of failing. The dispatch/arg-parsing assertions stay unconditional
+    # since they don't depend on the backend.
+    let leakProbe = getTempDir() / ("3code-box-probe-" & $getCurrentProcessId())
+    removeFile(leakProbe)
+    backendWorks =
+      run(["sandbox", "restrict", boxTmp, "--", "true"]).code == 0 and
+      run(["sandbox", "restrict", boxTmp, "--", "touch",
+           leakProbe]).code != 0 and
+      not fileExists(leakProbe)
+    removeFile(leakProbe)
 
   teardown:
     removeDir(boxTmp)

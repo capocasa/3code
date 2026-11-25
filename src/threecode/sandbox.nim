@@ -536,6 +536,21 @@ proc backendWorks*(exe: string): bool =
         result = true
       else:
         result = code == 0
+        if result:
+          # A zero exit no longer proves the domain applied: the landlock
+          # layer degrades to a stderr notice on hosts whose kernel
+          # refuses prctl(NO_NEW_PRIVS) (arm64 CI runners, observed
+          # 2026-11), leaving the command unconfined. Verify the fence
+          # holds - a write outside the writable root must fail - or
+          # report the backend as absent so callers fall back to the
+          # honest unconfined path.
+          let leak = tmp / "leak-probe"
+          var lp = startProcess(exe,
+            args = ["sandbox", "restrict", tmp, "--", "touch", leak],
+            options = {poStdErrToStdOut})
+          let leakCode = lp.waitForExit()
+          lp.close()
+          result = leakCode != 0 and not fileExists(leak)
       try:
         discard p.outputStream.readAll()
       except CatchableError:
