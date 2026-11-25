@@ -111,6 +111,14 @@ task test, "Run the test suite via testament (all, or named files)":
       cmd.add " '" & file.replace("'", "'\"'\"'") & "'"
     exec cmd
 
+task testSoak, "Run the tty stress tier (tests/tools/tty_soak.txt)":
+  # Kept out of `nimble test`: the four stress tests take 287s together,
+  # a third of the tty run, and they guard races that do not change with
+  # every edit. Nightly CI and release checks run them.
+  exec "sh tests/tools/build_binary.sh 3code src/threecode.nim"
+  exec "python3 tests/tools/parallel_tty.py --soak " &
+      "--timeout ${PER_TEST_SECS:-1800}"
+
 task docs, "Build HTML manual, reference, and developer docs":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default
   # (light theme + visible theme switcher). Our curated dark theme lives

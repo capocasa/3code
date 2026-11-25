@@ -20,7 +20,8 @@
 # Each category is sequential inside testament.
 #
 # Usage: tests/tools/ci_tests.sh [global-timeout-secs] [categories...]
-#   PER_TEST_SECS env overrides the per-test cap (default 480, 0=off).
+#   PER_TEST_SECS env overrides the per-test cap (default 720, 0=off).
+#   SOAK=1 adds the four tty stress tests to the run (default: nightly only).
 set -u
 
 # build/test-nimflags: extra nim flags for the test binary, one line.
@@ -114,7 +115,13 @@ run_testament() {
     # Word-splitting is intentional: test paths contain no spaces.
     python3 tests/tools/parallel_files.py --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
     if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
-      python3 tests/tools/parallel_tty.py --timeout "${PER_TEST_SECS:-720}" || rc_all=1
+      # The four stress tests are the soak tier: 287s together, a third of
+      # the tty run. The per-change suite leaves them out; SOAK=1 (nightly)
+      # runs them with the rest of the suite.
+      soak=''
+      [ "${SOAK:-0}" = 1 ] && soak='--include-soak'
+      # $soak is one word or empty.
+      python3 tests/tools/parallel_tty.py $soak --timeout "${PER_TEST_SECS:-720}" || rc_all=1
     fi
     return $rc_all
   else

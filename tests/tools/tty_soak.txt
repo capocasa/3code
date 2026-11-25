@@ -1,0 +1,7 @@
+# tty stress/soak tests: 287s together, 35% of the tty run. They guard real
+# races and keep running nightly and before releases, but not per change.
+# One test stem (file name without .nim) per line; '#' starts a comment.
+test_spinner_race_stress
+test_gui_live_basic
+test_submit_race_real_stream
+test_provider_wizard_cancel_stress

@@ -13,10 +13,13 @@ Testament's spec handling is preserved where the tty category uses it:
 No tty test uses matrix/output/exitCode specs.
 
 Usage: parallel_tty.py [-j N] [--timeout SECS] [--build-only] [--list]
-  -j N         compile workers (default: min(4, max(1, cpu_count - 1)))
-  --timeout S  per-test run cap, 0 = off (default 720)
-  --build-only compile and stop
-  --list       print the selected files and exit
+                  [--soak | --include-soak]
+  -j N             compile workers (default: min(4, max(1, cpu_count - 1)))
+  --timeout S      per-test run cap, 0 = off (default 720)
+  --build-only     compile and stop
+  --list           print the selected files and exit
+  --soak           run only the soak tests in tests/tools/tty_soak.txt
+  --include-soak   run the soak tests too (the default excludes them)
 """
 import argparse
 import hashlib
@@ -32,6 +35,7 @@ ROOT = os.getcwd()
 TTY = os.path.join(ROOT, "tests", "tty")
 CACHE = os.path.join(ROOT, "nimcache", "parallel_tty")
 NIMFLAGS = ["--hints:on", "-d:testing", "--nimblePath:build/deps/pkgs2"]
+SOAK_LIST = os.path.join(ROOT, "tests", "tools", "tty_soak.txt")
 # The two stub variants the tty tests build through ensureStubBinary. The
 # tag is Nim's `$secureHash(defines)` (sha1, first 16 hex chars, lowercase).
 STUB_VARIANTS = [
@@ -44,6 +48,15 @@ STUB_VARIANTS = [
     ("-d:ssl -d:providerStub --threads:on -d:computerUse",
      "-d:ssl -d:providerStub --threads:on -d:computerUse"),
 ]
+
+
+def soak_stems():
+    try:
+        lines = open(SOAK_LIST, encoding="utf-8").read().splitlines()
+    except OSError:
+        return set()
+    return {l.strip() for l in lines
+            if l.strip() and not l.lstrip().startswith("#")}
 
 
 def platform():
@@ -131,17 +144,28 @@ def main():
     ap.add_argument("--timeout", type=int, default=720)
     ap.add_argument("--build-only", action="store_true")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--soak", action="store_true",
+                    help="run only the soak tests")
+    ap.add_argument("--include-soak", action="store_true",
+                    help="run the soak tests too (default: exclude)")
     args = ap.parse_args()
+    if args.soak and args.include_soak:
+        ap.error("--soak and --include-soak are mutually exclusive")
 
     here = platform()
     files = sorted(f for f in os.listdir(TTY)
                    if f.startswith("test_") and f.endswith(".nim"))
-    selected, skipped = [], []
+    selected, skipped, tier_skipped = [], [], []
+    soak = soak_stems()
     for f in files:
         path = os.path.join(TTY, f)
         dis = disabled_on(path)
         if here in dis:
             skipped.append((f, ",".join(dis)))
+        elif args.soak and f[:-4] not in soak:
+            tier_skipped.append((f, "non-soak"))
+        elif not (args.soak or args.include_soak) and f[:-4] in soak:
+            tier_skipped.append((f, "soak"))
         else:
             selected.append(path)
 
@@ -150,13 +174,15 @@ def main():
             print(p)
         for f, dis in skipped:
             print(f"SKIP {f} (disabled: {dis})")
+        for f, why in tier_skipped:
+            print(f"SKIP {f} ({why})")
         return 0
 
     logdir = os.path.join(ROOT, "build", "parallel_tty_logs")
     os.makedirs(logdir, exist_ok=True)
-    print(f"parallel_tty: {len(selected)} files, {len(skipped)} skipped, "
-          f"{args.jobs} compile workers, run cap {args.timeout or 'off'}s",
-          flush=True)
+    print(f"parallel_tty: {len(selected)} files, {len(skipped)} disabled, "
+          f"{len(tier_skipped)} other-tier, {args.jobs} compile workers, "
+          f"run cap {args.timeout or 'off'}s", flush=True)
 
     # Compile the two stub variants alongside the test binaries. Different
     # output paths mean different build locks; the build script's up-to-date
@@ -224,8 +250,8 @@ def main():
             print(tail(log), flush=True)
 
     print(f"parallel_tty: {len(selected) - len(run_failed)}/{len(selected)} "
-          f"passed, {len(skipped)} skipped, {len(failed)} build failures",
-          flush=True)
+          f"passed, {len(skipped)} disabled, {len(tier_skipped)} "
+          f"other-tier, {len(failed)} build failures", flush=True)
     if failed:
         print("build failures:", flush=True)
         for kind, name, _ in failed:
