@@ -2427,7 +2427,12 @@ proc readInput*(editor: var minline.LineEditor, done: var bool,
   # Arriving at the prompt ends the "during a turn" window: a SIGINT from
   # that window already cancelled its turn and must not also quit here.
   clearSigintIdleExit()
+  var loggedArrival = false
   while true:
+    if not loggedArrival:
+      loggedArrival = true
+      debugOut &"readInput: parked={replParkedAtInput.load(moAcquire)} " &
+        &"jobs={btwJobsLive()} retired={btwRetiredLive()}"
     # The wait is also the delivery window for async side questions: a
     # finished `:btw` worker lands its answer here, between keystrokes,
     # without the prompt ever having blocked for it. It is also the rest
