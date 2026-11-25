@@ -2888,7 +2888,18 @@ proc inputThreadProc() {.thread.} =
             # "getchr returns a byte right now" probe; `_kbhit` counts
             # charless records (key-ups), so the legacy-console path below
             # must keep its blocking read.
+            # Re-check the wizard sentinel inside the loop: the main
+            # thread posts a wizard request right after this readLineWith
+            # submitted the `:provider edit` line, and this loop is where
+            # the thread parks when no key follows. Without the check the
+            # sentinel is only tested once, at loop entry, and the wizard
+            # branch never runs - the caller parks forever (ConPTY, every
+            # modal prompt, no further keystroke needed to trigger it).
+            # The POSIX poll timeout re-enters this check every 200ms for
+            # free; this loop must do it explicitly.
             while inputRunning():
+              if wizardRequestPosted.load(moAcquire):
+                return minline.wizardSentinel
               if minline.consoleVtByteReady():
                 draftLastKeyAt = epochTime()
                 return getchr().int
@@ -2899,6 +2910,12 @@ proc inputThreadProc() {.thread.} =
           # just before parking in the blocking read — the buffer has been
           # untouched since the pause began, so a settled, sentence-complete
           # draft saves here; a fast typist is still inside the window.
+          # A wizard request posted before this point still lands; one
+          # posted mid-read waits for the next keystroke, the price of
+          # having no honest readiness probe on a legacy console (ConPTY
+          # and Windows Terminal enable VT input, so this path is rare).
+          if wizardRequestPosted.load(moAcquire):
+            return minline.wizardSentinel
           maybeSaveDraft()
           draftLastKeyAt = epochTime()
           return getchr().int
