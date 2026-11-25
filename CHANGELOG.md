@@ -35,6 +35,19 @@ Unreleased
   cached-input. (`tests/core/test_btw.nim`,
   `tests/tty/test_btw_async.nim`)
 
+- **The prompt reference tokens are retuned to punctuation.** `@*`
+  (last command output) and `@+` (previous prompt) become the five:
+  `@.` splices the model's last output (checkpoint markers stripped, the
+  empty-reply marker read as none), `@>` your previous prompt, `@!` the
+  last run command, `@$` its output — the old combined blob split so a
+  command can be quoted without its output and vice versa — and `@?`
+  the last `:btw` question and answer (the delivered aside is now
+  remembered on the session, in memory like `@>`; the reply carries its
+  question so question and answer land together, spliced as question,
+  a newline, the answer). Token-exact as
+  before, so `@.gitignore` stays a file mention.
+  (`tests/core/test_attach.nim`)
+
 - **The `[image attached]` echo marker is now `🖼`.** The transcript
   echo of a prompt whose `@image` tokens attached ends in U+1F5BC,
   the framed picture — the image icon, at the end of the echoed line.

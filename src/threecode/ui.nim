@@ -2150,25 +2150,58 @@ proc sessionPreamble*(cwd: string): string =
   if notes.len > 0:
     result.add "\n\n<project_notes>\n" & notes & "\n</project_notes>"
 
-proc lastBashInclude*(toolLog: seq[ToolRecord]): string =
-  ## The `@*` splice: the newest akBash toolLog record as `$ cmd\n<output>`,
-  ## output capped like file includes. The command line rides along because
-  ## `:!` output never reaches the model otherwise. "" when no bash ran yet
+proc capInclude*(s: string): string =
+  ## Splice-text cap, the file-include rule: over 64KB the head rides with
+  ## a byte-cut and a truncation note.
+  const Cap = 64 * 1024
+  if s.len > Cap:
+    utf8ByteCut(s, Cap) & "\n... [truncated; text is " & $s.len & " bytes]"
+  else:
+    s
+
+proc lastAssistantText*(messages: JsonNode): string =
+  ## The `@.` splice: the newest assistant message's text, checkpoint
+  ## markers stripped and the empty-reply marker read as no output — the
+  ## transcript's visibility rules. "" when the model has not answered yet
   ## (the caller splices the no-value note in its place).
+  if messages == nil or messages.kind != JArray: return ""
+  for i in countdown(messages.len - 1, 0):
+    let m = messages[i]
+    if m.kind != JObject or m{"role"}.getStr != "assistant": continue
+    let c = m{"content"}
+    if c == nil or c.kind != JString: continue
+    let body = stripCheckpointMarkers(c.str)
+    if isEmptyReplyMsg(body.strip): return ""
+    return capInclude(body)
+  ""
+
+proc lastBashCommand*(toolLog: seq[ToolRecord]): string =
+  ## The `@!` splice: the newest akBash toolLog record's command line — a
+  ## `:!` escape or a model-run call, either lands in the log. "" when no
+  ## command ran yet (the caller splices the no-value note in its place).
+  for i in countdown(toolLog.len - 1, 0):
+    if toolLog[i].kind == akBash: return toolLog[i].command
+  ""
+
+proc lastBashOutput*(toolLog: seq[ToolRecord]): string =
+  ## The `@$` splice: the newest akBash toolLog record's output, capped
+  ## like file includes. `:!` output never reaches the model otherwise.
+  ## "" when no bash ran yet (the caller splices the no-value note).
   for i in countdown(toolLog.len - 1, 0):
     let r = toolLog[i]
     if r.kind != akBash: continue
-    const Cap = 64 * 1024
-    let body =
-      if r.output.len > Cap:
-        utf8ByteCut(r.output, Cap) & "\n... [truncated; output is " & $r.output.len & " bytes]"
-      else:
-        r.output
-    return "$ " & r.command & "\n" & body
+    return capInclude(r.output)
   ""
 
+proc lastBtwInclude*(question, answer: string): string =
+  ## The `@?` splice text: the question, a newline, the answer. "" until
+  ## an answer has landed.
+  if question.len == 0 or answer.strip.len == 0: return ""
+  question & "\n" & capInclude(answer)
+
 proc inlineAtFiles*(msg: string, vision: bool, imgDir: string,
-    imgs: var seq[ImageInfo]; lastBash = "", lastPrompt = ""): string =
+    imgs: var seq[ImageInfo]; lastLLM = "", lastPrompt = "",
+    lastCmd = "", lastBashOut = "", lastBtw = ""): string =
   ## Find @path tokens (whitespace-delimited, must follow whitespace or start
   ## of input). For each that resolves to an existing regular file under cwd,
   ## append `\n\n=== {path} ===\n<content>` (capped) after the message text.
@@ -2177,25 +2210,37 @@ proc inlineAtFiles*(msg: string, vision: bool, imgDir: string,
   ## land in `imgs` for the caller to attach as content blocks; otherwise they
   ## drop with a hint naming a vision model.
   ##
-  ## `@*` (last command output) and `@+` (previous prompt) are splice tokens:
-  ## the two-character token itself is replaced in place by the referenced
-  ## text, every occurrence, token-exact only (`@*rc` stays a file mention).
-  ## One pass over `msg`, so spliced text is never re-expanded.
+  ## `@.` `@>` `@!` `@$` `@?` are splice tokens: the two-character token
+  ## itself is replaced in place by the referenced text (last model output,
+  ## previous prompt, last command, its output, last `:btw` question and
+  ## answer), every occurrence, token-exact only (`@.gitignore` stays a
+  ## file mention). One pass over `msg`, so spliced text is never
+  ## re-expanded.
   result = ""
   var blocks: seq[string]
   var seen: seq[string]
   var i = 0
   while i < msg.len:
     let prevOk = i == 0 or msg[i-1] in {' ', '\t', '\n'}
-    if prevOk and msg[i] == '@' and i + 1 < msg.len and msg[i+1] in {'*', '+'} and
+    if prevOk and msg[i] == '@' and i + 1 < msg.len and
+        msg[i+1] in {'.', '>', '!', '$', '?'} and
         (i + 2 == msg.len or msg[i+2] in {' ', '\t', '\n'}):
       result.add case msg[i+1]
-        of '*':
-          if lastBash.len > 0: lastBash
-          else: "[no command output yet: run :! <command>]"
-        else:
+        of '.':
+          if lastLLM.len > 0: lastLLM
+          else: "[no model output yet]"
+        of '>':
           if lastPrompt.len > 0: lastPrompt
           else: "[no prompt yet]"
+        of '!':
+          if lastCmd.len > 0: lastCmd
+          else: "[no command yet: run :! <command>]"
+        of '$':
+          if lastBashOut.len > 0: lastBashOut
+          else: "[no command output yet: run :! <command>]"
+        else:
+          if lastBtw.len > 0: lastBtw
+          else: "[no :btw answer yet]"
       inc i, 2
       continue
     if prevOk and msg[i] == '@' and i + 1 < msg.len and msg[i+1] notin {' ', '\t', '\n', '@'}:
@@ -2249,18 +2294,20 @@ var lastImageAttachments*: seq[string] = @[]
   ## turn it into the image-mark suffix.
 
 proc buildUserMessage*(messages: JsonNode, raw: string; cwd = safeCwd();
-    vision = false, imgDir = ""; lastBash = "", lastPrompt = ""): JsonNode =
+    vision = false, imgDir = ""; lastLLM = "", lastPrompt = "",
+    lastCmd = "", lastBashOut = "", lastBtw = ""): JsonNode =
   ## Apply @file inlining always; prepend the session preamble (cwd, git
   ## state, AGENTS.md, ls) only on the first user message of a session so
   ## resumed conversations don't re-inject stale context. `cwd` lets
   ## embedded sessions (library, ACP) build the preamble from the session's
   ## working dir instead of the process's. @image tokens on a vision
   ## profile return a content array (text block first, image blocks after)
-  ## instead of a plain string. `lastBash`/`lastPrompt` feed the `@*`/`@+`
-  ## splice tokens; empty ones splice the no-value notes.
+  ## instead of a plain string. The `last*` params feed the `@.` `@>` `@!`
+  ## `@$` `@?` splice tokens; empty ones splice the no-value notes.
   var imgs: seq[ImageInfo]
   lastImageAttachments.setLen 0
-  let body = inlineAtFiles(raw, vision, imgDir, imgs, lastBash, lastPrompt)
+  let body = inlineAtFiles(raw, vision, imgDir, imgs, lastLLM, lastPrompt,
+    lastCmd, lastBashOut, lastBtw)
   for im in imgs: lastImageAttachments.add im.name
   let text =
     if isFirstUserMessage(messages):
@@ -2345,6 +2392,11 @@ proc deliverFinishedBtw*() =
       for r in replies:
         stashBtwUsage(r.usage)
     for r in replies:
+      if not r.cancelled and r.answer.strip.len > 0:
+        # The `@?` reference: the newest delivered aside, question and
+        # answer together.
+        inputSession[].lastBtwQ = r.question
+        inputSession[].lastBtwA = r.answer
       paintBtwReply(r)
 
 proc installAsideTicks*() =
