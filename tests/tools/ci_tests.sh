@@ -107,13 +107,22 @@ run_testament() {
     for d in tests/*/; do
       d=${d%/}
       [ "$d" = tests/tty ] && continue
+      # config is folded into one binary below: 19 compiles -> 1.
+      [ "$d" = tests/config ] && continue
       for f in "$d"/test_*.nim; do
         [ -f "$f" ] && files="$files $f"
       done
     done
-    [ -n "$files" ] || { echo 'no non-tty tests found' >&2; return 1; }
-    # Word-splitting is intentional: test paths contain no spaces.
-    python3 tests/tools/parallel_files.py --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
+    # Config is proven green as one process (592 tests, 0 failures), so
+    # its 19 files become one compile; every other non-tty file keeps
+    # testament's per-file spec and process isolation in the pool.
+    python3 tests/tools/fold_category.py config \
+      --timeout "${PER_TEST_SECS:-720}" || rc_all=1
+    if [ -n "$files" ]; then
+      # Word-splitting is intentional: test paths contain no spaces.
+      python3 tests/tools/parallel_files.py \
+        --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
+    fi
     if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
       # The four stress tests are the soak tier: 287s together, a third of
       # the tty run. The per-change suite leaves them out; SOAK=1 (nightly)
