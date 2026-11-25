@@ -90,7 +90,12 @@ def main():
                 failed.append((path, rc, log))
                 print(f"[{done}/{len(files)}] FAIL {path} "
                       f"(rc={rc}, {dur:.1f}s)", flush=True)
-                print(tail(log), flush=True)
+                # Whole log, not a tail: a truncated block loses the
+                # `Test "..."` header and assertion that name the break,
+                # and ci_tests.sh's failure-detail recovery then finds
+                # nothing to print (the arm64 sandbox trio failed with
+                # only "rc=1" visible).
+                print(tail(log, n=100000), flush=True)
 
     print(f"parallel_files: {len(files) - len(failed)}/{len(files)} passed",
           flush=True)
