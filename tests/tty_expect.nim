@@ -11,6 +11,9 @@
 ## only the harness internals fork on `when defined(...)`.
 
 import std/[os, re, strformat, strutils, monotimes, unicode, json]
+when defined(macosx):
+  # `stallSample`: the macOS-only thread-stack diagnosis for a stalled child.
+  import std/osproc
 
 proc epochTime(): float =
   ## Harness-relative clock only: all deadlines and frame offsets are monotonic.
@@ -1317,6 +1320,46 @@ proc dumpTailFrames*(s: TtySession; n = 5): string =
       if row.len > 0:
         result.add row & "\n"
 
+proc stallSample*(s: TtySession): string =
+  ## Opt-in stall diagnosis (TTY_EXPECT_SAMPLE=1, macOS): when an expect
+  ## deadline expires with the child still alive, `sample` its call stacks
+  ## before the failure unwinds and kills it. The frame dump shows what
+  ## the screen froze on; this shows which call each thread is parked in.
+  ## Only the call graph's first (main thread) block is kept, capped so
+  ## it survives parallel_tty's failure tail, which keeps a message's
+  ## last 40 lines (the dump closes the message, after the frames).
+  when defined(macosx):
+    if getEnv("TTY_EXPECT_SAMPLE") == "" or s.exited: return ""
+    let path = getTempDir() / ("tty_expect_sample_" & $s.pid & ".txt")
+    defer:
+      try: removeFile(path) except OSError: discard
+    let (outp, code) = execCmdEx("sample " & $s.pid & " 1 -mayDie -f " &
+      path.quoteShell, options = {poStdErrToStdOut})
+    if code != 0:
+      return "\nsample (" & $code & "): " & outp.strip & "\n"
+    result.add "\n----- sample (main thread call graph, leaf last) -----\n"
+    var inGraph = false
+    var threads = 0
+    var stack: seq[string]
+    for line in readFile(path).splitLines():
+      if line.startsWith("Call graph:"):
+        inGraph = true
+        continue
+      if not inGraph: continue
+      if line.strip.startsWith("Thread_"):
+        inc threads
+        if threads > 1: break
+      stack.add line.strip
+    # The leaf frames name the stall; keep the tail of the stack.
+    if stack.len > 26:
+      result.add "...\n"
+      stack = stack[^26 .. ^1]
+    for line in stack:
+      result.add line & "\n"
+    result.add "------------------------------------------\n"
+  else:
+    discard
+
 proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
   var hits: seq[int]
   for i, frame in s.frames:
@@ -1326,7 +1369,8 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
         break
 
   if hits.len == 0:
-    return s.dumpTailFrames(radius * 2 + 1)
+    result = s.dumpTailFrames(radius * 2 + 1) & s.stallSample()
+    return
 
   var ranges: seq[tuple[first, last: int]]
   for hit in hits:
@@ -1345,6 +1389,7 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
         if row.len > 0:
           let mark = if rowIdx in frame.changedRows: "*" else: " "
           result.add &"{mark}{rowIdx:02d}: {row}\n"
+  result.add s.stallSample()
 
 proc framesText*(s: TtySession): string =
   for i, frame in s.frames:
