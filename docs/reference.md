@@ -160,7 +160,7 @@ Default keys at the prompt. `:help` prints the ones in effect;
 | Ctrl+L | clear the screen |
 | Alt+E | edit the input buffer in $VISUAL/$EDITOR |
 | Ctrl+X Ctrl+E | same (emacs edit-and-execute-command) |
-| Ctrl+C | clear current input; cancel the turn when it is empty |
+| Ctrl+C | cancel the running request; at the idle prompt clear the current input, or cancel when it is empty |
 | Esc | same as Ctrl+C |
 | Ctrl+D | exit |
 

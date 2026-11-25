@@ -532,7 +532,7 @@ The daily keys:
 | Ctrl+R / Ctrl+S | search history as you type |
 | Ctrl+9 | send the current state as a request, like Enter on an empty prompt (`:retry` as a key; needs a kitty-protocol terminal, see below) |
 | Alt+E | edit the input in $VISUAL/$EDITOR |
-| Ctrl+C or Esc | clear input; cancel the turn when it is empty |
+| Ctrl+C or Esc | cancel the running request (a typed draft survives and returns prefilled); at the idle prompt clear the input, or cancel when it is empty |
 | Ctrl+D | exit |
 
 If you forget one, `:help` prints the keys in effect. The full table,

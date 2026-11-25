@@ -729,6 +729,13 @@ proc main() =
   startupTrace("cli-parse-done")
   installInterruptHook()
   startupTrace("installInterruptHook")
+  # ESC / Ctrl-C cancel an ongoing request even with a draft typed; the
+  # input thread's InputCancelled handler stashes the draft and it
+  # returns with the next prompt. At the idle prompt the keys keep their
+  # readline editing meaning (clear the draft; cancel only an empty
+  # line). Plain global read lock-free by the input threads, assigned
+  # once here before any of them exist.
+  minline.cancelInterruptsTurn = proc(): bool = fatprompt.turnActive()
   materializeBuiltinSkills()
   startupTrace("materializeBuiltinSkills")
   showUpdateNoticeMaybe()
