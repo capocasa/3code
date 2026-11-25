@@ -57,8 +57,8 @@ suite "wall env helper":
                                  dns = "/tmp/dns.sock")
     let t3 = readFile(conf3)
     check "raw = on" in t3
-    check "permits = /tmp/p.json" in t3
-    check "dns = /tmp/dns.sock" in t3
+    check "permits = \"/tmp/p.json\"" in t3
+    check "dns = \"/tmp/dns.sock\"" in t3
     check "raw = off" in text
     check "permits" notin text
     check runtime.loadWallConf(conf3)
@@ -67,6 +67,16 @@ suite "wall env helper":
     check runtime.get("wall_raw") == "on"
     check runtime.get("wall_permits") == "/tmp/p.json"
     check runtime.get("wall_dns") == "/tmp/dns.sock"
+    # The reader tokenizes a bare value as a symbol, and a symbol has
+    # no colon and no space: on Windows a bare drive path came back as
+    # "C". The paths are string literals, and these read back whole.
+    let conf5 = sb.writeWallConf(dir, "12349", "", raw = true,
+                                 permits = "C:\\Users\\carlo\\sw-gate-work\\permits.json",
+                                 dns = "/tmp/with space/dns.sock")
+    check runtime.loadWallConf(conf5)
+    check runtime.get("wall_permits") ==
+      "C:\\Users\\carlo\\sw-gate-work\\permits.json"
+    check runtime.get("wall_dns") == "/tmp/with space/dns.sock"
     # every [wall] file is the same path (dir/wall.conf): a plain one
     # after a raw one means raw off again, not the previous file's keys
     let conf4 = sb.writeWallConf(dir, "12348", "")

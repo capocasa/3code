@@ -382,6 +382,14 @@ proc stopWall*() =
       except CatchableError: discard
       wallProxyDir = ""
 
+proc cfgString(s: string): string =
+  ## `s` as a parseCfg string literal: double quotes, backslashes
+  ## doubled. The reader tokenizes a bare value as a symbol, and a
+  ## symbol holds no colon and no space, so a Windows drive path came
+  ## back as "C" (seen on beck), and shell quoting is something
+  ## parseCfg does not understand either.
+  "\"" & s.replace("\\", "\\\\").replace("\"", "\\\"") & "\""
+
 proc writeWallConf*(dir, port, sockPath: string; raw = false;
                     permits = ""; dns = ""): string =
     ## Write the internal `[wall]` config file the sandbox parent
@@ -394,12 +402,12 @@ proc writeWallConf*(dir, port, sockPath: string; raw = false;
     let path = dir / "wall.conf"
     var text = "[wall]\nport = " & port & "\n"
     if sockPath.len > 0:
-      text.add "sock = " & sockPath.quoteShell & "\n"
+      text.add "sock = " & sockPath.cfgString & "\n"
     text.add "raw = " & (if raw: "on" else: "off") & "\n"
     if permits.len > 0:
-      text.add "permits = " & permits.quoteShell & "\n"
+      text.add "permits = " & permits.cfgString & "\n"
     if dns.len > 0:
-      text.add "dns = " & dns.quoteShell & "\n"
+      text.add "dns = " & dns.cfgString & "\n"
     writeFile(path, text)
     path
 
