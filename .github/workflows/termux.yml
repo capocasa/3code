@@ -2,7 +2,10 @@ name: Termux (Android arm64)
 
 on:
   push:
-    branches: [main]
+    # Every pushed branch runs the build + smoke/yrc suites (a branch
+    # merges only once its CI run is green); the deploy job stays
+    # main-only, so no binaries are published from branches.
+    branches: ['**']
     tags: ['[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
 

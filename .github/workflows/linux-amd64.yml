@@ -2,13 +2,18 @@ name: Linux amd64
 
 on:
   push:
-    branches: [main]
+    # Every pushed branch runs the test suites (a branch merges only once
+    # its CI run is green); binary packaging stays a main/tag concern.
+    branches: ['**']
     tags: ['[0-9]+.[0-9]+.[0-9]+']
   pull_request:
   workflow_dispatch:
 
 jobs:
   build:
+    # Binary build + packaging on main and tags only: branch pushes exist
+    # to run the tests, and no binaries are published from branches.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     # Frozen toolchain, not the runner image: the ubuntu-22.04 label
     # re-rolls weekly (gcc/glibc/binutils drift). This digest and the
@@ -169,7 +174,8 @@ jobs:
     # Tests stay on the stock runner: they produce no artifacts, and the
     # sandbox/tty tests assume runner-level kernel access (landlock,
     # userns, PTYs) that a container's seccomp profile may not allow.
-    needs: build
+    # No needs: build — the tests compile their own binaries, and they
+    # must also run on branch pushes, where the build job is skipped.
     runs-on: ubuntu-22.04
 
     steps:
@@ -215,9 +221,9 @@ jobs:
         run: sh tests/tools/ci_tests.sh 5400
         timeout-minutes: 95
 
-  # The dev-server upload is its own job, not a build step: the test job
-  # gates on build, and a deploy-endpoint hiccup (a mid-migration web
-  # root 404ing upload.nim, Nov 19) must not skip the Linux test suites.
+  # The dev-server upload is its own job, not a build step: a
+  # deploy-endpoint hiccup (a mid-migration web root 404ing upload.nim,
+  # Nov 19) must not skip the Linux test suites.
   deploy:
     needs: [build, test]
     if: github.ref == 'refs/heads/main'
