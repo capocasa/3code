@@ -1,6 +1,9 @@
-import std/[net, os, osproc, posix, strtabs, strutils, times, unittest]
+import std/[net, os, osproc, posix, streams, strtabs, strutils, times, unittest]
+import threecode/runtime
 import threecode/sandbox as sb
+import threecode/[types, streamexec]
 import sandwall/wall as sw
+import sandwall/wall/permit
 
 ## Fenced-bash wiring: proxy env helper, per-run proxy lifecycle, and
 ## an end-to-end netns launch through `3code sandbox`. POSIX only; the e2e
@@ -46,10 +49,84 @@ suite "wall env helper":
     # no sock path: the conf carries the port only (macOS shape)
     let conf2 = sb.writeWallConf(dir, "12346", "")
     check "sock" notin readFile(conf2)
+    # the raw keys: the child's egress path, the permit snapshot a
+    # stamping backend reads, the fence DNS relay target; and what
+    # the child's side reads back out of them
+    let conf3 = sb.writeWallConf(dir, "12347", "/tmp/sock", raw = true,
+                                 permits = "/tmp/p.json",
+                                 dns = "/tmp/dns.sock")
+    let t3 = readFile(conf3)
+    check "raw = on" in t3
+    check "permits = /tmp/p.json" in t3
+    check "dns = /tmp/dns.sock" in t3
+    check "raw = off" in text
+    check "permits" notin text
+    check runtime.loadWallConf(conf3)
+    check runtime.get("wall_port") == "12347"
+    check runtime.get("wall_sock") == "/tmp/sock"
+    check runtime.get("wall_raw") == "on"
+    check runtime.get("wall_permits") == "/tmp/p.json"
+    check runtime.get("wall_dns") == "/tmp/dns.sock"
+    # every [wall] file is the same path (dir/wall.conf): a plain one
+    # after a raw one means raw off again, not the previous file's keys
+    let conf4 = sb.writeWallConf(dir, "12348", "")
+    check runtime.loadWallConf(conf4)
+    check runtime.get("wall_port") == "12348"
+    check runtime.get("wall_sock") == ""
+    check runtime.get("wall_raw") == "off"
+    check runtime.get("wall_permits") == ""
+    check runtime.get("wall_dns") == ""
+    discard runtime.loadWallConf(conf)
+    check runtime.get("wall_raw") == "off"
+    # raw: nothing in the environment at all
+    check sb.wallEnv("/x/3code", "12345", "", conf, raw = true).len == 0
+
+proc readBanner(sock: Socket; waitMs: int): string =
+  ## Accept one connection on `sock` within `waitMs`, read the
+  ## client's SSH banner from it, close it. "" when nobody came.
+  var fdc = [TPollfd(fd: sock.getFd().cint, events: POLLIN, revents: 0)]
+  var waited = 0
+  var c: SocketHandle = SocketHandle(-1)
+  while c.int < 0 and waited < waitMs:
+    if posix.poll(addr fdc[0], 1, 100) > 0 and
+        (fdc[0].revents and POLLIN) != 0:
+      c = posix.accept(sock.getFd(), nil, nil)
+    inc waited, 100
+  if c.int < 0: return ""
+  var buf = newString(256)
+  var bwait = 0
+  while result.len < 8 and bwait < 5_000:
+    var rfds = [TPollfd(fd: c.cint, events: POLLIN, revents: 0)]
+    if posix.poll(addr rfds[0], 1, 100) <= 0 or
+        (rfds[0].revents and POLLIN) == 0:
+      inc bwait, 100
+      continue
+    let n = posix.recv(c, addr buf[0], 255, 0'i32)
+    if n > 0: result.add(buf[0 ..< n])
+    if n <= 0: break
+  discard posix.close(c)
+
+template bannerWhile(sock: Socket; dir, name: string; body: untyped): string =
+  ## Run `body` here while a forked child reads one banner off `sock`
+  ## (readBanner) and parks it in `dir/name`; the banner, or "".
+  var rpid = posix.fork()
+  if rpid == 0:
+    writeFile(dir / name, readBanner(sock, 20_000))
+    exitnow(0)
+  body
+  var bstatus: cint
+  discard posix.waitpid(rpid, bstatus, 0)
+  (try: readFile(dir / name) except CatchableError: "")
 
 when defined(posix):
   suite "wall ssh shim":
-    test "installSshShim wraps the real ssh with a wall ProxyCommand":
+    test "env mode shadows ssh with a ProxyCommand, nothing else":
+      # OpenSSH ignores the proxy env vars, so env mode needs the
+      # tunnel; that is all the wrapper does now. The old -F config
+      # (pw_dir repair, copied user config, ControlMaster off) is gone:
+      # the fenced uid is the launching user's, ssh reads its own
+      # config and keys, and the default policy makes known_hosts and
+      # ~/.ssh/control writable.
       if findExe("ssh") == "":
         skip()
       else:
@@ -61,22 +138,13 @@ when defined(posix):
                                         wallConf = wallConf)
         check shimDir == dir / "wallbin"
         let shim = readFile(shimDir / "ssh")
-        check shim.startsWith("#!/bin/sh")
-        check ("exec " & findExe("ssh").quoteShell) in shim
-        check ("-F " & (shimDir / "ssh_config").quoteShell) in shim
-        # the wall config carries the tunnel plus the pw_dir repairs
-        # (fence uid is 65534; see wallSshConfig)
-        let cfg = readFile(shimDir / "ssh_config")
-        check "/x/3code wall --config " & wallConf in cfg
-        check "connect %h %p" in cfg
-        check "IdentityFile " in cfg
-        check "UserKnownHostsFile " in cfg
-        if fileExists(getHomeDir() / ".ssh/config"):
-          check "~/" notin cfg
-          # multiplexing cannot work on a readonly ~/.ssh, and a
-          # ControlMaster bind failure is fatal in OpenSSH 10
-          check "ControlMaster auto" notin cfg
-          check "ControlPath ~/.ssh" notin cfg
+        check shim.startsWith("#!/bin/sh\nexec " & findExe("ssh").quoteShell)
+        check " -o " in shim
+        check "ProxyCommand=" in shim
+        check "ProxyCommand=/x/3code wall --config '" & wallConf &
+          "' connect %h %p" in shim
+        check " -F " notin shim
+        check not fileExists(shimDir / "ssh_config")
         var st: Stat
         check posix.stat((shimDir / "ssh").cstring, st) == 0
         check (st.st_mode and 0o111) != 0  # executable
@@ -86,26 +154,45 @@ when defined(posix):
         check v.exitCode == 0
         check "OpenSSH" in v.output
 
-    test "unproxied fence still repairs ssh pw_dir defaults":
-      # Regression: a policy with no host rules leaves the network
-      # open, so no proxy and no ProxyCommand - but the fenced uid
-      # is still 65534, whose passwd home is /, and ssh without the
-      # -F config looks under /.ssh (no aliases, keys, known_hosts).
-      # The shim must install for every fenced launch, tunnel or not.
+    test "raw mode and an open policy install no ssh shim":
+      # Raw egress carries plain ssh, scp and sftp unaided (no PATH
+      # wrapper, no ProxyCommand); a policy without host rules never
+      # needed one.
+      let dir = getTempDir() / ("3code-sshshim-none-" & $getCurrentProcessId())
+      createDir(dir)
+      defer: removeDir(dir)
+      check sb.installSshShim(dir, "/x/3code", proxied = false) == ""
+      check not dirExists(dir / "wallbin")
+
+    test "env mode: ssh through the wrapper reaches a host through the wall":
+      # The wrapper's quoting, `wall connect` and the proxy's SOCKS5
+      # side, end to end but outside the netns (the reader is on host
+      # loopback, which the proxy dials): a plain ssh by the wrapper
+      # must deliver its banner to the reader.
       if findExe("ssh") == "":
         skip()
       else:
-        let dir = getTempDir() / ("3code-sshshim-open-" & $getCurrentProcessId())
+        let dir = getTempDir() / ("3code-sshshim-e2e-" & $getCurrentProcessId())
         createDir(dir)
         defer: removeDir(dir)
-        let shimDir = sb.installSshShim(dir, "/x/3code", proxied = false)
-        check shimDir == dir / "wallbin"
-        let cfg = readFile(shimDir / "ssh_config")
-        check "wall connect" notin cfg
-        check "IdentityFile " in cfg
-        check "UserKnownHostsFile " in cfg
-        if fileExists(getHomeDir() / ".ssh/config"):
-          check "~/" notin cfg
+        let pol = dir / "policy"
+        writeFile(pol, "allow 127.0.0.1\n")
+        let srv = newSocket(buffered = false)
+        srv.setSockOpt(OptReuseAddr, true)
+        srv.bindAddr(Port(0), "127.0.0.1")
+        srv.listen()
+        defer: srv.close()
+        let srvPort = int(srv.getLocalAddr()[1])
+        var proxy = sw.startWallProxy(pol, dir, port = 0)
+        defer: sw.stopWallProxy(proxy)
+        let wallConf = sb.writeWallConf(dir, $int(proxy.port), "")
+        let shimDir = sb.installSshShim(dir, binPath(), proxied = true,
+                                        wallConf = wallConf)
+        let got = bannerWhile(srv, dir, "banner.txt"):
+          discard execCmdEx((shimDir / "ssh").quoteShell &
+            " -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" &
+            " -o ConnectTimeout=6 -p " & $srvPort & " 127.0.0.1 </dev/null")
+        check got.startsWith("SSH-2.0-")
 
 suite "wall proxy lifecycle":
   test "proxy starts on host rules, reloads on policy rewrite":
@@ -183,6 +270,20 @@ suite "wall proxy lifecycle":
     check sb.wallProxyPort() == portB
 
 when defined(linux):
+  proc netnsHolds(wallConf, pol: string; env: StringTableRef): bool =
+    ## Whether a fenced launch here actually gets a netns. The probe
+    ## must exit 0 AND print no degrade notice: sandwall continues
+    ## WITHOUT network fencing when the unshare is refused, and that
+    ## launch also exits 0 (which used to read as "netns works").
+    let p = startProcess(binPath(), args = ["sandbox", "--config",
+      wallConf, "--policy", pol, "restrict", "--", "sh", "-c",
+      "echo probe-ok"], env = env, options = {poStdErrToStdOut})
+    let probeOut = p.outputStream.readAll()
+    let code = p.waitForExit(20_000)
+    p.close()
+    code == 0 and probeOut.strip().endsWith("probe-ok") and
+      "WITHOUT network fencing" notin probeOut
+
   suite "fenced bash end to end":
     test "netns: direct egress dies, proxy tunnel works":
       # Probe netns support with a trivial fenced launch first; skip
@@ -206,14 +307,8 @@ when defined(linux):
       let port = $int(proxy.port)
       # the box child reads the proxy coordinates from the [wall] file
       let wallConf = sb.writeWallConf(dir, port, dir / "proxy.sock")
-      # probe: fenced `true` succeeds only when netns works
-      let probe = startProcess(binPath(), args = ["sandbox", "--config",
-        wallConf, "--policy", pol,
-        "restrict", "--", "true"],
-        options = {poStdErrToStdOut})
-      let probeOk = probe.waitForExit(15_000) == 0
-      probe.close()
-      if not probeOk:
+      # probe: a fenced launch that prints its token with no degrade
+      if not netnsHolds(wallConf, pol, nil):
         # unfenced fallback: sandwall warns and continues; e2e moot
         skip()
       else:
@@ -291,92 +386,118 @@ when defined(linux):
           options = {poDaemon})
         check "403" in r3.output
 
-    test "netns: ssh tunnels through the wall shim, allowlisted":
-      # The fence is protocol-agnostic at the proxy (SOCKS5 carries
-      # any TCP); what makes ssh work is the PATH shim's ProxyCommand
-      # (`wall connect`, DNS at the proxy) plus the bridge surviving
-      # ssh's close_range(3, ...) fd hygiene (sandwall PDEATHSIG fix).
-      # ssh itself must be present; the binary dir must be executable
-      # inside the fence because the ProxyCommand re-execs 3code.
-      if findExe("ssh") == "":
+    test "netns: raw ssh by name rides the redirect; the fake-IP stays, the real one moves":
+      # Raw egress, the child side: the proxy runs with a scripted
+      # resolver (no test waits on real DNS), the [wall] file says
+      # raw = on, and the box child puts the fence up itself: fake-IP
+      # fence DNS, nft redirect, no proxy env and no ssh shim. A
+      # plain `ssh` by name must reach the host-side banner reader,
+      # a denied name must not, and after the name's real address
+      # moves (second echo server) the same fake-IP must land there:
+      # the forwarder resolves at connect time, never fake -> real.
+      if findExe("ssh") == "" or sw.findNft().len == 0:
         skip()
       else:
-        let dir = getTempDir() / ("3code-walle2e-ssh-" & $getCurrentProcessId())
+        let dir = getTempDir() / ("3code-walle2e-raw-" & $getCurrentProcessId())
         createDir(dir)
         defer: removeDir(dir)
         let pol = dir / "policy"
+        # banner readers: one on 127.0.0.2, one on 127.0.0.3 (both
+        # loopback; two addresses for the same name's two generations)
+        template reader(ip: string): tuple[sock: Socket, port: int] =
+          var s = newSocket(buffered = false)
+          s.setSockOpt(OptReuseAddr, true)
+          s.bindAddr(Port(0), ip)
+          s.listen()
+          (s, int(s.getLocalAddr()[1]))
+        let a = reader("127.0.0.2")
+        defer: a.sock.close()
+        let b = reader("127.0.0.3")
+        defer: b.sock.close()
         writeFile(pol, "deny /\nallow " & dir & "\nallow " & getTempDir() &
-          "\nallow " & getCurrentDir() & "\nallow 127.0.0.1\n")
-        # banner reader: accept, read the client's SSH banner, close
-        let srv = newSocket(buffered = false)
-        srv.setSockOpt(OptReuseAddr, true)
-        srv.bindAddr(Port(0), "127.0.0.1")
-        srv.listen()
-        defer: srv.close()
-        let srvPort = int(srv.getLocalAddr()[1])
+          "\nallow ssh.test:" & $a.port & "\nallow ssh.test:" & $b.port &
+          "\n")
+        var generation = 0
+        let realA = parseIpAddress("127.0.0.2")
+        let realB = parseIpAddress("127.0.0.3")
+        let ps = newPermitSet(resolver = proc (name: string): ResolveResult
+            {.gcsafe, raises: [].} =
+          if name == "ssh.test":
+            ResolveResult(outcome: roAddrs,
+              ips: @[(if generation == 0: realA else: realB)])
+          else:
+            ResolveResult(outcome: roNxdomain))
         var proxy = sw.startWallProxy(pol, dir, port = 0,
-          unixSockPath = dir / "proxy.sock")
+          unixSockPath = dir / "proxy.sock", permit = ps,
+          dnsSockPath = dir / "dns.sock")
         defer: sw.stopWallProxy(proxy)
-        let port = $int(proxy.port)
-        let wallConf = sb.writeWallConf(dir, port, dir / "proxy.sock")
-        let shimDir = sb.installSshShim(dir, binPath(), proxied = true,
-                                        wallConf = wallConf)
-        var fenceEnv = {"PATH": shimDir & ":" & getEnv("PATH")}.newStringTable
-        # netns probe first: skip (don't fail) without userns+netns
-        let probe = startProcess(binPath(), args = ["sandbox", "--config",
-          wallConf, "--policy",
-          pol, "restrict", "--", "true"], env = fenceEnv,
-          options = {poStdErrToStdOut})
-        let probeOk = probe.waitForExit(15_000) == 0
-        probe.close()
-        if not probeOk:
+        let wallConf = sb.writeWallConf(dir, $int(proxy.port),
+          dir / "proxy.sock", raw = true, dns = dir / "dns.sock")
+        template fenced(args: openArray[string]): tuple[output: string, exitCode: int] =
+          execCmdEx(binPath() & " sandbox --config " &
+            wallConf.quoteShell & " --policy " & pol.quoteShell &
+            " restrict -- " & args.join(" "), options = {poStdErrToStdOut})
+        if not netnsHolds(wallConf, pol, nil):
           skip()
         else:
-          # 1. allowed: the shim's tunnel must carry ssh's banner to
-          # the reader on host loopback (proxy resolves/dials for us)
-          let p1 = startProcess(binPath(), args = ["sandbox", "--config",
-            wallConf, "--policy",
-            pol, "restrict", "--", "ssh", "-o", "StrictHostKeyChecking=no",
+          # 1. allowed: plain ssh reaches the first reader by name
+          let got = bannerWhile(a.sock, dir, "banner-a.txt"):
+            discard fenced(["ssh", "-o", "StrictHostKeyChecking=no", "-o",
+              "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10",
+              "-p", $a.port, "ssh.test", "</dev/null"])
+          check got.startsWith("SSH-2.0-")
+          # 2. the name's real address moves: same fake-IP, new real IP
+          generation = 1
+          ps.clear()   # past its refresh: the next connect resolves anew
+          let got2 = bannerWhile(b.sock, dir, "banner-b.txt"):
+            discard fenced(["ssh", "-o", "StrictHostKeyChecking=no", "-o",
+              "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10",
+              "-p", $b.port, "ssh.test", "</dev/null"])
+          check got2.startsWith("SSH-2.0-")
+          # 3. denied: a name no rule allows does not resolve, ssh dies
+          let r3 = fenced(["ssh", "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=6",
-            "-p", $srvPort, "127.0.0.1"], env = fenceEnv,
-            options = {poStdErrToStdOut})
-          var afd: SocketHandle = SocketHandle(-1)
-          var waited = 0
-          while afd.int < 0 and waited < 10_000:
-            var fds = [TPollfd(fd: srv.getFd().cint, events: POLLIN,
-                               revents: 0)]
-            doAssert posix.poll(addr fds[0], 1, 100) >= 0
-            if fds[0].revents != 0:
-              afd = posix.accept(srv.getFd(), nil, nil)
-            waited += 100
-          check afd.int >= 0
-          var banner = ""
-          if afd.int >= 0:
-            var buf = newString(256)
-            var bwait = 0
-            while banner.len < 8 and bwait < 5_000:
-              var rfds = [TPollfd(fd: afd.cint, events: POLLIN, revents: 0)]
-              if posix.poll(addr rfds[0], 1, 100) <= 0 or
-                  (rfds[0].revents and POLLIN) == 0:
-                inc bwait, 100
-                continue
-              let n = posix.recv(afd, addr buf[0], 255, 0'i32)
-              if n > 0: banner.add(buf[0 ..< n])
-              if n <= 0: break
-            discard posix.close(afd)  # EOF: ssh gives up fast
-          check banner.startsWith("SSH-2.0-")
-          discard p1.waitForExit(15_000)
-          p1.close()
-          # 2. denied: the proxy refuses the SOCKS5 request and ssh
-          # dies without reaching anything
-          let r2 = execCmdEx(binPath() & " sandbox --config " &
-            wallConf.quoteShell & " --policy " &
-            pol.quoteShell & " restrict -- ssh -o StrictHostKeyChecking=no" &
-            " -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 " &
-            "denied.example </dev/null", env = fenceEnv,
-            options = {poStdErrToStdOut, poDaemon})
-          check r2.exitCode != 0
-          check "denied.example" in r2.output
+            "denied.example", "</dev/null"])
+          check r3.exitCode != 0
+
+    test "a raw launch that cannot hold falls back to env mode once":
+      # The parent side (runStreamingBash): host rules mean the box
+      # child is asked for raw (nft is on PATH); where the fence does
+      # not hold the child exits 75 with the marker BEFORE exec, and
+      # the parent re-spawns env mode: the command runs exactly once.
+      # Where the fence holds, the first launch is already raw and this
+      # still runs once. Either way the stderr note is not tool output.
+      if sw.findNft().len == 0:
+        skip()
+      else:
+        let repo = getCurrentDir()
+        let bin = binPath()
+        let dir = getTempDir() / ("3code-walle2e-fb-" & $getCurrentProcessId())
+        createDir(dir)
+        writeFile(dir / ".sandbox",
+          "deny /\nallow /tmp\nallow example.com\n")
+        let wasActive = sb.active
+        let wasProcbox = sb.procboxExe
+        setCurrentDir(dir)
+        sb.current = sb.loadPolicy(dir)
+        sb.active = true
+        sb.procboxExe = bin
+        defer:
+          sb.stopWall()
+          sb.active = wasActive
+          sb.procboxExe = wasProcbox
+          sb.current = @[]
+          setCurrentDir(repo)
+          removeDir(dir)
+        var lines: seq[string]
+        let act = Action(kind: akBash, body: "echo fallback-ok; exit 3")
+        let (rawOut, code, _) = runStreamingBash(act, nil,
+          proc(line: string) = lines.add(line))
+        check code == 3
+        check count(rawOut, "fallback-ok") == 1
+        check "fallback-ok" in lines
+        check sw.RawMarker notin rawOut
+        check "retrying with the proxy env" notin rawOut
 
 when defined(posix):
   suite "default policy keeps git working":

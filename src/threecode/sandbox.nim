@@ -53,6 +53,7 @@ when defined(posix):
   from std/posix import kill, Pid
 import sandwall
 import sandwall/wall as sandwallWall
+import sandwall/wall/permit
 import runtime
 import config
 import defaults
@@ -67,6 +68,11 @@ export sandwall.AccessKind, sandwall.Rule,
        sandwall.RuleKind, sandwall.parsePolicy, sandwall.checkPath,
        sandwall.renderPolicy, sandwall.resolve,
        sandwall.Resolved
+
+const SeedDeadlineMs* = 1500
+  ## How long a permit seed or refresh may hold a spawn: names not
+  ## resolved by then stay unpermitted this run (the forwarder still
+  ## resolves them lazily for env-mode tools).
 
 const
   PolicyFile* = ".sandbox"
@@ -207,6 +213,11 @@ var
     ## The dir the running proxy's policy file lives in. On POSIX the
     ## unix listener is rebound when the bash tmp dir changes; Windows
     ## has no unix listener, only the loopback TCP port.
+  wallPermit: PermitSet = nil
+    ## The long-lived forwarder's permit set when the policy can be
+    ## stamped (see stampable): this process owns it, seeds it from the
+    ## policy, refreshes the stale entries per spawn and snapshots it
+    ## for the box child; the proxy uses it without owning it.
 
 when defined(posix):
   var
@@ -242,6 +253,16 @@ when defined(posix):
     ## ensureWallProxy; the proxy binds lazily there.
     wallProxyDir = dir
 
+  proc dnsSockPath*(): string =
+    ## The forwarder's fence DNS listener (an AF_UNIX datagram socket,
+    ## the netns relay's target in Linux raw mode). Next to the proxy
+    ## socket, in the launch dir the fence leaves writable. "" on macOS
+    ## and before moveWallSock.
+    when defined(linux):
+      if wallProxyDir.len > 0: wallProxyDir / "dns.sock" else: ""
+    else:
+      ""
+
 proc wallPolicyText*(projectDir: string): string =
   ## The effective policy text the proxy enforces: the active policy
   ## file's contents, matching loadPolicy.
@@ -252,12 +273,30 @@ proc wallProxyPolicyDir(): string =
   ## Temp dir holding the proxy's merged policy file.
   tempDir() / ("3code-wall-" & $getCurrentProcessId())
 
-proc ensureWallProxy*(projectDir: string): bool =
+proc stampable*(): bool =
+  ## Can the policy's addresses stand in for the forwarder's decision
+  ## by name (permit.canStamp)? Only when every allow rule names an
+  ## exact host or an IP literal: a wildcard allow admits names no
+  ## snapshot can enumerate, and a deny-only policy has nothing to
+  ## stamp. Either way the run goes through the forwarder (env mode).
+  toHostList(current.resolve().hosts).canStamp
+
+proc seedPermits*() =
+  ## Make the long-lived permit set match the policy: create it when
+  ## needed and resolve every exact allow rule within SeedDeadlineMs.
+  ## Idempotent for the proxy (it keeps using the same set).
+  if wallPermit == nil: wallPermit = newPermitSet()
+  discard wallPermit.seedFromPolicy(toHostList(current.resolve().hosts),
+                                   SeedDeadlineMs)
+
+proc ensureWallProxy*(projectDir: string; withPermits = false): bool =
   ## Start the per-run proxy when the policy needs it. On POSIX, when
   ## it is already running but bound in a different (since-deleted)
   ## bash tmp dir, restart it so the unix socket lives in the current
   ## launch's writable dir; the bridge connects there. True when
-  ## fenced bash may launch.
+  ## fenced bash may launch. `withPermits` (the stamping backends,
+  ## Windows) hands the proxy a permit set this process owns, seeded
+  ## from the policy, so a spawn can snapshot it (permitsForSpawn).
   if not wallProxyNeeded(current): return false
   when defined(posix):
     if wallProxyDir.len == 0:
@@ -278,17 +317,36 @@ proc ensureWallProxy*(projectDir: string): bool =
   # `./` targets in an ancestor's policy resolve against the ancestor,
   # the directory that owns the active policy file.
   let root = activePolicyRoot(projectDir)
+  if withPermits and stampable() and wallPermit == nil: seedPermits()
   try:
     when defined(posix):
       wallProxy = sandwallWall.startWallProxy(polFile, root,
-        port = 0, unixSockPath = proxySockPath())
+        port = 0, unixSockPath = proxySockPath(),
+        permit = wallPermit, dnsSockPath = dnsSockPath())
     else:
       # port = 0 picks a free port in the WFP fence range on Windows
-      wallProxy = sandwallWall.startWallProxy(polFile, root)
+      wallProxy = sandwallWall.startWallProxy(polFile, root,
+        permit = wallPermit)
     wallProxyBoundDir = dir
   except CatchableError as e:
     raise newException(IOError, "wall proxy: " & e.msg)
   true
+
+proc permitsForSpawn*(dir: string): string =
+  ## Refresh the long-lived permit set's stale entries (bounded by
+  ## SeedDeadlineMs; whatever is not back in time keeps serving its
+  ## old addresses) and write the snapshot the box child stamps into
+  ## `dir`. "" when there is nothing to stamp: the run takes the
+  ## forwarder path (env mode). Names that never resolved are simply
+  ## not in the snapshot and stay unreachable this run.
+  if wallPermit == nil or not stampable(): return ""
+  let r = wallPermit.refreshForSpawn(SeedDeadlineMs)
+  let unresolved = r.failed.len + r.pending.len
+  if unresolved > 0:
+    stderr.writeLine("3code sandbox: " & $unresolved &
+      " allowed host(s) did not resolve in time; not permitted this run")
+  result = dir / "permits.json"
+  wallPermit.writeSnapshot(result)
 
 proc wallProxyPort*(): uint16 =
   ## The proxy's loopback port; 0 when not running.
@@ -305,6 +363,9 @@ proc syncWallProxyPolicy*(projectDir: string) =
   if wallProxy.port == 0 or wallProxyBoundDir.len == 0: return
   if not dirExists(wallProxyBoundDir): return
   writeFile(wallProxyBoundDir / "policy", wallPolicyText(projectDir))
+  # The forwarder's permit set follows the policy too: a rule that
+  # went away must stop being stamped, a new one must resolve.
+  if wallPermit != nil and stampable(): seedPermits()
 
 proc stopWall*() =
   ## Proxy + temp dir teardown, called from 3code's cleanup exit proc.
@@ -312,33 +373,53 @@ proc stopWall*() =
     sandwallWall.stopWallProxy(wallProxy)
     wallProxy.port = 0
     wallProxyBoundDir = ""
+  if wallPermit != nil:
+    wallPermit.close()
+    wallPermit = nil
   when defined(posix):
     if wallProxyDir.len > 0:
       try: removeDir(wallProxyDir)
       except CatchableError: discard
       wallProxyDir = ""
 
-proc writeWallConf*(dir, port, sockPath: string): string =
-    ## Write the internal `[wall]` config file (`port`, `sock`) the
-    ## sandbox parent hands to its `sandbox restrict` / `wall connect`
-    ## children instead of environment handoffs. Lives in the
-    ## bash launch's temp dir, which the fenced child can read.
+proc writeWallConf*(dir, port, sockPath: string; raw = false;
+                    permits = ""; dns = ""): string =
+    ## Write the internal `[wall]` config file the sandbox parent
+    ## hands to its `sandbox restrict` / `wall connect` children
+    ## instead of environment handoffs: `port` and `sock` (the
+    ## forwarder's loopback and unix listener), `raw` (on: the child
+    ## takes the raw egress path), `permits` (the snapshot a stamping
+    ## backend reads) and `dns` (the fence DNS relay's target). Lives
+    ## in the bash launch's temp dir, which the fenced child can read.
     let path = dir / "wall.conf"
     var text = "[wall]\nport = " & port & "\n"
     if sockPath.len > 0:
       text.add "sock = " & sockPath.quoteShell & "\n"
+    text.add "raw = " & (if raw: "on" else: "off") & "\n"
+    if permits.len > 0:
+      text.add "permits = " & permits.quoteShell & "\n"
+    if dns.len > 0:
+      text.add "dns = " & dns.quoteShell & "\n"
     writeFile(path, text)
     path
 
 proc wallEnv*(selfExe, port: string;
-              existingGitSsh, wallConf: string): seq[(string, string)] =
+              existingGitSsh, wallConf: string;
+              raw = false): seq[(string, string)] =
     ## Environment additions for a fenced bash launch: the standard
-    ## proxy vars pointing at the loopback proxy (socks5h = remote DNS)
-    ## and a ProxyCommand GIT_SSH_COMMAND unless the user already set
-    ## one. The 3code children on the other side (box, `wall connect`)
-    ## find the proxy through `wallConf` (see writeWallConf), not the
-    ## environment. Pure helper; streamexec merges the result into the
-    ## child's env table.
+    ## proxy vars pointing at the loopback proxy (socks5h = remote
+    ## DNS) and a ProxyCommand GIT_SSH_COMMAND unless the user already
+    ## set one. The 3code children on the other side (box, `wall
+    ## connect`) find the proxy through `wallConf` (see
+    ## writeWallConf), not the environment. Pure helper; streamexec
+    ## merges the result into the child's env table.
+    ##
+    ## `raw`: nothing. The raw path carries egress itself (Linux:
+    ## redirect plus fence DNS; Windows: stamped kernel permits), so
+    ## the child needs no proxy vars and no git ProxyCommand, and
+    ## plain ssh, scp and telnet work exactly as they do outside the
+    ## fence.
+    if raw: return @[]
     let hp = "http://127.0.0.1:" & port
     let sp = "socks5h://127.0.0.1:" & port
     result.add ("http_proxy", hp)
@@ -366,98 +447,43 @@ proc wallEnv*(selfExe, port: string;
         (if wallConf.len > 0: " wall --config " & wallConf else: "") &
         " connect %h %p\"")
 
-when defined(posix):
-  proc wallSshConfig*(dir, selfExe: string; proxied: bool;
-                      wallConf = ""): string =
-    ## The ssh config the fence hands to OpenSSH, written to
-    ## `dir/wallbin/ssh_config`. Two jobs in one file:
-    ##
-    ## * when `proxied`, route every connection through the wall
-    ##   proxy. OpenSSH ignores the proxy env vars, so the shim passes
-    ##   this file with -F: `wall connect %h %p` is the same tunnel
-    ##   GIT_SSH_COMMAND gives git, the proxy resolves the name, and
-    ##   the allowlist decides, loopback and remote targets alike.
-    ##   Without host rules the network is open and no tunnel is
-    ##   needed, but the pw_dir repair below still is.
-    ##
-    ## * repair the defaults that break under the fence. With the
-    ## user namespace mapped (box.nim repairs sandwall's stranded
-    ## unmapped namespace) the fenced uid is the launching user's and
-    ## pw_dir is right; when that repair degrades (a nested run from
-    ## an already-unmapped namespace), the child is uid 65534 (nobody),
-    ## whose passwd home is /, and ssh's pw_dir-based defaults would
-    ## look under /.ssh: no config aliases, no default identities, no
-    ## known_hosts. The file carries a copy of ~/.ssh/config with ~
-    ## rewritten to the absolute home, plus explicit fallbacks.
-    ##
-    ## Not covered: scp and sftp, whose OpenSSH 9.8+ binaries exec
-    ## /usr/bin/ssh by absolute path - no PATH shim or env reaches
-    ## them, so inside the fence they die for lack of a route (rsync
-    ## and git cover their use cases and are proxied).
-    ##
-    ## The user's stanzas come first (first-obtained wins per option,
-    ## so their ProxyCommand/aliases beat the appended Host * block;
-    ## IdentityFile accumulates). Empty when there is nothing to do
-    ## (no ssh on PATH).
-    if findExe("ssh").len == 0: return ""
-    let shimDir = dir / "wallbin"
-    createDir(shimDir)
-    let cfgPath = shimDir / "ssh_config"
-    let home = getHomeDir()
-    var text = ""
-    let userCfg = home & ".ssh/config"
-    if fileExists(userCfg):
-      try:
-        # copy with ~ rewritten to the absolute home, minus the
-        # multiplexing options: a ControlMaster listener needs a
-        # writable ControlPath, the fence's ~/.ssh is at best
-        # readonly, and OpenSSH 10 treats the bind failure as fatal
-        for line in readFile(userCfg).splitLines():
-          let t = line.strip().toLowerAscii
-          if t.startsWith("controlmaster") or t.startsWith("controlpath") or
-              t.startsWith("controlpersist"):
-            continue
-          text.add(line.replace("~/", home) & "\n")
-      except CatchableError: discard  # unreadable: defaults only
-    text.add "\n# 3code wall proxy (sandbox fence)\nHost *\n"
-    # when the id mapping degrades, the fenced uid is 65534 and ssh
-    # would log in as nobody@...; the launching user's name is the
-    # right default (a User in the user's own stanzas, or user@host /
-    # -l, still wins: first match)
-    let loginName = getEnv("LOGNAME", getEnv("USER", ""))
-    if loginName.len > 0:
-      text.add "  User " & loginName & "\n"
-    # multiplexing needs a writable ControlPath; the fence's ~/.ssh is
-    # at best readonly
-    text.add "  ControlMaster no\n  ControlPath none\n"
-    if "userknownhostsfile" notin text.toLowerAscii:
-      text.add "  UserKnownHostsFile " & home & ".ssh/known_hosts\n"
-    for id in ["id_ed25519", "id_ecdsa", "id_rsa",
-               "id_ecdsa_sk", "id_ed25519_sk"]:
-      text.add "  IdentityFile " & home & ".ssh/" & id & "\n"
-    if proxied:
-      text.add "  ProxyCommand " & selfExe &
-        (if wallConf.len > 0: " wall --config " & wallConf else: "") &
-        " connect %h %p\n"
-    writeFile(cfgPath, text)
-    cfgPath
+when defined(windows):
+  proc putProxyEnv*(selfExe, port, existingGitSsh: string) =
+    ## The in-process spawn path's env mode (Windows): runSandboxed
+    ## spawns the child from THIS process, which inherits its
+    ## environment, so the proxy vars and the git ProxyCommand go in
+    ## through putenv instead of an env table (streamexec, box).
+    for (k, v) in wallEnv(selfExe, port, existingGitSsh, ""):
+      putenv(k, v)
 
+when defined(posix):
   proc installSshShim*(dir, selfExe: string; proxied: bool;
                        wallConf = ""): string =
     ## Write an `ssh` wrapper into `dir/wallbin`, first on the fenced
-    ## child's PATH, for clients that find ssh through PATH (plain
-    ## ssh, rsync, everything scripting `ssh ...`). It execs the real
-    ## ssh with -F pointing at the wall config (see wallSshConfig),
-    ## which also repairs the pw_dir defaults that break under the
-    ## fence. Returns the shim dir, or "" when there is no ssh on PATH
-    ## to wrap.
+    ## child's PATH, for the env-mode clients that find ssh through
+    ## PATH (plain ssh, rsync, everything scripting `ssh ...`):
+    ## OpenSSH ignores the proxy env vars, so the wrapper adds the
+    ## ProxyCommand through the wall proxy (`wall connect %h %p`, the
+    ## tunnel GIT_SSH_COMMAND gives git). Nothing else: the fenced
+    ## uid is the launching user's (box.nim repairs the namespace), so
+    ## ssh reads the user's own config, keys and known_hosts where they
+    ## are, and ControlMaster works against the default policy's
+    ## writable `~/.ssh/control`. The raw path needs no tunnel and
+    ## installs nothing. Returns the shim dir, or "" when there is no
+    ## ssh on PATH or nothing to do.
+    if not proxied: return ""
     let ssh = findExe("ssh")
-    let cfg = wallSshConfig(dir, selfExe, proxied, wallConf)
-    if ssh.len == 0 or cfg.len == 0: return ""
+    if ssh.len == 0: return ""
     let shimDir = dir / "wallbin"
+    createDir(shimDir)
     let shim = shimDir / "ssh"
-    writeFile(shim, "#!/bin/sh\nexec " & ssh.quoteShell & " -F " &
-      cfg.quoteShell & " \"$@\"\n")
+    # The ProxyCommand value runs through the shell, so the conf
+    # path is quoted inside it; the -o argument is in double quotes
+    # for the wrapper's own sh.
+    let proxy = "ProxyCommand=" & selfExe & " wall --config '" &
+      wallConf & "' connect %h %p"
+    writeFile(shim, "#!/bin/sh\nexec " & ssh.quoteShell & " -o \"" &
+      proxy & "\" \"$@\"\n")
     setFilePermissions(shim,
       {fpUserRead, fpUserWrite, fpUserExec,
        fpGroupRead, fpGroupExec, fpOthersRead, fpOthersExec})
@@ -689,6 +715,15 @@ proc arm*(projectDir: string) =
   procboxExe = findProcbox()
   if not backendWorks(procboxExe):
     procboxExe = ""
+  when defined(posix):
+    # ControlMaster sockets need a writable ControlPath the fence
+    # leaves alone; the default policy allows `~/.ssh/control`, which
+    # only the user (this process, unfenced) can create. Only when
+    # ~/.ssh exists: its creation is ssh's, with ssh's 700 mode.
+    let sshDir = getHomeDir() / ".ssh"
+    if dirExists(sshDir):
+      try: createDir(sshDir / "control")
+      except CatchableError: discard
 
 proc disarm*() =
   ## Lift enforcement for the running session (`:sandbox off`): the
