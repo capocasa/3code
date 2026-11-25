@@ -809,6 +809,32 @@ suite "meta requests: google native wire":
     let body = parseJson(req.body)
     check body{"toolConfig"}{"functionCallingConfig"}{"mode"}.getStr == "NONE"
 
+  test "geminicli meta request uses the Code Assist envelope":
+    let tmp = getTempDir() / "3code-geminicli-meta-test"
+    createDir(tmp / "3code" / "auth")
+    let oldXdg = getEnv("XDG_DATA_HOME")
+    putEnv("XDG_DATA_HOME", tmp)
+    defer:
+      if oldXdg == "": delEnv("XDG_DATA_HOME")
+      else: putEnv("XDG_DATA_HOME", oldXdg)
+    writeFile(tmp / "3code" / "auth" / "google.json",
+      """{"access_token":"tok-1","refresh_token":"","token_type":"Bearer","expires_at":9999999999}""")
+    writeFile(tmp / "3code" / "auth" / "google-project.txt", "proj-1")
+    let cli = Profile(name: "geminicli.gemini-4-argon", family: "gemini",
+                      model: "gemini-4-argon",
+                      url: "https://cloudcode-pa.googleapis.com",
+                      key: "")
+    let req = buildMetaRequest(cli,
+      %*[{"role": "user", "content": "hi"}], "summarize", "", 64)
+    check req.codeAssist
+    check req.endpoint ==
+      "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
+    check req.authKey == "tok-1"
+    let body = parseJson(req.body)
+    check body{"model"}.getStr == "gemini-4-argon"
+    check body{"project"}.getStr == "proj-1"
+    check body{"request"}{"contents"}[0]{"parts"}[0]{"text"}.getStr == "hi"
+
 suite "prompts: golden fixtures":
   test "every family prompt matches its golden fixture":
     createDir(GoldenDir)
