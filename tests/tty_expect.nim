@@ -1346,10 +1346,13 @@ proc stallSample*(s: TtySession): string =
         inGraph = true
         continue
       if not inGraph: continue
-      if line.strip.startsWith("Thread_"):
+      if line.startsWith("Total number in stack"): break
+      # Header: `    2631 Thread_1234567   DispatchQueue_1: ...`.
+      if line.strip.match(re"\d+ Thread_\d+"):
         inc threads
         if threads > 1: break
-      stack.add line.strip
+      if line.strip.len > 0:
+        stack.add line.strip
     # The leaf frames name the stall; keep the tail of the stack.
     if stack.len > 26:
       result.add "...\n"
