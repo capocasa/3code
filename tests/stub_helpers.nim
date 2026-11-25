@@ -1,6 +1,6 @@
 ## Shared incremental build preparation. config.nims/nimble.paths own dependency
 ## resolution; no per-test nimble solver or incomplete source-mtime cache.
-import std/[os, osproc, sequtils, strtabs, strutils, sha1]
+import std/[os, osproc, sequtils, streams, strtabs, strutils, sha1]
 
 proc tempDir*(): string =
   ## std/os getTempDir hardcodes /data/local/tmp under defined(android)
@@ -120,16 +120,41 @@ proc mergeChildConf*(path: string; test: openArray[ConfPair] = [];
       outp.add k & " = " & quoteConfVal(v)
   writeFile(path, outp.join("\n") & "\n")
 
-proc buildBinary*(defines, outName: string; forceRebuild = false): string =
+proc binaryPath*(defines, outName: string): string =
   # Different options must never replace a binary another test is using.
   let tag = ($secureHash(defines))[0..15].toLowerAscii
   result = getCurrentDir() / "build" / (outName & "_" & tag)
   when defined(windows): result.add ".exe"
+
+proc buildBinary*(defines, outName: string; forceRebuild = false): string =
+  result = binaryPath(defines, outName)
   var cmd = "sh tests/tools/build_binary.sh " & result.quoteShell &
     " src/threecode.nim " & defines
   if forceRebuild: cmd.add " --forceBuild:on"
   let (output, code) = execCmdEx(cmd)
   doAssert code == 0, output
+
+proc buildBinaries*(items: openArray[(string, string)]): seq[string] =
+  ## Build several (defines, outName) pairs concurrently. build_binary.sh
+  ## gives each output its own lock and nimcache, so the only serialization
+  ## was the caller waiting on each build in turn.
+  var procs: seq[Process]
+  result = newSeq[string](items.len)
+  for i in 0 ..< items.len:
+    let (defines, outName) = items[i]
+    result[i] = binaryPath(defines, outName)
+    var args: seq[string]
+    for a in ["tests/tools/build_binary.sh", result[i], "src/threecode.nim"]:
+      args.add a
+    for flag in defines.split():
+      args.add flag
+    procs.add startProcess("sh", args = args,
+                            options = {poUsePath, poStdErrToStdOut})
+  for p in procs:
+    let output = p.outputStream.readAll()
+    let code = p.waitForExit()
+    p.close()
+    doAssert code == 0, output
 
 proc prebuiltStubPath*(): string =
   ## Cross-compiled runners can inject a prebuilt stub binary when Nim is
