@@ -49,6 +49,8 @@ when defined(linux):
         "head -c1 /dev/null; echo null:$?; " &
         "head -c1 /dev/zero >/dev/null; echo zero:$?; " &
         "true 3<>/dev/ptmx && echo ptmx-ok; echo chain-end'")
+      if code != 0:
+        echo "fenced run exit ", code, " output:\n", outp
       check code == 0
       if "WITHOUT device-node masking" in outp:
         # Nested or namespace-less host: the degrade notice is the

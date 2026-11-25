@@ -176,8 +176,8 @@ sleep 2
 wait "$TID"
 rc=$?
 
-echo "----- testament log (last 80 lines) -----"
-tail -n 80 "$LOG"
+echo "----- testament log (last 200 lines) -----"
+tail -n 200 "$LOG"
 echo "-----------------------------------------"
 # Failure detail survives: the last-80-line tail lands mid-compile and
 # cuts away every failure report. Two shapes to recover from the full
@@ -187,7 +187,14 @@ echo "-----------------------------------------"
 # expected/gotten exitcodes and the test's whole stdout - assertion
 # traces, [FAILED] blocks, frame dumps. Print both, verbatim.
 print_failures() {
+  # parallel_files.py's per-file report: the `FAIL path (rc=...)` line
+  # plus its 40-line tail, up to the next runner line. Without this shape
+  # a failing batch file's diagnosis (its own error output) never leaves
+  # the runner - the arm64 sandbox failures were unactionable exactly so.
   sed 's/\x1b\[[0-9;]*m//g' "$LOG" | awk '
+    /^\[[0-9]+\/[0-9]+\] FAIL / { inpar = 1 }
+    /^\[[0-9]+\/[0-9]+\] PASS / { inpar = 0 }
+    inpar                       { print; next }
     /^diff --git .*diffStrings_/ { indiff = 1 }
     indiff                     { print; if ($0 == "" && NR > 1) indiff = 0; next }
     /^Test "/                  { intest = 1 }

@@ -42,6 +42,11 @@ when defined(linux):
       let (outp, code) = execCmdEx(binPath().quoteShell & " sandbox restrict " &
         dir.quoteShell & " --deny " & (dir / "denied").quoteShell &
         " -- sh -c 'id -u; cat /proc/self/uid_map'")
+      if code != 0:
+        # The fenced run's own words are the diagnosis (kernel feature
+        # missing, sandbox degrade, launch failure); without them the
+        # runner-specific failure is unactionable.
+        echo "fenced run exit ", code, " output:\n", outp
       check code == 0
       # Warnings (sandwall's, the repair's) interleave with the child's
       # stdout in the merged capture, so assert on whole lines, never
