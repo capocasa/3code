@@ -3940,7 +3940,7 @@ commands:
   :verifier on|off    toggle the verifier without losing the selection
   :retry              send the current state as a request, exactly like
                       Enter on an empty prompt
-                      (also ctrl+shift+r on kitty-protocol terminals)
+                      (also ctrl+9 on kitty-protocol terminals)
   :retry list         show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off       toggle patient retry of 429/5xx/network errors
   :private            show private mode (off by default; on = allow-private only)

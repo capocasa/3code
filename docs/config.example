@@ -81,10 +81,10 @@ current = "ollama.qwen3-coder:480b"
 ; exchange-point-and-mark, quoted-insert, char-search,
 ; char-search-backward, delete-horizontal-space, tab-insert, retry,
 vi-mode.
-; `retry` (default CtrlShiftR) cuts a retry backoff short or resends a
-; data-less in-flight request, like `:retry`; distinct from Ctrl+R only
-; on kitty-protocol terminals. `clear` also adds the discarded text to
-; history. Key tokens beyond
+; `retry` (default Ctrl9) cuts a retry backoff short or resends a
+; data-less in-flight request, like `:retry`; distinct from the digit
+; only on kitty-protocol terminals (legacy ones type a 9). `clear`
+; also adds the discarded text to history. Key tokens beyond
 ; the obvious: Ctrl_ (C-_), Ctrl/ (C-/), Ctrl@ (C-@), Ctrl] (C-]),
 ; Alt< Alt> (M-< M->), Alt. (M-.), AltSpace (M-SPC), AltY, AltR,
 ; AltP, AltN, AltT, AltU, AltL, AltC, AltQ, CtrlR, CtrlS.
