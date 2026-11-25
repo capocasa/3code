@@ -1,3 +1,5 @@
+## Covers: src/threecode/api.nim
+## Covers: src/threecode/streamexec.nim
 discard """
   disabled: "win"
   ## Sends raw \x03 (Ctrl-C) to interrupt a network connect. Under ConPTY
@@ -51,21 +53,18 @@ proc env(root: string): seq[EnvVar] =
     (key: "HOME", val: root),
   ]
 
-proc ensureRealBinary(): string =
-  ## Non-stub 3code binary with plain-HTTP transport enabled so it can talk to
-  ## the local mock server over `http://127.0.0.1`.
-  const defines = "-d:ssl -d:testPlainHttp --threads:on"
-  buildBinary(defines, "3code_real")
-
-proc ensureQuietBinary(): string =
-  ## As `ensureRealBinary` but with a shrunk `QuietTooLongMs` so a black-holed
-  ## link surfaces the network-quiet timeout in ~3s instead of the production
-  ## 45s. The production value is an intdefine for exactly this.
-  const defines = "-d:ssl -d:testPlainHttp --threads:on -d:QuietTooLongMs=3000"
-  buildBinary(defines, "3code_quiet")
-
-let realBin = ensureRealBinary()
-let quietBin = ensureQuietBinary()
+# A non-stub 3code binary with plain-HTTP transport enabled so it can talk
+# to the local mock server over `http://127.0.0.1`. The quiet variant shrinks
+# `QuietTooLongMs` so a black-holed link surfaces the network-quiet timeout
+# in ~3s instead of the production 45s (the production value is an
+# intdefine for exactly this). Both builds start together: each has its own
+# build lock and nimcache, so sequential waits doubled the fresh-tree cost.
+const realDefines = "-d:ssl -d:testPlainHttp --threads:on"
+const quietDefines = realDefines & " -d:QuietTooLongMs=3000"
+let bins = buildBinaries([(realDefines, "3code_real"),
+                          (quietDefines, "3code_quiet")])
+let realBin = bins[0]
+let quietBin = bins[1]
 
 suite "interrupt during real network connect/stream":
   test "Ctrl-C during connect (silent server) returns to prompt":

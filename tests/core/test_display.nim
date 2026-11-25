@@ -114,7 +114,7 @@ suite "display: printSessionList cap":
       check plainLine.len > 0 and "private" notin plainLine
       check privLine.len > 0 and "private" in privLine
 
-import threecode/[transcript, types]
+import threecode/[transcript, types, images, fatprompt]
 
 suite "display: tool transcript body strips boundary blanks":
   # A tool item must not bring its own newlines into scrollback. Web
@@ -674,8 +674,11 @@ when not defined(windows):
         {"role": "assistant", "content": "ok"},
       ]
       let outp = captureReplay2(msgs, @[])
-      check "@mockup.png describe [image attached]" in outp
+      check "@mockup.png describe " & ImageAttachMark in outp
       check "base64" notin outp
+      # The mark ends the echoed line: nothing paints after it on its row.
+      check outp.splitLines.anyIt(it.endsWith("describe " & ImageAttachMark))
+      check formatUserPromptItem("x " & ImageAttachMark).endsWith(ImageAttachMark)
 
     test "replay skips the harness image follow-up":
       let msgs = %*[

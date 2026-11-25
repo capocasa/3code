@@ -1,3 +1,4 @@
+## Covers: tests/tty_expect.nim
 import std/[strutils, unittest]
 import tty_expect
 import ttty/grid

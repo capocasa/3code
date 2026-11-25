@@ -22,6 +22,35 @@ case $out in
   *) out="$PWD/$out" ;;
 esac
 mkdir -p "$(dirname "$out")"
+# Up-to-date fast path, before taking the lock: a published stub binary is
+# only rebuilt when an input is newer. Nim's nimcache makes the recompile
+# cheap but still pays a full frontend+link pass; ensureStubBinary runs this
+# per tty session (70 in test_tty_functional), which dwarfed the tests
+# themselves. git checkout/pull set source mtimes to the change time, so
+# newer-than-output is a sound staleness signal; a touched-but-unchanged file
+# only costs a rebuild.
+#
+# Restricted to build/ outputs: their inputs are exactly the repo files
+# below. Out-of-tree probes (test_build_provenance) have inputs this list
+# cannot know (a data file, an include, a dep module), so for them every
+# invocation rebuilds.
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+case " $* " in
+  *--forceBuild*) ;;
+  *)
+    case $out in
+      "$root"/build/*)
+        if [ -f "$out" ]; then
+          inputs='src config.nims nimble.paths nimble.lock'
+          [ -d tests/testdata/stub ] && inputs="$inputs tests/testdata/stub"
+          if ! find $inputs -newer "$out" -print -quit 2>/dev/null | grep -q .; then
+            exit 0
+          fi
+        fi
+        ;;
+    esac
+    ;;
+esac
 lock="$out.build-lock"
 waited=0
 until mkdir "$lock" 2>/dev/null; do

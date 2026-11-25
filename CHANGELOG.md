@@ -2,6 +2,49 @@ Changelog
 
 Unreleased
 
+- **Goal mode starts work again when you reopen an open goal.** A launch
+  with `3code -r` used to idle on a session whose goal was still armed:
+  the kickoff stanza was already in the scrollback, and the resume guard
+  read that as "nothing to do" even when the last check had said the goal
+  was not met. The work-owed state is now a session flag maintained where
+  it changes - a verdict step landing in scrollback clears it, a kickoff
+  stanza reaching the model or a user cancellation sets it - so no launch
+  walks the transcript to reconstruct it. Result: work starts on its own at
+  the two points where nobody has to press a key, the arm itself and a
+  reopen into an open goal, and never on its own after a user cancellation
+  (an unanswered prompt is left alone) or after a satisfied check (the
+  goal is retired).
+
+- **A `:btw` answer can no longer be a tool call, and the aside stops
+  re-paying the whole history.** The side-question request used to ride
+  a dedicated system prompt over a history flattened to prose, tools
+  omitted — and the model still came back with tool calls (an empty
+  content, i.e. no answer), twice prompting a “never tool calls” sentence
+  in the prompt that nothing honored. Worse, that reshaped payload
+  shares no byte with the conversation's own wire prefix, so on a
+  cache-keyed provider every aside re-billed the entire history as fresh
+  input. The aside now rides the live history through the main call's
+  exact wire transforms — same system message, same tool roster (prefix
+  content on cache-keyed providers), internal fields stripped — and
+  forbids its own tool calls where the turn's request allows them:
+  `tool_choice: "none"` on both the chat-completions and Responses
+  shapes, plus the conversation's `prompt_cache_key` so the aside lands
+  on the cache shard the main call warmed (gh #58). The question rides
+  as a trailing user message, framed once in prose. An aside on a long
+  session now costs roughly the question and the answer; the history is
+  cached-input. (`tests/core/test_btw.nim`,
+  `tests/tty/test_btw_async.nim`)
+
+- **The `[image attached]` echo marker is now `🖼`.** The transcript
+  echo of a prompt whose `@image` tokens attached ends in U+1F5BC,
+  the framed picture — the image icon, at the end of the echoed line.
+  It is a text-default pictograph, so a mono symbol font (Noto Sans
+  Symbols 2) wins the fallback race and terminals paint it in the
+  text color rather than goofy multicolor; it measures one cell in
+  the project's width math. Replay paints the same mark, so
+  scrollback parity holds. (`tests/core/test_attach.nim`,
+  `tests/core/test_display.nim`)
+
 - **Flail detector's identical-consecutive signal is progress-gated.**
   A back-to-back re-run of the exact same call no longer flags when the
   first call's result delivered a new output line: a legitimate poll

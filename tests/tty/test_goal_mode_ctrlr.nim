@@ -9,9 +9,12 @@ discard """
 ##   appends the kickoff and runs the turn at once; a goal.md left on
 ##   disk (the upgrade case) arms nothing. The arm announces with the
 ##   kickoff item alone - the `⚑` flag plus the goal text, no echoed
-##   command line, no receipt, no hint line, no `Goal armed:` scaffold -
-##   and the stanza is fed exactly once per arming: a resumed session
-##   never re-feeds it, it just derives goal mode from the .3log. Each
+##   command line, no receipt, no hint line, no `Goal armed:` scaffold.
+##   Work starts on its own at the two points where nobody has to press
+##   a key: the arm itself, and a launch (`3code -r`) into a session whose
+##   goal is still open and whose last turn completed. It does not start
+##   on its own after a user cancellation or after a satisfied check - the
+##   user's stop and the goal's retirement both mean done. Each
 ##   turn end runs the verifier whose reply is the whole display - a
 ##   quote block led by the green `✓` or red `✗` icon, no notice
 ##   before or after it. An unmet verdict sends the agent back in under
@@ -534,13 +537,15 @@ suite "goal mode mid-turn detection (interactive)":
     tty.expectAlive()
 
 suite "goal mode resume (interactive)":
-  test "a resumed session never re-feeds the kickoff stanza":
-    let root = newFixture("goal_resume_no_refeed")
+  test "a cancelled kickoff turn is not restarted on resume":
+    let root = newFixture("goal_resume_after_cancel")
     writeConfiguredProvider(root)
     # Phase 1 arms the goal and leaves the mode live: the kickoff turn
     # is Ctrl-C'd mid-call (an interrupt mid-call never reaches the
     # end-call boundary, so the mode stays armed), and the session exits
-    # with the kickoff stanza already in the conversation.
+    # with the kickoff stanza already in the conversation and no verdict
+    # step after it. A user cancellation is the one state a launch must
+    # not restart on its own: the user said stop.
     writeFile(root / "run" / "stub_responses.json", $(%*[
       reply("WORK_TURN_ONE", delayMs = 8000),
     ]))
@@ -562,10 +567,10 @@ suite "goal mode resume (interactive)":
     tty.expectExit(0, timeoutMs = 5000)
     check not sessionLogHas(root, "verdict=satisfied")
     # Phase 2 resumes. The stub queue holds exactly two replies: the
-    # answer to the typed prompt, then its turn-end verifier. If the
-    # kickoff stanza were re-fed, it would consume the first reply and
-    # every later assertion falls apart - the re-feed itself is what
-    # the never-assertions catch.
+    # answer to the typed prompt, then its turn-end verifier. Nothing is
+    # typed yet, so an auto-restart of the cancelled work would burn the
+    # first reply and every later assertion falls apart - the restart
+    # itself is what the idle-caret and never-assertions catch.
     writeFile(root / "run" / "stub_responses.json", $(%*[
       reply("NEXT_AFTER_RESUME"),
       reply("all good\nVERDICT: SATISFIED"),
@@ -584,6 +589,7 @@ suite "goal mode resume (interactive)":
     tty2.expectInHistory "⚑ keep working after resume"
     tty2.expectNeverInHistory "Goal armed:"
     tty2.expectNeverInHistory "detected implementing"
+    tty2.expectNeverInHistory "NEXT_AFTER_RESUME"
     # The prompt answers with the first queued reply - proof no kickoff
     # turn burned it - and its turn-end check retires the goal.
     tty2.send "hello again"
@@ -647,4 +653,53 @@ suite "goal mode resume (interactive)":
     check hist.find("VERIFY_PROSE_MARKER") > hist.find("WORK_TURN_ONE")
     check hist.find("VERIFY_PROSE_MARKER") <
         hist.find("Verifier feedback:")
+    tty2.expectAlive()
+
+  test "a resumed session with an open goal starts work at once":
+    # The check ran, could not produce a verdict (the red ✗ row), and the
+    # turn ended: the session idles with the goal still armed. Closing
+    # and reopening with `3code -r` must pick the work back up with no
+    # key pressed - the kickoff lands again and its turn runs, and this
+    # time the check retires the goal.
+    let root = newFixture("goal_resume_starts_work")
+    writeConfiguredProvider(root)
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("WORK_TURN_ONE"),
+      reply("no verdict in this reply"),
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    tty.expect "\u276f"
+    tty.send ":goal keep working after resume"
+    tty.send "\n"
+    tty.expectInHistory "⚑ keep working after resume"
+    tty.expectInHistory "WORK_TURN_ONE"
+    # A check with no verdict line paints the red ✗ row and ends the
+    # turn: no feedback continuation, the session idles.
+    tty.expectInHistory "\u2717"
+    tty.drain(300)
+    tty.ctrlD()
+    tty.expectExit(0, timeoutMs = 5000)
+    check not sessionLogHas(root, "verdict=satisfied")
+    # Phase 2: resume with no typed prompt. The first queued reply is
+    # the kickoff turn the launch starts on its own; the second is its
+    # turn-end verifier, which retires the goal.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("WORK_TURN_TWO"),
+      reply("all good\nVERDICT: SATISFIED"),
+    ]))
+    let tty2 = newTtySession(stub,
+                            args = ["-x", "-i", "-r"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty2.writeFrameArtifact(root / "frames.txt")
+      tty2.close()
+    tty2.expectInHistory "WORK_TURN_TWO"
+    tty2.expectInHistory "\u2713"
+    tty2.drain(300)
+    check sessionLogHas(root, "goal_check verdict=satisfied")
     tty2.expectAlive()

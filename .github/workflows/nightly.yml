@@ -1,0 +1,39 @@
+name: Nightly soak
+
+# The per-change suite leaves the four tty stress tests out (287s together,
+# 35% of the tty run). They guard real races, so they run here every night
+# on the full suite, and before releases via workflow_dispatch.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  soak:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.4.0
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
+
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+
+      - name: Generate nimble.paths for direct nim invocations
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
+
+      - name: Run full suite including the soak tier
+        # 2700s: the soak tier adds ~5 min (four stress tests, 287s) to
+        # the ~14-16 min per-change suite; 45 min keeps 2x headroom.
+        run: SOAK=1 sh tests/tools/ci_tests.sh 2700
+        timeout-minutes: 50

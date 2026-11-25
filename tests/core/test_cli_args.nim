@@ -487,10 +487,14 @@ suite "cli config layer stack":
     check r.code == 3
     check (tmp / "a") in r.o
 
-  test "bare -C is the first-run state":
+  test "bare -C names the existing user config, not a first run":
+    # First run means no config file anywhere. -C reads nothing, but the
+    # write target exists, so this is a config problem, not a first run:
+    # the run names the file instead of opening the wizard.
     let r = runIn("-C")
-    check r.code == 3
-    check "no [provider] section" notin r.o
+    check r.code == 0
+    check "no usable provider in" in r.o
+    check (tmp / "xdg" / "3code" / "config") in r.o
 
   test "-C also drops the user global":
     layer("a", "a.m")
@@ -556,14 +560,24 @@ suite "cli project-local config discovery":
     check projCfg() in r.o
 
   test "-C skips the walk entirely":
+    # The cleared stack reads nothing, so the run cannot die on the
+    # project pin: it names the (unread) user global instead, and the
+    # walked project layer never appears.
     let r = runIn(tmp / "repo" / "sub", "-C")
-    check r.code == 3
-    check "no [provider] section" notin r.o
+    check r.code == 0
+    check "no usable provider in" in r.o
+    check (tmp / "xdg" / "3code" / "config") in r.o
+    check projCfg() notin r.o
 
   test "a directory without a store reads the user config only":
+    # No ancestor carries a .3code/config, so the run names the user
+    # global (its [settings] carries no pin, so no die) and never the
+    # repo pin.
     let r = runIn(tmp, "")
-    check r.code == 3
-    check "no [provider] section" notin r.o
+    check r.code == 0
+    check "no usable provider in" in r.o
+    check (tmp / "xdg" / "3code" / "config") in r.o
+    check projCfg() notin r.o
 
   test "-h lists the stack with the project layer":
     let r = runIn(tmp / "repo" / "sub", "-h")

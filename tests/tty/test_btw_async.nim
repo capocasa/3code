@@ -144,15 +144,19 @@ suite ":btw is async":
     tty.drain(400)
     tty.expectNo "main reply", settleMs = 100
 
-    # The aside, typed mid-turn: the receipt is immediate.
+    # The aside, typed mid-turn: the question row commits at once (the
+    # `?`-led item IS the receipt; the answer lands below when it
+    # arrives).
     tty.send ":btw what is happening?"
     tty.send "\n"
-    tty.expectInHistory "asked"
+    tty.expectInHistory "? what is happening?"
 
     # The answer lands while the turn is still running — before the
     # model's own reply, which the stub is holding.
     tty.expectInHistory "midturn answer", timeoutMs = 2000
-    tty.expectInHistory "💬"
+    # The answer renders as the dim `!`-led quote block, not the old
+    # 💬 emoji row.
+    tty.expectInHistory "! │"
     tty.expectNo "main reply", settleMs = 100
     tty.expectAlive()
 

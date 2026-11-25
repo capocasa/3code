@@ -1149,7 +1149,7 @@ model:
 
 - **Attach**: put `@mockup.png` in your prompt. The image rides the message
   as an image block (not 64 KB of inlined binary), the echo shows
-  `@mockup.png [image attached]`, and the model answers about what it sees.
+  `@mockup.png 🖼`, and the model answers about what it sees.
 - **Read**: the model calls `read` on an image path — e.g. to inspect its own
   rendered output — and the image rides the next message. The tool result is
   a one-line text receipt
@@ -1358,6 +1358,14 @@ the token bar shows the sum of the rest's requests (the turn's own call,
 the verifier check, and any other side call that landed on the same
 rest, all added together).
 
+The side request carries the conversation verbatim — the same system
+prompt, tool roster, and history the turn itself sends — so the provider's
+prompt cache stays hot and the aside bills the history at cached-input
+prices, with only the question and the answer fresh. Tool use is switched
+off for that one request (`tool_choice: "none"`), so the answer is always
+prose: the model may read the tool calls in the history but cannot
+answer with a run of its own.
+
 ## Chunked mode
 
 For a large mechanical task, ask the model to split the work into files. Each
@@ -1488,9 +1496,12 @@ Arming starts work immediately: `:goal <text>` lands the kickoff in the
 conversation and runs the kickoff turn with no echoed command line and no
 receipt — the kickoff item is the arm's whole announcement, and repeating
 the goal text above it would say it twice. The kickoff speaks as one
-scrollback item — the `⚑` flag plus the goal text alone — and the stanza
-is fed exactly once per arming: resuming a session never re-feeds it, the
-check just runs at the next turn end. Each turn end runs the check; the
+scrollback item — the `⚑` flag plus the goal text alone. Work also starts
+on its own when you reopen a session whose goal is still open: `3code -r`
+lands the kickoff again and runs its turn, so a goal you left unfinished is
+picked up the moment you come back. It does not start on its own after you
+cancel a turn (your stop stands until you prompt again) or after a satisfied
+check (the goal is retired). Each turn end runs the check; the
 verifier's reply is the whole display, a dim quote block led by a green
 `✓` or a red `✗` (the verdict line itself is stripped; a failed or
 unreadable check shows the same red `✗` row). A satisfied verdict

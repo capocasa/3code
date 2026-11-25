@@ -10,7 +10,7 @@ requires "streamhttp >= 0.5.0"
 requires "ttty >= 0.5.0"
 requires "unicodedb >= 0.13.0"
 requires "tinotify >= 0.1.3"
-requires "sandwall >= 0.5.15"
+requires "sandwall >= 0.5.16"
 requires "libsha >= 1.0"
 requires "nimdiff >= 0.1.0"
 requires "zippy >= 0.10"
@@ -110,6 +110,23 @@ task test, "Run the test suite via testament (all, or named files)":
     for file in files:
       cmd.add " '" & file.replace("'", "'\"'\"'") & "'"
     exec cmd
+
+task testSoak, "Run the tty stress tier (tests/tools/tty_soak.txt)":
+  # Kept out of `nimble test`: the four stress tests take 287s together,
+  # a third of the tty run, and they guard races that do not change with
+  # every edit. Nightly CI and release checks run them.
+  exec "sh tests/tools/build_binary.sh 3code src/threecode.nim"
+  exec "python3 tests/tools/parallel_tty.py --soak " &
+      "--timeout ${PER_TEST_SECS:-1800}"
+
+task testContract, "Run the interactive contract tier (tests/tools/contract_tier.txt)":
+  # The 2-3 minute tier that answers "did I break prompt/submit, ESC/Ctrl-C
+  # cancel, interrupt during a tool or network call, or quit?" Run it per
+  # change; the full suite stays in CI.
+  exec "sh tests/tools/build_binary.sh 3code src/threecode.nim"
+  exec "python3 tests/tools/parallel_tty.py " &
+      "--file tests/tools/contract_tier.txt " &
+      "--timeout ${PER_TEST_SECS:-300}"
 
 task docs, "Build HTML manual, reference, and developer docs":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default

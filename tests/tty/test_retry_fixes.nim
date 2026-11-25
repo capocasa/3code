@@ -7,7 +7,7 @@ discard """
 ## turn that sends the current conversation state as a request. The old
 ## "instant retry requested" hint is gone, a backoff in flight is no
 ## longer cut short (the queued submit runs once the turn yields), and
-## Ctrl+Shift+R is the same gesture as a key — without eating a
+## Ctrl+9 is the same gesture as a key — without eating a
 ## half-typed draft. Commands still land in the prompt log (the history
 ## file behind Up / Ctrl+R) whether typed at idle or mid-turn.
 import std/[json, os, strutils, times, unittest]
@@ -52,8 +52,11 @@ proc reply(content: string; delayMs = 50): JsonNode =
      "usage": {"promptTokens": 5, "completionTokens": 1,
                 "totalTokens": 6, "cachedTokens": 0}}
 
-const CtrlShiftR = "\x1b[114;6u"
-  ## kitty keyboard protocol: CSI 114;6 u (ctrl+shift+r, mods 5|1)
+const Ctrl9 = "\x1b[57;5u"
+  ## kitty keyboard protocol: CSI 57;5 u (ctrl+9, mods 5|1). Retry lives
+  ## on ctrl+9 since the ask-answer shortcuts landed: ctrl+digit is
+  ## kitty-protocol-distinct exactly like ctrl+shift+letter was, and
+  ## ctrl+shift+r sat one key from ctrl+R isearch.
 
 suite ":retry as empty submit":
   test "idle :retry sends the current state as a request, no hint line":
@@ -152,7 +155,37 @@ suite ":retry as empty submit":
     let hist = readFile(root / "xdg" / "3code" / "history")
     check ":retry list" in hist
 
-  test "ctrl+shift+r is the same submit without eating the draft":
+  test "idle ctrl+9 sends the current state as a request":
+    let root = newFixture("retry_key_idle")
+    writeConfiguredProvider(root)
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      reply("FIRST_TURN"), reply("SECOND_TURN")
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "go"
+    tty.send "\n"
+    tty.expectInHistory "FIRST_TURN"
+    tty.drain(300)
+    # The key at the idle prompt is the `:retry` gesture: a fresh
+    # request on the conversation as it stands, nothing appended.
+    tty.send Ctrl9
+    tty.expectNeverInHistory "instant retry requested"
+    tty.expectInHistory "SECOND_TURN"
+    tty.expectAlive()
+    tty.drain(200)
+    # The key is not a typed line: it must not enter the prompt log.
+    check ":retry" notin readFile(root / "xdg" / "3code" / "history")
+
+  test "ctrl+9 is the same submit without eating the draft":
     let root = newFixture("retry_key")
     writeConfiguredProvider(root)
     # Response 1 is slow (1.5s) so the draft and the key press land
@@ -177,7 +210,7 @@ suite ":retry as empty submit":
     # clears the line; the key keeps the draft riding the turns).
     tty.send "next prompt"
     tty.expect "next prompt"
-    tty.send CtrlShiftR
+    tty.send Ctrl9
     tty.expectNeverInHistory "instant retry requested"
     tty.expectInHistory "FIRST_TURN"
     tty.expectInHistory "SECOND_TURN"

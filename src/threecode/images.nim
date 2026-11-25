@@ -14,6 +14,11 @@ const
   ImageShrinkStep = 0.8
   MaxAttachPerMessage* = 3
   MaxImagesPerTurn* = 4           ## read-on-image cost cap; extras are noted, not attached
+  ImageAttachMark* = "🖼"          ## stand-in for `image attached`: the framed
+                                  ## picture, U+1F5BC. Text-default presentation, so
+                                  ## a mono symbol font (Noto Sans Symbols 2) wins
+                                  ## the fallback race and terminals paint it in
+                                  ## the text color; 1 cell per runeCellWidth
 
 type
   ImageInfo* = object

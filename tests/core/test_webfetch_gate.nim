@@ -55,18 +55,18 @@ suite "web_fetch network gate":
   test "no host rules: unchanged behavior (no gate engaged)":
     withPolicy("nohosts", "deny /\nallow ./\n"):
       # No gate: the fetch itself runs and fails on network grounds
-      # (192.0.2.x is TEST-NET, nothing listens there), but crucially
-      # NOT with a sandbox-deny message.
-      let act = Action(kind: akWebFetch, body: "http://192.0.2.1/")
+      # (127.0.0.1:1 is closed, so the connect is refused at once), but
+      # crucially NOT with a sandbox-deny message.
+      let act = Action(kind: akWebFetch, body: "http://127.0.0.1:1/")
       let (outp, code, _) = runAction(act)
       check code == 1
       check "sandbox" notin outp
 
   test "allowed host passes the gate":
-    withPolicy("allowone", "deny /\nallow ./\ndeny *\nallow 192.0.2.1\n"):
+    withPolicy("allowone", "deny /\nallow ./\ndeny *\nallow 127.0.0.1\n"):
       # Gate passes; the fetch then fails on network grounds without a
       # sandbox-deny message.
-      let act = Action(kind: akWebFetch, body: "http://192.0.2.1/")
+      let act = Action(kind: akWebFetch, body: "http://127.0.0.1:1/")
       let (outp, code, _) = runAction(act)
       check code == 1
       check "sandbox" notin outp

@@ -1458,9 +1458,10 @@ max-tokens = "8192"
          "contentChunks": ["STEERED-REPLY-MARKER"],
          "usage": {"promptTokens": 20, "completionTokens": 4,
                    "totalTokens": 24, "cachedTokens": 0}},
-        # Turn 2, reply 1: two identical bash calls in one batch; the second
-        # is the classic identical-repeat loop and escalates, but executes
-        # anyway with the note riding on the result.
+        # Turn 2, reply 1: two identical bash calls in one batch. The
+        # identical-repeat signal is progress-gated: the first call's
+        # result delivered a fresh output line, so the batch-mate reads
+        # as a legitimate poll and does not flag. Both execute plainly.
         {"role": "assistant", "content": "",
          "tool_calls": [
            toolCall("flail_a", "bash",
@@ -1502,6 +1503,15 @@ max-tokens = "8192"
          "tool_calls": [toolCall("ab_5", "bash",
            %*{"command": "printf 'doomed-loop\\n'"})],
          "usage": {"promptTokens": 50, "completionTokens": 5,
+                   "totalTokens": 55, "cachedTokens": 0}},
+        # The progress gate shifts the ladder one call later: ab_1 is
+        # fresh, ab_2 rides a fresh result (a poll), ab_3's result is
+        # stale so ab_3 escalates - steps land on ab_3/4/5 and ab_6
+        # aborts.
+        {"role": "assistant", "content": "",
+         "tool_calls": [toolCall("ab_6", "bash",
+           %*{"command": "printf 'doomed-loop\\n'"})],
+         "usage": {"promptTokens": 50, "completionTokens": 5,
                    "totalTokens": 55, "cachedTokens": 0}}
       ])
 
@@ -1528,7 +1538,9 @@ max-tokens = "8192"
         tty.expectInHistory "$ printf 'flail-real-run"
         tty.expectInHistory "flail-real-run"
         tty.expectNeverInHistory "auto: repeated tool call executed"
-        tty.expectInHistory "» Loop detected"
+        # Progress-gated: flail_b repeats over a fresh result, so no
+        # loop fires here (the doom turn below supplies the » items).
+        tty.expectNeverInHistory "» Loop detected"
         # The old paraphrased harness line is gone.
         tty.expectNeverInHistory "flailing detected (repeated tool call)"
         tty.expectInHistory "FLAIL-RECOVERED-MARKER"
@@ -1555,8 +1567,8 @@ max-tokens = "8192"
       check "user +agent" in log
       check "Your last reply came back empty." in log
       check "tool_result flail_a exit=0" in log
-      check "flail flail_b" in log
-      check "tool_result flail_b exit=0 +flail" in log
+      check "tool_result flail_b exit=0" in log
+      check "tool_result flail_b exit=0 +flail" notin log
       check "Loop detected" in log
       check "flail ab_5" in log
       check "tool_result ab_5 exit=0 +flail" in log
@@ -1606,8 +1618,11 @@ models = "stub-model"
 provider = "stub"
 max-tokens = "8192"
 """)
+        # Six calls: the progress gate shifts the ladder one call later
+        # (nf_1 fresh, nf_2 a poll over it), so steps land on nf_3/4/5
+        # and nf_6 aborts - the same shape as the glm doom turn above.
         let replies = %*[]
-        for n in 1 .. 5:
+        for n in 1 .. 6:
           replies.add %*{"role": "assistant", "content": "",
            "tool_calls": [toolCall("nf_" & $n, "bash",
              %*{"command": "printf 'noflail-loop\\n'"})],
@@ -2910,7 +2925,7 @@ max-tokens = "8192"
 
     # Drain order: the sandbox command's output lands first, then the
     # queued prompt's turn.
-    tty.expectInHistory "sandbox updated: allow ./foo"
+    tty.expectInHistory "sandbox allow ./foo"
     tty.expectInHistory "After the rule."
     # First materialization lands in the .3code store (5e61b040); the
     # legacy root-level .sandbox is only kept when it already exists.
@@ -3321,7 +3336,7 @@ max-tokens = "8192"
     # Idle submit of a command wrapping to 4 editor rows (one long word
     # cannot break, so the editor stacks it over continuation rows).
     tty.send ":sandbox allow " & repeat('w', 120) & "\n"
-    tty.expect "sandbox updated"
+    tty.expect "sandbox allow"
     tty.drain(400)
     block:
       let rows = tty.rows()
@@ -3329,19 +3344,19 @@ max-tokens = "8192"
       for i, r in rows:
         if r.startsWith("❯ :sandbox allow"): echoRow = i
       doAssert echoRow >= 2,
-        "command echo head row missing\n" & tty.dumpFramesAround("sandbox updated")
+        "command echo head row missing\n" & tty.dumpFramesAround("sandbox allow")
       doAssert rows[echoRow - 1].strip.len == 0,
         "row above the echo head is not the separator blank: '" &
-        rows[echoRow - 1] & "'\n" & tty.dumpFramesAround("sandbox updated")
+        rows[echoRow - 1] & "'\n" & tty.dumpFramesAround("sandbox allow")
       doAssert "○0%" in rows[echoRow - 2],
         "receipt does not sit two rows above the echo head: '" &
-        rows[echoRow - 2] & "'\n" & tty.dumpFramesAround("sandbox updated")
+        rows[echoRow - 2] & "'\n" & tty.dumpFramesAround("sandbox allow")
       var echoHeads = 0
       for r in rows:
         if r.startsWith("❯ :sandbox allow"): inc echoHeads
       doAssert echoHeads == 1,
         "stale editor row duplicated above the committed echo\n" &
-        tty.dumpFramesAround("sandbox updated")
+        tty.dumpFramesAround("sandbox allow")
     # Mid-turn submit of the same wrapped command: it queues for the
     # next opportunity, and the queue-time echo commit must consume the
     # whole buffered editor block, leaving no `❯ :...` remnant on screen
@@ -3378,7 +3393,7 @@ max-tokens = "8192"
         tty.dumpFramesAround(":sandbox allow")
     tty.continueStubApi()
     # The drain runs the queued command once the turn yields.
-    tty.expectInHistory "sandbox updated: allow vvv"
+    tty.expectInHistory "sandbox allow vvv"
     tty.expectInHistory "second reply marker two"
     tty.expectIdleCaret()
     tty.drain(300)

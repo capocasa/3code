@@ -20,7 +20,8 @@
 # Each category is sequential inside testament.
 #
 # Usage: tests/tools/ci_tests.sh [global-timeout-secs] [categories...]
-#   PER_TEST_SECS env overrides the per-test cap (default 480, 0=off).
+#   PER_TEST_SECS env overrides the per-test cap (default 720, 0=off).
+#   SOAK=1 adds the four tty stress tests to the run (default: nightly only).
 set -u
 
 # build/test-nimflags: extra nim flags for the test binary, one line.
@@ -93,25 +94,52 @@ echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}
 run_testament() {
   rc_all=0
   if [ $# -eq 0 ]; then
-    # Default selection: every category except tty in parallel, then tty
-    # alone. The tty PTY tests are scheduler-sensitive: on small runners
-    # (macos-15 is 3-core) the concurrent category compiles starve the
-    # render threads, producing load-induced frame mismatches, assertion
-    # failures and per-test-cap kills -- `testament all` fans out every
-    # category at once and did all of those. Alone (as the windows job
-    # already runs it), the same suite passes.
-    # Category rule mirrors testament's isTestFile: a dir with at least
-    # one t*.nim; helper dirs like tests/tools have none and are skipped
-    # by that rule.
-    cats=''
+    # Default selection: config and core folded, every other non-tty file
+    # in one worker pool, then tty alone. Testament still owns each pooled
+    # file's spec (matrix, disabled, exit codes), so coverage is unchanged;
+    # folds trade per-file process isolation for one compile per group and
+    # keep every assertion.
+    # The tty PTY tests stay alone: they are scheduler-sensitive, and on
+    # small runners (macos-15 is 3-core) concurrent compiles starve the
+    # render threads, producing load-induced frame mismatches and
+    # per-test-cap kills.
+    files=''
     for d in tests/*/; do
       d=${d%/}
       [ "$d" = tests/tty ] && continue
-      ls "$d"/t*.nim >/dev/null 2>&1 && cats="$cats ${d#tests/}"
+      # config and core are folded below: 19 and 58 compiles -> 1 and 6.
+      [ "$d" = tests/config ] && continue
+      [ "$d" = tests/core ] && continue
+      for f in "$d"/test_*.nim; do
+        [ -f "$f" ] && files="$files $f"
+      done
     done
-    sh tests/tools/test_dispatch.sh categories $cats || rc_all=1
+    # Core's solo files stay per-file in the pool: the fold spec names
+    # them, so the pool list cannot drift from the spec.
+    for f in $(python3 tests/tools/fold_groups.py --list-solo core); do
+      files="$files $f"
+    done
+    # Config is proven green as one process (592 tests, 0 failures), so its
+    # 19 files become one compile. Core folds into six domain groups, one
+    # process each (1280 tests, 0 failures): grouping, not a single binary,
+    # is what keeps cross-domain state apart.
+    python3 tests/tools/fold_category.py config \
+      --timeout "${PER_TEST_SECS:-720}" || rc_all=1
+    python3 tests/tools/fold_groups.py core \
+      --timeout "${PER_TEST_SECS:-720}" || rc_all=1
+    if [ -n "$files" ]; then
+      # Word-splitting is intentional: test paths contain no spaces.
+      python3 tests/tools/parallel_files.py \
+        --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
+    fi
     if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
-      sh tests/tools/test_dispatch.sh categories tty || rc_all=1
+      # The four stress tests are the soak tier: 287s together, a third of
+      # the tty run. The per-change suite leaves them out; SOAK=1 (nightly)
+      # runs them with the rest of the suite.
+      soak=''
+      [ "${SOAK:-0}" = 1 ] && soak='--include-soak'
+      # $soak is one word or empty.
+      python3 tests/tools/parallel_tty.py $soak --timeout "${PER_TEST_SECS:-720}" || rc_all=1
     fi
     return $rc_all
   else

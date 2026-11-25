@@ -1,3 +1,4 @@
+## Covers: src/threecode/fatprompt/runtime.nim
 ## Quit-signalling behaviour at the prompt and during a turn.
 ##
 ## The fat prompt honours several ways out, and each must do *only* what its

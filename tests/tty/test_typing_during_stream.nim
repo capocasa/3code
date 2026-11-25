@@ -1,3 +1,4 @@
+## Covers: src/threecode/fatprompt/runtime.nim
 discard """
   disabled: "win"
   disabled: "osx"

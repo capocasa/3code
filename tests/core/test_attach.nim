@@ -50,7 +50,7 @@ suite "buildUserMessage: @image attach":
         if f.extractFilename.split('.')[0] == "001": delivered = f
       require delivered.len > 0
       check uri.endsWith(encode(readFile(delivered)))
-      check imageAttachEcho() == " [image attached]"
+      check imageAttachEcho() == " " & ImageAttachMark
       removeDir(imgDir)
 
   test "non-vision profile: string with the hint, image dropped":
