@@ -1,0 +1,15 @@
+# Interactive contract tier: the 2-3 minute set that answers "did I break
+# prompt/submit, ESC/Ctrl-C cancel, interrupt during a tool or network call,
+# or quit?" Run per change (nimble testContract) and by the opt-in
+# pre-commit hook; the full suite stays in CI. One test stem per line.
+test_first_prompt_overwrite
+test_first_submit_blank_row
+test_empty_enter_freeze
+test_escape_reassembly
+test_typing_during_stream
+test_quit_signals
+test_provider_wizard_cancel
+test_interrupt_prestream_freeze
+test_interrupt_network_connect
+test_expect_contract
+test_broken_stdout_exit

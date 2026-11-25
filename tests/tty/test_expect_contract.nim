@@ -1,3 +1,4 @@
+## Covers: tests/tty_expect.nim
 discard """
   action: run
   disabled: "win"

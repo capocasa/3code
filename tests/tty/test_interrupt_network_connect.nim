@@ -1,3 +1,5 @@
+## Covers: src/threecode/api.nim
+## Covers: src/threecode/streamexec.nim
 discard """
   disabled: "win"
   ## Sends raw \x03 (Ctrl-C) to interrupt a network connect. Under ConPTY

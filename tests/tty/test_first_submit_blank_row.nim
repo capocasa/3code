@@ -1,3 +1,4 @@
+## Covers: src/threecode/fatprompt/runtime.nim
 ## Reproduction: after the first submit, the volatile gap row above the
 ## idle prompt collapses away instead of being left blank, so the committed
 ## echo lands directly under the welcome hint with no empty row between

@@ -1,3 +1,4 @@
+## Covers: src/threecode/fatprompt/runtime.nim
 import std/[json, os, strutils, times, unittest]
 import tty_expect
 import stub_helpers
