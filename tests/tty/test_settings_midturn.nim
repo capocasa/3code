@@ -63,10 +63,15 @@ suite "chrome settings during a turn":
     writeFile(root / "run" / "stub_responses.json", $(%*[
       heldReply("main reply", 2500)
     ]))
+    # Scratch diagnosis: trace every config write (globals serialized per
+    # call) while the session runs; dumped below on failure.
+    let tracePath = root / "xdg" / "config_write_trace.txt"
+    removeFile(tracePath)
+    var env = stubEnv(root, root / "run" / "stub_responses.json")
+    env.add (key: "test.config_write_trace", val: tracePath)
     let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
                             cwd = root / "run",
-                            env = stubEnv(root,
-                              root / "run" / "stub_responses.json"))
+                            env = env)
     defer: tty.close()
     tty.expect "❯"
 
@@ -92,6 +97,12 @@ suite "chrome settings during a turn":
     # The rest writes what the running turn made wait.
     tty.expectInHistory "main reply", timeoutMs = 8000
     tty.expectPromptLive()
+    # Scratch diagnosis: dump every config write the app made, with the
+    # globals each call serialized, when the assertions below fail.
+    defer:
+      if fileExists(tracePath):
+        echo "---- config write trace ----"
+        echo readFile(tracePath)
     # The write is ordered with the turn finalize, not with the prompt
     # repaint: a slow runner can surface the prompt first (osx). Poll
     # briefly so the assertion measures the contract (the write happens)

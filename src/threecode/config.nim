@@ -626,7 +626,8 @@ const
   TestKeys = ["frame_fd", "frame_ack_fd", "ticker_fd", "ticker_ack_fd",
               "api_continue_fd", "gui_live", "stub_responses",
               "http_stub_responses", "stub_sandbox",
-              "stub_verify_delay_ms", "screenshot_src", "geometry_audit"]
+              "stub_verify_delay_ms", "screenshot_src", "geometry_audit",
+              "config_write_trace"]
   ThinkBackValues = ["none", "turn", "all"]
   SearchEngines = ["exa", "parallel", "brave"]
   # `light` is the canonical light-background value; `bright` is the
@@ -1284,8 +1285,20 @@ proc userSettingPrefixes(eff: string): string =
     userSettingsRaw.getOrDefault("system-command-prefixes", ""))
   if norm != "": norm else: ":"
 
+proc cfgTrace*(msg: string) {.gcsafe.} =
+  ## Scratch diagnosis: append to [test] config_write_trace when armed.
+  let path = runtime.get("config_write_trace")
+  if path.len == 0: return
+  var f: File
+  if f.open(path, fmAppend):
+    f.writeLine(msg)
+    f.close()
+
 proc writeConfigFile*(path: string, current: string,
                      providers: seq[ProviderRec]) =
+  cfgTrace("writeConfigFile: current=" & current & " providers=" &
+    $providers.len & " notify=" & $notifyEnabled & " tabtitle=" &
+    $tabTitleEnabled)
   createDir(path.parentDir)
   # Models are persisted in normalized form when the pair is curated
   # (the known-good table repairs the wire id back at load time); the
