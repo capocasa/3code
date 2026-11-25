@@ -1617,12 +1617,14 @@ proc persistSettingConfig() =
   if not turnActive():
     writeConfigFile(configPath(), activeCurrent, activeProviders)
   else:
+    debugOut "persistSettingConfig: deferred to the next rest"
     settingConfigWritePending = true
 
 proc flushSettingConfig*() =
   ## Run the write a mid-turn settings command deferred. Controller thread,
   ## at a rest.
   if settingConfigWritePending:
+    debugOut "flushSettingConfig: writing the deferred config"
     settingConfigWritePending = false
     writeConfigFile(configPath(), activeCurrent, activeProviders)
 
@@ -2382,6 +2384,7 @@ proc deliverFinishedBtw*() =
       # At a rest the session is stable: ledger what the running turn
       # made us park, then this poll's own answers, in arrival order.
       for u in takeStashedBtwUsage():
+        debugOut &"btw deliver: at rest, ledgering stashed {u.totalTokens}"
         accountSideCallUsage(inputSession[], inputMessages[], u,
                              contextWindowFor(inputProfile[]))
       for r in replies:
@@ -2390,6 +2393,7 @@ proc deliverFinishedBtw*() =
                              contextWindowFor(inputProfile[]))
     else:
       for r in replies:
+        debugOut &"btw deliver: turn running, stashing {r.usage.totalTokens}"
         stashBtwUsage(r.usage)
     for r in replies:
       if not r.cancelled and r.answer.strip.len > 0:
@@ -2398,6 +2402,9 @@ proc deliverFinishedBtw*() =
         inputSession[].lastBtwQ = r.question
         inputSession[].lastBtwA = r.answer
       paintBtwReply(r)
+    if replies.len > 0:
+      debugOut &"btw deliver: parked={replParkedAtInput.load(moAcquire)} " &
+        &"replies={replies.len}"
 
 proc installAsideTicks*() =
   ## Hand `:btw` the controller's in-turn beats. A turn holds the prompt

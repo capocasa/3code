@@ -140,6 +140,7 @@ type
     ## `turnIdle` (below) is the authoritative signal; this is the fallback
     ## used where the frame channel is inert (ConPTY).
     cursorShown*: bool
+    debugLog*: string  ## the child's debug_log sink, when one was armed
     ## The app's own turn state, tracked from the `'b'`/`'i'` events it
     ## writes on the frame channel at `beginTurn` / turn end. The caret is
     ## shown on the prompt row during a running turn too (buffered typing
@@ -753,7 +754,16 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       pluginsConf.add (item.key[8 ..^ 1], item.val)
     else:
       envVars.add item
+  # TTY_EXPECT_DEBUG_LOG: arm the child's own debug_log sink (its
+  # `debugOut` trace) for every session; a failure dump then carries the
+  # trace tail next to the frames and the stall sample.
+  var debugLogPath = ""
+  if getEnv("TTY_EXPECT_DEBUG_LOG") != "":
+    debugLogPath = getTempDir() / ("tty_expect_debug_" & $gIpcSessionSeq & ".log")
+    settingsConf.add ("debug_log", debugLogPath)
   var childArgs: seq[string] = @args
+  if debugLogPath.len > 0:
+    childArgs.add "--debug"  # the trace itself is gated on this flag
   var cfgPath = sessionConfigFile(childArgs, envVars)
   if cfgPath == "":
     # Neither -c nor an XDG redirect: never touch the real user config —
@@ -847,6 +857,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       tickerCommandFd: tickerCommandFd,
       tickerAckFd: tickerAckFd,
       apiContinueFd: apiContinueFd)
+    result.debugLog = debugLogPath
 
     # The ConPTY is created at cols x rows above, but the grid still has
     # newGrid()'s default size; without this the model parses 120-col
@@ -1037,6 +1048,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       turnIdle: true,
       exitCode: -1)
     discard result.resize(cols, rows)
+    result.debugLog = debugLogPath
 
     let pid = fork()
     doAssert pid >= 0
@@ -1354,14 +1366,24 @@ proc stallSample*(s: TtySession): string =
       if line.strip.len > 0:
         stack.add line.strip
     # The leaf frames name the stall; keep the tail of the stack.
-    if stack.len > 26:
+    if stack.len > 14:
       result.add "...\n"
-      stack = stack[^26 .. ^1]
+      stack = stack[^14 .. ^1]
     for line in stack:
       result.add line & "\n"
     result.add "------------------------------------------\n"
   else:
     discard
+
+proc debugLogTail(s: TtySession): string =
+  ## Last lines of the child's debug_log (armed by TTY_EXPECT_DEBUG_LOG):
+  ## the app's own trace of what it decided, next to what it painted.
+  if s.debugLog.len == 0 or not fileExists(s.debugLog): return ""
+  let lines = readFile(s.debugLog).splitLines()
+  result.add "\n----- child debug log (last 20) -----\n"
+  for line in lines[max(0, lines.len - 20) ..< lines.len]:
+    result.add line & "\n"
+  result.add "-------------------------------------\n"
 
 proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
   var hits: seq[int]
@@ -1372,7 +1394,8 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
         break
 
   if hits.len == 0:
-    result = s.dumpTailFrames(radius * 2 + 1) & s.stallSample()
+    result = s.dumpTailFrames(radius * 2 + 1) & s.debugLogTail() &
+      s.stallSample()
     return
 
   var ranges: seq[tuple[first, last: int]]
@@ -1392,7 +1415,7 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
         if row.len > 0:
           let mark = if rowIdx in frame.changedRows: "*" else: " "
           result.add &"{mark}{rowIdx:02d}: {row}\n"
-  result.add s.stallSample()
+  result.add s.debugLogTail() & s.stallSample()
 
 proc framesText*(s: TtySession): string =
   for i, frame in s.frames:

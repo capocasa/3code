@@ -983,6 +983,7 @@ proc accountSideCallUsage*(session: var Session; messages: JsonNode;
   let elapsed =
     if pendingHint.active: pendingHint.elapsed else: -1
   let label = tokenLineLabel(combined, window)
+  debugOut &"side call ledgered: base={base.totalTokens} side={usage.totalTokens} label={label}"
   emitFatPromptEvent setPendingHintEvent(combined, window, elapsed)
   emitFatPromptEvent setBarEvent(label)
   if base.totalTokens > 0:

@@ -286,7 +286,10 @@ jobs:
           # child's main-thread call stack into the failure tail: this is
           # the one platform nobody can reproduce on locally, and a frame
           # dump alone cannot say which call a stalled controller is in.
+          # TTY_EXPECT_DEBUG_LOG arms the child's debugOut trace so the same
+          # dump carries what the app decided (ledger, config write, paints).
           TTY_EXPECT_SAMPLE: '1'
+          TTY_EXPECT_DEBUG_LOG: '1'
         run: >-
           mkdir -p build && printf '%s\n' '-d:staticSsl' > build/test-nimflags &&
           PER_TEST_SECS=720 sh tests/tools/ci_tests.sh 3600
