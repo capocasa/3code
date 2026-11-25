@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **ESC and Ctrl-C cancel the running request again, draft or not.** A
+  cancel key pressed mid-turn used to clear a typed draft and leave
+  the request running (September's "esc clears the draft" change), so
+  the common stop gesture - type a correction, hit ESC - did nothing
+  to the request and ate the text. Both keys now interrupt the turn
+  regardless of the draft, and the typed follow-up is not lost either:
+  it comes back prefilled on the prompt after "interrupted by user".
+  At the idle prompt the keys keep their readline editing meaning:
+  clear a non-empty line into history, cancel only an empty one.
+  (`tests/tty/test_quit_signals.nim`,
+  `tests/tty/test_429_typing_during_backoff.nim`,
+  `tests/tty/test_gui_join_freeze.nim`)
+
 - **Goal mode starts work again when you reopen an open goal.** A launch
   with `3code -r` used to idle on a session whose goal was still armed:
   the kickoff stanza was already in the scrollback, and the resume guard
