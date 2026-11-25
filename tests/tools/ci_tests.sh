@@ -93,23 +93,26 @@ echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}
 run_testament() {
   rc_all=0
   if [ $# -eq 0 ]; then
-    # Default selection: every category except tty in parallel, then tty
-    # alone. The tty PTY tests are scheduler-sensitive: on small runners
-    # (macos-15 is 3-core) the concurrent category compiles starve the
-    # render threads, producing load-induced frame mismatches, assertion
-    # failures and per-test-cap kills -- `testament all` fans out every
-    # category at once and did all of those. Alone (as the windows job
-    # already runs it), the same suite passes.
-    # Category rule mirrors testament's isTestFile: a dir with at least
-    # one t*.nim; helper dirs like tests/tools have none and are skipped
-    # by that rule.
-    cats=''
+    # Default selection: every non-tty test file in one worker pool, then
+    # tty alone. File-level parallelism beats category-level: core alone
+    # has 59 files and was the critical path even with the other four
+    # categories running beside it. Testament still owns each file's spec
+    # (matrix, disabled, exit codes), so this is the same coverage.
+    # The tty PTY tests stay alone: they are scheduler-sensitive, and on
+    # small runners (macos-15 is 3-core) concurrent compiles starve the
+    # render threads, producing load-induced frame mismatches and
+    # per-test-cap kills.
+    files=''
     for d in tests/*/; do
       d=${d%/}
       [ "$d" = tests/tty ] && continue
-      ls "$d"/t*.nim >/dev/null 2>&1 && cats="$cats ${d#tests/}"
+      for f in "$d"/test_*.nim; do
+        [ -f "$f" ] && files="$files $f"
+      done
     done
-    sh tests/tools/test_dispatch.sh categories $cats || rc_all=1
+    [ -n "$files" ] || { echo 'no non-tty tests found' >&2; return 1; }
+    # Word-splitting is intentional: test paths contain no spaces.
+    python3 tests/tools/parallel_files.py $files || rc_all=1
     if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
       sh tests/tools/test_dispatch.sh categories tty || rc_all=1
     fi

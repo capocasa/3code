@@ -7,6 +7,12 @@ import stub_helpers
 # or execCmdEx gets a file-not-found.
 const Exe = when defined(windows): ".exe" else: ""
 
+# One compiler cache for every subprocess probe in this process. Each probe
+# used to get its own throwaway nimcache, so all 15 probes recompiled the
+# whole source tree from scratch; sharing the cache lets the second and later
+# probes reuse the unchanged object files.
+let probeNimcache = getTempDir() / ("tc_api_probe_nimcache_" & $getCurrentProcessId())
+
 suite "api request shaping":
   test "z.ai glm sets tool_stream (streamhttp TLS truncation fixed)":
     # tool_stream makes GLM stream tool-call arguments as per-token deltas.
@@ -1217,7 +1223,7 @@ suite "api request shaping":
     let probeDir = getTempDir() / ("tc_autosend_probe_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -1297,7 +1303,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     let probeDir = getTempDir() / ("tc_syscmd_yield_probe_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -1376,7 +1382,7 @@ doAssert "SECOND_REPLY" notin $messages
     let probeDir = getTempDir() / ("tc_syscmd_resume_probe_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -1462,7 +1468,7 @@ doAssert "tooldone" in messages[3]{"content"}.getStr
     let probeDir = getTempDir() / ("tc_syscmd_inline_probe_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -1534,7 +1540,7 @@ doAssert "SECOND_REPLY" in messages[4]{"content"}.getStr
     let probeDir = getTempDir() / ("tc_autosend_api_probe_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -1610,7 +1616,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     let probeDir = getTempDir() / ("tc_autosend_batch_probe_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -1700,7 +1706,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     let probeDir = getTempDir() / ("tc_autosend_cmd_tombstone_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -1787,7 +1793,7 @@ doAssert messages[4]{"content"}.getStr == "SECOND_REPLY"
     let probeDir = getTempDir() / ("tc_autosend_cmd_deferred_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -2437,7 +2443,7 @@ suite "runTurns empty-content auto-handling":
     let probeDir = getTempDir() / ("tc_empty_esc_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -2517,7 +2523,7 @@ echo "OK"
     let probeDir = getTempDir() / ("tc_empty_demote_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -2584,7 +2590,7 @@ echo "OK"
     let probeDir = getTempDir() / ("tc_loop_steer_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -2664,7 +2670,7 @@ echo "OK"
     let probeDir = getTempDir() / ("tc_loop_giveup_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -2736,7 +2742,7 @@ echo "OK"
     let probeDir = getTempDir() / ("tc_empty_demote_ladder_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -2801,7 +2807,7 @@ echo "OK"
     let probeDir = getTempDir() / ("tc_empty_resend_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
@@ -2890,7 +2896,7 @@ suite "runTurns request-size 400 recovery":
     let probeDir = getTempDir() / ("tc_size400_" & pid)
     let probePath = probeDir / "probe.nim"
     let outPath = probeDir / ("probe" & Exe)
-    let cacheDir = probeDir / "nimcache"
+    let cacheDir = probeNimcache
     createDir(probeDir)
     createDir(cacheDir)
     defer:
