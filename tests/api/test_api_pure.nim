@@ -423,10 +423,11 @@ suite "api: applyReasoning — darkbloom":
 
 suite "api: applyReasoning — zai/zaicode glm-5.4":
   # glm-5.4 keeps the 5.3 effort ladder (low/high/max -> top-level
-  # reasoning_effort) and, unlike 5.3, takes a true off again:
-  # thinking.type disabled answers 200 on both z.ai endpoints (probed
-  # live 2026-11-23).
-  test "levels ride reasoning_effort, off disables thinking":
+  # reasoning_effort) and has no true off: thinking.type disabled
+  # answers 200 but the model still thinks lightly (z.ai maps
+  # Claude-Code thinking-off to effort low, probed live 2026-11-24),
+  # so off maps to the cheapest real setting, effort low.
+  test "levels ride reasoning_effort, off maps to effort low":
     for prov in ["zai", "zaicode"]:
       for level in ["low", "high", "max"]:
         var body = %*{"stream": true}
@@ -442,8 +443,8 @@ suite "api: applyReasoning — zai/zaicode glm-5.4":
                         model: "glm-5.4", version: "5", variant: "4",
                         reasoning: "off")
         applyReasoning(p, body)
-        check body{"thinking"}{"type"}.getStr == "disabled"
-        check not body.hasKey("reasoning_effort")
+        check body{"reasoning_effort"}.getStr == "low"
+        check not body.hasKey("thinking")
 
   test "catalog row: vision, window, budgets, think-back":
     let d = knownGoodGeneration("zaicode", "glm-5.4")
@@ -453,7 +454,7 @@ suite "api: applyReasoning — zai/zaicode glm-5.4":
     check knownGoodVision("zai", "glm-5.4")
     check knownGoodVision("zaicode", "glm-5.4")
     check knownGoodReasonings("zaicode", "glm-5.4") ==
-        @["off", "low", "high", "max"]
+        @["low", "high", "max"]
     check knownGoodThinkBack("zai", "glm-5.4") == tbNone
     check knownGoodThinkBack("zaicode", "glm-5.4") == tbAllTurns
     check maxOutputTokensFor(Profile(family: "glm", model: "glm-5.4")) == 131_072
