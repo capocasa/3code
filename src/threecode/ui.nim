@@ -3040,7 +3040,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           # what the capped viewport holds and follow the rest live.
           let (fidx, fok, fnote) = startFollowRunning()
           if fok:
-            resp &"following T{fidx} live · :unshow or click the viewport to stop"
+            resp &"following T{fidx} live · :unshow or ctrl+5 to stop"
           elif n > 0 and n <= session.toolLog.len:
             body.add showToolS($n, session.toolLog)  # finished meanwhile
           else:

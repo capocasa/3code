@@ -126,7 +126,8 @@ const ShortcutNames* = [
   "char-search-backward",
   "delete-horizontal-space",
   "tab-insert",
-  "retry"
+  "retry",
+  "expand-shell"
 ]
 
 type KeySpec* = tuple[keys: seq[string], times: int]

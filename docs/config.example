@@ -80,10 +80,13 @@ current = "ollama.qwen3-coder:480b"
 ; nonincremental-search-forward, history-begin, history-end, set-mark,
 ; exchange-point-and-mark, quoted-insert, char-search,
 ; char-search-backward, delete-horizontal-space, tab-insert, retry,
-vi-mode.
+; expand-shell, vi-mode.
 ; `retry` (default Ctrl9) cuts a retry backoff short or resends a
 ; data-less in-flight request, like `:retry`; distinct from the digit
-; only on kitty-protocol terminals (legacy ones type a 9). `clear`
+; only on kitty-protocol terminals (legacy ones type a 9).
+; `expand-shell` (default Ctrl5) toggles the running live shell viewport
+; between its capped tail and an expanded tail a bit less than the
+; terminal height; inert when nothing streams. `clear`
 ; also adds the discarded text to history. Key tokens beyond
 ; the obvious: Ctrl_ (C-_), Ctrl/ (C-/), Ctrl@ (C-@), Ctrl] (C-]),
 ; Alt< Alt> (M-< M->), Alt. (M-.), AltSpace (M-SPC), AltY, AltR,

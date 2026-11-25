@@ -3568,11 +3568,16 @@ max-tokens = "8192"
               "code": 0
             }),
             toolCall("call_slow", "bash", %*{
-              "command": "printf 'slow-pre\\n'; sleep 3; printf 'slow-done\\n'"
+              "command": "printf 'expand-1\\n'; sleep 3; printf 'expand-done\\n'"
             }, %*{
-              "stream": ["slow-pre", "slow-done"],
-              "streamDelayMs": 2000,
-              "output": "slow-pre\nslow-done\n",
+              "stream": ["expand-1", "expand-2", "expand-3", "expand-4",
+                         "expand-5", "expand-6", "expand-7", "expand-8",
+                         "expand-9", "expand-10", "expand-11", "expand-12",
+                         "expand-done"],
+              "streamDelayMs": 300,
+              "output": "expand-1\nexpand-2\nexpand-3\nexpand-4\nexpand-5\n" &
+                        "expand-6\nexpand-7\nexpand-8\nexpand-9\nexpand-10\n" &
+                        "expand-11\nexpand-12\nexpand-done\n",
               "code": 0
             }),
             toolCall("call_long", "bash", %*{
@@ -3662,18 +3667,25 @@ max-tokens = "8192"
       tty.expectInHistory "stopped following T3"
       tty.expectInHistory "scroll-10"
       tty.expectInHistory "T3.log ↗"
-      # --- click shortcut, T4 (slow): an SGR press during the stall between
-      # its two lines toggles follow without any command; the held line
-      # flushes, the last line flows, and the fold links T4.log instead of
-      # a body row. The stall is the deterministic window (the PTY coalesces
-      # a burst, so a click sent after a one-line call can never beat the
-      # fold).
-      require tty.waitForText("slow-pre")
-      tty.send("\x1b[<0;5;10M")  # any row: with 1000h on, a press is app input
-      tty.expectInHistory "slow-done"
+      # --- ctrl+5 expansion, T4 (slow): the mouseless shell-box expand.
+      # With 9+ lines the capped tail hides the head behind an omitted row;
+      # ctrl+5 expands the viewport to a bit less than the terminal height
+      # (48 rows here), revealing every line; a second press collapses back
+      # to the capped tail and the fold links T4.log. The kitty protocol
+      # reports ctrl+5 as CSI 53;5u; legacy terminals fold it into a typed
+      # digit, so the press stays a no-op there.
+      require tty.waitForText("expand-3")
+      tty.send("\x1b[53;5u")
+      tty.drain(200)
+      require tty.waitForText("expand-9")  # 9 lines: a capped tail omits
+      check tty.rowContaining("lines omitted") < 0
+      check tty.rowContaining("expand-1") >= 0
+      tty.send("\x1b[53;5u")
+      tty.drain(200)
+      check tty.rowContaining("lines omitted") >= 0
+      tty.expectInHistory "expand-done"
       tty.expectInHistory "T4.log ↗"
-      tty.expectInHistory "$ printf 'slow-pre"
-      tty.expectInHistory "slow-pre"
+      tty.expectInHistory "$ printf 'expand-1"
       # A long bash command wraps to fill the terminal width instead of being
       # clipped at a fixed column. The full command is present in scrollback,
       # split across rows; its tail (well past the old 64-char clip) is visible.

@@ -4055,6 +4055,9 @@ input:
   ctrl+@        set the mark (alt+space too; bind exchange-point-and-mark)
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   ctrl+r / s    incremental history search (enter submits, esc accepts, ctrl+g aborts)
+  ctrl+5        expand/collapse the ongoing live shell output to a bit
+                less than the terminal height (kitty-protocol terminals;
+                elsewhere ctrl+5 types a digit and :show N remains)
   ctrl+9        retry now: cut a backoff wait or resend a data-less
                 in-flight request (kitty-protocol terminals; elsewhere
                 ctrl+9 types a digit and the :retry command remains)

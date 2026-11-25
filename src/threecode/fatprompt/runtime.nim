@@ -461,6 +461,9 @@ var
 var
   frameModelLock: Lock
   frameModelShared: FrameModel
+  liveExpanded: Atomic[bool]
+  ## Ctrl+5 expansion of the running live shell viewport. Dies with the
+  ## call: `clearAnimViewport` clears it at the fold.
 frameModelLock.initLock()
 
 proc setFrameModel*(m: FrameModel) {.gcsafe.} =
@@ -603,6 +606,8 @@ proc setAnimViewport*(banner: string; lines: openArray[string];
 
 proc clearAnimViewport*() {.gcsafe.} =
   ## Mark the viewport snapshot inactive (no live bash tool viewport).
+  ## A pending expansion dies with the call: the next one starts capped.
+  liveExpanded.store(false, moRelease)
   {.cast(gcsafe).}:
     acquire frameModelLock
     frameModelShared.viewport = ViewportSnapshot(active: false)
@@ -1161,8 +1166,8 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
 
 # --- Live follow (`:show N` on the running call) --------------------------
 #
-# While a bash tool streams, `:show N` (or a viewport click) can flush the
-# capped viewport's held lines into scrollback and follow the rest live:
+# While a bash tool streams, `:show N` can flush the capped viewport's held
+# lines into scrollback and follow the rest live:
 # every new line commits as it arrives, the viewport paints banner-only.
 # The snapshot keeps mirroring the full line buffer (the paint side drops
 # the rows), so `:unshow` instantly restores the capped tail and a re-follow
@@ -1171,7 +1176,6 @@ var
   followIdx: Atomic[int]
   followFlushPending: Atomic[bool]
   followTouchedIdx: Atomic[int]
-  mouseClickActive: Atomic[bool]
 
 proc runningToolViewportIdx*(): int {.gcsafe.} =
   ## Tool idx of the streaming viewport, 0 when none is running.
@@ -1199,8 +1203,8 @@ proc commitFollowLine*(idx: int; line: string) {.gcsafe.} =
 
 proc startFollowRunning*(): tuple[idx: int, ok: bool, note: string] {.gcsafe.} =
   ## Flush the running viewport's held (uncommitted) lines into scrollback
-  ## and follow the rest live. Input-thread context (`:show` command hook,
-  # or the mouse dispatcher).
+  ## and follow the rest live. Input-thread context (the `:show` command
+  ## hook).
   {.cast(gcsafe).}:
     followFlushPending.store(true, moRelease)
     var held: seq[string] = @[]
@@ -1261,39 +1265,38 @@ proc followFinish*(idx: int) {.gcsafe.} =
       clearAnimViewport()
       requestViewportPaint()
 
-proc toggleFollowFromClick*() {.gcsafe.} =
-  ## Mouse shortcut: a click inside the painted viewport toggles follow
-  ## for the running call. Same path `:show`/`:unshow` take.
+proc expandedViewportMaxLines(): int {.gcsafe.} =
+  ## The expanded live shell viewport's output-line cap: a bit less than
+  ## the terminal height, leaving room for the banner, the ticker row and
+  ## the editor below. 0 (keep the capped tail) when the terminal is
+  ## unavailable or too small to expand into.
+  {.cast(gcsafe).}:
+    let h = try: terminalHeight() except CatchableError: 0
+    if h <= 0: return 0
+    result = h - 5
+    if result < StreamMaxLines: result = 0
+
+proc effectiveViewportMaxLines(capped: int): int {.gcsafe.} =
+  ## The output-line cap the running viewport paints with: `capped` (the
+  ## snapshot's cap), or the near-full-terminal tail while Ctrl+5
+  ## expansion is on. Following paints banner-only, so the expansion
+  ## never shows there.
+  {.cast(gcsafe).}:
+    result = capped
+    if liveExpanded.load(moAcquire):
+      let h = expandedViewportMaxLines()
+      if h > capped: result = h
+
+proc toggleLiveShellExpand*() {.gcsafe.} =
+  ## Ctrl+5: the mouseless expand of the ongoing live shell. Following
+  ## (`:show`) collapses first; otherwise the running viewport toggles
+  ## between its capped tail and the near-full-terminal tail.
   {.cast(gcsafe).}:
     if followIdx.load(moAcquire) > 0:
       discard stopFollowRunning()
-    else:
-      discard startFollowRunning()
-
-proc dispatchMouseClick*(row: int) {.gcsafe.} =
-  ## An SGR press report's 1-based screen row. While reporting is on (a
-  ## bash tool is streaming), a left press anywhere toggles live follow:
-  ## with 1000h active the terminal no longer selects on plain clicks
-  ## (shift-click still does), so any press that reaches the app is an
-  ## intentional app interaction. Row hit-testing is wrong by construction:
-  ## the volatile block is not bottom-anchored (a scrollback app parks the
-  ## prompt right below the last content row), so absolute screen rows
-  ## cannot be derived from the terminal height.
-  {.cast(gcsafe).}:
-    if runningToolViewportIdx() > 0:
-      toggleFollowFromClick()
-
-proc setMouseClickReporting*(on: bool) {.gcsafe.} =
-  ## Enable/disable SGR click reporting (1000+1006), scoped to bash tool
-  ## runs: while on, the input thread parses press reports and a click
-  ## inside the painted viewport toggles live follow. Posix only (the
-  ## parser lives in the posix getCh); Windows keeps the command paths.
-  when defined(posix):
-    if mouseClickActive.load(moAcquire) == on: return
-    mouseClickActive.store(on, moRelease)
-    termengine.syncWrite(
-      if on: "\x1b[?1000h\x1b[?1006h" else: "\x1b[?1000l\x1b[?1006l")
-
+      return
+    if runningToolViewportIdx() <= 0: return
+    liveExpanded.store(not liveExpanded.load(moAcquire), moRelease)
 
 proc commitQueuedEcho*(text: string) =
   ## Echo a mid-turn queued prompt or command as an hourglass item pinned
@@ -1470,7 +1473,7 @@ proc guiLoop(unused: string) {.thread.} =
           # sync with the current geometry.
           let termW = currentTermW()
           var view = initStreamingView(
-            snap.maxLines, snap.idx, snap.banner)
+            effectiveViewportMaxLines(snap.maxLines), snap.idx, snap.banner)
           view.exitCode = snap.exitCode
           # Apply the rotating command symbol (starts at `$`, index 0) for
           # the live "currency ticker" effect during bash execution. The
@@ -1494,7 +1497,8 @@ proc guiLoop(unused: string) {.thread.} =
             # them. The snapshot still mirrors the full buffer for a later
             # `:unshow` (instant capped-tail restore) and re-follow.
             let symbol = view.symbol
-            view = initStreamingView(snap.maxLines, snap.idx, snap.banner)
+            view = initStreamingView(
+              effectiveViewportMaxLines(snap.maxLines), snap.idx, snap.banner)
             view.exitCode = snap.exitCode
             view.symbol = symbol
           let bannerRows = bannerRowCountAt(view, termW)
@@ -2662,43 +2666,6 @@ proc inputThreadProc() {.thread.} =
           stdinEof = true
         result = pendingInput.len > 0
 
-      var mousePushback: seq[int]
-      proc dispatchSgrPress(seqBuf: seq[int]) =
-        var s = ""
-        for b in seqBuf: s.add chr(b)
-        # s == "\x1b[<btn;col;rowM": body spans the first digit through the
-        # byte before the final M (s[3] is the button; s[4] would drop it).
-        if s.len < 7: return
-        let body = s[3 ..< s.len - 1]
-        let parts = body.split(';')
-        if parts.len != 3: return
-        let btn = try: parseInt(parts[0]) except ValueError: return
-        if btn != 0: return  # left press only
-        let row = try: parseInt(parts[2]) except ValueError: return
-        dispatchMouseClick(row)
-
-      proc tryMouseReport(): bool =
-        # Consumes one candidate sequence from pendingInput. True when it
-        # was an SGR mouse report (handled); false when it was not mouse
-        # (arrows, bracketed paste: every consumed byte is pushed back for
-        # the editor) or incomplete after a short wait (a lone Esc,
-        # pushed back the same way).
-        var seqBuf = @[pendingInput[0]]
-        pendingInput.delete(0)
-        while seqBuf.len < 24:
-          if pendingInput.len == 0 and not fillPending(30.cint):
-            break
-          seqBuf.add pendingInput[0]
-          pendingInput.delete(0)
-          if seqBuf.len == 2 and seqBuf[1] != ord('['): break
-          if seqBuf.len == 3 and seqBuf[2] != ord('<'): break
-          if seqBuf[^1] in {ord('M'), ord('m')}:
-            if seqBuf[^1] == ord('M'):
-              dispatchSgrPress(seqBuf)
-            return true
-        for b in seqBuf: mousePushback.add b
-        false
-
       let getCh: minline.GetChProc = proc(): int =
         while inputRunning():
           # An external editor owns stdin and the screen (runInHandoffTerminal):
@@ -2753,14 +2720,6 @@ proc inputThreadProc() {.thread.} =
                 continue
               break
             startupDrainDone = true
-          # SGR mouse reports arrive only while a bash tool runs (the
-          # enable bytes are scoped to it). Parse the report here, before
-          # any byte of it can reach the editor as junk keystrokes.
-          when defined(posix):
-            if mousePushback.len > 0:
-              result = mousePushback[0]
-              mousePushback.delete(0)
-              return
           # Park the persistent prompt (not the wizard) on a stale
           # idle-submit; see the protocol header for the lifecycle.
           if inputIdleLinePending.load(moAcquire) and
@@ -2768,20 +2727,6 @@ proc inputThreadProc() {.thread.} =
             sleep(5)
             continue
           if pendingInput.len > 0 or fillPending(200.cint):
-            when defined(posix):
-              # A byte that landed in this same poll window: mouse reports
-              # are intercepted at the read point (a report never reaches
-              # the editor as keystrokes; anything ESC-led that is NOT an
-              # SGR report is pushed back byte-for-byte).
-              if mouseClickActive.load(moAcquire) and pendingInput[0] == 27:
-                # Both outcomes need a loop restart: `true` means the SGR
-                # report was dispatched; `false` means the consumed bytes
-                # (a lone Esc or a non-mouse sequence) were parked in
-                # `mousePushback` — pendingInput is empty here, so falling
-                # through to `pendingInput[0]` would raise IndexDefect. The
-                # top-of-loop drain hands the parked bytes back as input.
-                discard tryMouseReport()
-                continue
             draftLastKeyAt = epochTime()
             result = pendingInput[0]
             pendingInput.delete(0)
@@ -3027,6 +2972,14 @@ proc inputThreadProc() {.thread.} =
           ed.clearLine()
         queueEmptySubmit()
     minline.CommandProcs["retry"] = retryKey
+    # Ctrl+5 (`expand-shell` in DefaultShortcuts, rebindable via
+    # [shortcuts]): expand/collapse the ongoing live shell viewport.
+    # Inert while a modal wizard owns the keys.
+    let expandShellKey: minline.KeyCallback = proc(ed: var minline.LineEditor) =
+      {.cast(gcsafe).}:
+        if inputModalActive.load(moAcquire): return
+        toggleLiveShellExpand()
+    minline.CommandProcs["expand-shell"] = expandShellKey
     # Ctrl+1 / Ctrl+2 / Ctrl+4 (kitty-protocol terminals; `allow`,
     # `allow-dir`, `deny` in DefaultShortcuts, rebindable via
     # [shortcuts]): the :allow / :allow-dir / :deny commands as keys.
