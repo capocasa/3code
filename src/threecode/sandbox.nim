@@ -544,17 +544,13 @@ proc backendWorks*(exe: string): bool =
           # holds - a write outside the writable root must fail - or
           # report the backend as absent so callers fall back to the
           # honest unconfined path.
-          # Outside the writable root: a leak file under `tmp` would
-          # create happily on every host and read as "no backend".
-          let leak = tempDir() / ("3code-bw-leak-" & $getCurrentProcessId())
-          removeFile(leak)
+          let leak = tmp / "leak-probe"
           var lp = startProcess(exe,
             args = ["sandbox", "restrict", tmp, "--", "touch", leak],
             options = {poStdErrToStdOut})
           let leakCode = lp.waitForExit()
           lp.close()
           result = leakCode != 0 and not fileExists(leak)
-          removeFile(leak)
       try:
         discard p.outputStream.readAll()
       except CatchableError:
