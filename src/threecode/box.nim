@@ -592,12 +592,19 @@ proc boxRestrict(args: seq[string]): int =
     # production tool path already warns when the fence is missing.
     try:
       var permits: seq[PermitEntry]
+      var snapshotError = ""
       if wallRaw:
         try:
           permits = readSnapshot(runtime.get("wall_permits"))
         except CatchableError as e:
-          stderr.writeLine("3code sandbox: permit snapshot: " & e.msg)
+          snapshotError = e.msg
       try:
+        if snapshotError.len > 0:
+          # An unreadable snapshot is nothing stamped: the raw launch
+          # cannot be honored, so it takes the refused stamp's fallback
+          # (proxy env), never a run with neither path.
+          raise newException(PermitStampError, "permit snapshot: " &
+            snapshotError)
         return int(runSandboxed(writable, a.cmd, read = readOnly,
                                 denied = denied, permits = permits))
       except PermitStampError as e:
