@@ -8,6 +8,7 @@
 ## while the answer is still in flight, and the reply (answer plus burned
 ## tokens) is drained from the job.
 import std/[json, strutils, unittest]
+import std/times except sleep
 import std/net except send
 from std/nativesockets import selectRead
 import std/atomics
@@ -328,9 +329,13 @@ suite ":btw side questions":
     check not replies[0].cancelled
     check replies[0].answer == "SIDE ANSWER"
     # The abandoned worker is released by its own timeout handshake and
-    # freed on a later poll.
+    # freed on a later poll. Bounded on the wall clock, not on an iteration
+    # count: the worker's wait is a 1ms-sleep loop whose real pace is the
+    # host's timer granularity, several times slower than nominal on a
+    # loaded macOS runner.
     h.srv.gate.store(true, moRelease)
-    for _ in 0 ..< (BtwReapWaitMs div 1000 + 4):
+    let reapDeadline = epochTime() + 15.0
+    while btwRetiredLive() > 0 and epochTime() < reapDeadline:
       replies.setLen 0
       pollBtw(replies)
       if btwRetiredLive() == 0: break
