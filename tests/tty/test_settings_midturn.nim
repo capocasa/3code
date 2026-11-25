@@ -64,11 +64,14 @@ suite "chrome settings during a turn":
       heldReply("main reply", 2500)
     ]))
     # Scratch diagnosis: trace every config write (globals serialized per
-    # call) while the session runs; dumped below on failure.
+    # call) plus the rest-loop ledger beats the write shares its loop with
+    # (the btw failures on osx came out of the same loop); dumped below on
+    # failure.
     let tracePath = root / "xdg" / "config_write_trace.txt"
     removeFile(tracePath)
     var env = stubEnv(root, root / "run" / "stub_responses.json")
     env.add (key: "test.config_write_trace", val: tracePath)
+    env.add (key: "test.btw_trace", val: tracePath)
     let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
                             cwd = root / "run",
                             env = env)

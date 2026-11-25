@@ -24,8 +24,21 @@ type
     gate: Atomic[bool]  # false holds every response until the test flips it
     payloads: seq[string]  # request bodies, in arrival order
     failFirst: Atomic[int]  # answer this many requests with a 503 first
+    dropFirstGated: bool  # close the first gated request instead of
+                          # answering it: the interrupt test's abandoned
+                          # call then ends by a plain EOF, the same end
+                          # any real provider eventually forces, and the
+                          # reap handshake stops depending on how the
+                          # runner delivers the would-be reply
     thread: Thread[BtwSrv]  # inside the ref: the OS trampoline keeps a
                            # pointer to this object, so it must not move
+
+proc srvTrace(s: BtwSrv; msg: string) =
+  # Timestamped stderr beats for the server half of each handshake; CI
+  # captures stderr in the testament log, so a stalled macOS runner names
+  # the phase that never ran.
+  stderr.writeLine("btwsrv: ", $epochTime(), " ", msg)
+  stderr.flushFile()
 
 proc send(client: Socket; data: string) =
   # flags = {}: raise on a client that already hung up instead of std/net's
@@ -50,6 +63,7 @@ proc serve(s: BtwSrv) {.thread.} =
         s.listener.accept(client)
       except CatchableError:
         continue
+      srvTrace(s, "accepted")
       try:
         var contentLength = 0
         while true:
@@ -64,6 +78,7 @@ proc serve(s: BtwSrv) {.thread.} =
           body.add chunk
         if body.len == 0: continue
         s.payloads.add body
+        srvTrace(s, "body " & $body.len & "B")
         # Gate: the test releases the response to observe the command
         # returning while the answer is still in flight. Bounded so a
         # forgotten flip cannot wedge the suite.
@@ -73,6 +88,13 @@ proc serve(s: BtwSrv) {.thread.} =
         while not s.gate.load(moAcquire) and waited < 10:
           discard sleep(1)
           inc waited
+        srvTrace(s, "gate after " & $waited & " polls")
+        if s.dropFirstGated and s.payloads.len == 1:
+          # The abandoned aside: end its call here. A real provider
+          # answers or drops it eventually; dropping keeps the handshake
+          # under test off the runner's reply-delivery timing.
+          srvTrace(s, "dropping the abandoned call")
+          continue
         if s.failFirst.load(moAcquire) > 0:
           discard s.failFirst.fetchSub(1, moAcquire)
           let err = """{"error":"overloaded"}"""
@@ -84,6 +106,7 @@ proc serve(s: BtwSrv) {.thread.} =
         send(client, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
           "Content-Length: " & $reply.len & "\r\nConnection: close\r\n\r\n" &
           reply)
+        srvTrace(s, "replied 200")
       except CatchableError:
         discard
       finally:
@@ -307,6 +330,7 @@ suite ":btw side questions":
     # gets its `! interrupted by user` row) and the registry is clear,
     # so a later aside's answer never queues behind the abandoned call.
     let h = startBtwSrv()
+    h.srv.dropFirstGated = true
     defer: stopBtwSrv(h)
     h.srv.gate.store(false, moRelease)
     check startBtw("what did foo.nim have?", history(), h.prof)
@@ -328,10 +352,12 @@ suite ":btw side questions":
     check not replies[0].cancelled
     check replies[0].answer == "SIDE ANSWER"
     # The abandoned worker is released by its own timeout handshake and
-    # freed on a later poll. Wall-clock deadline, not an iteration count:
+    # freed on a later poll. Its call ended with the server's drop (the
+    # transport error funnels through the same cancel-check the reply
+    # path uses), so what remains is the publish + BtwReapWaitMs handshake
+    # and the freeing poll. Wall-clock deadline, not an iteration count:
     # on a loaded runner (macos-15) each poll+sleep pass stretches and the
     # counted loop expired before the reap landed (observed 2026-11).
-    h.srv.gate.store(true, moRelease)
     let reapDeadline = epochTime() + (BtwReapWaitMs.float / 1000.0) + 30.0
     while epochTime() < reapDeadline:
       replies.setLen 0

@@ -938,6 +938,7 @@ proc clearSubmittedReceiptState() =
   emitFatPromptEvent clearTickerEvent()
   if restingLabel.len > 0:
     emitFatPromptEvent setBarEvent(restingLabel)
+    testTrace("btw_trace", "receipt cleared: bar set to resting " & restingLabel)
 
 proc accountSideCallUsage*(session: var Session; messages: JsonNode;
                           usage: Usage; window: int) =
@@ -988,6 +989,8 @@ proc accountSideCallUsage*(session: var Session; messages: JsonNode;
   if base.totalTokens > 0:
     emitFatPromptEvent setRestingLabelEvent(contextLabel(
       combined.promptTokens, window))
+  testTrace("btw_trace", "ledger label=" & label & " hintActive=" &
+    $pendingHint.active & " anchored=" & $liveEditorFooterAnchored())
   # The turn's last paint (the verdict step's commit) still shows the
   # pre-check bar, and the boundary's end path finalizes state without
   # repainting chrome - paint the combined bar here so the resting row

@@ -72,11 +72,20 @@ suite ":btw is async":
       assistantReply("second reply", %*{"promptTokens": 6100,
         "completionTokens": 4, "totalTokens": 6104, "cachedTokens": 0})
     ]))
+    # btw_trace: the rest-loop ledger diagnostic (config.nim's testTrace).
+    # The dump below lands in the .run.log parallel_tty prints whole for a
+    # failing test, so a CI-side ledger failure names its step.
+    let tracePath = root / "btw_trace.log"
+    var env = stubEnv(root, root / "run" / "stub_responses.json")
+    env.add (key: "test.btw_trace", val: tracePath)
     let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
                             cwd = root / "run",
-                            env = stubEnv(root,
-                              root / "run" / "stub_responses.json"))
-    defer: tty.close()
+                            env = env)
+    defer:
+      tty.close()
+      if fileExists(tracePath):
+        echo "---- btw trace ----"
+        echo readFile(tracePath)
     tty.expect "❯"
 
     # Turn 1: the turn's own request lands on the bar.

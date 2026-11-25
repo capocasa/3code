@@ -150,6 +150,10 @@ proc takeStashedBtwUsage*(): seq[Usage] =
   result = stashedUsage
   stashedUsage = @[]
 
+proc btwStashedLive*(): int =
+  ## Asides parked mid-turn, waiting for the rest that ledgers them.
+  stashedUsage.len
+
 proc btwJobsLive*(): int =
   ## Jobs spawned but not yet delivered. Lets frontends cheaply skip
   ## polling (and the library notice a pending `:btw` to drain).

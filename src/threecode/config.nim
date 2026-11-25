@@ -627,7 +627,7 @@ const
               "api_continue_fd", "gui_live", "stub_responses",
               "http_stub_responses", "stub_sandbox",
               "stub_verify_delay_ms", "screenshot_src", "geometry_audit",
-              "config_write_trace"]
+              "config_write_trace", "btw_trace"]
   ThinkBackValues = ["none", "turn", "all"]
   SearchEngines = ["exa", "parallel", "brave"]
   # `light` is the canonical light-background value; `bright` is the
@@ -1285,14 +1285,19 @@ proc userSettingPrefixes(eff: string): string =
     userSettingsRaw.getOrDefault("system-command-prefixes", ""))
   if norm != "": norm else: ":"
 
-proc cfgTrace*(msg: string) {.gcsafe.} =
-  ## Scratch diagnosis: append to [test] config_write_trace when armed.
-  let path = runtime.get("config_write_trace")
+proc testTrace*(key, msg: string) {.gcsafe.} =
+  ## Scratch diagnosis: append to the [test] trace file named by `key`
+  ## when a test armed it. No-op everywhere else.
+  let path = runtime.get(key)
   if path.len == 0: return
   var f: File
   if f.open(path, fmAppend):
     f.writeLine(msg)
     f.close()
+
+proc cfgTrace*(msg: string) {.gcsafe.} =
+  ## Scratch diagnosis: append to [test] config_write_trace when armed.
+  testTrace("config_write_trace", msg)
 
 proc writeConfigFile*(path: string, current: string,
                      providers: seq[ProviderRec]) =

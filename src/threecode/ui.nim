@@ -1624,6 +1624,7 @@ proc flushSettingConfig*() =
   ## at a rest.
   if settingConfigWritePending:
     settingConfigWritePending = false
+    testTrace("btw_trace", "flushSettingConfig: writing the deferred config")
     writeConfigFile(configPath(), activeCurrent, activeProviders)
 
 proc cmdStreamingList(): string =
@@ -2331,6 +2332,9 @@ proc deliverFinishedBtw*() =
         commitTranscriptBytes(errBytes, restoreEditor = true)
     var replies: seq[BtwReply]
     pollBtw(replies)
+    testTrace("btw_trace", "deliver parked=" & $replParkedAtInput.load(
+        moAcquire) & " replies=" & $replies.len & " stashedBefore=" &
+      $btwStashedLive())
     if replParkedAtInput.load(moAcquire):
       # At a rest the session is stable: ledger what the running turn
       # made us park, then this poll's own answers, in arrival order.
