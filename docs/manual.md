@@ -2049,8 +2049,12 @@ Windows notes:
   fenced commands running at once see the union of their permits. Past
   512 address and port pairs (every address of every allowed host, both
   generations) a run takes env mode, with a line on stderr.
-- The grant, and whether permitting port 53 revives name resolution inside
-  the fence, are unverified on real hardware at the time of writing.
+- Checked on a Windows 11 host (26100): the grant is real (the probe
+  exits 0 for the granted account, 1 for any other standard account), a raw
+  command reached its permitted address and was refused on any other, and
+  names resolved inside the fence. What ran there is `3code sandbox` and
+  `3code wall wfp-stamp-probe`; the bash tool's own raw launch has not run
+  on Windows hardware yet.
 
 macOS notes:
 
