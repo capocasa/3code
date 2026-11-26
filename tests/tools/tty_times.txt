@@ -1,0 +1,56 @@
+# Wall seconds per tty test on the Linux amd64 runner (run 45727242825,
+# soak tier from nightly 45815171280). parallel_tty.py --shard balances
+# shards with these; a missing stem costs balance, never a run. Refresh
+# from the [run i/n] lines of a full run when the suite changes shape.
+test_429_typing_during_backoff 6.7
+test_broken_stdout_exit 0.7
+test_btw_async 5.0
+test_clear_follow_prompt 2.9
+test_computer_shot 0.0
+test_conpty_diag 0.0
+test_cyber_mode_ctrlr 0.0
+test_empty_enter_freeze 1.2
+test_empty_prompt_continue 2.1
+test_escape_reassembly 0.0
+test_expect_contract 0.3
+test_experimental_gate_freeze 0.3
+test_first_prompt_overwrite 0.7
+test_first_submit_blank_row 1.7
+test_frame_contract 3.0
+test_goal_armed_resume 0.9
+test_goal_edit 3.6
+test_goal_mode_ctrlr 14.1
+test_goal_resume_prompt 0.9
+test_gui_join_freeze 11.0
+test_internal_error_survives 1.4
+test_interrupt_network_connect 44.8
+test_interrupt_prestream_freeze 2.9
+test_isearch_recall 3.3
+test_no_config_bootstrap 1.5
+test_opost_discipline 0.5
+test_pause_no_indicator 13.4
+test_provider_add_badargs_freeze 1.2
+test_provider_bailout_echo 1.1
+test_provider_edit_crash 1.2
+test_provider_verify_cancel 4.9
+test_provider_wizard_cancel 8.2
+test_provider_wizard_resize 1.8
+test_provider_wizard_wide_prompt 2.0
+test_quit_signals 11.4
+test_rebreak_item_order 2.2
+test_repro_spacing 0.6
+test_resize_ticker 8.7
+test_resume_replay_bytes 3.5
+test_retry_exhaustion 9.2
+test_retry_fixes 8.3
+test_sandbox_ask_prompt 22.6
+test_scenario_selector 0.0
+test_selection 8.3
+test_settings_midturn 2.7
+test_shell_and_editor 12.2
+test_slurp_resize_reasoning 3.2
+test_startup_history_leak 0.6
+test_submit_race_real_stream 30
+test_suspend_kitty 18.6
+test_tty_functional 121.2
+test_typing_during_stream 13.5

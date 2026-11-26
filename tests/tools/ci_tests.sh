@@ -22,6 +22,9 @@
 # Usage: tests/tools/ci_tests.sh [global-timeout-secs] [categories...]
 #   PER_TEST_SECS env overrides the per-test cap (default 720, 0=off).
 #   SOAK=1 adds the four tty stress tests to the run (default: nightly only).
+#   TTY_SHARD=i/n runs only tty subset i of n (duration-balanced by
+#   parallel_tty.py); TTY_SHARD=none runs everything but tty. CI splits the
+#   tty category across jobs this way; unset runs the whole suite here.
 set -u
 
 # build/test-nimflags: extra nim flags for the test binary, one line.
@@ -94,6 +97,22 @@ echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}
 run_testament() {
   rc_all=0
   if [ $# -eq 0 ]; then
+    tty_shard=''; tty_skip=0
+    case "${TTY_SHARD:-}" in
+      '') ;;
+      none) tty_skip=1 ;;
+      */*) tty_shard="--shard $TTY_SHARD" ;;
+      *) echo "ci_tests: TTY_SHARD wants i/n or none, got '$TTY_SHARD'" >&2
+         return 2 ;;
+    esac
+    if [ -n "$tty_shard" ]; then
+      soak=''
+      [ "${SOAK:-0}" = 1 ] && soak='--include-soak'
+      # $soak and $tty_shard are whole words.
+      python3 tests/tools/parallel_tty.py $soak $tty_shard \
+        --timeout "${PER_TEST_SECS:-720}"
+      return $?
+    fi
     # Default selection: config and core folded, every other non-tty file
     # in one worker pool, then tty alone. Testament still owns each pooled
     # file's spec (matrix, disabled, exit codes), so coverage is unchanged;
@@ -132,7 +151,7 @@ run_testament() {
       python3 tests/tools/parallel_files.py \
         --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
     fi
-    if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
+    if [ "$tty_skip" = 0 ] && [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
       # The four stress tests are the soak tier: 287s together, a third of
       # the tty run. The per-change suite leaves them out; SOAK=1 (nightly)
       # runs them with the rest of the suite.

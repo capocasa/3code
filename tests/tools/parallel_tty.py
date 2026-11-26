@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Build the tty tests in parallel, then run them one at a time.
 
+With --shard i/n the tests are split into n duration-balanced subsets
+(longest-processing-time over tests/tools/tty_times.txt) and only subset i
+is built and run; CI runs the subsets as separate jobs, so each runner
+still runs one PTY test at a time while the whole category takes a third
+of the wall time. Every test of the selection lands in exactly one shard,
+so a shard run proves what a full run proves for its subset.
+
 `testament cat tty` compiles and runs each of the 55 tty files sequentially:
 one full source compile per file, then the test. The tty tests are
 PTY-scheduler-sensitive, so the run phase stays serial, but the compile phase
@@ -13,13 +20,14 @@ Testament's spec handling is preserved where the tty category uses it:
 No tty test uses matrix/output/exitCode specs.
 
 Usage: parallel_tty.py [-j N] [--timeout SECS] [--build-only] [--list]
-                  [--soak | --include-soak]
+                  [--soak | --include-soak] [--shard i/n]
   -j N             compile workers (default: min(4, max(1, cpu_count - 1)))
   --timeout S      per-test run cap, 0 = off (default 720)
   --build-only     compile and stop
   --list           print the selected files and exit
   --soak           run only the soak tests in tests/tools/tty_soak.txt
   --include-soak   run the soak tests too (the default excludes them)
+  --shard i/n      build and run only balanced subset i of n
 """
 import argparse
 import hashlib
@@ -36,6 +44,10 @@ TTY = os.path.join(ROOT, "tests", "tty")
 CACHE = os.path.join(ROOT, "nimcache", "parallel_tty")
 NIMFLAGS = ["--hints:on", "-d:testing", "--nimblePath:build/deps/pkgs2"]
 SOAK_LIST = os.path.join(ROOT, "tests", "tools", "tty_soak.txt")
+TIMES_LIST = os.path.join(ROOT, "tests", "tools", "tty_times.txt")
+# A stem missing from tty_times.txt: near the suite median, so an unknown
+# test neither starves a shard nor lands all of them on one.
+UNKNOWN_SECS = 3.0
 # The two stub variants the tty tests build through ensureStubBinary. The
 # tag is Nim's `$secureHash(defines)` (sha1, first 16 hex chars, lowercase).
 STUB_VARIANTS = [
@@ -57,6 +69,36 @@ def read_stems(path):
         return set()
     return {l.strip() for l in lines
             if l.strip() and not l.lstrip().startswith("#")}
+
+
+def read_times(path):
+    times = {}
+    try:
+        for line in open(path, encoding="utf-8"):
+            parts = line.split()
+            if len(parts) == 2 and not parts[0].startswith("#"):
+                times[parts[0]] = float(parts[1])
+    except (OSError, ValueError):
+        pass
+    return times
+
+
+def shard_of(paths, index, count):
+    """Subset `index` (1-based) of `count` duration-balanced subsets.
+
+    Longest-processing-time: walk the tests from slowest to fastest and
+    append each to the shard with the least load so far. Deterministic, so
+    the same selection always splits the same way.
+    """
+    times = read_times(TIMES_LIST)
+    loads = [0.0] * count
+    shards = [[] for _ in range(count)]
+    for path in sorted(paths, key=lambda p: -times.get(os.path.basename(p)[:-4],
+                                                       UNKNOWN_SECS)):
+        i = min(range(count), key=lambda k: (loads[k], k))
+        loads[i] += times.get(os.path.basename(path)[:-4], UNKNOWN_SECS)
+        shards[i].append(path)
+    return sorted(shards[index - 1])
 
 
 def platform():
@@ -149,9 +191,17 @@ def main():
     ap.add_argument("--include-soak", action="store_true",
                     help="run the soak tests too (default: exclude)")
     ap.add_argument("--file", help="run only the stems listed in this file")
+    ap.add_argument("--shard", metavar="i/n",
+                    help="build and run only subset i of n")
     args = ap.parse_args()
     if args.soak and args.include_soak:
         ap.error("--soak and --include-soak are mutually exclusive")
+    shard = None
+    if args.shard:
+        m = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", args.shard)
+        if not m or int(m.group(1)) > int(m.group(2)):
+            ap.error("--shard wants i/n with 1 <= i <= n, got " + args.shard)
+        shard = (int(m.group(1)), int(m.group(2)))
 
     here = platform()
     files = sorted(f for f in os.listdir(TTY)
@@ -178,6 +228,8 @@ def main():
             tier_skipped.append((f, "soak"))
         else:
             selected.append(path)
+    if shard:
+        selected = shard_of(selected, *shard)
 
     if args.list:
         for p in selected:
@@ -190,7 +242,8 @@ def main():
 
     logdir = os.path.join(ROOT, "build", "parallel_tty_logs")
     os.makedirs(logdir, exist_ok=True)
-    print(f"parallel_tty: {len(selected)} files, {len(skipped)} disabled, "
+    which = f"shard {shard[0]}/{shard[1]}, " if shard else ""
+    print(f"parallel_tty: {which}{len(selected)} files, {len(skipped)} disabled, "
           f"{len(tier_skipped)} other-tier, {args.jobs} compile workers, "
           f"run cap {args.timeout or 'off'}s", flush=True)
 
@@ -263,7 +316,7 @@ def main():
                   f"{dur:.1f}s)", flush=True)
             print(tail(log), flush=True)
 
-    print(f"parallel_tty: {len(selected) - len(run_failed)}/{len(selected)} "
+    print(f"parallel_tty: {which}{len(selected) - len(run_failed)}/{len(selected)} "
           f"passed, {len(skipped)} disabled, {len(tier_skipped)} "
           f"other-tier, {len(failed)} build failures", flush=True)
     if failed:
