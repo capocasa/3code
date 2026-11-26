@@ -463,8 +463,12 @@ proc promptBody(s: AgentSession; text: string): string =
                       "content": buildUserMessage(s.messages, promptText,
                         s.state.cwd, s.profile.vision,
                         sessionImageDir(s.state.savePath),
-                        lastBash = lastBashInclude(s.state.toolLog),
-                        lastPrompt = s.state.lastPrompt)}
+                        lastLLM = lastAssistantText(s.messages),
+                        lastPrompt = s.state.lastPrompt,
+                        lastCmd = lastBashCommand(s.state.toolLog),
+                        lastBashOut = lastBashOutput(s.state.toolLog),
+                        lastBtw = lastBtwInclude(s.state.lastBtwQ,
+                          s.state.lastBtwA))}
     if text.strip.len > 0:
       s.state.lastPrompt = text
     refreshSystemPrompt(s.messages, s.profile, s.state.promptState)
@@ -606,6 +610,8 @@ proc command*(s: AgentSession; cmd: string): string =
         continue
       accountSideCallUsage(s.state, s.messages, r.usage,
                            contextWindowFor(s.profile))
+      s.state.lastBtwQ = r.question
+      s.state.lastBtwA = r.answer
       result.add "\n\n" & normalizeItem(btwAnswerBytes(r.answer))
 
 proc interrupt*(s: AgentSession) =

@@ -254,6 +254,8 @@ suite ":btw side questions":
     check btwJobsLive() == 0
     check replies.len == 1
     check replies[0].answer == "SIDE ANSWER"
+    # The reply echoes its question so the `@?` reference can quote both.
+    check replies[0].question == "what did foo.nim have?"
     check replies[0].usage.totalTokens == 18
     # The contract: no question, no answer, nothing new in the context —
     # before and after delivery alike.

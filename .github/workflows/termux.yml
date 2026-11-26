@@ -211,24 +211,45 @@ jobs:
     # RC ops safe. This job cross-compiles the tty stress tests + a stub
     # 3code to arm64 with --mm:yrc and runs them in emulated Termux
     # (termux-docker) to confirm the freeze is gone on the target that
-    # actually aborts. Requires Nim devel, so it uses nim-version: devel
-    # (the build/smoke jobs stay on stable for the shipped binary).
+    # actually aborts. Requires Nim devel, so the stress cross-compiles run
+    # on nim-version: devel (the build/smoke jobs stay on stable for the
+    # shipped binary), after the dependencies were installed with the
+    # stable toolchain like every other job.
     runs-on: ubuntu-22.04
+    # A healthy run takes 13-17 min (devel builds from source, the tests
+    # run under qemu). The default 360 would let a hung dependency install
+    # hold a runner for six hours (observed 2026-11-25).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
+      # The dependencies are installed exactly as the build job does, with
+      # the stable toolchain the lock pins. Devel's nimble (v0.28) cannot
+      # do this step: it insists on the locked Nim version and downloads
+      # it when the compiler differs, and with --useSystemNim its build of
+      # the deps' binaries stalled on "Building nimdiff/nimdiff" until the
+      # runner killed the step (exit 143, four runs on 2026-11-25). Only
+      # the sources land in pkgs2 for the cross-compiles below, so which
+      # compiler built the throwaway binaries does not matter.
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.4.0
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-stable
+
+      - name: Install dependencies
+        run: |
+          nimble install -y --depsOnly
+
+      # Devel goes on PATH ahead of the stable toolchain for the
+      # cross-compiles; the deps install above never sees it.
       - uses: jiro4989/setup-nim-action@v2
         with:
           nim-version: devel
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
-
-      - name: Install dependencies
-        # nimble.lock pins deps for the shipped builds; this experimental
-        # stress job rides devel Nim on purpose and keeps the same lock.
-        run: |
-          nimble install -y --depsOnly
 
       - name: Generate nimble.paths for direct nim invocations
         # Same as the build job: the lock disables nim's pkgs2 scan and the

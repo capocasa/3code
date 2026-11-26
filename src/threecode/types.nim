@@ -419,8 +419,10 @@ type
     usage*: Usage
     lastPromptTokens*: int
     toolLog*: seq[ToolRecord]
-    lastPrompt*: string  ## raw previous user input (`@+`); in-memory only
+    lastPrompt*: string  ## raw previous user input (`@>`); in-memory only
                           ## for now, not persisted across resume
+    lastBtwQ*: string    ## last `:btw` question (`@?`); in-memory only
+    lastBtwA*: string    ## last `:btw` answer (`@?`); in-memory only
     savePath*: string
     profileName*: string
     created*: string
