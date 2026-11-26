@@ -2,6 +2,19 @@ Changelog
 
 Unreleased
 
+- **The live shell viewport expands with Ctrl+5 and no longer reacts to
+  mouse clicks.** While a bash tool streams, Ctrl+5 (`expand-shell`,
+  rebindable, kitty-protocol terminals like its sibling Ctrl+9) toggles
+  the viewport between its capped tail and an expanded tail a bit less
+  than the terminal height; it is inert when nothing streams, and the
+  expansion dies when the call folds, so the next one starts capped.
+  The click-to-toggle path is gone: mouse reporting was only ever
+  enabled for the viewport and its row hit-testing was wrong by
+  construction, since the volatile block is not bottom-anchored and
+  absolute screen rows cannot be derived from the terminal height.
+  `:show N` / `:unshow` keep doing what the click used to pretend to
+  do. (`tests/tty/test_tty_functional.nim`)
+
 - **ESC and Ctrl-C cancel the running request again, draft or not.** A
   cancel key pressed mid-turn used to clear a typed draft and leave
   the request running (September's "esc clears the draft" change), so
