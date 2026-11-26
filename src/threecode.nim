@@ -25,7 +25,7 @@
 ##     ├── types        shared types + globals
 ##     └── minline      readline-style input
 
-import std/[json, os, parseopt, strformat, strutils, tables, terminal, times]
+import std/[json, locks, os, parseopt, strformat, strutils, tables, terminal, times]
 when not defined(windows):
   import std/atomics
 import std/exitprocs
@@ -302,16 +302,21 @@ const NotifyMinSeconds = 5.0
 proc notifyTurnFinished(messages: JsonNode) {.gcsafe.} =
   let body = turnFinishedBody(messages)
   if body.len == 0: return
-  {.cast(gcsafe).}:
-    # The backends shell out (macOS runs a compiled Swift helper) and are
-    # not annotated gcsafe; the thread wrapper below guarantees the call
-    # never lands on the controller.
-    notify("3code", "Turn finished", body)
+  when defined(macosx):
+    # The macOS backend compiles and runs a Swift helper on first use; a
+    # consent-waiting helper must never park the controller between the
+    # turn's end and the rest loop the deferred side effects ride, so the
+    # call fires on a one-shot thread. Linux's dbus path is a fast direct
+    # call and stays synchronous.
+    {.cast(gcsafe).}:
+      var notifier: Thread[JsonNode]
+      createThread(notifier, notifyTurnFinishedThreaded, messages)
+  else:
+    {.cast(gcsafe).}:
+      notify("3code", "Turn finished", body)
 
 proc notifyTurnFinishedThreaded(messages: JsonNode) {.thread, gcsafe.} =
-  ## Controller thread's fire-and-forget notification body (see the spawn
-  ## site in runTurnWithSafetyNet). Deep-copies nothing: the thread owns
-  ## the JsonNode handed over by the spawn.
+  ## See the spawn site above; the thread owns the JsonNode handed over.
   notifyTurnFinished(messages)
 
 proc commitUserPromptTranscript(line: string) =
@@ -1271,13 +1276,7 @@ proc main() =
         # and runs a Swift helper), and a slow or consent-waiting helper
         # must never park the controller between the turn's end and the
         # rest loop the deferred side effects ride.
-        debugOut "notify: firing turn-finished notification"
-        var notifier: Thread[JsonNode]
-        createThread(notifier, notifyTurnFinishedThreaded, messages)
-        # Detached by the join-less contract: the thread's JsonNode arg is
-        # its own copy (system copies thread args), so nothing here dangles.
-        discard
-        debugOut "notify: notification dispatched"
+        notifyTurnFinished(messages)
       result = handleBufferedAfterTurn(interrupted)
     except IOError as e:
       stderr.writeLine "3code: output stream broken (" & e.msg &

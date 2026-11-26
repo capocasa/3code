@@ -1121,7 +1121,8 @@ proc send*(s: TtySession; text: string) =
       var wfd: TPollfd
       wfd.fd = s.masterFd
       wfd.events = POLLOUT
-      if poll(addr wfd, 1.Tnfds, 2000.cint) > 0:
+      let canWrite = poll(addr wfd, 1.Tnfds, 2000.cint) > 0
+      if canWrite:
         discard posix.write(s.masterFd, text[0].unsafeAddr, text.len)
   var printable = ""
   var inEsc = false

@@ -2647,7 +2647,6 @@ proc inputThreadProc() {.thread.} =
           return true
         if stdinEof:
           return false
-        debugOut "fillPending: polling waitMs=" & $waitMs
         var pfd: Tpollfd
         pfd.fd = STDIN_FILENO
         pfd.events = POLLIN
