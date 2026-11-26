@@ -2247,7 +2247,8 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     return false
   try:
     result = runTurns(p, messages, session)
-    debugOut "runTurnsInteractive: runTurns returned interrupted=" & $result
+    when defined(macosx):
+      debugOut "runTurnsInteractive: runTurns returned interrupted=" & $result
     return result
   except SessionSaveError as e:
     # A checkpoint save could not commit: the previous transcript on disk

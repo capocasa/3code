@@ -1615,7 +1615,8 @@ proc persistSettingConfig() =
   ## raised; `flushSettingConfig` writes at the next rest. At a rest — or
   ## in a frontend without a turn state, like the library — write now.
   if not turnActive():
-    debugOut "persistSettingConfig: writing now"
+    when defined(macosx):
+      debugOut "persistSettingConfig: writing now"
     writeConfigFile(configPath(), activeCurrent, activeProviders)
   else:
     debugOut "persistSettingConfig: deferred to the next rest"
@@ -2446,10 +2447,11 @@ proc readInput*(editor: var minline.LineEditor, done: var bool,
     let nowS = epochTime()
     if nowS - lastBeat >= 1.0:
       lastBeat = nowS
-      debugOut &"rest beat: parked={replParkedAtInput.load(moAcquire)} " &
-        &"stash={btwStashedLive()} jobs={btwJobsLive()} " &
-        &"retired={btwRetiredLive()} posted={postedBtwLive()} " &
-        &"turnActive={turnActive()} pendingWrite={settingConfigWritePending}"
+      when defined(macosx):
+        debugOut &"rest beat: parked={replParkedAtInput.load(moAcquire)} " &
+          &"stash={btwStashedLive()} jobs={btwJobsLive()} " &
+          &"retired={btwRetiredLive()} posted={postedBtwLive()} " &
+          &"turnActive={turnActive()} pendingWrite={settingConfigWritePending}"
     # The wait is also the delivery window for async side questions: a
     # finished `:btw` worker lands its answer here, between keystrokes,
     # without the prompt ever having blocked for it. It is also the rest
