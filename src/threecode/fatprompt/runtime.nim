@@ -2662,7 +2662,6 @@ proc inputThreadProc() {.thread.} =
         let n = posix.read(fd, addr ch, 1)
         if n == 1:
           pendingInput.add ch.ord.int
-          debugOut "stdin byte " & $ch.ord & " ('" & ch & "')"
         elif n == 0:
           # poll() reports a closed/EOF fd (e.g. `/dev/null` stdin, a
           # daemonized process, or a closed PTY) as perpetually readable,
