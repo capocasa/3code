@@ -2189,13 +2189,11 @@ when defined(posix):
         var buf: array[64, char]
         let n = posix.read(0.cint, addr buf[0], buf.len)
         if n > 0:
-          for i in 0 ..< n.int:
-            let b = buf[i].uint8
-            {.cast(gcsafe).}:
-              if b in cancelWatchSnapshot:
-                requestTurnInterrupt("api-cancel-watcher")
-                restoreCancelTermios()
-                return
+          {.cast(gcsafe).}:
+            if stashTypedBytes(addr buf, n.int, cancelWatchSnapshot):
+              requestTurnInterrupt("api-cancel-watcher")
+              restoreCancelTermios()
+              return
 
   proc drainCancelInput() =
     if isatty(0.cint) == 0: return
@@ -2210,6 +2208,8 @@ when defined(posix):
       let n = posix.read(0.cint, addr buf[0], buf.len)
       if n <= 0:
         break
+      {.cast(gcsafe).}:
+        discard stashTypedBytes(addr buf, n.int, cancelWatchSnapshot)
 
   proc startCancelWatcher() =
     if cancelWatcherActive: return
@@ -2271,9 +2271,8 @@ proc installWizardVerifyCancel*(jobDone: proc(): bool {.closure.};
               var buf: array[64, char]
               let n = posix.read(0.cint, addr buf[0], buf.len)
               if n > 0:
-                for i in 0 ..< n.int:
-                  let b = buf[i].uint8
-                  if b in cancelWatchSnapshot:
+                {.cast(gcsafe).}:
+                  if stashTypedBytes(addr buf, n.int, cancelWatchSnapshot):
                     cancelJob()
                     return true
           return false
@@ -2640,8 +2639,15 @@ proc inputThreadProc() {.thread.} =
       proc fillPending(waitMs: cint): bool =
         if pendingInput.len > 0:
           return true
+        # Bytes the cancel watcher read while the turn held stdin come
+        # back here first, in arrival order.
+        let stashed = takeStashedByte()
+        if stashed >= 0:
+          pendingInput.add stashed
+          return true
         if stdinEof:
           return false
+        debugOut "fillPending: polling waitMs=" & $waitMs
         var pfd: Tpollfd
         pfd.fd = STDIN_FILENO
         pfd.events = POLLIN
@@ -2657,6 +2663,7 @@ proc inputThreadProc() {.thread.} =
         let n = posix.read(fd, addr ch, 1)
         if n == 1:
           pendingInput.add ch.ord.int
+          debugOut "stdin byte " & $ch.ord & " ('" & ch & "')"
         elif n == 0:
           # poll() reports a closed/EOF fd (e.g. `/dev/null` stdin, a
           # daemonized process, or a closed PTY) as perpetually readable,

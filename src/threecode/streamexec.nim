@@ -566,6 +566,10 @@ when defined(posix):
       let n = posix.read(0.cint, addr buf[0], buf.len)
       if n <= 0:
         break
+      {.cast(gcsafe).}:
+        # Same stdin-sharing contract as the turn's cancel watcher: bytes
+        # that are not the tool-cancel keys belong to the prompt editor.
+        discard stashTypedBytes(addr buf, n.int, {0x03'u8, 0x1b'u8})
 
   proc isAlive(pid: Pid): bool {.inline.} =
     ## Check if a process is still alive using kill(pid, 0).
@@ -581,9 +585,8 @@ when defined(posix):
         var buf: array[64, char]
         let n = posix.read(0.cint, addr buf[0], buf.len)
         if n > 0:
-          for i in 0 ..< n.int:
-            let b = buf[i].uint8
-            if b == 0x03 or b == 0x1b:
+          {.cast(gcsafe).}:
+            if stashTypedBytes(addr buf, n.int, {0x03'u8, 0x1b'u8}):
               toolCancelHit.store(true, moRelaxed)
               cancelActiveTool()
               let pid = toolCancelPid.load(moRelaxed)
