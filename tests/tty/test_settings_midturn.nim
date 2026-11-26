@@ -122,12 +122,12 @@ suite "chrome settings during a turn":
     # briefly so the assertion measures the contract (the write happens)
     # and not a paint-vs-fsync race.
     var saved = ""
-    # 15s: the osx runner stretches the stub's hold past the nominal
+    # 30s: the osx runner stretches the stub's hold past the nominal
     # 2.5s (the hold loop rides the frame-ack handshake, and the ack
     # cadence lags on the 3-core runner), so the turn's yield - and the
     # write ordered with it - lands ~10s in. The contract is the write
     # happens at the finalize; the window only bounds the wait.
-    let deadline = epochTime() + 15.0
+    let deadline = epochTime() + 30.0
     while epochTime() < deadline:
       saved = readFile(configFile)
       if "notify = \"off\"" in saved and "tab-title = \"off\"" in saved:
