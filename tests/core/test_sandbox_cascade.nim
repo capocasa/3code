@@ -422,9 +422,13 @@ suite "single active policy file":
         let r = handleCommandResult(":sb ask " & opt, messages, session,
                                     prof, editor)
         check r.ok
-        # The item IS the receipt: icon, the command sans colon, the
-        # edit's diff (sandboxChangeBytes).
+        # The item IS the receipt: icon and the command sans colon.
+        # Rule verbs name the one rule they wrote - no diff rows; the
+        # diff display is `:sandbox edit`'s alone.
         check r.body.contains("sandbox ask " & opt.replace(DirSep, '/'))
+        for line in r.body.splitLines:
+          let t = line.strip
+          check not (t.len > 0 and (t[0] == '-' or t[0] == '+'))
         check readFile(repoFile) ==
           "ask " & opt.replace(DirSep, '/') & "\n" &
           "allow " & varDir.replace(DirSep, '/') & "\n"
@@ -432,8 +436,43 @@ suite "single active policy file":
         let r = handleCommandResult(":sandbox edit", messages, session,
                                     prof, editor)
         check r.ok
-        check r.body.contains("sandbox updated: edited")
+        # edit is the one verb whose receipt carries the diff rows: the
+        # editor rewrote deny opt -> (removed) and allow ./ -> added.
+        check r.body.contains("sandbox edit")
+        check r.body.contains("-allow " & varDir)
+        check r.body.contains("+allow ./")
         check readFile(repoFile) == "deny " & opt & "\nallow ./\n"
+    finally:
+      setCurrentDir(oldCwd)
+
+  test "a :sandbox allow receipt carries no diff rows":
+    # The rule verbs' receipt is the bare icon+phrase item; only
+    # `:sandbox edit` may show -/+ lines.
+    let (home, projDir) = newFixture("allowreceipt")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "ask " & opt & "\n")
+    var messages = %* []
+    var session = Session()
+    var prof = Profile()
+    var editor: minline.LineEditor
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      let r = handleCommandResult(":sandbox allow ./work", messages,
+                                  session, prof, editor)
+      check r.ok
+      check r.body.contains("sandbox allow ./work")
+      # diff rows are indented two spaces ("  -old" / "  +new"); strip
+      # before testing the leading sign.
+      for line in r.body.splitLines:
+        let t = line.strip
+        doAssert not (t.len > 0 and (t[0] == '-' or t[0] == '+')),
+          "receipt carries a diff row: " & line
+      check readFile(repoFile) ==
+        "ask " & opt & "\nallow ./work\n"
     finally:
       setCurrentDir(oldCwd)
 

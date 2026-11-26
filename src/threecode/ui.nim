@@ -2775,8 +2775,8 @@ proc sandboxVerbBody(verb, argPath: string;
     messages: var JsonNode): tuple[ok: bool, body: string] =
   ## Apply `:sandbox <verb> <argPath>` (allow/readonly/deny/ask) and
   ## build its answer: on success the scrollback item - icon, the
-  ## phrase, the edit's diff - and nothing else (the item IS the
-  ## receipt). The command is printed to the model too, without the
+  ## phrase, no diff rows (the item IS the receipt; the diff display
+  ## is `:sandbox edit`'s alone). The command is printed to the model too, without the
   ## colon, as a user message: the next turn sees the policy change.
   ## A literal `@d` expands to the last path an ask requested.
   var path = argPath
@@ -2797,7 +2797,9 @@ proc sandboxVerbBody(verb, argPath: string;
     return (false, cmdErrorS("could not write sandbox file at " & sf))
   messages.add %*{"role": "user", "agentSent": true,
     "content": "sandbox " & verb & " " & path}
-  (true, sandboxChangeBytes(verb, path, sandbox.lastRuleDiff))
+  # Receipt without the diff rows: the verb names the one rule it wrote;
+  # the diff display is `:sandbox edit`'s alone.
+  (true, sandboxChangeBytes(verb, path, (@[], @[])))
 
 proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
                    prof: var Profile, editor: var minline.LineEditor): bool =
@@ -3067,12 +3069,17 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       of "on", "off":
         body.add cmdSandboxSettingSelect(verb)
       of "edit":
-        let msg = sandbox.editPolicy(sandbox.sandboxPathInCwd())
+        # The only :sandbox verb whose receipt carries the diff rows:
+        # allow/readonly/deny/ask name their single rule in the phrase,
+        # but the editor may touch any number of rules.
+        let sf = sandbox.sandboxPathInCwd()
+        let msg = sandbox.editPolicy(sf)
         if msg.startsWith("error:"):
           ok = false
           respErr msg
         else:
-          resp msg
+          resp sandboxChangeBytes("edit", sandbox.askPathDisplay(sf),
+            sandbox.lastRuleDiff)
       of "allow", "readonly", "deny", "ask":
         if parts.len < 2:
           ok = false

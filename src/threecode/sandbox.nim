@@ -1157,9 +1157,14 @@ proc editPolicy*(sandboxFile: string): string =
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(getCurrentDir()):
       return "error: could not create sandbox file at " & sandboxFile
+  # Snapshot AFTER materialization: a first-ever edit materializes the
+  # whole baseline from the user file, and only what the editor changed
+  # is this edit's diff (lastRuleDiff, for the scrollback item).
+  let before = policyLinesOf(sandboxFile)
   let code = runExternalEditor(sandboxFile)
   if code != 0:
     return "error: editor exited with status " & $code
   current = loadPolicy(getCurrentDir())
+  noteRuleChange(before, policyLinesOf(sandboxFile))
   "sandbox updated: edited " & sandboxFile
 
