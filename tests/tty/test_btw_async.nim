@@ -29,6 +29,10 @@ proc writeConfiguredProvider(root: string) =
   writeFile(root / "xdg" / "3code" / "config", """
 [settings]
 current = "stub.stub-model"
+# The ledger/aside contract has nothing to do with desktop toasts, and the
+# first macos notification compiles tinotify's Swift helper, starving the
+# runner past every timing window in these tests.
+notify = "off"
 
 [provider]
 name = "stub"
