@@ -12,15 +12,15 @@
       }
     },
     "sandwall": {
-      "version": "0.5.18",
-      "vcsRevision": "272e6d3ad8e86ac2c1338adac1539f8d8cb89519",
+      "version": "0.6.0",
+      "vcsRevision": "a51e419d61a72848c321ac78e01d22feb9c5936f",
       "url": "https://github.com/capocasa/sandwall",
       "downloadMethod": "git",
       "dependencies": [
         "nim"
       ],
       "checksums": {
-        "sha1": "62deefdc258dd3d71b80a2e42af666c41b566bcf"
+        "sha1": "f40acbc8ac267213bb31fb032b96afc4fd0c1307"
       }
     },
     "streamhttp": {
