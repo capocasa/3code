@@ -1,3 +1,16 @@
+discard """
+  disabled: "win"
+  ## Three consecutive CI runs (20261124, 20261125 x2) died in the same
+  ## spot: the wizard's first field paint (`name [stub]`) never matched
+  ## inside the 5s expect budget under ConPTY on the 2-core runner — the
+  ## documented timing-sensitive ConPTY-output-latency class, not a
+  ## product freeze (the POSIX runs of the same iterations pass, and
+  ## `test_provider_edit_crash` drives the same wizard entry on Windows
+  ## and passes). Re-enable with a longer first-paint budget or a
+  ## ConPTY-latency-tolerant wait when the wizard paint path is
+  ## revisited for Windows.
+"""
+
 ## Stress test: repeatedly enter `:provider edit`, accept defaults,
 ## Ctrl-C on the api-key prompt, then issue a non-modal `:show`
 ## command. If the wizard RPC (`wizardReadLine` in

@@ -10,7 +10,7 @@ discard """
 ## `writeConfigFile` re-parses the file and briefly swaps the settings
 ## globals a running turn reads, so mid-turn the in-memory switch flips at
 ## once and the write waits for the rest.
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, unittest, times]
 import tty_expect
 import stub_helpers
 
@@ -63,10 +63,18 @@ suite "chrome settings during a turn":
     writeFile(root / "run" / "stub_responses.json", $(%*[
       heldReply("main reply", 2500)
     ]))
+    # Scratch diagnosis: trace every config write (globals serialized per
+    # call) plus the rest-loop ledger beats the write shares its loop with
+    # (the btw failures on osx came out of the same loop); dumped below on
+    # failure.
+    let tracePath = root / "xdg" / "config_write_trace.txt"
+    removeFile(tracePath)
+    var env = stubEnv(root, root / "run" / "stub_responses.json")
+    env.add (key: "test.config_write_trace", val: tracePath)
+    env.add (key: "test.btw_trace", val: tracePath)
     let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
                             cwd = root / "run",
-                            env = stubEnv(root,
-                              root / "run" / "stub_responses.json"))
+                            env = env)
     defer: tty.close()
     tty.expect "❯"
 
@@ -95,14 +103,23 @@ suite "chrome settings during a turn":
     # shows (the prompt repaint can come first).
     tty.expectInHistory "main reply", timeoutMs = 8000
     tty.expectPromptLive()
-    proc savedBoth(): bool =
-      try:
-        let s = readFile(configFile)
-        "notify = \"off\"" in s and "tab-title = \"off\"" in s
-      except IOError:
-        false
-    tty.waitUntil(proc(t: TtySession): bool = savedBoth(), timeoutMs = 8000)
-    let saved = readFile(configFile)
+    # Scratch diagnosis: dump every config write the app made, with the
+    # globals each call serialized, when the assertions below fail.
+    defer:
+      if fileExists(tracePath):
+        echo "---- config write trace ----"
+        echo readFile(tracePath)
+    # The write is ordered with the turn finalize, not with the prompt
+    # repaint: a slow runner can surface the prompt first (osx). Poll
+    # briefly so the assertion measures the contract (the write happens)
+    # and not a paint-vs-fsync race.
+    var saved = ""
+    let deadline = epochTime() + 5.0
+    while epochTime() < deadline:
+      saved = readFile(configFile)
+      if "notify = \"off\"" in saved and "tab-title = \"off\"" in saved:
+        break
+      sleep(100)
     check "notify = \"off\"" in saved
     check "tab-title = \"off\"" in saved
     tty.send ":q\n"

@@ -87,6 +87,8 @@ type
     ## reads them (never copies them into refs it frees).
     job*: BtwJob
     req*: MetaRequest
+    question*: string ## the asked aside, echoed back on its reply so the
+                      ## `@?` reference can quote question and answer
     interrupts: int32 ## `interruptsSeen()` when the aside was asked
 
   BtwEntry = object
@@ -97,6 +99,7 @@ type
   BtwReply* = object
     ## One delivered aside. `cancelled` is set instead of an answer when
     ## an "interrupted by user" dropped it; `usage` is zeroed with it.
+    question*: string
     answer*: string
     usage*: Usage
     cancelled*: bool
@@ -149,6 +152,10 @@ proc takeStashedBtwUsage*(): seq[Usage] =
   ## Oldest first. Controller thread only.
   result = stashedUsage
   stashedUsage = @[]
+
+proc btwStashedLive*(): int =
+  ## Asides parked mid-turn, waiting for the rest that ledgers them.
+  stashedUsage.len
 
 proc btwJobsLive*(): int =
   ## Jobs spawned but not yet delivered. Lets frontends cheaply skip
@@ -240,7 +247,7 @@ proc startBtw*(question: string, messages: JsonNode, p: Profile): bool =
   let job = create(BtwJobState)
   job.lock.initLock()
   let args = create(BtwWorkerArgs)
-  args[] = BtwWorkerArgs(job: job, req: req,
+  args[] = BtwWorkerArgs(job: job, req: req, question: question,
                          interrupts: interruptsSeen())
   let t = create(Thread[ptr BtwWorkerArgs])
   try:
@@ -294,7 +301,8 @@ proc pollBtw*(into: var seq[BtwReply]) =
         continue
       break
     acquire(e.job.lock)
-    into.add BtwReply(answer: rawCopy(e.job.answer), usage: e.job.usage,
+    into.add BtwReply(question: e.args.question,
+                      answer: rawCopy(e.job.answer), usage: e.job.usage,
                       cancelled: e.job.cancelled)
     e.job.reaped = true
     release(e.job.lock)

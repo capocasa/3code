@@ -8,19 +8,19 @@
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": "e4e638a20c4650cc6b463f8b19f5009db3a916b5"
+        "sha1": ""
       }
     },
     "sandwall": {
-      "version": "0.5.19",
-      "vcsRevision": "649977481953db306df1b56d9d3bbbdedf22237b",
+      "version": "0.6.1",
+      "vcsRevision": "caa854b213c8837057345b44daf484e8af3a2e74",
       "url": "https://github.com/capocasa/sandwall",
       "downloadMethod": "git",
       "dependencies": [
         "nim"
       ],
       "checksums": {
-        "sha1": "c47ab4cadbb8d09116e593b0d5b1dd5e942b4de0"
+        "sha1": "d8e58e493ea9f1326ca711ee9931c8dc17f75e91"
       }
     },
     "streamhttp": {

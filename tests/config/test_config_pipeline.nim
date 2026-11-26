@@ -147,6 +147,12 @@ suite "config: catalog urls":
     check catalogUrl("relace") == "https://models.relace.ai/v1"
     check catalogUrl("darkbloom") == "https://api.darkbloom.dev/v1"
 
+  test "first-party google urls name their wire":
+    check defaultNameFromUrl(
+      "https://generativelanguage.googleapis.com/v1beta") == "google"
+    check defaultNameFromUrl(
+      "https://cloudcode-pa.googleapis.com") == "geminicli"
+
 suite "config: new known-good providers":
   test "glm rows ride the glm family":
     check knownGoodFamily("vercel", "zai/glm-5.3") == "glm"
@@ -258,6 +264,11 @@ suite "config: resolveFamily":
     let prov = ProviderRec(name: "google", models: @["gemini-9-unreleased"])
     let prof = Profile(name: "google.gemini-9-unreleased", model: "gemini-9-unreleased")
     check resolveFamily(prov, prof) == "gemini"
+
+  test "uncurated google gemma model defaults to other":
+    let prov = ProviderRec(name: "google", models: @["gemma-9-it"])
+    let prof = Profile(name: "google.gemma-9-it", model: "gemma-9-it")
+    check resolveFamily(prov, prof) == "other"
 
   test "geminicli twin defaults to gemini too":
     let prov = ProviderRec(name: "geminicli", models: @["gemini-9-unreleased"])

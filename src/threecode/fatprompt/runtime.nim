@@ -175,6 +175,7 @@ var journalAnchorMessagesLen*: int = 0
   ## only misplace a notice within the window's tail, never lose it.
 
 proc markReplParked*(parked: bool) =
+  debugOut "markReplParked " & $parked
   termui.withTerminalWriteLock:
     replParkedAtInput.store(parked, moRelease)
 

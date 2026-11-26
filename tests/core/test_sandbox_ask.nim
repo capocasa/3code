@@ -11,6 +11,7 @@ discard """
 """
 import std/[unittest, os, strutils]
 import threecode/sandbox
+import threecode/dirsettings
 import threecode/ui
 
 proc newFixture(name: string): tuple[base, proj: string] =
@@ -162,12 +163,24 @@ suite "grant":
     # "policy update failed".
     let base = getTempDir() / ("3code_asktest_default_" & $getCurrentProcessId())
     if dirExists(base): removeDir(base)
-    let proj = base / "proj"
-    createDir(proj)
+    createDir(base / "proj")
+    # Canonical spelling: macOS temp dirs live behind /var -> /private/var,
+    # and getCurrentDir() after enterProj resolves it, so the dirs store the
+    # grant writes (storeDirFor(getCurrentDir())) and the path this test
+    # reads (repoPolicyPath(proj)) must mangle the same string or the file
+    # lands under private_var_... and the read looks for var_....
+    let proj = expandFilename(base / "proj")
     defer: removeDir(base)
     let prevCfg = getEnv("XDG_CONFIG_HOME")
     putEnv("XDG_CONFIG_HOME", base / "cfg")
     defer: putEnv("XDG_CONFIG_HOME", prevCfg)
+    # Isolate the ancestor cascade too: the fixture lives under /tmp, and
+    # a real /tmp/.3code/sandbox (any session that ever ran with cwd=/tmp)
+    # would otherwise win the cascade and absorb the grant. dirconfig=user
+    # routes every store slot through the isolated config root instead.
+    let prevDirCfg = dirsettings.dirConfigLocation
+    dirsettings.dirConfigLocation = "user"
+    defer: dirsettings.dirConfigLocation = prevDirCfg
     withPolicy(proj):
       check sandbox.askCoveredPath("/etc/hosts")
       check sandbox.grantAskAllow("/etc/hosts")

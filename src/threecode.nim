@@ -1212,8 +1212,12 @@ proc main() =
                         "content": buildUserMessage(messages, promptText,
                           vision = prof.vision,
                           imgDir = sessionImageDir(session.savePath),
-                          lastBash = lastBashInclude(session.toolLog),
-                          lastPrompt = session.lastPrompt)}
+                          lastLLM = lastAssistantText(messages),
+                          lastPrompt = session.lastPrompt,
+                          lastCmd = lastBashCommand(session.toolLog),
+                          lastBashOut = lastBashOutput(session.toolLog),
+                          lastBtw = lastBtwInclude(session.lastBtwQ,
+                            session.lastBtwA))}
         if ev.text.strip.len > 0:
           session.lastPrompt = ev.text
         refreshSystemPrompt(messages, prof, session.promptState)
@@ -1317,8 +1321,11 @@ proc main() =
     pluginOnPrompt(text, session.savePath, prof.name, prof.model)
     messages.add %*{"role": "user", "content": buildUserMessage(messages, text,
       vision = prof.vision, imgDir = sessionImageDir(session.savePath),
-      lastBash = lastBashInclude(session.toolLog),
-      lastPrompt = session.lastPrompt)}
+      lastLLM = lastAssistantText(messages),
+      lastPrompt = session.lastPrompt,
+      lastCmd = lastBashCommand(session.toolLog),
+      lastBashOut = lastBashOutput(session.toolLog),
+      lastBtw = lastBtwInclude(session.lastBtwQ, session.lastBtwA))}
     if textIn.strip.len > 0:
       session.lastPrompt = textIn
     refreshSystemPrompt(messages, prof, session.promptState)
@@ -1578,8 +1585,11 @@ proc main() =
       pluginOnPrompt(line, session.savePath, prof.name, prof.model)
       messages.add %*{"role": "user", "content": buildUserMessage(messages, line,
         vision = prof.vision, imgDir = sessionImageDir(session.savePath),
-        lastBash = lastBashInclude(session.toolLog),
-        lastPrompt = session.lastPrompt)}
+        lastLLM = lastAssistantText(messages),
+        lastPrompt = session.lastPrompt,
+        lastCmd = lastBashCommand(session.toolLog),
+        lastBashOut = lastBashOutput(session.toolLog),
+        lastBtw = lastBtwInclude(session.lastBtwQ, session.lastBtwA))}
       if rawLine.strip.len > 0:
         session.lastPrompt = rawLine
       refreshSystemPrompt(messages, prof, session.promptState)

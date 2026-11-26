@@ -417,7 +417,7 @@ login that rides on `anthropic`.
 | ★ openai | US | API key, or log in as `chatgpt` on a Plus/Pro subscription |
 | ★ xai | US | API key, or log in as `supergrok` on SuperGrok/X Premium+ |
 | anthropic | US | Claude on the Messages wire, or log in as `claudecode` on Pro/Max |
-| google | US | Gemini through the OpenAI-compatible surface |
+| google | US | Gemini on the native generateContent wire |
 | mistral | France (EU) | Mistral first-party, plus hosted GLM |
 
 ### US inference clouds
@@ -505,10 +505,12 @@ requirements. To include a file directly in a prompt, prefix its path with
 Review @src/parser.nim and add tests for malformed input.
 ```
 
-`@path` reads a file, `@*` shows the last result, `@+` repeats your last
-prompt. The latter two splice in place of the token: `:!` output never
-reaches the model otherwise, and `@+` is the cheap way to iterate on the
-same instruction.
+`@path` reads a file. The bare-punctuation tokens splice recent session
+history in place of the token: `@.` the model's last output, `@>` your
+previous prompt, `@!` the last run command, `@$` its output, `@?` the
+last `:btw` question and answer. They exist for what would not reach the
+model otherwise (`:!` output never does), and `@>` is the cheap way to
+iterate on the same instruction.
 
 To run a shell command yourself without sending anything to the model,
 prefix it with `:!`:
@@ -1718,10 +1720,14 @@ deny ~/.ssh/id_ed25519
 deny ~/.ssh/id_ed25519_sk
 deny ~/.ssh/id_rsa
 deny ~/.ssh/id_xmss
+allow ~/.ssh/known_hosts
+allow ~/.ssh/control
 allow *
 ```
 
-On macOS the same policy plus `allow ~/Library/Caches` applies. This lets the
+On macOS the same policy plus `allow ~/Library/Caches`, `~/Library/Java`,
+`~/.jdks`, `~/.sdkman/candidates` and `~/.local/share/uv` (read-only) applies.
+This lets the
 model write in the project and temporary directories and the development
 caches, not wander through other user files. The floor is `ask /`: a path the
 table does not name stays closed, but a call that lands on one offers the
@@ -1734,6 +1740,13 @@ private-identity name is denied on top (a `.pub` sibling is a different
 path and stays readable). The version-control config lines exist because
 git aborts every command when `~/.gitconfig` exists but is unreadable.
 `allow *` leaves the network open.
+
+The two `allow` lines under `~/.ssh` are narrow writable grants on the
+read-only directory: `known_hosts`, so a first connect inside the fence can
+persist the host key, and `~/.ssh/control`, so OpenSSH's ControlMaster has a
+socket directory (3code creates it when the sandbox arms, if `~/.ssh`
+exists; point `ControlPath` at it, for example
+`ControlPath ~/.ssh/control/%C`). The private keys stay denied.
 
 On Windows, the built-in policy is:
 
@@ -1972,42 +1985,94 @@ unmatched hosts denied. With only `deny` host rules, unmatched hosts remain
 allowed. This is the small detail that decides whether you have made an
 allowlist or a blocklist.
 
-On Linux and macOS, fenced commands reach the network through a local CONNECT
-and SOCKS5 allowlist proxy. Linux puts the command in a network namespace;
-macOS confines it to loopback with Seatbelt. 3code sets the standard proxy
-variables for the child process, and routes the proxy-unaware clients
-itself: git gets an SSH proxy command, and ``ssh`` is shadowed by a wrapper
-that tunnels through the wall proxy (``rsync`` and anything scripting
-``ssh`` spawn it from PATH and ride along). Local hostnames such as
-``martin`` or ``martin.local`` resolve at the proxy, so mDNS and search-domain
-names work inside the fence like they do outside. Every TCP protocol is
-carried the same way - the allowlist decides per host and port, loopback
-targets included (on Linux they go through the proxy too; the fenced
-namespace has no loopback of the host's). Denied HTTP connections return
-403; denied SSH targets fail with a ``proxy denied`` message from the wrapper.
-The wrapper also points ssh at a copy of ``~/.ssh/config`` (with ``~``
-rewritten to absolute paths) and at your real keys and ``known_hosts``:
-the fenced child runs as uid 65534, whose passwd home is ``/``, so ssh's
-own defaults would look under ``/.ssh`` and every login would die at
-host-key or auth. This repair applies to every fenced launch, not only
-the proxied ones: a policy without host rules leaves the network open,
-but the child still runs as uid 65534, so the wrapper installs with the
-tunnel line omitted and the config, keys, and ``known_hosts`` repair
-kept.
+Every fenced command has two ways out, and 3code picks one per launch.
 
-``scp`` and ``sftp`` are the exception: their binaries exec ``/usr/bin/ssh``
-by absolute path (OpenSSH 9.8+), where no PATH wrapper or environment
-variable can follow, so inside the fence they cannot reach the proxy and
-fail. Use ``rsync``, ``ssh``, or git instead - same job, proxied.
+**Raw egress, no proxy variables.** The child connects as it would outside
+the fence and the kernel carries it: no `http_proxy`, no `GIT_SSH_COMMAND`,
+no ssh wrapper, so plain `ssh`, `scp`, `sftp`, `telnet` and every library
+that ignores proxy variables work as they do outside. Linux has it wherever
+`nft` is installed. Windows has it behind the gate below. macOS does not
+have it (Seatbelt cannot permit single addresses).
 
-.. note::
+**Env mode, the forwarder.** The child gets the standard proxy variables
+(`http_proxy`, `https_proxy`, `ALL_PROXY` with `socks5h`, so DNS happens at
+the proxy) and, because OpenSSH ignores them, an `ssh` wrapper on PATH that
+adds a `ProxyCommand` through the forwarder. Every TCP protocol is carried
+the same way; the allowlist decides per host and port, loopback targets
+included. Local hostnames such as ``martin`` or ``martin.local`` resolve at
+the forwarder, so mDNS and search-domain names work inside the fence like
+they do outside.
 
-   Inside the fence, only clients that reach the proxy get out: ``curl``,
-   ``wget``, git, package managers, ``ssh`` through its wrapper. ``ping``
-   (ICMP) and ``host``/``dig`` (their own DNS queries) still fail: the
-   fenced namespace has no route off the machine, and name resolution
-   happens at the proxy. TCP only - anything UDP or ICMP needs its own
-   adapter.
+The decision is by name in both modes. Linux resolves names at a fence DNS:
+`resolv.conf` in the fence points at a relay to the forwarder, which answers
+A queries for allowed names with a stable synthetic address from
+`198.18.0.0/15` and refuses the rest; `nft` redirects every non-loopback TCP
+connection onto the forwarder, which maps the synthetic address back to the
+name and checks the rule again at connect time. Nothing in the fence ever
+learns a real address, and a denied name does not resolve. Windows raw mode
+stamps the allowed names' addresses as per-run kernel permits (WFP) for
+exactly that run. A wildcard rule admits names nobody can enumerate, so raw
+mode there needs every `allow` rule to name an exact host: `*.example.org`
+or a deny-only policy takes env mode, as does a run where none of the
+allowed hosts resolved. Addresses are refreshed on a fixed interval (five
+minutes, not DNS TTL: the system resolver reports none), and the previous
+set stays permitted for a grace period, so a failover between two launches
+is covered. A change in the middle of a command is not: Windows permits are
+fixed at spawn, and Linux sees the new set on the next connect.
+
+| Platform | Raw egress | Name resolution inside the fence |
+|----------|-----------|-----------------------------------|
+| Linux | fake-IP fence DNS + nft redirect, any policy | at the forwarder; no name leaks |
+| Windows | per-run WFP permits, exact allow rules only, after `3code setup --stamp-as` | the system resolver; names leak |
+| macOS | none, env mode always | at the forwarder |
+
+Linux notes:
+
+- A bare address (`ssh 192.0.2.10`, `curl https://192.0.2.10/`) is admitted
+  only when an allowed name resolved to it. An open policy (`allow *`) or a
+  deny-only policy does not vouch for a literal in raw mode, so such
+  connections fail closed where env mode admits them. Name the host, or
+  allow the address explicitly (`allow 192.0.2.10`).
+- The fence DNS answers `dns` lookups only. An nsswitch line that puts
+  `resolve` or `mdns` before `dns` bypasses it: `*.local` names never reach
+  it, and a systemd-resolved stub hands out real addresses that go nowhere.
+- When the fence cannot be put up (no network namespace, `nft` fails to
+  load, `resolv.conf` is a dangling symlink), the child exits before running
+  anything and 3code runs the same command in env mode, with one line on
+  stderr saying why.
+- The fenced namespace has no loopback of the host's: the host's own
+  services on `127.0.0.1` are reachable through the forwarder in env mode
+  and not at all in raw mode. The child's own loopback works in both.
+- UDP and ICMP are not carried in either mode.
+
+Windows notes:
+
+- Raw mode needs a one-time grant in addition to the fence: `3code setup
+  --stamp-as ACCOUNT` (elevated) lets the unelevated account that runs 3code
+  add and remove its own permit filters. `3code wall wfp-stamp-probe`, run
+  unelevated as that account, tells you whether it took: 0 yes, 1 denied,
+  2 something else. Without the grant every run takes env mode, as before.
+- The child resolves names with the system resolver, so what it looks up is
+  visible to the host's DNS (Linux leaks no name). Permits are addresses:
+  a denied name sharing an address with an allowed one is reachable.
+- Permits are per run, but every run shares the sandbox account, so two
+  fenced commands running at once see the union of their permits. Past
+  512 address and port pairs (every address of every allowed host, both
+  generations) a run takes env mode, with a line on stderr.
+- Checked on a Windows 11 host (26100): the grant is real (the probe
+  exits 0 for the granted account, 1 for any other standard account), a raw
+  command reached its permitted address and was refused on any other, and
+  names resolved inside the fence. What ran there is `3code sandbox` and
+  `3code wall wfp-stamp-probe`; the bash tool's own raw launch has not run
+  on Windows hardware yet.
+
+macOS notes:
+
+- Env mode always. A Seatbelt network filter accepts `*` or `localhost`
+  only as the host of `(remote ip "host:port")` and rejects a literal
+  address, so there is no per-address permit to apply. macOS is the one
+  platform where host rules need the proxy variables and the ssh wrapper
+  for everything to work.
 
 On Windows, host rules require one admin setup command:
 

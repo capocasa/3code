@@ -626,7 +626,8 @@ const
   TestKeys = ["frame_fd", "frame_ack_fd", "ticker_fd", "ticker_ack_fd",
               "api_continue_fd", "gui_live", "stub_responses",
               "http_stub_responses", "stub_sandbox",
-              "stub_verify_delay_ms", "screenshot_src", "geometry_audit"]
+              "stub_verify_delay_ms", "screenshot_src", "geometry_audit",
+              "config_write_trace", "btw_trace"]
   ThinkBackValues = ["none", "turn", "all"]
   SearchEngines = ["exa", "parallel", "brave"]
   # `light` is the canonical light-background value; `bright` is the
@@ -1284,8 +1285,25 @@ proc userSettingPrefixes(eff: string): string =
     userSettingsRaw.getOrDefault("system-command-prefixes", ""))
   if norm != "": norm else: ":"
 
+proc testTrace*(key, msg: string) {.gcsafe.} =
+  ## Scratch diagnosis: append to the [test] trace file named by `key`
+  ## when a test armed it. No-op everywhere else.
+  let path = runtime.get(key)
+  if path.len == 0: return
+  var f: File
+  if f.open(path, fmAppend):
+    f.writeLine(msg)
+    f.close()
+
+proc cfgTrace*(msg: string) {.gcsafe.} =
+  ## Scratch diagnosis: append to [test] config_write_trace when armed.
+  testTrace("config_write_trace", msg)
+
 proc writeConfigFile*(path: string, current: string,
                      providers: seq[ProviderRec]) =
+  cfgTrace("writeConfigFile: current=" & current & " providers=" &
+    $providers.len & " notify=" & $notifyEnabled & " tabtitle=" &
+    $tabTitleEnabled)
   createDir(path.parentDir)
   # Models are persisted in normalized form when the pair is curated
   # (the known-good table repairs the wire id back at load time); the
@@ -1941,7 +1959,11 @@ proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
   if kg != "": return kg
   if experimentalEnabled and prov.family.strip != "":
     return prov.family.strip.toLowerAscii
-  if canonicalKnownGoodProvider(prov.name) == "google": return "gemini"
+  if canonicalKnownGoodProvider(prov.name) == "google":
+    # Gemma shares the google endpoint but has no thinking surface; its
+    # curated rows already ride `other`, and an uncurated gemma id must
+    # land there too so `applyReasoning` sends no thinking knob.
+    return if prof.model.toLowerAscii.startsWith("gemma"): "other" else: "gemini"
   "glm"
 
 func paramsModelMatches*(spec, model: string): bool =
@@ -2366,7 +2388,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("engy",        "https://api.engy.ai/v1"),
   ("fireworks",   "https://api.fireworks.ai/inference/v1"),
   ("friendli",    "https://api.friendli.ai/serverless/v1"),
-  ("google",      "https://generativelanguage.googleapis.com/v1beta/openai"),
+  ("google",      "https://generativelanguage.googleapis.com/v1beta"),
   ("greenpt",     "https://api.greenpt.ai/v1"),
   ("groq",        "https://api.groq.com/openai/v1"),
   ("hetzner",     "https://inference.hetzner.com/api/v1"),
@@ -2501,6 +2523,10 @@ proc echoMasksAsKey*(s: string): bool =
 proc defaultNameFromUrl*(url: string): string =
   let host = parseUri(url).hostname
   if host == "": return ""
+  # First-party Google hosts carry two different wires under one domain:
+  # name them for the provider that speaks the pasted base.
+  if host == "generativelanguage.googleapis.com": return "google"
+  if host == "cloudcode-pa.googleapis.com": return "geminicli"
   # Provider names live inside `provider.model` dot-joined ids everywhere
   # (config `current`, Profile.name, providerOf's find('.')), so a name
   # containing a dot breaks the split. Dotted-quad hosts therefore mangle

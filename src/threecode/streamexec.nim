@@ -18,6 +18,10 @@ when defined(windows):
   import registry
   import sandwall
   import sandwall/wall as sandwallWall
+  import sandwall/wall/permit
+when defined(linux):
+  import sandwall
+  import sandwall/wall as sandwallWall
 
 var wallWarnShown = false  ## one Windows wall warning per run
 
@@ -763,11 +767,13 @@ proc localFileSig(path: string): (Time, int) =
   try: (getLastModificationTime(path), getFileSize(path).int)
   except CatchableError: (Time(), 0)
 
-proc runStreamingBash*(act: Action, cache: ReadCache,
-                       onLine: proc(line: string) = nil):
+proc runStreamingBashPath(act: Action, cache: ReadCache,
+                          onLine: proc(line: string); allowRaw: bool):
     tuple[rawOut: string, code: int, cap: int] =
   # When the OS sandbox backend is unavailable, bash runs unconfined
   # here; that is announced once at startup (see main), not refused.
+  # `allowRaw` false is the second pass of a raw launch that fell
+  # back (see the RawMarker check at the end): env mode, once.
   let cmd = act.body.strip
   let mutPath = bashMutationPath(cmd)
   let (readPath, fullRead) = bashReadPath(cmd)
@@ -790,6 +796,9 @@ export DEBIAN_FRONTEND=noninteractive
   writeFile(stdinPath, act.stdin)
 
   let cap = bashTimeoutSecs(act.timeoutSecs)
+  var rawTried = false
+    ## Set by the POSIX spawn below when this launch takes the raw path;
+    ## exit 75 plus the marker then means "re-spawn env mode".
   var p =
     when defined(posix):
       let shell = shPath()
@@ -847,13 +856,24 @@ export DEBIAN_FRONTEND=noninteractive
           sandbox.moveWallSock(tmp)
           let proxied = sandbox.ensureWallProxy(getCurrentDir())
           var wallConf = ""
+          var raw = false
           if proxied:
+            # Raw egress when nft is around to load the redirect (the
+            # parent's probe): the child decides whether the fence
+            # holds and exits 75 with the marker when it does not
+            # (box.nim); the pass below re-spawns env mode. No raw path
+            # on macOS: Seatbelt cannot permit single addresses.
+            when defined(linux):
+              raw = allowRaw and sandwallWall.findNft().len > 0
+            rawTried = raw
             # box args: swap the --ro tmp for a writable tmp so the
             # bridge can connect() the unix socket inside the netns.
             # The wall coordinates reach the box child and the ssh
             # ProxyCommand through the [wall] config file, not env vars.
             wallConf = sandbox.writeWallConf(tmp, $int(sandbox.wallProxyPort()),
-                                             sandbox.proxySockPath())
+                                             sandbox.proxySockPath(),
+                                             raw = raw,
+                                             dns = sandbox.dnsSockPath())
             args = @[]
             args.add "sandbox"
             args.add ["--config", wallConf]
@@ -868,21 +888,22 @@ export DEBIAN_FRONTEND=noninteractive
             args.add wrapped
             env = newStringTable()  # case-sensitive on posix; env names differ by case
             for k, v in envPairs(): env[k] = v
+            # raw: no proxy vars, no git ProxyCommand, no ssh shim; the
+            # redirect and the fence DNS carry egress (wallEnv).
             for (k, v) in sandbox.wallEnv(sandbox.procboxExe,
                 $int(sandbox.wallProxyPort()),
-                getEnv("GIT_SSH_COMMAND", ""), wallConf):
+                getEnv("GIT_SSH_COMMAND", ""), wallConf, raw = raw):
               env[k] = v
+            # env mode: ssh ignores the proxy env vars, so shadow it
+            # with a wrapper that adds the tunnel (installSshShim).
+            let shimDir = sandbox.installSshShim(tmp, sandbox.procboxExe,
+                                                 proxied = not raw,
+                                                 wallConf = wallConf)
+            if shimDir.len > 0:
+              env["PATH"] = shimDir & ":" & env.getOrDefault("PATH")
           else:
             env = newStringTable()
             for k, v in envPairs(): env[k] = v
-          # ssh ignores the proxy env vars; give the child an ssh that
-          # tunnels through the wall when proxied, and in any case the
-          # -F config that repairs the pw_dir defaults uid 65534
-          # breaks (aliases, keys, known_hosts; see installSshShim).
-          let shimDir = sandbox.installSshShim(tmp, sandbox.procboxExe, proxied,
-                                               wallConf)
-          if shimDir.len > 0:
-            env["PATH"] = shimDir & ":" & env.getOrDefault("PATH")
         when defined(macosx):
           # Children inherit TMPDIR=$DARWIN_USER_TEMP_DIR (/var/folders),
           # which the policy leaves unwritable; every compiler temp
@@ -997,7 +1018,8 @@ export DEBIAN_FRONTEND=noninteractive
             let fenceInstalled = sandbox.netFenceState() == sandbox.nfsInstalled
             if fenceInstalled:
               try:
-                fenced = sandbox.ensureWallProxy(getCurrentDir())
+                fenced = sandbox.ensureWallProxy(getCurrentDir(),
+                                                 withPermits = true)
               except CatchableError:
                 fenced = false
             elif sandboxWallWarn and not wallWarnShown:
@@ -1005,16 +1027,28 @@ export DEBIAN_FRONTEND=noninteractive
               stderr.writeLine("3code sandbox: WARNING: host rules are " &
                 "present but the WFP fence is not installed. The child " &
                 "will have OPEN network access. Run '3code setup' once.")
+          var permits: seq[PermitEntry] = @[]
           if fenced:
             # box runs in-process here: hand it the wall coordinates
             # through the runtime store directly (the POSIX child gets
-            # them via a [wall] config file). The proxy vars below are
-            # for the grandchildren (curl, git), not for 3code.
+            # them via a [wall] config file).
             runtime.put("wall_port", $int(sandbox.wallProxyPort()))
-            for (k, v) in sandbox.wallEnv(sandbox.procboxExe,
+            # Raw path: when every allow rule names an exact host, the
+            # long-lived set's snapshot becomes this run's kernel
+            # permits (runSandboxed) and the child needs no proxy env.
+            # Otherwise, or when nothing resolved, env mode: the proxy
+            # vars are for the grandchildren (curl, git), not 3code.
+            let permitsPath = sandbox.permitsForSpawn(tmp)
+            if permitsPath.len > 0:
+              try:
+                permits = readSnapshot(permitsPath)
+              except CatchableError as e:
+                stderr.writeLine("3code sandbox: permit snapshot: " &
+                  e.msg)
+            if permits.len == 0:
+              sandbox.putProxyEnv(sandbox.procboxExe,
                 $int(sandbox.wallProxyPort()),
-                getEnv("GIT_SSH_COMMAND", ""), ""):
-              putenv(k, v)
+                getEnv("GIT_SSH_COMMAND", ""))
           let resolved = sandbox.current.resolve()
           var writable = resolved.writable
           var readonly = resolved.readonly
@@ -1041,9 +1075,22 @@ export DEBIAN_FRONTEND=noninteractive
           startToolCancelWatcher(0)
           startToolTimeoutWatcher(cap)
           try:
-            inProcCode = int(runSandboxed(writable, [b, "-c", bashCmd],
-                                          read = readonly,
-                                          denied = resolved.denied))
+            try:
+              inProcCode = int(runSandboxed(writable, [b, "-c", bashCmd],
+                                            read = readonly,
+                                            denied = resolved.denied,
+                                            permits = permits))
+            except PermitStampError as e:
+              # Raised before anything is stamped, restricted or
+              # spawned: the run takes env mode instead.
+              stderr.writeLine("3code sandbox: " & e.msg &
+                "; using the proxy env path")
+              sandbox.putProxyEnv(sandbox.procboxExe,
+                $int(sandbox.wallProxyPort()),
+                getEnv("GIT_SSH_COMMAND", ""))
+              inProcCode = int(runSandboxed(writable, [b, "-c", bashCmd],
+                                            read = readonly,
+                                            denied = resolved.denied))
           except CatchableError as e:
             discard sandwallWall.endCapture()
             return ("3code sandbox: " & e.msg, 127, cap)
@@ -1134,6 +1181,21 @@ export DEBIAN_FRONTEND=noninteractive
       rawOut.add "\n"
     return (rawOut, 124, cap)
 
+  when defined(linux):
+    if rawTried and code == RawFallbackExit and
+        rawOut.strip().endsWith(RawMarker):
+      # The raw fence did not hold and nothing is half up: the box
+      # child never exec'd the command (box.nim). One line, then the
+      # same launch in env mode; its own output is the tool's.
+      var cause = ""
+      for line in rawOut.splitLines():
+        if line.startsWith("3code sandbox: "):
+          cause = line["3code sandbox: ".len .. ^1]
+      stderr.writeLine("3code: raw egress unavailable (" &
+        (if cause.len > 0: cause else: "exit " & $code) &
+        "), retrying with the proxy env")
+      return runStreamingBashPath(act, cache, onLine, allowRaw = false)
+
   # Sandbox denial hint: a sandboxed command cannot tell EPERM from the
   # kernel sandbox apart from a plain filesystem permission problem, so
   # a bare "Permission denied" would send the agent retrying blindly.
@@ -1151,3 +1213,11 @@ export DEBIAN_FRONTEND=noninteractive
     rawOut.add SandboxDenyHint
 
   return (rawOut, code, cap)
+
+proc runStreamingBash*(act: Action, cache: ReadCache,
+                       onLine: proc(line: string) = nil):
+    tuple[rawOut: string, code: int, cap: int] =
+  ## The bash tool's one launch: fenced when the sandbox is on, raw
+  ## egress where the platform has it, env mode otherwise (and as
+  ## the one retry when the raw fence does not hold).
+  runStreamingBashPath(act, cache, onLine, allowRaw = true)

@@ -116,6 +116,7 @@ proc answerAsk(s: TtySession; ans: string) =
 
 var bashBackendCache = -1
 var restrictBaselineCache = -1
+var landlockBitesCache = -1
 
 proc restrictBaselineBites(): bool =
   ## Whether the toggle leg's denial bites on this host: it comes from
@@ -151,6 +152,40 @@ proc restrictBaselineBites(): bool =
     removeFile(probe)
   except CatchableError: discard
   restrictBaselineCache == 1
+
+proc landlockBites(): bool =
+  ## Whether the policy's hard deny bites on this host: the deny floor is
+  ## landlock on posix, and kernels that refuse prctl(NO_NEW_PRIVS)
+  ## cannot engage it (arm64 CI runners deny the prctl outright,
+  ## observed 2026-11) - sandwall degrades with a notice and the command
+  ## runs unconfined, so the hard-deny legs must skip instead of failing
+  ## on the missing denial. Mirrors the probe pattern of
+  ## bashSandboxWorks, but probes the landlock floor, not the mount mask.
+  if landlockBitesCache >= 0: return landlockBitesCache == 1
+  let tmp = getTempDir() / ("landlock_bites_" & $getCurrentProcessId())
+  try: removeDir(tmp) except CatchableError: discard
+  createDir(tmp)
+  writeFile(tmp / ".sandbox", "deny /\nallow ./\n")
+  let probe = getTempDir() / ("landlock_out_" & $getCurrentProcessId())
+  try: removeFile(probe) except CatchableError: discard
+  when defined(windows):
+    let cmd = "cmd /c echo x > " & probe.quoteShell
+  else:
+    let cmd = "sh -c " & ("echo x > " & probe).quoteShell
+  let quoted = "\"" & ensureStubBinary() & "\" sandbox --policy " &
+    (tmp / ".sandbox").quoteShell & " restrict -- " & cmd
+  try:
+    let r = execCmdEx(quoted)
+    landlockBitesCache =
+      if r.exitCode != 0 and not fileExists(probe) and
+          "denied" in r.output.toLowerAscii: 1 else: 0
+  except CatchableError:
+    landlockBitesCache = 0
+  try:
+    removeDir(tmp)
+    removeFile(probe)
+  except CatchableError: discard
+  landlockBitesCache == 1
 
 proc bashSandboxWorks(): bool =
   ## Whether the ask enforcement the bash legs depend on actually bites
@@ -252,7 +287,9 @@ suite "sandbox ask prompt":
       tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
       tty.answerAsk ":a"
       tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
-      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+      # The sandboxed rerun spawns via CreateProcessWithLogonW, which
+      # Defender/SmartScreen can stall well past 30s on a cold runner.
+      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 90_000
       # The ask rule covers more than the denied file: changing it would
       # rewrite a rule the user aimed at other paths, so the allow lands
       # after every existing rule instead (last-match-wins puts it above
@@ -316,7 +353,9 @@ suite "sandbox ask prompt":
       tty.answerAsk ":a"
       tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
       check waitForFileContent(tty, root / "run" / "vault" / "out.txt", "granted\n")
-      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 30_000
+      # The sandboxed rerun spawns via CreateProcessWithLogonW, which
+      # Defender/SmartScreen can stall well past 30s on a cold runner.
+      tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 90_000
       check policyLines(root) ==
         @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
       tty.expect "\u276f"
@@ -416,9 +455,9 @@ suite "sandbox ask prompt":
     tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
     tty.answerAsk ":a"
     tty.expectInHistory "allowed ./vault/out.txt - retrying", 30_000
-    # The retry is a second bash spawn; a loaded 2-core Windows runner has
-    # run it past 30s twice (a healthy run finishes the whole file in 45s).
-    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 60_000
+    # The sandboxed rerun spawns via CreateProcessWithLogonW, which
+    # Defender/SmartScreen can stall well past 30s on a cold runner.
+    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 90_000
     check policyLines(root) ==
       @["deny /", "allow ./", "allow ./vault/out.txt", "deny ./locked"]
     tty.expect "\u276f"
@@ -436,7 +475,9 @@ suite "sandbox ask prompt":
 
     tty.expectInHistory ":a to allow ./vault/out.txt, :d or wait 20s to deny", 30_000
     tty.answerAsk ":a"
-    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 60_000
+    # The sandboxed rerun spawns via CreateProcessWithLogonW, which
+    # Defender/SmartScreen can stall well past 30s on a cold runner.
+    tty.expectInHistory "[sandbox ask: sandbox allow ./vault/out.txt; command retried]", 90_000
     check policyLines(root) ==
       @["deny /", "allow ./", "ask ./vault", "deny ./locked",
         "allow ./vault/out.txt"]
@@ -666,7 +707,7 @@ suite "sandbox ask prompt":
     echo "  PASS: apply_patch two roots ask sequentially"
 
   test "hard deny never asks":
-    if bashSandboxWorks():
+    if bashSandboxWorks() and landlockBites():
       let root = newFixture("harddeny")
       defer: removeDir(root)
       writeConfiguredProvider(root)

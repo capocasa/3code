@@ -1454,6 +1454,112 @@ proc claudecodeProfile(server: SseServer): Profile =
           key: "claude-oauth-access-token", model: "claude-sonnet-5",
           family: "claude", reasoning: "medium")
 
+proc makeGeminiSse(text: string): string =
+  ## One native `streamGenerateContent?alt=sse` event: a text part with a
+  ## STOP finishReason and usage. No `[DONE]`; translateEvent synthesizes
+  ## it from the finishReason.
+  let ev = %*{
+    "candidates": [{
+      "content": {"parts": [{"text": text}]},
+      "finishReason": "STOP"
+    }],
+    "usageMetadata": {
+      "promptTokenCount": 4,
+      "candidatesTokenCount": 2,
+      "totalTokenCount": 6
+    }
+  }
+  "data: " & $ev & "\n\n"
+
+proc serveGeminiCapture(server: SseServer) {.thread.} =
+  ## Capture the request headers AND body, then answer with the server's
+  ## configured native Gemini SSE stream.
+  var client: Socket
+  if not server.acceptWithinDeadline(client): return
+  var contentLength = 0
+  while true:
+    let line = client.recvLine(timeout = 3000)
+    let s = line.strip()
+    if s.len == 0: break
+    server.capturedHeaders.add s.toLowerAscii()
+    if s.toLowerAscii().startsWith("content-length:"):
+      contentLength = try: parseInt(s.split(":")[1].strip) except ValueError: 0
+  var bodyBuf = ""
+  while bodyBuf.len < contentLength:
+    let chunk = client.recv(contentLength - bodyBuf.len, timeout = 3000)
+    if chunk.len == 0: break
+    bodyBuf.add chunk
+  server.capturedBody = bodyBuf
+  let body = server.response
+  try:
+    client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
+      "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+    client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
+    client.send("0\r\n\r\n")
+  except CatchableError:
+    discard
+  client.close()
+
+proc googleProfile(server: SseServer): Profile =
+  Profile(name: "google.gemini-4-neon", family: "gemini",
+          model: "gemini-4-neon", key: "AIza-test",
+          url: "http://127.0.0.1:" & $server.port.uint16 & "/v1beta/openai")
+
+suite "gemini native wire over the real transport":
+  test "generateContent stream translates to an OpenAI message":
+    let server = newSseServer(makeGeminiSse("hello from neon"))
+    var srv: Thread[SseServer]
+    createThread(srv, serveGeminiCapture, server)
+    closeCachedStreamConn()
+    var usage = Usage()
+    let result = callModel(googleProfile(server),
+      %*[{"role": "user", "content": "hi"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr == "hello from neon"
+    check result{"finish_reason"}.getStr == "stop"
+    check usage.promptTokens == 4
+    check usage.completionTokens == 2
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+    # The `/openai` suffix selects the compat surface; the native base drops
+    # it and the model rides in the URL.
+    check server.capturedHeaders[0] ==
+      "post /v1beta/models/gemini-4-neon:streamgeneratecontent?alt=sse http/1.1"
+    check server.capturedHeaders.anyIt(it == "x-goog-api-key: aiza-test")
+    check not server.capturedHeaders.anyIt(it.startsWith("authorization:"))
+    # Body: the native request, no Code Assist envelope.
+    let req = parseJson(server.capturedBody)
+    check not req.hasKey("model")
+    check not req.hasKey("request")
+    check req{"contents"}[0]{"parts"}[0]{"text"}.getStr == "hi"
+    check req{"generationConfig"}{"maxOutputTokens"}.getInt > 0
+    check req{"tools"}[0]{"functionDeclarations"}.len > 0
+
+  test "image content arrays become inlineData parts":
+    let server = newSseServer(makeGeminiSse("a screenshot"))
+    var srv: Thread[SseServer]
+    createThread(srv, serveGeminiCapture, server)
+    closeCachedStreamConn()
+    var usage = Usage()
+    let history = %*[
+      {"role": "user", "content": [
+        {"type": "text", "text": "what is this"},
+        {"type": "image_url",
+         "image_url": {"url": "data:image/png;base64,AAAA"}}
+      ]}
+    ]
+    let result = callModel(googleProfile(server), history, usage, 0)
+    check result != nil
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+    let req = parseJson(server.capturedBody)
+    let parts = req{"contents"}[0]{"parts"}
+    check parts[0]{"text"}.getStr == "what is this"
+    check parts[1]{"inlineData"}{"mimeType"}.getStr == "image/png"
+    check parts[1]{"inlineData"}{"data"}.getStr == "AAAA"
+
 suite "claudecode (Claude subscription) over the real transport":
   test "bearer + oauth beta header, no x-api-key, Claude Code system first":
     let server = newSseServer("")

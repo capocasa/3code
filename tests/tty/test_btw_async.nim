@@ -72,11 +72,20 @@ suite ":btw is async":
       assistantReply("second reply", %*{"promptTokens": 6100,
         "completionTokens": 4, "totalTokens": 6104, "cachedTokens": 0})
     ]))
+    # btw_trace: the rest-loop ledger diagnostic (config.nim's testTrace).
+    # The dump below lands in the .run.log parallel_tty prints whole for a
+    # failing test, so a CI-side ledger failure names its step.
+    let tracePath = root / "btw_trace.log"
+    var env = stubEnv(root, root / "run" / "stub_responses.json")
+    env.add (key: "test.btw_trace", val: tracePath)
     let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
                             cwd = root / "run",
-                            env = stubEnv(root,
-                              root / "run" / "stub_responses.json"))
-    defer: tty.close()
+                            env = env)
+    defer:
+      tty.close()
+      if fileExists(tracePath):
+        echo "---- btw trace ----"
+        echo readFile(tracePath)
     tty.expect "❯"
 
     # Turn 1: the turn's own request lands on the bar.
@@ -163,10 +172,13 @@ suite ":btw is async":
     # The turn finishes; the rest ledgers the aside onto the same bar:
     # 6000+40 in, 5+6 out (ledgered only now, never mid-turn: the running
     # turn owns the bar until it rests).
-    # macOS CI runners stream the held reply well past 8s; the bar sum
-    # repaint follows the park, so both waits need slow-runner headroom.
-    tty.expectInHistory "main reply", timeoutMs = 20000
-    tty.expectInHistory "↓11", timeoutMs = 15000
+    tty.expectInHistory "main reply", timeoutMs = 8000
+    # The rest-ledger lands with the turn finalize; on the 3-core macos
+    # runner the stream drip and the join repaint run seconds behind the
+    # committed reply (the reply assert above passed while the bar still
+    # showed mid-turn partials). 12s keeps the contract (the ledger does
+    # land) without measuring the runner's scheduler.
+    tty.expectInHistory "↓11", timeoutMs = 12000
     tty.expectPromptLive()
     tty.send ":q\n"
     tty.expectExit(0)

@@ -38,6 +38,8 @@ import sandwall
 import sandwall/baseline
 import sandbox
 import dirsettings
+when defined(windows):
+  import sandwall/wall/permit
 
 when defined(linux):
   import sandwall/mask
@@ -561,6 +563,15 @@ proc boxRestrict(args: seq[string]): int =
   let wallPort = try: uint16(parseInt(runtime.get("wall_port")))
                  except ValueError: 0'u16
   let wallSock = runtime.get("wall_sock")
+  # The raw egress path (wall.conf `raw = on`): Linux carries every
+  # connection through a fake-IP fence DNS and an nft redirect,
+  # Windows stamps the policy's addresses as this run's kernel
+  # permits (from the `permits` snapshot); neither needs proxy env.
+  # Linux only decides it here: only this side knows whether the fence
+  # holds, and the parent re-spawns env mode on exit 75 plus the
+  # marker. On Windows the parent decided (the snapshot exists or not).
+  let wallRaw = runtime.get("wall_raw") == "on"
+  let wallDns = runtime.get("wall_dns")
 
   when defined(windows):
     # Windows cannot confine the current process; restrict() only
@@ -572,12 +583,37 @@ proc boxRestrict(args: seq[string]): int =
     # the caller points the child at the wall proxy via env for host
     # rules. When the fence is NOT installed, say so instead of
     # pretending (honest degrade posture).
+    # Raw path: the parent wrote `raw = on` and a permit snapshot
+    # (hosts.canStamp); runSandboxed stamps the addresses before
+    # anything else and raises PermitStampError with nothing stamped
+    # when it cannot: then env mode, as the standalone CLI does.
     # Do not call fenceStatus() here: opening the WFP engine is hundreds
     # of ms and the fence is installed once by `3code setup`. The
     # production tool path already warns when the fence is missing.
     try:
-      return int(runSandboxed(writable, a.cmd, read = readOnly,
-                              denied = denied))
+      var permits: seq[PermitEntry]
+      var snapshotError = ""
+      if wallRaw:
+        try:
+          permits = readSnapshot(runtime.get("wall_permits"))
+        except CatchableError as e:
+          snapshotError = e.msg
+      try:
+        if snapshotError.len > 0:
+          # An unreadable snapshot is nothing stamped: the raw launch
+          # cannot be honored, so it takes the refused stamp's fallback
+          # (proxy env), never a run with neither path.
+          raise newException(PermitStampError, "permit snapshot: " &
+            snapshotError)
+        return int(runSandboxed(writable, a.cmd, read = readOnly,
+                                denied = denied, permits = permits))
+      except PermitStampError as e:
+        stderr.writeLine("3code sandbox: " & e.msg &
+          "; using the proxy env path")
+        sandbox.putProxyEnv(sandbox.findProcbox(), $wallPort,
+                            getEnv("GIT_SSH_COMMAND", ""))
+        return int(runSandboxed(writable, a.cmd, read = readOnly,
+                                denied = denied))
     except CatchableError as e:
       stderr.writeLine("3code sandbox: " & e.msg)
       return 127
@@ -615,9 +651,25 @@ proc boxRestrict(args: seq[string]): int =
       # maskUngrantedDevices).
       if fence or maskRo.len > 0 or denied.len > 0:
         maskUngrantedDevices(writable, readOnly)
-      restrict(writable, read = readOnly, denied = denied,
-               fenceNet = fence, proxyPort = wallPort,
-               proxySockPath = wallSock)
+      if fence and wallRaw:
+        # Raw egress: the fake-IP fence DNS and the nft redirect carry
+        # every connection, no proxy env and no ssh shim. Decided here
+        # because only this side knows whether the fence holds;
+        # RawUnavailableError leaves nothing half up, and exit 75 plus
+        # the marker tells the parent to re-spawn env mode.
+        try:
+          restrict(writable, read = readOnly, denied = denied,
+                   fenceNet = true, proxyPort = wallPort,
+                   proxySockPath = wallSock, raw = true,
+                   dnsSockPath = wallDns)
+        except RawUnavailableError as e:
+          stderr.writeLine("3code sandbox: " & e.msg)
+          stderr.writeLine(RawMarker)
+          return RawFallbackExit
+      else:
+        restrict(writable, read = readOnly, denied = denied,
+                 fenceNet = fence, proxyPort = wallPort,
+                 proxySockPath = wallSock)
       repairUsernsIds(idmaps, outerUid, outerGid)
     else:
       restrict(writable, read = readOnly, denied = denied,

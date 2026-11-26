@@ -27,6 +27,36 @@ Unreleased
   (`tests/tty/test_quit_signals.nim`,
   `tests/tty/test_429_typing_during_backoff.nim`,
   `tests/tty/test_gui_join_freeze.nim`)
+- **Fenced commands reach the network without proxy variables on Linux,
+  and on Windows behind a one-time grant; the ssh wrapper is gone on the raw
+  path.** A fenced bash launch with host rules used to set `http_proxy` and
+  friends and shadow `ssh` with a wrapper carrying a generated config
+  (`-F`), so only proxy-aware tools and the wrapper's ssh worked, and
+  `scp` and `sftp` could not connect at all. A fenced command now takes
+  the raw path where the platform has it. Linux resolves names at a fence
+  DNS that answers allowed names with synthetic addresses from
+  `198.18.0.0/15` and redirects every connection onto the forwarder with
+  `nft`, so plain `ssh`, `scp`, `sftp` and `telnet` work with no proxy
+  variables, no wrapper and no git `ProxyCommand`; the forwarder still
+  decides by name at connect time. Windows stamps the allowed hosts'
+  addresses as per-run kernel permits after `3code setup --stamp-as
+  ACCOUNT` (exact allow rules only; `3code wall wfp-stamp-probe` says
+  whether the grant took). When the Linux fence cannot be put up the child
+  exits before running anything and the parent re-runs the command in env
+  mode, with one stderr line. Env mode (wildcard and deny-only policies
+  on Windows, all of macOS, a failed fence) keeps the proxy variables and
+  an ssh wrapper that adds only the `ProxyCommand`. The default policy
+  gains `allow ~/.ssh/known_hosts` and `allow ~/.ssh/control` on POSIX,
+  since the generated ssh config is gone: a first connect persists the
+  host key, and ControlMaster has a socket directory (`ControlPath
+  ~/.ssh/control/%C`). What it costs: on Linux a bare IP is admitted in
+  raw mode only when an allowed name resolved to it, so `ssh 192.0.2.10`
+  fails closed under an open policy where env mode admitted it, and the
+  host's own loopback services are unreachable in raw mode; on Windows
+  the child resolves through the system resolver and concurrent fenced
+  runs share their permits. macOS stays on env mode: Seatbelt cannot
+  permit single addresses. The manifest now requires sandwall >= 0.5.19
+  (permit set, fence DNS, WFP permits). (`tests/core/test_wall_bash.nim`)
 
 - **Goal mode starts work again when you reopen an open goal.** A launch
   with `3code -r` used to idle on a session whose goal was still armed:
@@ -60,6 +90,19 @@ Unreleased
   session now costs roughly the question and the answer; the history is
   cached-input. (`tests/core/test_btw.nim`,
   `tests/tty/test_btw_async.nim`)
+
+- **The prompt reference tokens are retuned to punctuation.** `@*`
+  (last command output) and `@+` (previous prompt) become the five:
+  `@.` splices the model's last output (checkpoint markers stripped, the
+  empty-reply marker read as none), `@>` your previous prompt, `@!` the
+  last run command, `@$` its output — the old combined blob split so a
+  command can be quoted without its output and vice versa — and `@?`
+  the last `:btw` question and answer (the delivered aside is now
+  remembered on the session, in memory like `@>`; the reply carries its
+  question so question and answer land together, spliced as question,
+  a newline, the answer). Token-exact as
+  before, so `@.gitignore` stays a file mention.
+  (`tests/core/test_attach.nim`)
 
 - **The `[image attached]` echo marker is now `🖼`.** The transcript
   echo of a prompt whose `@image` tokens attached ends in U+1F5BC,

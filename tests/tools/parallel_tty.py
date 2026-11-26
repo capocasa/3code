@@ -232,7 +232,11 @@ def main():
                     failed.append((kind, name, log))
                     print(f"[build {i}/{len(jobs)}] FAIL {kind} {name} "
                           f"(rc={rc}, {dur:.1f}s)", flush=True)
-                    print(tail(log), flush=True)
+                    # Whole log, not a tail: the truncated block loses the
+                # deferred-dump sections a test prints after its failure
+                # (the settings_midturn config-write trace), and the
+                # recovery patterns in ci_tests.sh then find nothing.
+                print(tail(log, n=100000), flush=True)
 
     if args.build_only:
         print(f"parallel_tty: build done, {len(failed)} failed", flush=True)

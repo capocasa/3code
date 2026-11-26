@@ -56,7 +56,11 @@
 ## and ~/.ssh private keys. ~/.ssh itself is read-only - public keys,
 ## config, known_hosts - with every OpenSSH default private-identity
 ## name re-denied on top, so ssh keeps working while the keys the
-## prompts answer for stay unread. A missed allow fails loud (git
+## prompts answer for stay unread. Two narrow writable grants ride on
+## top of the read-only dir on POSIX: `known_hosts` (a first connect
+## persists the host key) and `~/.ssh/control` (ControlMaster sockets,
+## with a `ControlPath ~/.ssh/control/...` the user config; 3code
+## creates the dir). A missed allow fails loud (git
 ## dies, the user sees it); a missed deny fails silent and forever.
 ## There is no published "safe dotfiles" list to defer to, so the
 ## default opens exactly the documented lookup paths of the tools it
@@ -134,6 +138,8 @@ deny ~/.ssh/id_ed25519
 deny ~/.ssh/id_ed25519_sk
 deny ~/.ssh/id_rsa
 deny ~/.ssh/id_xmss
+allow ~/.ssh/known_hosts
+allow ~/.ssh/control
 allow *
 """
 else:
@@ -168,5 +174,7 @@ deny ~/.ssh/id_ed25519
 deny ~/.ssh/id_ed25519_sk
 deny ~/.ssh/id_rsa
 deny ~/.ssh/id_xmss
+allow ~/.ssh/known_hosts
+allow ~/.ssh/control
 allow *
 """

@@ -390,7 +390,7 @@ user-facing switches, `[plugins]` the plugin tuning:
 | `termdbg` | `[settings]` | arm terminal-model probes, logged to this path, for rendering bug reports |
 | `force_sync_output` | `[settings]` | `on` re-enables DEC 2026 synchronized repaints (off by default) |
 | `ask_timeout_ms` | `[settings]` | ask-gate wait cap in ms (default 60000) |
-| `google_project` | `[settings]` | Code Assist project id override for `geminicli`/`google` |
+| `google_project` | `[settings]` | Code Assist project id override for `geminicli` |
 | `sync_ms` | `[plugins]` | sync-hook deadline override in ms (default 2000) |
 | `tool_ms` | `[plugins]` | plugin tool-exec default timeout in ms (default 120000) |
 

@@ -11,6 +11,9 @@
 ## only the harness internals fork on `when defined(...)`.
 
 import std/[os, re, strformat, strutils, monotimes, unicode, json]
+when defined(macosx):
+  # `stallSample`: the macOS-only thread-stack diagnosis for a stalled child.
+  import std/osproc
 
 proc epochTime(): float =
   ## Harness-relative clock only: all deadlines and frame offsets are monotonic.
@@ -137,6 +140,7 @@ type
     ## `turnIdle` (below) is the authoritative signal; this is the fallback
     ## used where the frame channel is inert (ConPTY).
     cursorShown*: bool
+    debugLog*: string  ## the child's debug_log sink, when one was armed
     ## The app's own turn state, tracked from the `'b'`/`'i'` events it
     ## writes on the frame channel at `beginTurn` / turn end. The caret is
     ## shown on the prompt row during a running turn too (buffered typing
@@ -750,7 +754,18 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       pluginsConf.add (item.key[8 ..^ 1], item.val)
     else:
       envVars.add item
+  # TTY_EXPECT_DEBUG_LOG: arm the child's own trace sink (its `debugOut`
+  # lines, `--debug`) for every session; a failure dump then carries the
+  # trace tail next to the frames and the stall sample. Through the env,
+  # not the config: a config carrying the key would make a first-run
+  # session (no config anywhere) look configured.
+  var debugLogPath = ""
+  if getEnv("TTY_EXPECT_DEBUG_LOG") != "":
+    debugLogPath = getTempDir() / ("tty_expect_debug_" & $gIpcSessionSeq & ".log")
+    envVars.add ("THREECODE_DEBUG_LOG", debugLogPath)
   var childArgs: seq[string] = @args
+  if debugLogPath.len > 0:
+    childArgs.add "--debug"  # the trace itself is gated on this flag
   var cfgPath = sessionConfigFile(childArgs, envVars)
   if cfgPath == "":
     # Neither -c nor an XDG redirect: never touch the real user config —
@@ -844,6 +859,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       tickerCommandFd: tickerCommandFd,
       tickerAckFd: tickerAckFd,
       apiContinueFd: apiContinueFd)
+    result.debugLog = debugLogPath
 
     # The ConPTY is created at cols x rows above, but the grid still has
     # newGrid()'s default size; without this the model parses 120-col
@@ -1034,6 +1050,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       turnIdle: true,
       exitCode: -1)
     discard result.resize(cols, rows)
+    result.debugLog = debugLogPath
 
     let pid = fork()
     doAssert pid >= 0
@@ -1057,7 +1074,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       clearEnv()
 
       var hasTerm = false
-      for item in env:
+      for item in envVars:
         if item.key == "TERM":
           hasTerm = true
         putEnv(item.key, item.val)
@@ -1317,6 +1334,59 @@ proc dumpTailFrames*(s: TtySession; n = 5): string =
       if row.len > 0:
         result.add row & "\n"
 
+proc stallSample*(s: TtySession): string =
+  ## Opt-in stall diagnosis (TTY_EXPECT_SAMPLE=1, macOS): when an expect
+  ## deadline expires with the child still alive, `sample` its call stacks
+  ## before the failure unwinds and kills it. The frame dump shows what
+  ## the screen froze on; this shows which call each thread is parked in.
+  ## Only the call graph's first (main thread) block is kept, capped so
+  ## it survives parallel_tty's failure tail, which keeps a message's
+  ## last 40 lines (the dump closes the message, after the frames).
+  when defined(macosx):
+    if getEnv("TTY_EXPECT_SAMPLE") == "" or s.exited: return ""
+    let path = getTempDir() / ("tty_expect_sample_" & $s.pid & ".txt")
+    defer:
+      try: removeFile(path) except OSError: discard
+    let (outp, code) = execCmdEx("sample " & $s.pid & " 1 -mayDie -f " &
+      path.quoteShell, options = {poStdErrToStdOut})
+    if code != 0:
+      return "\nsample (" & $code & "): " & outp.strip & "\n"
+    result.add "\n----- sample (main thread call graph, leaf last) -----\n"
+    var inGraph = false
+    var threads = 0
+    var stack: seq[string]
+    for line in readFile(path).splitLines():
+      if line.startsWith("Call graph:"):
+        inGraph = true
+        continue
+      if not inGraph: continue
+      if line.startsWith("Total number in stack"): break
+      # Header: `    2631 Thread_1234567   DispatchQueue_1: ...`.
+      if line.strip.match(re"\d+ Thread_\d+"):
+        inc threads
+        if threads > 1: break
+      if line.strip.len > 0:
+        stack.add line.strip
+    # The leaf frames name the stall; keep the tail of the stack.
+    if stack.len > 14:
+      result.add "...\n"
+      stack = stack[^14 .. ^1]
+    for line in stack:
+      result.add line & "\n"
+    result.add "------------------------------------------\n"
+  else:
+    discard
+
+proc debugLogTail(s: TtySession): string =
+  ## Last lines of the child's debug_log (armed by TTY_EXPECT_DEBUG_LOG):
+  ## the app's own trace of what it decided, next to what it painted.
+  if s.debugLog.len == 0 or not fileExists(s.debugLog): return ""
+  let lines = readFile(s.debugLog).splitLines()
+  result.add "\n----- child debug log (last 20) -----\n"
+  for line in lines[max(0, lines.len - 20) ..< lines.len]:
+    result.add line & "\n"
+  result.add "-------------------------------------\n"
+
 proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
   var hits: seq[int]
   for i, frame in s.frames:
@@ -1326,7 +1396,9 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
         break
 
   if hits.len == 0:
-    return s.dumpTailFrames(radius * 2 + 1)
+    result = s.dumpTailFrames(radius * 2 + 1) & s.debugLogTail() &
+      s.stallSample()
+    return
 
   var ranges: seq[tuple[first, last: int]]
   for hit in hits:
@@ -1345,6 +1417,7 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
         if row.len > 0:
           let mark = if rowIdx in frame.changedRows: "*" else: " "
           result.add &"{mark}{rowIdx:02d}: {row}\n"
+  result.add s.debugLogTail() & s.stallSample()
 
 proc framesText*(s: TtySession): string =
   for i, frame in s.frames:
