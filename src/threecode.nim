@@ -299,10 +299,20 @@ proc setupTlsEnv() =
 
 const NotifyMinSeconds = 5.0
 
-proc notifyTurnFinished(messages: JsonNode) =
+proc notifyTurnFinished(messages: JsonNode) {.gcsafe.} =
   let body = turnFinishedBody(messages)
   if body.len == 0: return
-  notify("3code", "Turn finished", body)
+  {.cast(gcsafe).}:
+    # The backends shell out (macOS runs a compiled Swift helper) and are
+    # not annotated gcsafe; the thread wrapper below guarantees the call
+    # never lands on the controller.
+    notify("3code", "Turn finished", body)
+
+proc notifyTurnFinishedThreaded(messages: JsonNode) {.thread, gcsafe.} =
+  ## Controller thread's fire-and-forget notification body (see the spawn
+  ## site in runTurnWithSafetyNet). Deep-copies nothing: the thread owns
+  ## the JsonNode handed over by the spawn.
+  notifyTurnFinished(messages)
 
 proc commitUserPromptTranscript(line: string) =
   ## Controller-owned transcript append for user prompt items submitted
@@ -1257,7 +1267,17 @@ proc main() =
         " after " & $(epochTime() - turnStart) & "s"
       if not interrupted and notifyEnabled and
           epochTime() - turnStart >= NotifyMinSeconds:
-        notifyTurnFinished(messages)
+        # Fire and forget: the desktop backends shell out (macOS compiles
+        # and runs a Swift helper), and a slow or consent-waiting helper
+        # must never park the controller between the turn's end and the
+        # rest loop the deferred side effects ride.
+        debugOut "notify: firing turn-finished notification"
+        var notifier: Thread[JsonNode]
+        createThread(notifier, notifyTurnFinishedThreaded, messages)
+        # Detached by the join-less contract: the thread's JsonNode arg is
+        # its own copy (system copies thread args), so nothing here dangles.
+        discard
+        debugOut "notify: notification dispatched"
       result = handleBufferedAfterTurn(interrupted)
     except IOError as e:
       stderr.writeLine "3code: output stream broken (" & e.msg &

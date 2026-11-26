@@ -1385,8 +1385,8 @@ proc debugLogTail(s: TtySession): string =
   ## the app's own trace of what it decided, next to what it painted.
   if s.debugLog.len == 0 or not fileExists(s.debugLog): return ""
   let lines = readFile(s.debugLog).splitLines()
-  result.add "\n----- child debug log (last 20) -----\n"
-  for line in lines[max(0, lines.len - 20) ..< lines.len]:
+  result.add "\n----- child debug log (last 60) -----\n"
+  for line in lines[max(0, lines.len - 60) ..< lines.len]:
     result.add line & "\n"
   result.add "-------------------------------------\n"
 
