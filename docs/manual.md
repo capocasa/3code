@@ -531,6 +531,7 @@ The daily keys:
 | Ctrl+Arrow | move by word |
 | Ctrl+R / Ctrl+S | search history as you type |
 | Ctrl+9 | send the current state as a request, like Enter on an empty prompt (`:retry` as a key; needs a kitty-protocol terminal, see below) |
+| Ctrl+5 | expand/collapse the running shell viewport to a bit less than the terminal height (`expand-shell` as a key; kitty-protocol terminals) |
 | Alt+E | edit the input in $VISUAL/$EDITOR |
 | Ctrl+C or Esc | cancel the running request (a typed draft survives and returns prefilled); at the idle prompt clear the input, or cancel when it is empty |
 | Ctrl+D | exit |
@@ -652,7 +653,8 @@ The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
 `nonincremental-search-backward`, `nonincremental-search-forward`,
 `history-begin`, `history-end`, `set-mark`, `exchange-point-and-mark`,
 `quoted-insert`, `char-search`, `char-search-backward`,
-`delete-horizontal-space`, `tab-insert`, `retry`, `vi-mode`.
+`delete-horizontal-space`, `tab-insert`, `retry`, `expand-shell`,
+`vi-mode`.
 
 `retry` is the `:retry` command as a key: it queues the same empty
 submit Enter on an empty prompt produces, so a fresh request goes out
@@ -661,7 +663,11 @@ for the next prompt). It defaults to Ctrl+9, which a terminal reports
 distinctly only when it speaks the kitty keyboard protocol (kitty,
 ghostty, foot, WezTerm, recent xterm). Elsewhere the terminal folds
 Ctrl+digit into the digit itself and the press types a 9 — the `:retry`
-command remains the spelling that works everywhere.
+command remains the spelling that works everywhere. `expand-shell`
+does the same on Ctrl+5: while a bash tool streams it toggles the live
+viewport between its capped 8-line tail and an expanded tail a bit less
+than the terminal height; with a follow (`:show`) running it collapses
+the follow first. Inert when nothing is streaming.
 
 Keys joined by `>` form a chord: pressed in sequence, they run the
 command once. The default `edit-in-editor` binding is exactly that:
@@ -727,11 +733,13 @@ line(s) in the banner (`banner_lines` in the config widens that, default
 1) and collapses the rest into a linked `… +N lines · T7.cmd ↗` tail row;
 `:cmd N` prints the whole command, `:cmd N edit` opens it in
 $VISUAL/$EDITOR. While tool call N is still running, the same `:show N`
-(or a click on the viewport) follows its output live: the held lines
-flush into scrollback and every new line lands as it arrives; `:unshow`
-returns to the capped viewport, and the fold pins only the banner plus
-the dump link. The whole elision row is a terminal
-hyperlink (OSC 8) over a dump of the full output in
+(or a ctrl+5 press, rebindable as `expand-shell`) follows its output
+live: the held lines flush into scrollback and every new line lands as
+it arrives; `:unshow` returns to the capped viewport, and the fold pins
+only the banner plus the dump link. ctrl+5 without an active follow
+toggles the running viewport between its capped tail and an expanded
+near-full-terminal tail instead; a second press collapses it.
+The whole elision row is a terminal hyperlink (OSC 8) over a dump of the full output in
 `$TMPDIR/3code_out_<pid>/T<N>.log(.diff)`, so terminals that support links
 open it in the `file:` handler (e.g. `$VISUAL`) on a click; the visible
 file name keeps the row honest where links are unsupported, and the dumps

@@ -817,7 +817,6 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
       renderView()
 
   setToolStdinWatcherEnabled(not promptOwnsStdin)
-  setMouseClickReporting(true)
   try:
     setCommandStatusActive(true)
     renderView()
@@ -902,7 +901,6 @@ proc runBashWithViewport*(act: Action; cache: ReadCache; stub: JsonNode;
   finally:
     setCommandStatusActive(false)
     setToolStdinWatcherEnabled(true)
-    setMouseClickReporting(false)
     # The normal path leaves the viewport in place so the controller's
     # `appendItem` can fold it into one synchronized scrollback commit (no
     # blank intermediate frame). Only on exception, where the append will not

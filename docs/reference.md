@@ -152,6 +152,7 @@ Default keys at the prompt. `:help` prints the ones in effect;
 | Ctrl+@ or Alt+Space | set the mark (binds `exchange-point-and-mark` to swap back) |
 | Ctrl+R / Ctrl+S | incremental history search: type to narrow, Ctrl+R/Ctrl+S step older/newer, Enter submits, Esc accepts, Ctrl+G aborts |
 | Ctrl+9 | send the current state as a request, like Enter on an empty prompt; the `retry` shortcut, distinct on kitty-protocol terminals only (legacy terminals type the digit) |
+| Ctrl+5 | expand/collapse the running shell viewport to a bit less than the terminal height; the `expand-shell` shortcut (kitty-protocol terminals, inert when nothing streams) |
 | Ctrl+1 | answer the waiting sandbox ask with `:allow` (kitty-protocol terminals; inert elsewhere, typed commands remain) |
 | Ctrl+2 | answer it with `:allow-dir` (same reachability) |
 | Ctrl+4 | answer it with `:deny` (same reachability) |

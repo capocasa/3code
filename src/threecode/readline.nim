@@ -95,6 +95,10 @@ const ReadlineShortcuts* = {
     # classic control bytes, so the press stays a harmless no-op there.
     # The app installs the handler.
     "retry": "Ctrl9",
+    # Expand/collapse the ongoing live shell viewport to a bit less than
+    # the terminal height. Same kitty-only story as Ctrl9; the app
+    # installs the handler.
+    "expand-shell": "Ctrl5",
     # Sandbox ask answers, armed only while an ask waits (the handlers
     # gate on the ask gate): fire the matching typed command. Distinct
     # keys only on kitty-protocol terminals; legacy terminals fold
