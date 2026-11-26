@@ -299,6 +299,13 @@ proc setupTlsEnv() =
 
 const NotifyMinSeconds = 5.0
 
+proc notifyTurnFinished(messages: JsonNode) {.gcsafe.}
+
+proc notifyTurnFinishedThreaded(messages: JsonNode) {.thread, gcsafe.} =
+  ## See the spawn site in notifyTurnFinished; the thread owns the
+  ## JsonNode handed over by createThread.
+  notifyTurnFinished(messages)
+
 proc notifyTurnFinished(messages: JsonNode) {.gcsafe.} =
   let body = turnFinishedBody(messages)
   if body.len == 0: return
@@ -314,10 +321,6 @@ proc notifyTurnFinished(messages: JsonNode) {.gcsafe.} =
   else:
     {.cast(gcsafe).}:
       notify("3code", "Turn finished", body)
-
-proc notifyTurnFinishedThreaded(messages: JsonNode) {.thread, gcsafe.} =
-  ## See the spawn site above; the thread owns the JsonNode handed over.
-  notifyTurnFinished(messages)
 
 proc commitUserPromptTranscript(line: string) =
   ## Controller-owned transcript append for user prompt items submitted
