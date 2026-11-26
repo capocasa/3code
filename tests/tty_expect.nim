@@ -761,7 +761,10 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
   # session (no config anywhere) look configured.
   var debugLogPath = ""
   if getEnv("TTY_EXPECT_DEBUG_LOG") != "":
-    debugLogPath = getTempDir() / ("tty_expect_debug_" & $gIpcSessionSeq & ".log")
+    # Unique per test process: getTempDir is shared across the parallel
+    # test binaries and O_APPEND mixes two apps' logs into one tail.
+    debugLogPath = getTempDir() / ("tty_expect_debug_" & $getCurrentProcessId() &
+      "_" & $gIpcSessionSeq & ".log")
     envVars.add ("THREECODE_DEBUG_LOG", debugLogPath)
   var childArgs: seq[string] = @args
   if debugLogPath.len > 0:
@@ -1903,7 +1906,8 @@ proc expectInHistory*(s: TtySession; text: string; timeoutMs = 5000): bool {.dis
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "expected history text not found: " & text & "\n" &
-    s.dumpFramesAround(text)
+    s.dumpFramesAround(text) &
+    "\n[reason] expected history text not found: " & text
 
 proc expectNeverInHistory*(s: TtySession; text: string) =
   s.drain(20, recordFrame = false)
@@ -1925,7 +1929,8 @@ proc expectNewInHistory*(s: TtySession; text: string; before: int;
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "expected new history text not found: " & text & "\n" &
-    s.dumpFramesAround(text)
+    s.dumpFramesAround(text) &
+    "\n[reason] expected new history text not found: " & text
 
 proc expectExit*(s: TtySession; code: int; timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0

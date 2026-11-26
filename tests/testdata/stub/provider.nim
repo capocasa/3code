@@ -419,7 +419,11 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
       break
   if result.kind == JObject and "role" notin result:
     result["role"] = %"assistant"
-  debugOut &"callModel stub idx={stubResponseIdx-1} failure={stubFailureName(lastFailure)}"
+  let lastContent = messages[^1]{"content"}.getStr
+  let head = if lastContent.len > 30: lastContent[0 ..< 30] else: lastContent
+  debugOut &"callModel stub idx={stubResponseIdx-1} failure={stubFailureName(lastFailure)} " &
+    &"hold={stubDelayMs(result, \"preStreamDelayMs\", 0)} " &
+    &"turnCall=" & $(messages[^1]{"role"}.getStr) & "/" & head
   # Test-only fault injection: arm the process-global interrupt flag as if a
   # watcher had fired mid-turn with no user key, so tests can lock out the
   # "interrupted by user printed on a normal turn return" bug.

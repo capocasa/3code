@@ -1158,6 +1158,11 @@ proc main() =
       of ieInterrupt:
         discard  # already handled
       of ieNone:
+        # The turn yielded: a mid-turn settings command's deferred config
+        # write is ordered with the finalize, not with the prompt repaint
+        # (a slow runner surfaces the prompt first, osx), so flush here
+        # and not only in the repl loop's rest spin.
+        flushSettingConfig()
         if not interrupted and turnYieldedToQueue and
             messages.len > 0 and
             messages[^1]{"role"}.getStr == "tool":
