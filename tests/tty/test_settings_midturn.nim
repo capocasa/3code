@@ -132,7 +132,11 @@ suite "chrome settings during a turn":
       saved = readFile(configFile)
       if "notify = \"off\"" in saved and "tab-title = \"off\"" in saved:
         break
-      sleep(100)
+      # Keep draining while polling: the app blocks in the stub's frame
+      # ack handshake while it still streams, and a test parked on this
+      # file with no pty reads deadlocks the turn against its own ack.
+      discard tty.waitForOutput(50, recordFrame = false)
+      sleep(50)
     check "notify = \"off\"" in saved
     check "tab-title = \"off\"" in saved
     tty.send ":q\n"
