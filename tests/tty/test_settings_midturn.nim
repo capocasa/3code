@@ -104,11 +104,19 @@ suite "chrome settings during a turn":
     tty.expectInHistory "main reply", timeoutMs = 8000
     tty.expectPromptLive()
     # Scratch diagnosis: dump every config write the app made, with the
-    # globals each call serialized, when the assertions below fail.
+    # globals each call serialized, plus the app's own debug log (rest
+    # beats, persist/flush decisions), when the assertions below fail.
+    # unittest check failures print no message, so both sinks go to
+    # stdout here unconditionally on exit.
     defer:
       if fileExists(tracePath):
         echo "---- config write trace ----"
         echo readFile(tracePath)
+      if tty.debugLog.len > 0 and fileExists(tty.debugLog):
+        echo "---- child debug log (last 120) ----"
+        let lines = readFile(tty.debugLog).splitLines()
+        for line in lines[max(0, lines.len - 120) ..< lines.len]:
+          echo line
     # The write is ordered with the turn finalize, not with the prompt
     # repaint: a slow runner can surface the prompt first (osx). Poll
     # briefly so the assertion measures the contract (the write happens)
