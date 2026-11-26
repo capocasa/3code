@@ -1615,6 +1615,7 @@ proc persistSettingConfig() =
   ## raised; `flushSettingConfig` writes at the next rest. At a rest — or
   ## in a frontend without a turn state, like the library — write now.
   if not turnActive():
+    debugOut "persistSettingConfig: writing now"
     writeConfigFile(configPath(), activeCurrent, activeProviders)
   else:
     debugOut "persistSettingConfig: deferred to the next rest"
@@ -2381,9 +2382,13 @@ proc deliverFinishedBtw*() =
         commitTranscriptBytes(errBytes, restoreEditor = true)
     var replies: seq[BtwReply]
     pollBtw(replies)
-    testTrace("btw_trace", "deliver parked=" & $replParkedAtInput.load(
-        moAcquire) & " replies=" & $replies.len & " stashedBefore=" &
-      $btwStashedLive())
+    # Trace the in-turn beats and every beat with news; the idle rest
+    # spin is covered by readInput's 1s heartbeat instead.
+    if not replParkedAtInput.load(moAcquire) or replies.len > 0 or
+        btwStashedLive() > 0 or postedBtwLive() > 0:
+      testTrace("btw_trace", "deliver parked=" &
+        $replParkedAtInput.load(moAcquire) & " replies=" & $replies.len &
+        " stashedBefore=" & $btwStashedLive())
     if replParkedAtInput.load(moAcquire):
       # At a rest the session is stable: ledger what the running turn
       # made us park, then this poll's own answers, in arrival order.
@@ -2432,11 +2437,19 @@ proc readInput*(editor: var minline.LineEditor, done: var bool,
   # that window already cancelled its turn and must not also quit here.
   clearSigintIdleExit()
   var loggedArrival = false
+  var lastBeat = 0.0
   while true:
     if not loggedArrival:
       loggedArrival = true
       debugOut &"readInput: parked={replParkedAtInput.load(moAcquire)} " &
         &"jobs={btwJobsLive()} retired={btwRetiredLive()}"
+    let nowS = epochTime()
+    if nowS - lastBeat >= 1.0:
+      lastBeat = nowS
+      debugOut &"rest beat: parked={replParkedAtInput.load(moAcquire)} " &
+        &"stash={btwStashedLive()} jobs={btwJobsLive()} " &
+        &"retired={btwRetiredLive()} posted={postedBtwLive()} " &
+        &"turnActive={turnActive()} pendingWrite={settingConfigWritePending}"
     # The wait is also the delivery window for async side questions: a
     # finished `:btw` worker lands its answer here, between keystrokes,
     # without the prompt ever having blocked for it. It is also the rest

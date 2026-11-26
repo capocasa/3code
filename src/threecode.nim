@@ -1248,6 +1248,8 @@ proc main() =
     let turnStart = epochTime()
     try:
       let interrupted = runTurnsInteractive(prof, messages, session)
+      debugOut "safetyNet: turn returned interrupted=" & $interrupted &
+        " after " & $(epochTime() - turnStart) & "s"
       if not interrupted and notifyEnabled and
           epochTime() - turnStart >= NotifyMinSeconds:
         notifyTurnFinished(messages)
@@ -1448,6 +1450,7 @@ proc main() =
     while true:
       # Parked: the input wait is the one window where the session
       # messages are stable, so the rebreak provider may read them.
+      debugOut "repl loop: iteration top"
       markReplParked(true)
       var done = false
       var emptySubmit = false

@@ -140,11 +140,20 @@ suite ":btw is async":
       assistantReply("midturn answer", %*{"promptTokens": 40,
         "completionTokens": 6, "totalTokens": 46, "cachedTokens": 0})
     ]))
+    # Scratch diagnosis: the rest-loop ledger beats, dumped below on
+    # failure (the osx runs went silent after the receipt cleared).
+    let tracePath = root / "xdg" / "btw_trace.txt"
+    removeFile(tracePath)
+    var env = stubEnv(root, root / "run" / "stub_responses.json")
+    env.add (key: "test.btw_trace", val: tracePath)
     let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
                             cwd = root / "run",
-                            env = stubEnv(root,
-                              root / "run" / "stub_responses.json"))
-    defer: tty.close()
+                            env = env)
+    defer:
+      tty.close()
+      if fileExists(tracePath):
+        echo "---- btw trace ----"
+        echo readFile(tracePath)
     tty.expect "❯"
 
     # The turn starts and is held by the stub before any content exists.

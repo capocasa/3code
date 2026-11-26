@@ -2246,7 +2246,9 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     releaseIdleSubmittedInput()
     return false
   try:
-    return runTurns(p, messages, session)
+    result = runTurns(p, messages, session)
+    debugOut "runTurnsInteractive: runTurns returned interrupted=" & $result
+    return result
   except SessionSaveError as e:
     # A checkpoint save could not commit: the previous transcript on disk
     # is intact, the turn's result lives on in memory, and the next save
