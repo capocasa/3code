@@ -1412,15 +1412,21 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
     else:
       ranges.add (first, last)
 
+  proc frameRows(i: int): string =
+    let frame = s.frames[i]
+    result.add &"frame {i} @{frame.ms}ms changed={frame.changedRows}\n"
+    for rowIdx, row in frame.rows:
+      if row.len > 0:
+        let mark = if rowIdx in frame.changedRows: "*" else: " "
+        result.add &"{mark}{rowIdx:02d}: {row}\n"
+  var framesDump = ""
   for r in ranges:
     for i in r.first .. r.last:
-      let frame = s.frames[i]
-      result.add &"frame {i} @{frame.ms}ms changed={frame.changedRows}\n"
-      for rowIdx, row in frame.rows:
-        if row.len > 0:
-          let mark = if rowIdx in frame.changedRows: "*" else: " "
-          result.add &"{mark}{rowIdx:02d}: {row}\n"
-  result.add s.debugLogTail() & s.stallSample()
+      framesDump.add frameRows(i)
+  # Frames last: parallel_tty keeps a failure message's last 40 lines,
+  # and the painted screen is the one dump nothing else can replace.
+  result.add s.debugLogTail() & s.stallSample() & "\n----- frames around -----\n" &
+    framesDump
 
 proc framesText*(s: TtySession): string =
   for i, frame in s.frames:
