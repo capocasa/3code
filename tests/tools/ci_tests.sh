@@ -25,6 +25,8 @@
 #   TTY_SHARD=i/n runs only tty subset i of n (duration-balanced by
 #   parallel_tty.py); TTY_SHARD=none runs everything but tty. CI splits the
 #   tty category across jobs this way; unset runs the whole suite here.
+#   CORE_SHARD=i/n runs only balanced subset i of the non-tty units
+#   (config fold, core fold groups, pooled files; shard_units.py).
 set -u
 
 # build/test-nimflags: extra nim flags for the test binary, one line.
@@ -138,16 +140,48 @@ run_testament() {
     for f in $(python3 tests/tools/fold_groups.py --list-solo core); do
       files="$files $f"
     done
+    # The non-tty suite is a set of units: the config fold, each core
+    # fold group, each pooled file. CORE_SHARD=i/n runs only balanced
+    # subset i of n on this runner (shard_units.py over
+    # tests/tools/core_times.txt); CI spreads the suite across jobs that
+    # way. Every unit is in exactly one shard.
+    units='config'
+    for g in $(python3 tests/tools/fold_groups.py --list core |
+              grep -v '^solo:' |
+              sed -n 's/^\([a-z_][a-z_0-9]*\): .*/\1/p'); do
+      units="$units core:$g"
+    done
+    if [ -n "${CORE_SHARD:-}" ]; then
+      run_units=''
+      owned=$(python3 tests/tools/shard_units.py "$CORE_SHARD" $units $files) \
+        || return 2
+      files=''
+      for u in $owned; do
+        case $u in
+          config|core:*) run_units="$run_units $u" ;;
+          *) files="$files $u" ;;
+        esac
+      done
+      units="$run_units"
+    fi
     # Config is proven green as one process (592 tests, 0 failures), so its
     # 19 files become one compile. Core folds into six domain groups, one
     # process each (1280 tests, 0 failures): grouping, not a single binary,
     # is what keeps cross-domain state apart.
-    python3 tests/tools/fold_category.py config \
-      --timeout "${PER_TEST_SECS:-720}" || rc_all=1
-    python3 tests/tools/fold_groups.py core \
-      --timeout "${PER_TEST_SECS:-720}" || rc_all=1
+    for u in $units; do
+      case $u in
+        config)
+          python3 tests/tools/fold_category.py config \
+            --timeout "${PER_TEST_SECS:-720}" || rc_all=1 ;;
+        core:*)
+          python3 tests/tools/fold_groups.py core --only "${u#core:}" \
+            --timeout "${PER_TEST_SECS:-720}" || rc_all=1 ;;
+      esac
+    done
     if [ -n "$files" ]; then
       # Word-splitting is intentional: test paths contain no spaces.
+      # Shard-owned files arrive longest first, so the pool's workers all
+      # start on the heavy ones.
       python3 tests/tools/parallel_files.py \
         --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
     fi

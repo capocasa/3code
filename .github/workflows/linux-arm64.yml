@@ -187,7 +187,39 @@ jobs:
     # userns, PTYs) that a container's seccomp profile may not allow.
     # No needs: build — the tests compile their own binaries, and they
     # must also run on branch pushes, where the build job is skipped.
+    # Suite split into six duration-balanced shards, one per job (see
+    # linux-amd64.yml): CORE_SHARD i/n for the non-tty units, TTY_SHARD i/n
+    # for the tty category. Every unit and test is in exactly one shard.
     runs-on: ubuntu-22.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: core-1
+            tty_shard: none
+            core_shard: 1/3
+            cap: 1200
+          - suite: core-2
+            tty_shard: none
+            core_shard: 2/3
+            cap: 1200
+          - suite: core-3
+            tty_shard: none
+            core_shard: 3/3
+            cap: 1200
+          - suite: tty-1
+            tty_shard: 1/3
+            cap: 900
+          - suite: tty-2
+            tty_shard: 2/3
+            cap: 900
+          - suite: tty-3
+            tty_shard: 3/3
+            cap: 900
+    name: test (${{ matrix.suite }})
+    env:
+      TTY_SHARD: ${{ matrix.tty_shard }}
+      CORE_SHARD: ${{ matrix.core_shard }}
 
     steps:
       - uses: actions/checkout@v4
@@ -243,7 +275,7 @@ jobs:
         # Same class of cut as 1800->2400 (Oct 6) and 2400->3600 (Nov 5),
         # now that the suite is faster. timeout-minutes keeps a 5-min
         # attribution window above the watchdog so the cap self-reports.
-        run: sh tests/tools/ci_tests.sh 2400
+        run: sh tests/tools/ci_tests.sh ${{ matrix.cap }}
         timeout-minutes: 45
 
   # The dev-server upload is its own job, not a build step: a

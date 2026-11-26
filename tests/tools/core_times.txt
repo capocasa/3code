@@ -1,0 +1,37 @@
+# Wall seconds per non-tty unit on the Linux amd64 runner (core job of run
+# 45840509310 for the folds, a local 8-core parallel_files run for the
+# files, scaled so the files sum to the CI total). shard_units.py balances
+# CORE_SHARD jobs with these; a missing unit costs balance, never a run.
+# Fold group entries are compile (~18s) plus run.
+config 60
+core:agent 45
+core:cli 53
+core:sandbox 53
+core:session 31
+core:ui 29
+core:util 21
+tests/api/test_anthropic.nim 4
+tests/api/test_api.nim 31
+tests/api/test_api_pure.nim 7
+tests/api/test_codeassist.nim 2
+tests/api/test_fatprompt.nim 4
+tests/api/test_library.nim 26
+tests/api/test_memory_leak.nim 13
+tests/api/test_plugin_agent.nim 20
+tests/api/test_plugins_turn.nim 14
+tests/api/test_prompts_compact.nim 8
+tests/api/test_vision_read.nim 15
+tests/api/test_vision_screenshot.nim 15
+tests/core/test_build_provenance.nim 2
+tests/install/test_install_verify.nim 8
+tests/shell/test_actions_extra.nim 6
+tests/shell/test_actions_text.nim 6
+tests/shell/test_shell.nim 4
+tests/shell/test_shell_extra.nim 3
+tests/stream/test_connection_identity.nim 4
+tests/stream/test_http_nonstream.nim 8
+tests/stream/test_netthread_blocks.nim 6
+tests/stream/test_streamexec.nim 4
+tests/stream/test_streaming_sse.nim 8
+tests/stream/test_streaming_view.nim 3
+tests/stream/test_vision_wire.nim 5
