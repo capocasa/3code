@@ -1,6 +1,7 @@
 Changelog
 
-Unreleased
+0.9.0  raw fenced networking on Linux and Windows, Ctrl+5 live shell viewport,
+       cancel keys honor the draft, plugin ABI and aside fixes
 
 - **The live shell viewport expands with Ctrl+5 and no longer reacts to
   mouse clicks.** While a bash tool streams, Ctrl+5 (`expand-shell`,
