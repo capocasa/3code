@@ -238,6 +238,67 @@ when defined(linux):
         $nodes.len & " ungranted device nodes failed (errno " & $errno &
         "); those keep their host identity")
 
+  const tioCsCtty = 0x540E
+  proc grantpt(fd: cint): cint {.importc: "grantpt", header: "<stdlib.h>".}
+  proc unlockpt(fd: cint): cint {.importc: "unlockpt", header: "<stdlib.h>".}
+  proc ptsnameR(fd: cint, buf: cstring, buflen: cint): cint {.
+      importc: "ptsname_r", header: "<stdlib.h>".}
+  proc ioctlVarargs(fd: cint, request: culong, arg: pointer): cint {.
+      importc: "ioctl", header: "<sys/ioctl.h>", varargs.}
+
+  proc grantControllingTerminal(writable: openArray[string]) =
+    ## Give the exec'd command a controlling terminal when the policy
+    ## grants /dev/tty writable. setsid() above dropped the launcher's
+    ## controlling terminal, and /dev/tty resolves to the session's
+    ## controlling terminal by definition: with none the open returns
+    ## ENXIO whatever Landlock allows, which is why `allow /dev/tty`
+    ## alone never made a terminal emulator run inside the fence (xterm
+    ## opens /dev/tty at startup and without it falls back to a racy pty
+    ## path whose child dies of SIGHUP). The explicit grant is the
+    ## opt-in to tty semantics. A private pty pair becomes the session's
+    ## controlling terminal; the master stays open across the exec so
+    ## the pair survives, and the slave fd closes because /dev/tty
+    ## resolves to the association, not to a descriptor. Reads from the
+    ## new ctty block, exactly as on any tty nobody writes to.
+    var granted = false
+    for w in writable:
+      try:
+        if isPathUnder("/dev/tty", w):
+          granted = true
+          break
+      except CatchableError: discard
+    if not granted: return
+    let master = posix.open("/dev/ptmx", posix.O_RDWR)
+    if master < 0:
+      stderr.writeLine("3code sandbox: opening /dev/ptmx for the " &
+        "controlling terminal failed (errno " & $errno &
+        "); /dev/tty stays ENXIO")
+      return
+    var keepMaster = false
+    defer:
+      if not keepMaster: discard posix.close(master)
+    if grantpt(master) != 0 or unlockpt(master) != 0:
+      stderr.writeLine("3code sandbox: unlocking the controlling " &
+        "terminal failed (errno " & $errno & "); /dev/tty stays ENXIO")
+      return
+    var nameBuf = newString(128)
+    if ptsnameR(master, cast[cstring](addr nameBuf[0]), 128) != 0:
+      stderr.writeLine("3code sandbox: naming the controlling terminal " &
+        "failed (errno " & $errno & "); /dev/tty stays ENXIO")
+      return
+    let slave = posix.open(nameBuf.cstring, posix.O_RDWR)
+    if slave < 0:
+      stderr.writeLine("3code sandbox: opening the controlling terminal " &
+        nameBuf & " failed (errno " & $errno & "); /dev/tty stays ENXIO")
+      return
+    if ioctlVarargs(slave, tioCsCtty, nil) != 0:
+      stderr.writeLine("3code sandbox: TIOCSCTTY on the controlling " &
+        "terminal failed (errno " & $errno & "); /dev/tty stays ENXIO")
+      discard posix.close(slave)
+      return
+    discard posix.close(slave)
+    keepMaster = true
+
 const usage = """
 3code sandbox - filesystem sandbox (Landlock/Seatbelt/ACL)
 
@@ -651,6 +712,7 @@ proc boxRestrict(args: seq[string]): int =
       # maskUngrantedDevices).
       if fence or maskRo.len > 0 or denied.len > 0:
         maskUngrantedDevices(writable, readOnly)
+      grantControllingTerminal(writable)
       if fence and wallRaw:
         # Raw egress: the fake-IP fence DNS and the nft redirect carry
         # every connection, no proxy env and no ssh shim. Decided here

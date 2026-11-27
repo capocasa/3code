@@ -821,6 +821,32 @@ suite "sandbox subcommand (built-in sandwall)":
     else:
       skip()
 
+  test "sandbox hands the command a controlling terminal when /dev/tty is granted":
+    # setsid() drops the launcher's controlling terminal, and /dev/tty
+    # resolves to the session's ctty by definition: without one the open
+    # is ENXIO no matter what the policy granted. A policy `allow
+    # /dev/tty` therefore comes with a private pty as the command's ctty
+    # (terminal emulators open /dev/tty at startup); without the grant
+    # nothing changes. /proc/self/stat field 7 is tty_nr, 0 when the
+    # session has no controlling terminal.
+    when defined(linux):
+      if backendWorks:
+        proc ttyNr(policy: string): int =
+          let r = run(["sandbox", "--policy", policy, "restrict", "--",
+                       "sh", "-c", "awk '{print $7}' /proc/self/stat"])
+          check r.code == 0
+          parseInt(r.o)
+        let withGrant = boxTmp / "tty-policy"
+        writeFile(withGrant, "allow /dev/tty\n")
+        check ttyNr(withGrant) != 0
+        let withoutGrant = boxTmp / "no-tty-policy"
+        writeFile(withoutGrant, "allow /dev/pts\n")
+        check ttyNr(withoutGrant) == 0
+      else:
+        skip()
+    else:
+      skip()
+
 suite "wall subcommand (built-in sandwall wall)":
   # `3code wall` exposes the network firewall: proxy, connect, and the
   # Windows setup entry points. POSIX runs test dispatch and the proxy
