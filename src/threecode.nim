@@ -1385,7 +1385,8 @@ proc main() =
       let window = contextWindowFor(prof)
       let lastUsage = replaySessionTail(messages, session.toolLog,
                                         window, prof.family,
-                                        session.goalSteps)
+                                        session.goalSteps,
+                                        btwAsides = session.btwAsides)
       if lastUsage.totalTokens > 0:
         # Same shape as `endTurn`: gap row + bar+prompt in typing-ready
         # state, carrying the last response's usage so
@@ -1473,7 +1474,8 @@ proc main() =
           result = renderTailRows(inputMessages[], inputSession[].toolLog,
             contextWindowFor(inputProfile[]), inputProfile[].family,
             termengine.tailJournalSnapshot(), width, budget,
-            inputSession[].goalSteps)
+            inputSession[].goalSteps,
+            btwAsides = inputSession[].btwAsides)
       termengine.transcriptTailRows = tailRowsAt
     while true:
       # Parked: the input wait is the one window where the session
@@ -1573,6 +1575,12 @@ proc main() =
         # kickoff's shape): the command name is dropped, the question
         # stands where the echoed prompt line would have.
         let questionEcho = commandResult.ok and commandResult.btwQuestion != ""
+        if questionEcho:
+          # The aside's `?` echo is its log record too, anchored where it
+          # was committed. Scrollback-only: never a wire message.
+          session.btwAsides.add BtwAsideRecord(
+            after: messages.len, isQuestion: true,
+            text: commandResult.btwQuestion, usage: Usage())
         let echoBytes =
           if suppressEcho: ""
           elif questionEcho:

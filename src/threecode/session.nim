@@ -88,7 +88,7 @@ const SessionExt* = ".3log"
 const Roles = ["session", "skills", "system", "context", "project_notes",
                "user", "image", "reasoning", "assistant",
                "tool_use", "tool_result", "tokens", "flail",
-               "goal_check"]
+               "goal_check", "btw_q", "btw_a"]
 
 # ---------- paths ----------
 
@@ -1261,6 +1261,29 @@ proc renderSession*(session: Session, messages: JsonNode): string =
   # the harness continuation that may follow it). A step whose anchor
   # outlives the conversation (compaction shrank it behind the
   # session's back) is dropped rather than pinned to a wrong turn.
+  # `:btw` asides replay at their anchored positions through the same
+  # formatters the live commits used. Scrollback-only: the records never
+  # become wire messages, so the context is untouched on initial add and
+  # on resume alike. A stale anchor (compaction shrank the history) just
+  # collapses to the end of the transcript - the aside stays visible.
+  var btwIdx = 0
+  template emitBtwAfter(n: int) =
+    while btwIdx < session.btwAsides.len and session.btwAsides[btwIdx].after <= n:
+      let a = session.btwAsides[btwIdx]
+      inc btwIdx
+      if a.isQuestion:
+        emitRecord s, "btw_q", a.text
+      else:
+        var hdr = "btw_a"
+        let u = a.usage
+        if u.totalTokens > 0:
+          let fresh = max(0, u.promptTokens - u.cachedTokens)
+          let hit = if u.promptTokens > 0:
+            int((u.cachedTokens.float * 100.0) / u.promptTokens.float + 0.5)
+          else: 0
+          hdr.add " fresh=" & $fresh & " cached=" & $u.cachedTokens &
+            " out=" & $u.completionTokens & " hit=" & $hit & "%"
+        emitRecord s, hdr, a.text
   var markIdx = 0
   template emitGoalChecksAfter(n: int) =
     while markIdx < session.goalSteps.len and session.goalSteps[markIdx].after <= n:
@@ -1365,6 +1388,7 @@ proc renderSession*(session: Session, messages: JsonNode): string =
       if flailNote.len > 0: hdr.add " +flail"
       emitRecord s, hdr, m{"content"}.getStr("")
     else: discard
+    emitBtwAfter(idx + 1)
     emitGoalChecksAfter(idx + 1)
   s
 
@@ -1966,6 +1990,20 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
         after: messages.len,
         step: GoalStep(prose: r.body,
           verdict: goalVerdictFromWord(kv.getOrDefault("verdict"))))
+    of "btw_q", "btw_a":
+      # A `:btw` aside at its scrollback position: after the messages
+      # parsed so far. Written interleaved by renderSession, so the count
+      # here reproduces the live anchor exactly. Scrollback-only: never
+      # appended to `messages`.
+      let uj = recordToUsage(r)
+      sess.btwAsides.add BtwAsideRecord(
+        after: messages.len,
+        isQuestion: r.role == "btw_q",
+        text: r.body,
+        usage: Usage(promptTokens: uj{"promptTokens"}.getInt(0),
+          completionTokens: uj{"completionTokens"}.getInt(0),
+          totalTokens: uj{"totalTokens"}.getInt(0),
+          cachedTokens: uj{"cachedTokens"}.getInt(0)))
     of "flail":
       # The flail note for the tool_result that follows it.
       if pos.len > 0: pendingFlail[pos[0]] = r.body
@@ -2000,6 +2038,7 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
     # counted without it (new-format files carry no system record); a
     # legacy file's own system record already counted.
     for g in mitems(sess.goalSteps): inc g.after
+    for a in mitems(sess.btwAsides): inc a.after
   sess.toolLog = buildToolLogFromMessages(messages, exitByCallId)
   sess.plan = buildPlanFromMessages(messages, exitByCallId)
   (sess, messages)

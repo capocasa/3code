@@ -3,6 +3,45 @@ Changelog
 0.9.0  raw fenced networking on Linux and Windows, Ctrl+5 live shell viewport,
        cancel keys honor the draft, plugin ABI and aside fixes
 
+- **A `:btw` aside survives a resume and shows its token receipt.** The
+  question and answer used to live only in the terminal's scrollback: a
+  resumed session replayed the conversation without them, and the answer
+  painted no receipt. Both pieces are now `btw_q`/`btw_a` records in the
+  .3log at exactly their scrollback anchors (`Session.btwAsides`, the
+  goal-step mechanism), replayed on resume and in the rebreak window
+  through the same formatters the live commits used, the answer carrying
+  a `tokens`-style header so replay renders the same receipt row the
+  live commit did. The records never become wire messages: the aside
+  stays out of the context on the initial add and on replay alike, and
+  stays visible to the user only. Its burned tokens were already summed
+  onto the bar with the turn's own (`accountSideCallUsage`), unchanged.
+  (`tests/core/test_btw.nim`, `tests/core/test_rebreak_window.nim`)
+
+- **The live shell viewport expands with Ctrl+5 and no longer reacts to
+  mouse clicks.** While a bash tool streams, Ctrl+5 (`expand-shell`,
+  rebindable, kitty-protocol terminals like its sibling Ctrl+9) toggles
+  the viewport between its capped tail and an expanded tail a bit less
+  than the terminal height; it is inert when nothing streams, and the
+  expansion dies when the call folds, so the next one starts capped.
+  The click-to-toggle path is gone: mouse reporting was only ever
+  enabled for the viewport and its row hit-testing was wrong by
+  construction, since the volatile block is not bottom-anchored and
+  absolute screen rows cannot be derived from the terminal height.
+  `:show N` / `:unshow` keep doing what the click used to pretend to
+  do. (`tests/tty/test_tty_functional.nim`)
+
+- **ESC and Ctrl-C cancel the running request again, draft or not.** A
+  cancel key pressed mid-turn used to clear a typed draft and leave
+  the request running (September's "esc clears the draft" change), so
+  the common stop gesture - type a correction, hit ESC - did nothing
+  to the request and ate the text. Both keys now interrupt the turn
+  regardless of the draft, and the typed follow-up is not lost either:
+  it comes back prefilled on the prompt after "interrupted by user".
+  At the idle prompt the keys keep their readline editing meaning:
+  clear a non-empty line into history, cancel only an empty one.
+  (`tests/tty/test_quit_signals.nim`,
+  `tests/tty/test_429_typing_during_backoff.nim`,
+  `tests/tty/test_gui_join_freeze.nim`)
 - **Goal mode starts work again when you reopen an open goal.** A launch
   with `3code -r` used to idle on a session whose goal was still armed:
   the kickoff stanza was already in the scrollback, and the resume guard

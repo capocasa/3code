@@ -13,7 +13,8 @@ import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, tabtitle, engine as termengine,
   auth_xai, auth_anthropic, auth_openai, auth_google, oauth, turns, plugins,
-  images, goal, screen, dirsettings, btwthread, terminal as termui
+  images, goal, screen, dirsettings, btwthread, terminal as termui,
+  transcript
 
 # `:computer` stays out of the list in undocumented builds so tab
 # completion, prefix resolution and typo suggestions do not advertise
@@ -2326,9 +2327,10 @@ proc imageAttachEcho*(): string =
   ## tokens attached: `@mockup.png rebuild this 🖼`.
   if lastImageAttachments.len == 0: "" else: " " & ImageAttachMark
 
-proc paintBtwReply(r: BtwReply) =
-  ## Commit one finished aside to scrollback: its dim `!` quote block,
-  ## the `! interrupted by user` row when an interrupt dropped it, or the
+proc paintBtwReply(r: BtwReply; window: int) =
+  ## Commit one finished aside to scrollback: its dim `!` quote block
+  ## with its token receipt (like any other scrollback part), the
+  ## `! interrupted by user` row when an interrupt dropped it, or the
   ## failure line when the meta-call produced no answer. Paint only — the
   ## caller decides when its tokens are ledgered.
   if r.cancelled:
@@ -2342,7 +2344,8 @@ proc paintBtwReply(r: BtwReply) =
     termengine.noteNonMessageTail(errBytes, inputMessages[].len)
     commitTranscriptBytes(errBytes, restoreEditor = true)
     return
-  let bytes = btwAnswerBytes(r.answer)
+  var bytes = btwAnswerBytes(r.answer)
+  bytes.attachReceipt(receiptBytes(tokenLineLabel(r.usage, window)), true)
   termengine.noteNonMessageTail(bytes, inputMessages[].len)
   commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
 
@@ -2390,6 +2393,7 @@ proc deliverFinishedBtw*() =
       testTrace("btw_trace", "deliver parked=" &
         $replParkedAtInput.load(moAcquire) & " replies=" & $replies.len &
         " stashedBefore=" & $btwStashedLive())
+    let window = contextWindowFor(inputProfile[])
     if replParkedAtInput.load(moAcquire):
       # At a rest the session is stable: ledger what the running turn
       # made us park, then this poll's own answers, in arrival order.
@@ -2411,7 +2415,13 @@ proc deliverFinishedBtw*() =
         # answer together.
         inputSession[].lastBtwQ = r.question
         inputSession[].lastBtwA = r.answer
-      paintBtwReply(r)
+      if not r.cancelled and r.answer.strip.len > 0:
+        # The aside's log record at its scrollback anchor: replayed on
+        # resume through the same formatter, never a wire message.
+        inputSession[].btwAsides.add BtwAsideRecord(
+          after: inputMessages[].len, isQuestion: false,
+          text: r.answer, usage: r.usage)
+      paintBtwReply(r, window)
     if replies.len > 0:
       debugOut &"btw deliver: parked={replParkedAtInput.load(moAcquire)} " &
         &"replies={replies.len}"

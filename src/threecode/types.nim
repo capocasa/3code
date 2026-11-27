@@ -297,6 +297,17 @@ type
     ## between the turn's last reply and the harness continuation.
     after*: int
     step*: GoalStep
+  BtwAsideRecord* = object
+    ## One `:btw` scrollback piece - a `?` question echo or a `!` answer -
+    ## plus its position: rendered after the first `after` messages of the
+    ## conversation. Persisted as `btw_q`/`btw_a` records at exactly that
+    ## spot in the .3log so a resumed session replays the asides a live
+    ## session painted. An aside never enters the wire conversation: the
+    ## live add and the replay are both scrollback-only.
+    after*: int
+    isQuestion*: bool
+    text*: string
+    usage*: Usage
   ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akScreenshot, akClear, akDMail, akPlugin, akError
   Action* = object
     ## The parsed, tool-agnostic representation of a single model tool call.
@@ -446,6 +457,11 @@ type
                                      ## survives loading scrollback from disk.
                                      ## Cleared with the conversation (:clear,
                                      ## compaction) like the tool log
+    btwAsides*: seq[BtwAsideRecord]  ## `:btw` asides the session painted,
+                                     ## anchored like the goal steps:
+                                     ## replayed on resume so the asides
+                                     ## survive loading scrollback from
+                                     ## disk. Never part of the context.
     modeSnapshot*: string  ## the armed mode's file bytes at this turn's
                            ## start: the update-discipline and delta
                            ## baseline (transient; a resumed session starts
