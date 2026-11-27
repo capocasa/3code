@@ -2,7 +2,10 @@ name: Nightly soak
 
 # The per-change suite leaves the four tty stress tests out (287s together,
 # 35% of the tty run). They guard real races, so they run here every night
-# on the full suite, and before releases via workflow_dispatch.
+# on the full suite, and before releases via workflow_dispatch. The suite is
+# sharded like linux-amd64.yml (CORE_SHARD and TTY_SHARD i/n, one job per
+# shard, SOAK=1 adds the stress tests to the tty shards): the serial run
+# took 20 min in one job, the slowest shard takes a third of that.
 
 on:
   schedule:
@@ -12,6 +15,30 @@ on:
 jobs:
   soak:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: core-1
+            tty_shard: none
+            core_shard: 1/3
+          - suite: core-2
+            tty_shard: none
+            core_shard: 2/3
+          - suite: core-3
+            tty_shard: none
+            core_shard: 3/3
+          - suite: tty-1
+            tty_shard: 1/3
+          - suite: tty-2
+            tty_shard: 2/3
+          - suite: tty-3
+            tty_shard: 3/3
+    name: soak (${{ matrix.suite }})
+    env:
+      SOAK: '1'
+      TTY_SHARD: ${{ matrix.tty_shard }}
+      CORE_SHARD: ${{ matrix.core_shard }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,8 +59,8 @@ jobs:
           } > nimble.paths
           cat nimble.paths
 
-      - name: Run full suite including the soak tier
-        # 2700s: the soak tier adds ~5 min (four stress tests, 287s) to
-        # the ~14-16 min per-change suite; 45 min keeps 2x headroom.
-        run: SOAK=1 sh tests/tools/ci_tests.sh 2700
-        timeout-minutes: 50
+      - name: Run tests (shard including the soak tier)
+        # 1500s per shard: the soak tier adds 287s to the tty half, spread
+        # over the three tty shards; 35 min keeps 2x headroom.
+        run: sh tests/tools/ci_tests.sh 1500
+        timeout-minutes: 35

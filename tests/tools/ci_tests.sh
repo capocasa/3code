@@ -22,6 +22,11 @@
 # Usage: tests/tools/ci_tests.sh [global-timeout-secs] [categories...]
 #   PER_TEST_SECS env overrides the per-test cap (default 720, 0=off).
 #   SOAK=1 adds the four tty stress tests to the run (default: nightly only).
+#   TTY_SHARD=i/n runs only tty subset i of n (duration-balanced by
+#   parallel_tty.py); TTY_SHARD=none runs everything but tty. CI splits the
+#   tty category across jobs this way; unset runs the whole suite here.
+#   CORE_SHARD=i/n runs only balanced subset i of the non-tty units
+#   (config fold, core fold groups, pooled files; shard_units.py).
 set -u
 
 # build/test-nimflags: extra nim flags for the test binary, one line.
@@ -94,6 +99,26 @@ echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}
 run_testament() {
   rc_all=0
   if [ $# -eq 0 ]; then
+    tty_shard=''; tty_skip=0
+    case "${TTY_SHARD:-}" in
+      '') ;;
+      none) tty_skip=1 ;;
+      */*) tty_shard="--shard $TTY_SHARD" ;;
+      *) echo "ci_tests: TTY_SHARD wants i/n or none, got '$TTY_SHARD'" >&2
+         return 2 ;;
+    esac
+    if [ -n "$tty_shard" ]; then
+      soak=''
+      [ "${SOAK:-0}" = 1 ] && soak='--include-soak'
+      # $soak and $tty_shard are whole words. The Windows runner may
+      # expose python only as `python`.
+      py=python3
+      command -v python3 >/dev/null 2>&1 || py=python
+      # shellcheck disable=SC2086
+      "$py" tests/tools/parallel_tty.py $soak $tty_shard \
+        --timeout "${PER_TEST_SECS:-720}"
+      return $?
+    fi
     # Default selection: config and core folded, every other non-tty file
     # in one worker pool, then tty alone. Testament still owns each pooled
     # file's spec (matrix, disabled, exit codes), so coverage is unchanged;
@@ -119,20 +144,52 @@ run_testament() {
     for f in $(python3 tests/tools/fold_groups.py --list-solo core); do
       files="$files $f"
     done
+    # The non-tty suite is a set of units: the config fold, each core
+    # fold group, each pooled file. CORE_SHARD=i/n runs only balanced
+    # subset i of n on this runner (shard_units.py over
+    # tests/tools/core_times.txt); CI spreads the suite across jobs that
+    # way. Every unit is in exactly one shard.
+    units='config'
+    for g in $(python3 tests/tools/fold_groups.py --list core |
+              grep -v '^solo:' |
+              sed -n 's/^\([a-z_][a-z_0-9]*\): .*/\1/p'); do
+      units="$units core:$g"
+    done
+    if [ -n "${CORE_SHARD:-}" ]; then
+      run_units=''
+      owned=$(python3 tests/tools/shard_units.py "$CORE_SHARD" $units $files) \
+        || return 2
+      files=''
+      for u in $owned; do
+        case $u in
+          config|core:*) run_units="$run_units $u" ;;
+          *) files="$files $u" ;;
+        esac
+      done
+      units="$run_units"
+    fi
     # Config is proven green as one process (592 tests, 0 failures), so its
     # 19 files become one compile. Core folds into six domain groups, one
     # process each (1280 tests, 0 failures): grouping, not a single binary,
     # is what keeps cross-domain state apart.
-    python3 tests/tools/fold_category.py config \
-      --timeout "${PER_TEST_SECS:-720}" || rc_all=1
-    python3 tests/tools/fold_groups.py core \
-      --timeout "${PER_TEST_SECS:-720}" || rc_all=1
+    for u in $units; do
+      case $u in
+        config)
+          python3 tests/tools/fold_category.py config \
+            --timeout "${PER_TEST_SECS:-720}" || rc_all=1 ;;
+        core:*)
+          python3 tests/tools/fold_groups.py core --only "${u#core:}" \
+            --timeout "${PER_TEST_SECS:-720}" || rc_all=1 ;;
+      esac
+    done
     if [ -n "$files" ]; then
       # Word-splitting is intentional: test paths contain no spaces.
+      # Shard-owned files arrive longest first, so the pool's workers all
+      # start on the heavy ones.
       python3 tests/tools/parallel_files.py \
         --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
     fi
-    if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
+    if [ "$tty_skip" = 0 ] && [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
       # The four stress tests are the soak tier: 287s together, a third of
       # the tty run. The per-change suite leaves them out; SOAK=1 (nightly)
       # runs them with the rest of the suite.
