@@ -21,7 +21,8 @@
 #
 # Usage: tests/tools/ci_tests.sh [global-timeout-secs] [categories...]
 #   PER_TEST_SECS env overrides the per-test cap (default 720, 0=off).
-#   SOAK=1 adds the four tty stress tests to the run (default: nightly only).
+#   SOAK=1 adds the four tty stress tests to the run (default: off; the
+#   Soak workflow sets it).
 #   TTY_SHARD=i/n runs only tty subset i of n (duration-balanced by
 #   parallel_tty.py); TTY_SHARD=none runs everything but tty. CI splits the
 #   tty category across jobs this way; unset runs the whole suite here.
@@ -191,8 +192,8 @@ run_testament() {
     fi
     if [ "$tty_skip" = 0 ] && [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
       # The four stress tests are the soak tier: 287s together, a third of
-      # the tty run. The per-change suite leaves them out; SOAK=1 (nightly)
-      # runs them with the rest of the suite.
+      # the tty run. The per-change suite leaves them out; SOAK=1 (the Soak
+      # workflow) runs them with the rest of the suite.
       soak=''
       [ "${SOAK:-0}" = 1 ] && soak='--include-soak'
       # $soak is one word or empty.

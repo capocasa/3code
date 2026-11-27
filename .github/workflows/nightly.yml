@@ -1,15 +1,14 @@
-name: Nightly soak
+name: Soak
 
 # The per-change suite leaves the four tty stress tests out (287s together,
-# 35% of the tty run). They guard real races, so they run here every night
-# on the full suite, and before releases via workflow_dispatch. The suite is
+# 35% of the tty run). They guard real races, so they run here on the
+# full suite, by hand only (workflow_dispatch, e.g. before a release);
+# nothing is scheduled. The suite is
 # sharded like linux-amd64.yml (CORE_SHARD and TTY_SHARD i/n, one job per
 # shard, SOAK=1 adds the stress tests to the tty shards): the serial run
 # took 20 min in one job, the slowest shard takes a third of that.
 
 on:
-  schedule:
-    - cron: '0 3 * * *'
   workflow_dispatch:
 
 jobs:
