@@ -330,6 +330,15 @@ def main():
         print("build failures:", flush=True)
         for kind, name, _ in failed:
             print(f"  {kind} {name}", flush=True)
+        # The error lines again, last: ci_tests.sh keeps only the final
+        # 200 lines, and the whole-log block above has scrolled out of it
+        # by the time the run phase ends.
+        for _, _, log in failed:
+            print(f"----- {os.path.basename(log)} (error lines) -----")
+            for line in tail(log, n=100000).splitlines():
+                if re.search(r"(?i)error|fatal|cannot|timed out|undefined|No such", line) \
+                        and not line.startswith(("CC:", "Hint:")):
+                    print(line, flush=True)
     if run_failed:
         print("run failures:", flush=True)
         for name, rc in run_failed:
