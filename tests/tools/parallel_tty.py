@@ -21,13 +21,14 @@ No tty test uses matrix/output/exitCode specs. Runs on the Windows runner
 too (git-bash): the per-test kill is the process there, not its group.
 
 Usage: parallel_tty.py [-j N] [--timeout SECS] [--build-only] [--list]
-                  [--soak | --include-soak] [--shard i/n]
+                  [--soak | --no-soak] [--shard i/n]
   -j N             compile workers (default: min(4, max(1, cpu_count - 1)))
   --timeout S      per-test run cap, 0 = off (default 720)
   --build-only     compile and stop
   --list           print the selected files and exit
   --soak           run only the soak tests in tests/tools/tty_soak.txt
-  --include-soak   run the soak tests too (the default excludes them)
+  --no-soak        leave out the four stress tests in tty_soak.txt (the
+                   default runs them, like every other tty test)
   --shard i/n      build and run only balanced subset i of n
 """
 import argparse
@@ -195,14 +196,14 @@ def main():
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--soak", action="store_true",
                     help="run only the soak tests")
-    ap.add_argument("--include-soak", action="store_true",
-                    help="run the soak tests too (default: exclude)")
+    ap.add_argument("--no-soak", action="store_true",
+                    help="leave out the soak tests (default: run them)")
     ap.add_argument("--file", help="run only the stems listed in this file")
     ap.add_argument("--shard", metavar="i/n",
                     help="build and run only subset i of n")
     args = ap.parse_args()
-    if args.soak and args.include_soak:
-        ap.error("--soak and --include-soak are mutually exclusive")
+    if args.soak and args.no_soak:
+        ap.error("--soak and --no-soak are mutually exclusive")
     shard = None
     if args.shard:
         m = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", args.shard)
@@ -231,7 +232,7 @@ def main():
             continue
         elif args.soak and f[:-4] not in soak:
             tier_skipped.append((f, "non-soak"))
-        elif not (args.soak or args.include_soak) and f[:-4] in soak:
+        elif args.no_soak and f[:-4] in soak:
             tier_skipped.append((f, "soak"))
         else:
             selected.append(path)

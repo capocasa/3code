@@ -1,6 +1,7 @@
-# tty stress/soak tests: 287s together, 35% of the tty run. They guard real
-# races and keep running in the hand-run Soak workflow and before
-# releases, but not per change.
+# tty stress tests: ~340s together, half of the tty run's test time. They
+# run with every other tty test on every push, balanced into the shards
+# via their tty_times.txt rows. The list feeds parallel_tty.py --soak
+# (only these) and --no-soak (all but these).
 # One test stem (file name without .nim) per line; '#' starts a comment.
 test_spinner_race_stress
 test_gui_live_basic

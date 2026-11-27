@@ -21,8 +21,8 @@
 #
 # Usage: tests/tools/ci_tests.sh [global-timeout-secs] [categories...]
 #   PER_TEST_SECS env overrides the per-test cap (default 720, 0=off).
-#   SOAK=1 adds the four tty stress tests to the run (default: off; the
-#   Soak workflow sets it).
+#   The four tty stress tests run with the rest (parallel_tty.py
+#   --no-soak leaves them out).
 #   TTY_SHARD=i/n runs only tty subset i of n (duration-balanced by
 #   parallel_tty.py); TTY_SHARD=none runs everything but tty. CI splits the
 #   tty category across jobs this way; unset runs the whole suite here.
@@ -109,14 +109,12 @@ run_testament() {
          return 2 ;;
     esac
     if [ -n "$tty_shard" ]; then
-      soak=''
-      [ "${SOAK:-0}" = 1 ] && soak='--include-soak'
-      # $soak and $tty_shard are whole words. The Windows runner may
+      # $tty_shard is a whole word. The Windows runner may
       # expose python only as `python`.
       py=python3
       command -v python3 >/dev/null 2>&1 || py=python
       # shellcheck disable=SC2086
-      "$py" tests/tools/parallel_tty.py $soak $tty_shard \
+      "$py" tests/tools/parallel_tty.py $tty_shard \
         --timeout "${PER_TEST_SECS:-720}"
       return $?
     fi
@@ -191,13 +189,9 @@ run_testament() {
         --timeout "${PER_TEST_SECS:-720}" $files || rc_all=1
     fi
     if [ "$tty_skip" = 0 ] && [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
-      # The four stress tests are the soak tier: 287s together, a third of
-      # the tty run. The per-change suite leaves them out; SOAK=1 (the Soak
-      # workflow) runs them with the rest of the suite.
-      soak=''
-      [ "${SOAK:-0}" = 1 ] && soak='--include-soak'
-      # $soak is one word or empty.
-      python3 tests/tools/parallel_tty.py $soak --timeout "${PER_TEST_SECS:-720}" || rc_all=1
+      # The four stress tests (tests/tools/tty_soak.txt) ride along like
+      # every other tty test.
+      python3 tests/tools/parallel_tty.py --timeout "${PER_TEST_SECS:-720}" || rc_all=1
     fi
     return $rc_all
   else

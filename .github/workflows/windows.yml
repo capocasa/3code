@@ -22,7 +22,9 @@ jobs:
     # test run. Every entry pays the setup (toolchain, deps, static
     # OpenSSL, ~5 min) itself: that is the price of running them in
     # parallel. Each tty job still runs one PTY test at a time, and both
-    # shards together are the category.
+    # shards together are the category, the four stress tests included
+    # (tty_times.txt numbers are Linux ones, so a Windows shard
+    # runs longer than its balance predicts, hence the 1500 cap).
     strategy:
       fail-fast: false
       matrix:
@@ -32,10 +34,10 @@ jobs:
             cap: 1500
           - suite: tty-1
             tty_shard: 1/2
-            cap: 900
+            cap: 1500
           - suite: tty-2
             tty_shard: 2/2
-            cap: 900
+            cap: 1500
     name: ${{ matrix.suite }}
     env:
       TTY_SHARD: ${{ matrix.tty_shard }}

@@ -377,7 +377,9 @@ jobs:
       matrix:
         # Two shards per half, not three: macOS runners are scarce (a
         # six-job matrix sat 16 min in the queue for the fifth job), so
-        # the per-job setup (~2.5 min) is paid four times, not six.
+        # the per-job setup (~2.5 min) is paid four times, not six. The tty
+        # shards carry the four stress tests too, so their cap is
+        # 1500.
         include:
           - suite: core-1
             tty_shard: none
@@ -389,10 +391,10 @@ jobs:
             cap: 1200
           - suite: tty-1
             tty_shard: 1/2
-            cap: 900
+            cap: 1500
           - suite: tty-2
             tty_shard: 2/2
-            cap: 900
+            cap: 1500
     name: test (${{ matrix.suite }})
     env:
       TTY_SHARD: ${{ matrix.tty_shard }}

@@ -1,6 +1,6 @@
 # Wall seconds per tty test on the Linux amd64 runner (run 45727242825).
 # The four soak-tier stems (tests/tools/tty_soak.txt) are dev-box numbers
-# (8-core, Nov 27): the nightly log keeps only the last 200 lines, so its
+# (8-core, Nov 27): that run's log keeps only the last 200 lines, so its
 # [run i/n] lines are lost. parallel_tty.py --shard balances
 # shards with these; a missing stem costs balance, never a run. Refresh
 # from the [run i/n] lines of a full run when the suite changes shape.
