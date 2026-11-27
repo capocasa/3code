@@ -280,23 +280,39 @@ def main():
                          os.path.join(logdir, stem + ".compile.log")))
 
     failed = []
+    total = len(jobs)
+
+    def report(i, kind, name, rc, dur, log):
+        if rc == 0:
+            print(f"[build {i}/{total}] OK {kind} {name} "
+                  f"({dur:.1f}s)", flush=True)
+            return
+        failed.append((kind, name, log))
+        print(f"[build {i}/{total}] FAIL {kind} {name} "
+              f"(rc={rc}, {dur:.1f}s)", flush=True)
+        # Whole log, not a tail: the truncated block loses the
+        # deferred-dump sections a test prints after its failure
+        # (the settings_midturn config-write trace), and the
+        # recovery patterns in ci_tests.sh then find nothing.
+        print(tail(log, n=100000), flush=True)
+
+    # Every stub variant compiles src/threecode.nim, and the Windows
+    # linker reads its arguments from one per-project file in the project
+    # dir (threecode_linkerArgs.txt), deleted after use: two stub links at
+    # once race on it ("cannot find @threecode_linkerArgs.txt"). There the
+    # stubs go one at a time, ahead of the test pool.
+    serial = [j for j in jobs if j[0] == "stub"] if os.name == "nt" else []
+    jobs = [j for j in jobs if j not in serial]
+    done = 0
+    for job in serial:
+        done += 1
+        report(done, *compile_one(job))
     if jobs:
         with ThreadPoolExecutor(max_workers=args.jobs) as pool:
             futures = [pool.submit(compile_one, j) for j in jobs]
-            for i, fut in enumerate(as_completed(futures), 1):
-                kind, name, rc, dur, log = fut.result()
-                if rc == 0:
-                    print(f"[build {i}/{len(jobs)}] OK {kind} {name} "
-                          f"({dur:.1f}s)", flush=True)
-                else:
-                    failed.append((kind, name, log))
-                    print(f"[build {i}/{len(jobs)}] FAIL {kind} {name} "
-                          f"(rc={rc}, {dur:.1f}s)", flush=True)
-                    # Whole log, not a tail: the truncated block loses the
-                # deferred-dump sections a test prints after its failure
-                # (the settings_midturn config-write trace), and the
-                # recovery patterns in ci_tests.sh then find nothing.
-                print(tail(log, n=100000), flush=True)
+            for fut in as_completed(futures):
+                done += 1
+                report(done, *fut.result())
 
     if args.build_only:
         print(f"parallel_tty: build done, {len(failed)} failed", flush=True)
