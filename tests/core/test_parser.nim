@@ -7,6 +7,11 @@ suite "glm/qwen dispatch":
     check act.kind == akBash
     check act.body == "echo hi"
 
+  test "gemini dispatches on the same surface (native wire, translated calls)":
+    let act = toolCallToAction("gemini", "bash", %*{"command": "echo hi"})
+    check act.kind == akBash
+    check act.body == "echo hi"
+
   test "bash takes a command string":
     let act = toolCallToAction("glm", "bash", %*{"command": "nimble test"})
     check act.kind == akBash

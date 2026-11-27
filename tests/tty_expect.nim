@@ -761,7 +761,10 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
   # session (no config anywhere) look configured.
   var debugLogPath = ""
   if getEnv("TTY_EXPECT_DEBUG_LOG") != "":
-    debugLogPath = getTempDir() / ("tty_expect_debug_" & $gIpcSessionSeq & ".log")
+    # Unique per test process: getTempDir is shared across the parallel
+    # test binaries and O_APPEND mixes two apps' logs into one tail.
+    debugLogPath = getTempDir() / ("tty_expect_debug_" & $getCurrentProcessId() &
+      "_" & $gIpcSessionSeq & ".log")
     envVars.add ("THREECODE_DEBUG_LOG", debugLogPath)
   var childArgs: seq[string] = @args
   if debugLogPath.len > 0:
@@ -1118,7 +1121,8 @@ proc send*(s: TtySession; text: string) =
       var wfd: TPollfd
       wfd.fd = s.masterFd
       wfd.events = POLLOUT
-      if poll(addr wfd, 1.Tnfds, 2000.cint) > 0:
+      let canWrite = poll(addr wfd, 1.Tnfds, 2000.cint) > 0
+      if canWrite:
         discard posix.write(s.masterFd, text[0].unsafeAddr, text.len)
   var printable = ""
   var inEsc = false
@@ -1382,8 +1386,8 @@ proc debugLogTail(s: TtySession): string =
   ## the app's own trace of what it decided, next to what it painted.
   if s.debugLog.len == 0 or not fileExists(s.debugLog): return ""
   let lines = readFile(s.debugLog).splitLines()
-  result.add "\n----- child debug log (last 20) -----\n"
-  for line in lines[max(0, lines.len - 20) ..< lines.len]:
+  result.add "\n----- child debug log (last 60) -----\n"
+  for line in lines[max(0, lines.len - 60) ..< lines.len]:
     result.add line & "\n"
   result.add "-------------------------------------\n"
 
@@ -1409,15 +1413,21 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
     else:
       ranges.add (first, last)
 
+  proc frameRows(i: int): string =
+    let frame = s.frames[i]
+    result.add &"frame {i} @{frame.ms}ms changed={frame.changedRows}\n"
+    for rowIdx, row in frame.rows:
+      if row.len > 0:
+        let mark = if rowIdx in frame.changedRows: "*" else: " "
+        result.add &"{mark}{rowIdx:02d}: {row}\n"
+  var framesDump = ""
   for r in ranges:
     for i in r.first .. r.last:
-      let frame = s.frames[i]
-      result.add &"frame {i} @{frame.ms}ms changed={frame.changedRows}\n"
-      for rowIdx, row in frame.rows:
-        if row.len > 0:
-          let mark = if rowIdx in frame.changedRows: "*" else: " "
-          result.add &"{mark}{rowIdx:02d}: {row}\n"
-  result.add s.debugLogTail() & s.stallSample()
+      framesDump.add frameRows(i)
+  # Frames last: parallel_tty keeps a failure message's last 40 lines,
+  # and the painted screen is the one dump nothing else can replace.
+  result.add s.debugLogTail() & s.stallSample() & "\n----- frames around -----\n" &
+    framesDump
 
 proc framesText*(s: TtySession): string =
   for i, frame in s.frames:
@@ -1903,7 +1913,8 @@ proc expectInHistory*(s: TtySession; text: string; timeoutMs = 5000): bool {.dis
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "expected history text not found: " & text & "\n" &
-    s.dumpFramesAround(text)
+    s.dumpFramesAround(text) &
+    "\n[reason] expected history text not found: " & text
 
 proc expectNeverInHistory*(s: TtySession; text: string) =
   s.drain(20, recordFrame = false)
@@ -1925,7 +1936,8 @@ proc expectNewInHistory*(s: TtySession; text: string; before: int;
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "expected new history text not found: " & text & "\n" &
-    s.dumpFramesAround(text)
+    s.dumpFramesAround(text) &
+    "\n[reason] expected new history text not found: " & text
 
 proc expectExit*(s: TtySession; code: int; timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0

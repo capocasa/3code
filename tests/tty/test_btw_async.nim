@@ -29,6 +29,10 @@ proc writeConfiguredProvider(root: string) =
   writeFile(root / "xdg" / "3code" / "config", """
 [settings]
 current = "stub.stub-model"
+# The ledger/aside contract has nothing to do with desktop toasts, and the
+# first macos notification compiles tinotify's Swift helper, starving the
+# runner past every timing window in these tests.
+notify = "off"
 
 [provider]
 name = "stub"
@@ -181,13 +185,13 @@ suite ":btw is async":
     # The turn finishes; the rest ledgers the aside onto the same bar:
     # 6000+40 in, 5+6 out (ledgered only now, never mid-turn: the running
     # turn owns the bar until it rests).
-    tty.expectInHistory "main reply", timeoutMs = 8000
+    tty.expectInHistory "main reply", timeoutMs = 20000
     # The rest-ledger lands with the turn finalize; on the 3-core macos
     # runner the stream drip and the join repaint run seconds behind the
     # committed reply (the reply assert above passed while the bar still
     # showed mid-turn partials). 12s keeps the contract (the ledger does
     # land) without measuring the runner's scheduler.
-    tty.expectInHistory "↓11", timeoutMs = 12000
+    tty.expectInHistory "↓11", timeoutMs = 30000
     tty.expectPromptLive()
     tty.send ":q\n"
     tty.expectExit(0)

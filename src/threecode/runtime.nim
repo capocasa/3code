@@ -116,3 +116,34 @@ proc loadWallConf*(path: string): bool {.gcsafe.} =
   finally:
     try: p.close()
     except CatchableError: discard
+
+var
+  cancelByteStash: seq[byte]
+  cancelByteStashLock: Lock
+initLock(cancelByteStashLock)
+
+proc stashTypedBytes*(buf: ptr array[64, char]; n: int;
+    cancelSet: set[uint8]): bool =
+  ## The cancel watcher shares stdin with the persistent input thread, so
+  ## bytes it reads that are not cancel keys must go back: drop them and
+  ## a typed line loses its Enter (or its whole head) to the watcher.
+  ## Non-cancel bytes are parked here in arrival order; the editor's own
+  ## reader drains the stash before touching stdin again.
+  acquire(cancelByteStashLock)
+  var sawCancel = false
+  for i in 0 ..< n:
+    let b = buf[][i].uint8
+    if b in cancelSet:
+      sawCancel = true
+    else:
+      cancelByteStash.add b
+  release(cancelByteStashLock)
+  result = sawCancel
+
+proc takeStashedByte*(): int =
+  result = -1
+  acquire(cancelByteStashLock)
+  if cancelByteStash.len > 0:
+    result = cancelByteStash[0].int
+    cancelByteStash.delete(0)
+  release(cancelByteStashLock)
