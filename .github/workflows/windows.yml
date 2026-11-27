@@ -88,7 +88,25 @@ jobs:
         run: |
           nimble install -y --depsOnly
 
+      - name: Resolve the newest OpenSSL 3.5 release
+        # The cache key carries the resolved version, so a new patch
+        # release misses the cache and gets verified and built as before.
+        id: openssl
+        run: echo "version=$(sh tests/tools/fetch_openssl.sh --resolve 3.5)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore static OpenSSL cache
+        id: cache-openssl
+        uses: actions/cache@v4
+        with:
+          path: |
+            openssl-static/mingw64
+            openssl-static/version
+          key: openssl-mingw64-${{ steps.openssl.outputs.version }}-${{ hashFiles('tests/tools/fetch_openssl.sh') }}
+
       - name: Build static OpenSSL (latest 3.5 LTS)
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        # 3 to 6 minutes per job, now paid by three matrix entries: the
+        # cache holds the installed archives for one resolved release.
         # OpenSSL is linked into the exe (-d:staticSsl in config.nims),
         # replacing the bundled DLLs the package used to ship - those were
         # OpenSSL 1.1, end-of-life since 2023, and the dlopen design also
@@ -125,11 +143,14 @@ jobs:
             pacman -Sy --noconfirm perl make || true
             command -v perl make
             bash -x tests/tools/fetch_openssl.sh 3.5 mingw64"
-          echo "OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64")" >> "$GITHUB_ENV"
-          mkdir -p build && printf '%s\n' '-d:staticSsl' > build/test-nimflags
         # Bounds a stalled openssl build (msys2 make can wedge on the
         # jobserver); without it the job default is 360m.
         timeout-minutes: 90
+
+      - name: Point the build at static OpenSSL
+        run: |
+          echo "OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64")" >> "$GITHUB_ENV"
+          mkdir -p build && printf '%s\n' '-d:staticSsl' > build/test-nimflags
 
       - name: Compute build flags
         # POSIX sh: runners and containers differ in the default step

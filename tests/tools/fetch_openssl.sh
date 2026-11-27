@@ -14,11 +14,33 @@
 # usage: fetch_openssl.sh SERIES TARGET
 #   SERIES  e.g. 3.5 (LTS; openssl.org/source lists one latest per series)
 #   TARGET  darwin64-arm64 | darwin64-x86_64 | mingw64
-# Leaves libssl.a/libcrypto.a in openssl-static/TARGET/lib and the resolved
-# version in openssl-static/version. The source download is shared across
-# targets (macOS builds two slices from one tarball).
+#   Leaves libssl.a/libcrypto.a in openssl-static/TARGET/lib and the resolved
+#   version in openssl-static/version. The source download is shared across
+#   targets (macOS builds two slices from one tarball).
+#   fetch_openssl.sh --resolve SERIES prints the newest release of SERIES
+#   and stops: CI puts that version in a cache key, so a restored build is
+#   always the newest patch too (a cached tree skips the verify-and-build
+#   branch below, since openssl-static/version already exists).
 
 set -eu
+
+# Resolve via the git tag list, not the website: openssl.org redirects
+# through openssl-library.org to GitHub assets and 404s some networks
+# (GitHub runner IPs included), while git transport and github.com
+# release downloads are reachable everywhere this runs. Anchored to a
+# plain X.Y.Z so prerelease tags (openssl-4.1.0-beta2) never match.
+resolve() {
+  ver=$(git ls-remote --tags https://github.com/openssl/openssl.git \
+    | grep -oE "openssl-$1\.[0-9]+$" | sort -V | tail -1 \
+    | sed -e 's/^openssl-//')
+  [ -n "$ver" ] || { echo "no openssl $1.* tag found" >&2; exit 1; }
+  echo "$ver"
+}
+
+if [ "${1:-}" = --resolve ]; then
+  resolve "${2:?usage: fetch_openssl.sh --resolve SERIES}"
+  exit 0
+fi
 
 series=${1:?usage: fetch_openssl.sh SERIES TARGET}
 target=${2:?targets: darwin64-arm64 darwin64-x86_64 mingw64}
@@ -36,15 +58,7 @@ mkdir -p "$root/src"
 cd "$root"
 
 if [ ! -f version ]; then
-  # Resolve via the git tag list, not the website: openssl.org redirects
-  # through openssl-library.org to GitHub assets and 404s some networks
-  # (GitHub runner IPs included), while git transport and github.com
-  # release downloads are reachable everywhere this runs. Anchored to a
-  # plain X.Y.Z so prerelease tags (openssl-4.1.0-beta2) never match.
-  ver=$(git ls-remote --tags https://github.com/openssl/openssl.git \
-    | grep -oE "openssl-${series}\.[0-9]+$" | sort -V | tail -1 \
-    | sed -e 's/^openssl-//')
-  [ -n "$ver" ] || { echo "no openssl $series.* tag found" >&2; exit 1; }
+  ver=$(resolve "$series")
   echo "$ver" > version
 
   cd src
