@@ -444,17 +444,22 @@ proc debugToStderr(line: string): bool {.gcsafe, inline.} =
   ## pty so tty-test grid parsing is unaffected.
   when defined(posix): debugLogFd < 0 else: true
 
+proc dbgStamp(): string =
+  ## Process and thread ids in every line: a tty failure dump mixing two
+  ## apps' logs (or showing a worker thread's beat) must be attributable.
+  "p" & $getCurrentProcessId() & " t" & $getThreadId()
+
 proc debugOut*(msg: string) =
   if not debugEnabled: return
   let t = epochTime().formatFloat(ffDecimal, 3)
-  debugLogLine("[dbg " & t & "] " & msg)
+  debugLogLine("[dbg " & t & " " & dbgStamp() & "] " & msg)
   if debugToStderr(""):
     stderr.writeLine BlueFg & "[dbg " & t & "] " & msg & Reset
 
 proc debugOut*(msg, tag: string) =
   if not debugEnabled: return
   let t = epochTime().formatFloat(ffDecimal, 3)
-  debugLogLine("[dbg " & t & "] " & tag & " " & msg)
+  debugLogLine("[dbg " & t & " " & dbgStamp() & "] " & tag & " " & msg)
   if debugToStderr(""):
     stderr.writeLine BlueFg & "[dbg " & t & "] " & BoldOn & tag &
       Reset & BlueFg & " " & msg & Reset

@@ -29,6 +29,10 @@ proc writeConfiguredProvider(root: string) =
   writeFile(root / "xdg" / "3code" / "config", """
 [settings]
 current = "stub.stub-model"
+# The ledger/aside contract has nothing to do with desktop toasts, and the
+# first macos notification compiles tinotify's Swift helper, starving the
+# runner past every timing window in these tests.
+notify = "off"
 
 [provider]
 name = "stub"
@@ -140,11 +144,20 @@ suite ":btw is async":
       assistantReply("midturn answer", %*{"promptTokens": 40,
         "completionTokens": 6, "totalTokens": 46, "cachedTokens": 0})
     ]))
+    # Scratch diagnosis: the rest-loop ledger beats, dumped below on
+    # failure (the osx runs went silent after the receipt cleared).
+    let tracePath = root / "xdg" / "btw_trace.txt"
+    removeFile(tracePath)
+    var env = stubEnv(root, root / "run" / "stub_responses.json")
+    env.add (key: "test.btw_trace", val: tracePath)
     let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
                             cwd = root / "run",
-                            env = stubEnv(root,
-                              root / "run" / "stub_responses.json"))
-    defer: tty.close()
+                            env = env)
+    defer:
+      tty.close()
+      if fileExists(tracePath):
+        echo "---- btw trace ----"
+        echo readFile(tracePath)
     tty.expect "❯"
 
     # The turn starts and is held by the stub before any content exists.
@@ -172,13 +185,13 @@ suite ":btw is async":
     # The turn finishes; the rest ledgers the aside onto the same bar:
     # 6000+40 in, 5+6 out (ledgered only now, never mid-turn: the running
     # turn owns the bar until it rests).
-    tty.expectInHistory "main reply", timeoutMs = 8000
+    tty.expectInHistory "main reply", timeoutMs = 20000
     # The rest-ledger lands with the turn finalize; on the 3-core macos
     # runner the stream drip and the join repaint run seconds behind the
     # committed reply (the reply assert above passed while the bar still
     # showed mid-turn partials). 12s keeps the contract (the ledger does
     # land) without measuring the runner's scheduler.
-    tty.expectInHistory "↓11", timeoutMs = 12000
+    tty.expectInHistory "↓11", timeoutMs = 30000
     tty.expectPromptLive()
     tty.send ":q\n"
     tty.expectExit(0)

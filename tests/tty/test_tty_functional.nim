@@ -3701,6 +3701,12 @@ max-tokens = "8192"
       tty.expectNeverInHistory "echo ml-four"
       tty.expectInHistory "Bash checks complete."
       tty.expectTokenBar(["○", "↑210", "↓20"])
+      # The idle transition (termios restore/re-arm on the input thread)
+      # outlives the token bar repaint, and a keystroke inside it is lost.
+      # Wait for the prompt to be live and the transition to settle before
+      # typing anything.
+      tty.expectPromptLive()
+      tty.waitForQuiet(quietMs = 40)
       # `:cmd N` prints the whole command, elided lines included. Split
       # send (text, echo wait, Enter): one burst right after a turn's end
       # races the idle transition and can drop the line onto the model path.

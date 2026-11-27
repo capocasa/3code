@@ -104,22 +104,39 @@ suite "chrome settings during a turn":
     tty.expectInHistory "main reply", timeoutMs = 8000
     tty.expectPromptLive()
     # Scratch diagnosis: dump every config write the app made, with the
-    # globals each call serialized, when the assertions below fail.
+    # globals each call serialized, plus the app's own debug log (rest
+    # beats, persist/flush decisions), when the assertions below fail.
+    # unittest check failures print no message, so both sinks go to
+    # stdout here unconditionally on exit.
     defer:
       if fileExists(tracePath):
         echo "---- config write trace ----"
         echo readFile(tracePath)
+      if tty.debugLog.len > 0 and fileExists(tty.debugLog):
+        echo "---- child debug log (last 120) ----"
+        let lines = readFile(tty.debugLog).splitLines()
+        for line in lines[max(0, lines.len - 120) ..< lines.len]:
+          echo line
     # The write is ordered with the turn finalize, not with the prompt
     # repaint: a slow runner can surface the prompt first (osx). Poll
     # briefly so the assertion measures the contract (the write happens)
     # and not a paint-vs-fsync race.
     var saved = ""
-    let deadline = epochTime() + 5.0
+    # 30s: the osx runner stretches the stub's hold past the nominal
+    # 2.5s (the hold loop rides the frame-ack handshake, and the ack
+    # cadence lags on the 3-core runner), so the turn's yield - and the
+    # write ordered with it - lands ~10s in. The contract is the write
+    # happens at the finalize; the window only bounds the wait.
+    let deadline = epochTime() + 30.0
     while epochTime() < deadline:
       saved = readFile(configFile)
       if "notify = \"off\"" in saved and "tab-title = \"off\"" in saved:
         break
-      sleep(100)
+      # Keep draining while polling: the app blocks in the stub's frame
+      # ack handshake while it still streams, and a test parked on this
+      # file with no pty reads deadlocks the turn against its own ack.
+      discard tty.waitForOutput(50, recordFrame = false)
+      sleep(50)
     check "notify = \"off\"" in saved
     check "tab-title = \"off\"" in saved
     tty.send ":q\n"

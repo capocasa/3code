@@ -25,7 +25,7 @@
 ##     ├── types        shared types + globals
 ##     └── minline      readline-style input
 
-import std/[json, os, parseopt, strformat, strutils, tables, terminal, times]
+import std/[json, locks, os, parseopt, strformat, strutils, tables, terminal, times]
 when not defined(windows):
   import std/atomics
 import std/exitprocs
@@ -299,10 +299,28 @@ proc setupTlsEnv() =
 
 const NotifyMinSeconds = 5.0
 
-proc notifyTurnFinished(messages: JsonNode) =
+proc notifyTurnFinished(messages: JsonNode) {.gcsafe.}
+
+proc notifyTurnFinishedThreaded(messages: JsonNode) {.thread, gcsafe.} =
+  ## See the spawn site in notifyTurnFinished; the thread owns the
+  ## JsonNode handed over by createThread.
+  notifyTurnFinished(messages)
+
+proc notifyTurnFinished(messages: JsonNode) {.gcsafe.} =
   let body = turnFinishedBody(messages)
   if body.len == 0: return
-  notify("3code", "Turn finished", body)
+  when defined(macosx):
+    # The macOS backend compiles and runs a Swift helper on first use; a
+    # consent-waiting helper must never park the controller between the
+    # turn's end and the rest loop the deferred side effects ride, so the
+    # call fires on a one-shot thread. Linux's dbus path is a fast direct
+    # call and stays synchronous.
+    {.cast(gcsafe).}:
+      var notifier: Thread[JsonNode]
+      createThread(notifier, notifyTurnFinishedThreaded, messages)
+  else:
+    {.cast(gcsafe).}:
+      notify("3code", "Turn finished", body)
 
 proc commitUserPromptTranscript(line: string) =
   ## Controller-owned transcript append for user prompt items submitted
@@ -1158,6 +1176,11 @@ proc main() =
       of ieInterrupt:
         discard  # already handled
       of ieNone:
+        # The turn yielded: a mid-turn settings command's deferred config
+        # write is ordered with the finalize, not with the prompt repaint
+        # (a slow runner surfaces the prompt first, osx), so flush here
+        # and not only in the repl loop's rest spin.
+        flushSettingConfig()
         if not interrupted and turnYieldedToQueue and
             messages.len > 0 and
             messages[^1]{"role"}.getStr == "tool":
@@ -1248,8 +1271,15 @@ proc main() =
     let turnStart = epochTime()
     try:
       let interrupted = runTurnsInteractive(prof, messages, session)
+      when defined(macosx):
+        debugOut "safetyNet: turn returned interrupted=" & $interrupted &
+          " after " & $(epochTime() - turnStart) & "s"
       if not interrupted and notifyEnabled and
           epochTime() - turnStart >= NotifyMinSeconds:
+        # Fire and forget: the desktop backends shell out (macOS compiles
+        # and runs a Swift helper), and a slow or consent-waiting helper
+        # must never park the controller between the turn's end and the
+        # rest loop the deferred side effects ride.
         notifyTurnFinished(messages)
       result = handleBufferedAfterTurn(interrupted)
     except IOError as e:
@@ -1448,6 +1478,8 @@ proc main() =
     while true:
       # Parked: the input wait is the one window where the session
       # messages are stable, so the rebreak provider may read them.
+      when defined(macosx):
+        debugOut "repl loop: iteration top"
       markReplParked(true)
       var done = false
       var emptySubmit = false
