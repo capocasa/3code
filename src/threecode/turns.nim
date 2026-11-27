@@ -17,6 +17,7 @@ import types, util, prompts, session, compact, config, actions, api, plugins,
   display, fatprompt, streamexec, toolstream, transcript, images, screen
 from shell import bashMutationPath
 import snap
+import snapthread
 import sandbox
 import tabtitle
 import goal
@@ -1011,6 +1012,62 @@ proc cutVisibleContent(content: string): string =
   ## emptiness check, notification, and reply-text extraction must treat it
   ## as bookkeeping, not prose).
   cutPartialTrailingMarker(stripCheckpointMarkers(content))
+
+proc ephemeralStatusBytes*(label: string): string =
+  ## A transient system line (same grey tier as the other system
+  ## messages, same slot an error line lands in) describing work in
+  ## progress. Committed to scrollback, then physically erased when the
+  ## work ends — the only committed row that un-commits.
+  GreyFg & label & Reset & "\r\n"
+
+proc commitEphemeralStatus*(label: string; messages: JsonNode) =
+  let bytes = ephemeralStatusBytes(label)
+  termengine.noteNonMessageTail(bytes, messages.len)
+  commitTranscriptBytes(bytes, true)
+
+proc eraseEphemeralStatus*(messages: JsonNode) =
+  ## Walk the ephemeral line (its separator blank included) back off the
+  ## screen and out of every geometry model: the ring widths it added,
+  ## the tail-journal records a resize would replay it from.
+  commitTranscriptBytes("", restoreEditor = true, reserveFooter = false,
+                        extraWalkRows = 2)
+  termengine.unnoteCommittedRows(2)
+  termengine.dropTailRecords(messages.len)
+
+proc armSnapshotInteractive*(cache: ReadCache; root: string;
+                             messages: JsonNode): SnapshotOutcome =
+  ## The goal-mode arm that owns its UI: an ephemeral "Snapshotting..."
+  ## line (upgraded to "... this might take a while" once the walk shows
+  ## a tree over the warn threshold) while the arm runs on its own
+  ## niced thread. Interrupts stay live in the poll loop: Ctrl-C/ESC
+  ## cancel the snapshot — the worker aborts and deletes its partial
+  ## store — and take the turn down ahead of anything else in flight.
+  ## A tree over the refuse caps leaves the line off and answers with
+  ## the refusal; the caller explains it in scrollback.
+  startSnapArm(cache, root)
+  commitEphemeralStatus("Snapshotting...", messages)
+  var warned = false
+  while true:
+    os.sleep(50)
+    let (state, outcome, warn) = pollSnapArm()
+    if state == saRunning:
+      if warn and not warned:
+        # Same slot, same tier, more honesty: swap the line in place by
+        # erasing and recommitting one row at the same anchor.
+        eraseEphemeralStatus(messages)
+        commitEphemeralStatus("Snapshotting... this might take a while",
+                              messages)
+        warned = true
+      continue
+    reapSnapArm()
+    eraseEphemeralStatus(messages)
+    if state == saCancelled:
+      result = soCancelled
+    elif state == saRefused:
+      result = outcome
+    else:
+      result = soArmed
+    return
 
 proc commitHarnessNotice(bytes: string; messages: JsonNode) =
   ## Commit a harness notice (goal-mode verifier receipts and friends)
@@ -2083,8 +2140,28 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           if session.readCache == nil: session.readCache = newReadCache()
           session.changeCountStart = session.readCache.changes.len
           # A fresh arming takes a fresh manifest baseline, so work before
-          # this goal never feeds this goal's checks.
-          discard armManifest(session.readCache, session.cwd)
+          # this goal never feeds this goal's checks. The arm runs on its
+          # own niced thread behind an ephemeral status line, so a big
+          # tree cannot freeze the turn loop: Ctrl-C/ESC cancel the arm
+          # and end the turn, ahead of anything else in flight.
+          let armOutcome = armSnapshotInteractive(session.readCache,
+                                                  session.cwd, messages)
+          case armOutcome
+          of soCancelled:
+            onTurnInterrupted()
+            turnEnded = true
+            return true
+          of soTooManyFiles, soTooManyBytes:
+            # Stripped, not silent: goal mode runs on the executor-
+            # observed change log alone, and the user knows why.
+            let why = if armOutcome == soTooManyFiles:
+                        "tree has too many files to snapshot"
+                      else:
+                        "tree is too large to snapshot"
+            commitHarnessNotice(
+              receiptBytes(mode.name & ": " & why &
+                ", tracking tool-writes only"), messages)
+          of soArmed: discard
           let kickoff = mode.kickoffMessage(detectedText)
           messages.add kickoff
           saveSessionReported(session, messages)

@@ -409,6 +409,10 @@ type
     manifestRoot*: string
     manifestArmed*: bool  ## false outside a harness mode: no walk, no fold
     manifestTime*: Time  ## arming moment; a newer mode file re-arms
+    snapshotRefused*: bool
+      ## The tree was over the arm limits: goal mode runs without a
+      ## snapshot until disarm. A latch, not a re-check: the walk itself
+      ## is the expensive part on exactly the trees that refuse.
     renamedFrom*: Table[string, string]
       ## Change-log paths that are renames: new path -> the arm-time path
       ## the inode moved from, so the render says "renamed" instead of a

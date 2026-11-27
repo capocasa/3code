@@ -59,6 +59,22 @@ const
     ## Total bytes the store copies per arm. Past it, remaining paths
     ## keep detection (the manifest signature) but not before-bytes:
     ## the marker floor.
+  SnapshotWarnBytes* = 64 * 1024 * 1024
+    ## Total walked bytes above which the arm says so up front: the
+    ## ephemeral status line reads "this might take a while" past it.
+  SnapshotRefuseBytes* = 512 * 1024 * 1024
+    ## Total walked bytes above which goal mode refuses to arm at all:
+    ## a tree this size cannot be copied inside a turn, and the diffing
+    ## it would buy is past the capped feeds' reach. Detection degrades
+    ## to the executor-observed change log.
+  SnapshotRefuseFiles* = ManifestMaxEntries
+    ## A walk that hit the entry budget found more paths than any
+    ## snapshot could serve: refuse rather than arm a truncated store.
+
+type SnapshotOutcome* = enum
+  ## How an arm ended: done, refused by a limit (which one), or cancelled
+  ## by the user mid-copy.
+  soArmed, soTooManyFiles, soTooManyBytes, soCancelled
 
 proc snapshotDir*(root: string): string =
   root / StoreDirName / SnapshotDirName
@@ -100,7 +116,7 @@ proc readIgnoreFile(path: string): string =
   except CatchableError:
     ""
 
-proc walkTree(root: string):
+proc walkTree(root: string; cancelled: proc (): bool {.gcsafe.} = nil):
     tuple[files: Table[string, ManifestSig], worktrees: seq[string]] =
   ## The ignore-cascade walk: global defaults, the per-directory
   ## `.gitignore` chain (deepest wins), `.3code/ignore` last. A
@@ -117,6 +133,7 @@ proc walkTree(root: string):
   var stack: seq[DirCtx] =
     @[(root, @[], parseIgnore(readIgnoreFile(root / ".gitignore"), ""))]
   while stack.len > 0:
+    if cancelled != nil and cancelled(): return
     let ctx = stack.pop()
     # skipSpecial: fifos and device nodes must never enter the manifest,
     # because the fold (and the store copy, now) reads what the walk
@@ -152,14 +169,28 @@ proc walkTree(root: string):
           if sig.size >= 0: result.files[p] = sig
       else: discard  # symlinks and specials: never followed or recorded
 
-proc armManifest*(cache: ReadCache; root: string): bool =
+proc armManifestEx*(cache: ReadCache; root: string;
+                    outcome: var SnapshotOutcome; warn: var bool;
+                    cancelled: proc (): bool {.gcsafe.} = nil): bool =
   ## Arm the store: one stat walk (the manifest, the detection layer)
   ## plus materialization of the walked set under `.3code/snapshot/`
   ## (the before-bytes layer). Re-arm while still armed copies only the
   ## delta: entries whose signature is unchanged since the last
   ## observation and that were never mutated this session keep their
-  ## copies. `false` (and no arming) when the root cannot be walked.
+  ## copies. Returns `false` when the root cannot be walked, the tree is
+  ## over the refuse caps (outcome says which; a refused arming latches
+  ## `snapshotRefused` so later turn starts skip the re-walk), or the
+  ## `cancelled` probe fired mid-arm (the partial store is deleted;
+  ## soCancelled). `warn` comes back true when the walked set is over
+  ## SnapshotWarnBytes — the arm will work but take a while.
+  outcome = soArmed
+  warn = false
   if cache == nil: return false
+  if cache.snapshotRefused:
+    # Latched refusal for this mode run: the tree does not get more
+    # workable by re-walking it every turn start.
+    outcome = soTooManyBytes
+    return false
   let base = absolutePath(root)
   if not dirExists(base): return false
   let snap = snapshotDir(base)
@@ -171,8 +202,24 @@ proc armManifest*(cache: ReadCache; root: string): bool =
     # from scratch: bytes left over by a dead session are not a baseline.
     try: removeDir(snap)
     except CatchableError: discard
-  let walked = walkTree(base)
+  let walked = walkTree(base, cancelled)
+  if cancelled != nil and cancelled():
+    outcome = soCancelled
+    return false
   cache.manifest = walked.files
+  var totalBytes = 0'i64
+  for sig in cache.manifest.values: totalBytes += sig.size
+  warn = totalBytes > SnapshotWarnBytes
+  if walked.files.len >= SnapshotRefuseFiles:
+    outcome = soTooManyFiles
+    cache.snapshotRefused = true
+    cache.manifest = initTable[string, ManifestSig]()
+    return false
+  if totalBytes > SnapshotRefuseBytes:
+    outcome = soTooManyBytes
+    cache.snapshotRefused = true
+    cache.manifest = initTable[string, ManifestSig]()
+    return false
   if walked.worktrees.len > 0:
     # Persist the exclusion at the cascade's override point so later
     # walks prune the same trees without rediscovering them.
@@ -198,6 +245,14 @@ proc armManifest*(cache: ReadCache; root: string): bool =
   cache.manifestTime = getTime()
   var budget = SnapshotBudgetCap
   for p in toSeq(cache.manifest.keys).sorted:
+    if cancelled != nil and cancelled():
+      # The user said stop: leave nothing half-copied behind. The armed
+      # flag was never set, so the next arm starts fresh.
+      try: removeDir(snap)
+      except CatchableError: discard
+      cache.manifest.clear()
+      outcome = soCancelled
+      return false
     let sig = cache.manifest[p]
     if sig.size > SnapshotFileCap: continue
     let dst = snap / p.substr(base.len + 1)
@@ -217,6 +272,13 @@ proc armManifest*(cache: ReadCache; root: string): bool =
       except CatchableError: discard
   true
 
+proc armManifest*(cache: ReadCache; root: string): bool =
+  ## The plain arm: no cancel probe, no limit reporting. Same contract as
+  ## `armManifestEx` for the boolean result.
+  var outcome: SnapshotOutcome
+  var warn: bool
+  result = armManifestEx(cache, root, outcome, warn)
+
 proc syncManifest*(cache: ReadCache; root, modeFile: string;
                    modeActive: bool) =
   ## The turn-boundary arming gate, called once per turn start: disarm
@@ -229,6 +291,7 @@ proc syncManifest*(cache: ReadCache; root, modeFile: string;
   ## diffing cost inside an active mode.
   if cache == nil: return
   if not modeActive or (modeFile.len > 0 and not fileExists(modeFile)):
+    cache.snapshotRefused = false
     if cache.manifestArmed:
       # Disarm deletes the snapshot store with the manifest.
       if cache.manifestRoot.len > 0:
@@ -238,6 +301,7 @@ proc syncManifest*(cache: ReadCache; root, modeFile: string;
       cache.manifest.clear()
       cache.manifestRoot = ""
     return
+  if cache.snapshotRefused: return
   var stale = not cache.manifestArmed
   if not stale and modeFile.len > 0:
     let m = localSig(modeFile)

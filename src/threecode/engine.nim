@@ -156,6 +156,18 @@ proc noteNonMessageTail*(bytes: string; anchor: int) {.gcsafe.} =
       if tailJournal.len > TailJournalMax:
         tailJournal = tailJournal[tailJournal.len - TailJournalMax .. ^1]
 
+proc dropTailRecords*(anchor: int) {.gcsafe.} =
+  ## Forget the journal records committed at `anchor` — the ephemeral
+  ## status line's row set (the short line and its warn variant),
+  ## erased from scrollback when the work it described finished — so a
+  ## resize or resume cannot resurrect it.
+  {.cast(gcsafe).}:
+    termio.withTerminalWriteLock:
+      var i = tailJournal.len - 1
+      while i >= 0:
+        if tailJournal[i].atMessagesLen == anchor: tailJournal.delete(i)
+        dec i
+
 proc tailJournalSnapshot*(): seq[TailJournalRecord] {.gcsafe.} =
   {.cast(gcsafe).}:
     termio.withTerminalWriteLock:
@@ -170,6 +182,18 @@ proc noteCommittedRows*(e: var TerminalEngine; bytes: string;
   let overflow = e.committedRowWidths.len - CommittedRowRingMax
   if overflow > 0:
     e.committedRowWidths = e.committedRowWidths[overflow .. ^1]
+
+proc unnoteCommittedRows*(count: int) {.gcsafe.} =
+  ## Symmetric to `noteCommittedRows`: forget the last `count` tracked
+  ## committed widths. Used when a caller physically erases rows it just
+  ## committed (the ephemeral status line), so the rebreak window's
+  ## erase estimate does not over-walk on the next resize.
+  if not engineOutputEnabled or count <= 0: return
+  {.cast(gcsafe).}:
+    termio.withTerminalWriteLock:
+      let k = min(count, defaultEngine.committedRowWidths.len)
+      defaultEngine.committedRowWidths.setLen(
+        defaultEngine.committedRowWidths.len - k)
 
 proc noteCommittedRows*(bytes: string; separator = true) {.gcsafe.} =
   ## Track the geometry of committed scrollback rows: the rebreak window's
