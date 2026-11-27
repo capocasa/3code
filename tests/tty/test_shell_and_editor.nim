@@ -295,7 +295,9 @@ suite "shell command and edit-in-editor":
 
     require waitForFile(marker)
     tty.drain(300)
-    tty.expectInHistory "sandbox updated: edited"
+    # The receipt is the sandbox-change item: icon, verb, path, diff rows.
+    tty.expectInHistory "sandbox edit "
+    tty.expectInHistory "+allow ./from-editor"
     check readFile(root / "run" / ".sandbox") ==
       "allow ./\ndeny ./secrets\nallow ./from-editor\n"
 

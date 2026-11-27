@@ -684,9 +684,14 @@ when defined(posix):
         let probeDir = getTempDir() /
           ("3code-implied-deny-probe-" & $getCurrentProcessId())
         createDir(probeDir)
+        # The probe must load a rule file like the real command: the
+        # degrade notice under test ("WITHOUT read-only rule-file
+        # enforcement") only fires when a policy is loaded.
+        writeFile(probeDir / ".sandbox", "allow " & probeDir & "\n")
         let (probeMerged, probeCode) = execCmdEx(
-          bin.quoteShell & " sandbox restrict " & probeDir.quoteShell &
-          " -- true", options = {poStdErrToStdOut})
+          bin.quoteShell & " sandbox --policy " &
+          (probeDir / ".sandbox").quoteShell & " restrict " &
+          probeDir.quoteShell & " -- true", options = {poStdErrToStdOut})
         removeDir(probeDir)
         if probeCode != 0 or "sandwall:" in probeMerged:
           skip()
