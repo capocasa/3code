@@ -89,6 +89,11 @@ task gui, "Build bin/3code-gui: native GUI-subsystem build, headless only":
   exec "sh tests/tools/build_binary.sh bin/3code-gui src/threecode.nim " &
       "--app:gui -d:tcNativeGui"
 
+# build_binary.sh, not nimble's builtin: the builtin injects its own dep
+# paths, which can resolve a stale duplicate package over the lock pin.
+task build, "Build the binary":
+  exec "sh tests/tools/build_binary.sh 3code src/threecode.nim"
+
 task test, "Run the test suite via testament (all, or named files)":
   var files: seq[string] = @[]
   for p in commandLineParams:

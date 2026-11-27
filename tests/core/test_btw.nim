@@ -7,12 +7,13 @@
 ## the tests also pin the async contract: the command returns a receipt
 ## while the answer is still in flight, and the reply (answer plus burned
 ## tokens) is drained from the job.
-import std/[json, strutils, unittest, times]
+import std/[json, sequtils, strutils, unittest, times]
+import std/os except sleep
 import std/net except send
 from std/nativesockets import selectRead
 import std/atomics
 import threecode/[api, btwthread, compact, display, fatprompt, minline,
-                  turns, types, ui, util]
+                  session, transcript, turns, types, ui, util]
 
 when defined(posix):
   import std/posix except SocketHandle
@@ -458,3 +459,72 @@ suite ":btw side questions":
     check body{"input"}.len == 3
     check body{"input"}[0]{"content"}.getStr == "sysprompt"
     check body{"input"}[2]{"content"}.getStr.endswith("why?")
+
+suite ":btw asides in the .3log":
+  # The aside's log records: the `?` question and the `!` answer ride the
+  # .3log at their scrollback anchors so a resume replays them, and the
+  # load adds nothing to `messages` - the aside never becomes context,
+  # on initial add or on replay.
+
+  test "btw records round-trip anchored, outside the message tree":
+    let dir = getTempDir() / "btw_log_test_" & $getCurrentProcessId()
+    createDir(dir)
+    let path = dir / "20260302T120000" & SessionExt
+    var session: Session
+    session.savePath = path
+    session.cwd = dir
+    session.btwAsides.add BtwAsideRecord(after: 1, isQuestion: true,
+      text: "why this?", usage: Usage())
+    session.btwAsides.add BtwAsideRecord(after: 2, isQuestion: false,
+      text: "because of this",
+      usage: Usage(promptTokens: 11, completionTokens: 7,
+                   totalTokens: 18, cachedTokens: 3))
+    let messages = %*[
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "done"}]
+    let text = renderSession(session, messages)
+    check "btw_q" in text and "why this?" in text
+    check "btw_a fresh=8 cached=3 out=7 hit=27%" in text
+    # Record order is scrollback order: the `?` after the message it
+    # anchored on (after=1: the user line), the `!` after the turn's
+    # reply.
+    check text.find("user") < text.find("btw_q")
+    check text.find("btw_q") < text.find("assistant")
+    check text.find("assistant") < text.find("btw_a")
+    # No empty-usage header on the question; the answer's receipt rides
+    # the header so replay can render the same receipt the live commit did.
+    check "btw_q fresh" notin text
+    writeFile(path, text)
+    try:
+      let (loaded, msgs) = loadSessionFile(path)
+      # The asides never became messages: the loader's system backfill
+      # aside, exactly the user/assistant pair saved above.
+      check msgs.len == 3
+      check msgs[0]{"role"}.getStr == "system"
+      for m in msgs[1 .. ^1]:
+        check m{"role"}.getStr in ["user", "assistant"]
+      check loaded.btwAsides.len == 2
+      check loaded.btwAsides[0].isQuestion
+      check loaded.btwAsides[0].text == "why this?"
+      check not loaded.btwAsides[1].isQuestion
+      check loaded.btwAsides[1].text == "because of this"
+      check loaded.btwAsides[1].usage.totalTokens == 18
+      check loaded.btwAsides[1].usage.promptTokens == 11
+      check loaded.btwAsides[1].usage.cachedTokens == 3
+      # Re-render from the loaded session: byte-stable anchors.
+      check renderSession(loaded, msgs) == text
+    finally:
+      removeDir(dir)
+
+  test "the answer's receipt renders below the quote block":
+    # Same styling any receipt uses: the canonical receiptBytes row.
+    var bytes = btwAnswerBytes("because of this")
+    bytes.attachReceipt(receiptBytes(tokenLineLabel(
+      Usage(promptTokens: 11, completionTokens: 7, totalTokens: 18,
+            cachedTokens: 3), 1_000)), true)
+    check bytes.contains(BtwIcon)
+    check "because of this" in bytes
+    check bytes.contains(receiptBytes(tokenLineLabel(
+      Usage(promptTokens: 11, completionTokens: 7, totalTokens: 18,
+            cachedTokens: 3), 1_000)))
+    check "↑8" in bytes and "↓7" in bytes

@@ -58,3 +58,25 @@ suite "transcript: rebreak window order":
     check rows.len <= 5
     check rows[0] == "$"
     check rows[^1].contains("final answer prose")
+
+  test "a :btw aside replays at its anchor, the answer with its receipt":
+    # The aside is scrollback material: the `?` question and the `!`
+    # answer land where the live session committed them, the answer
+    # carrying a token receipt like any other scrollback part. Nothing
+    # is appended to `messages` - the context is untouched.
+    var asides: seq[BtwAsideRecord]
+    asides.add BtwAsideRecord(after: 3, isQuestion: true,
+                              text: "why one?", usage: Usage())
+    asides.add BtwAsideRecord(after: 3, isQuestion: false,
+                              text: "because one",
+                              usage: Usage(promptTokens: 11,
+                                           completionTokens: 7,
+                                           totalTokens: 18,
+                                           cachedTokens: 3))
+    let rows = plain(renderTailRows(messages, toolLog, 40000, "glm",
+                                    newSeq[TailJournalRecord](), 80, 200,
+                                    btwAsides = asides))
+    let q = rows.findIt(it.contains("why one?"))
+    let a = rows.findIt(it.contains("because one"))
+    let r = rows.findIt(it.contains("↑8") and it.contains("↓7"))
+    check q > 0 and a > q and r == a + 1

@@ -154,9 +154,16 @@ proc appendItem*(item: TranscriptItem; restoreEditor = true;
     beforeRepaint,
     reserveFooter = reserveFooter)
 
+proc btwQuestionBytes*(question: string): string =
+  ## The `?` question item: the same formatter the live `:btw` echo used,
+  ## so replay renders the aside's question identically.
+  if question.strip.len == 0: return ""
+  formatItem(agentPromptItem(question, BtwQuestionIcon))
+
 proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
                        window: int, family: string,
-                       goalSteps: seq[GoalStepRecord] = @[]): Usage =
+                       goalSteps: seq[GoalStepRecord] = @[];
+                       btwAsides: seq[BtwAsideRecord] = @[]): Usage =
   ## Replay the whole conversation into scrollback so a resumed session drops
   ## the user back into the full prior context, reachable by scrolling up.
   ## The session file is already bounded by compaction to roughly one context
@@ -215,9 +222,26 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       stdout.write "\n"
       stdout.write bytes & "\n"
       termengine.noteCommittedRows(bytes)
+  var btwIdx = 0
+  template btwAfter(n: int) =
+    while btwIdx < btwAsides.len and btwAsides[btwIdx].after <= n:
+      let a = btwAsides[btwIdx]
+      inc btwIdx
+      var bytes =
+        if a.isQuestion: btwQuestionBytes(a.text)
+        else:
+          var b = btwAnswerBytes(a.text)
+          b.attachReceipt(receiptBytes(tokenLineLabel(a.usage, window)), true)
+          b
+      if bytes.len == 0: continue
+      bytes.trimTranscriptTail()
+      stdout.write "\n"
+      stdout.write bytes & "\n"
+      termengine.noteCommittedRows(bytes)
   var lastAgentNote = ""
   var toolIdx = 0
   for i in start ..< messages.len:
+    btwAfter(i)
     goalChecksAfter(i)
     let m = messages[i]
     case m{"role"}.getStr
@@ -421,6 +445,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       # toolLog; nothing to do here.
       discard
     else: discard
+  btwAfter(messages.len)
   goalChecksAfter(messages.len)
   stdout.flushFile
 
@@ -428,7 +453,8 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
                      window: int; family: string;
                      journal: seq[termengine.TailJournalRecord];
                      width, budget: int;
-                     goalSteps: seq[GoalStepRecord] = @[]): seq[string] =
+                     goalSteps: seq[GoalStepRecord] = @[];
+                     btwAsides: seq[BtwAsideRecord] = @[]): seq[string] =
   ## The rebreak window's content: the committed transcript tail re-rendered
   ## at the CURRENT terminal width (the formatters read the live width; the
   ## `width` argument is advisory), newest content last, at most `budget`
@@ -477,6 +503,20 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
   # the first `after` messages, older than the message that follows it,
   # so emitting it at the top of message i's iteration keeps both the
   # sequence order and the merge's newest-first tie-break correct.
+  var btwIdx = 0
+  template btwAfter(n: int) =
+    while btwIdx < btwAsides.len and btwAsides[btwIdx].after <= n:
+      let a = btwAsides[btwIdx]
+      inc btwIdx
+      var bytes =
+        if a.isQuestion: btwQuestionBytes(a.text)
+        else:
+          var b = btwAnswerBytes(a.text)
+          b.attachReceipt(receiptBytes(tokenLineLabel(a.usage, window)), true)
+          b
+      if bytes.len == 0: continue
+      bytes.trimTranscriptTail()
+      emit n, bytes
   var markIdx = 0
   template goalChecksAfter(n: int) =
     while markIdx < goalSteps.len and goalSteps[markIdx].after <= n:
@@ -486,6 +526,7 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
       bytes.trimTranscriptTail()
       emit n, bytes
   for i in start ..< messages.len:
+    btwAfter(i)
     goalChecksAfter(i)
     let m = messages[i]
     let anchor = i + 1
@@ -608,6 +649,7 @@ proc renderTailRows*(messages: JsonNode; toolLog: seq[ToolRecord];
     of "tool":
       discard
     else: discard
+  btwAfter(messages.len)
   goalChecksAfter(messages.len)
   # Merge the journal and cut to the budget. The scan walks the tail
   # backwards, so `picked` accumulates newest-first; emission below

@@ -44,3 +44,4 @@ tests/tools/stress
 tests/megatest
 knowngood_table
 AGENTS.md
+src/nim.cfg
