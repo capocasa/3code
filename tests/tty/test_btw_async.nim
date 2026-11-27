@@ -111,7 +111,7 @@ suite ":btw is async":
 
     # Then the answer lands: the aside's own `!` icon, dim, in history.
     tty.expectInHistory "a side answer"
-    tty.expectInHistory "! │"
+    tty.expectInHistory "!  "
     tty.drain(300)
 
     # The bar rests on the SUM of both requests: 6000+40 in, 5+6 out.
@@ -178,7 +178,7 @@ suite ":btw is async":
     tty.expectInHistory "midturn answer", timeoutMs = 2000
     # The answer renders as the dim `!`-led quote block, not the old
     # 💬 emoji row.
-    tty.expectInHistory "! │"
+    tty.expectInHistory "!  "
     tty.expectNo "main reply", settleMs = 100
     tty.expectAlive()
 

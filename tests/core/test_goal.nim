@@ -542,35 +542,32 @@ suite "goal check loop (canned verdicts, no provider)":
 
 suite "verifier steps in scrollback":
   test "the check is a dim quote block led by the verdict icon":
-    # Only the icon carries the verdict color; the rule and the prose
-    # sit in the dim tier. The rule is continuous across wrapped rows,
-    # aligned under the icon, and it is a solid box-drawing line, never
-    # a punctuation `|`:
-    #   ✓ │ this is the
-    #     │ verdict text
+    # Only the icon carries the verdict color; the prose sits in the
+    # dim tier, indented two spaces under the icon:
+    #   ✓ this is the
+    #     verdict text
     let ok = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkSatisfied))
-    check ok == "\x1b[32m" & "✓" & Reset & " " & GreyFg & "│ checked." &
+    check ok == "\x1b[32m" & "✓" & Reset & GreyFg & "  checked." &
       Reset & "\r\n"
     check "\x1b[31m" notin ok
     check "|" notin ok
     let no = goalStepBytes(GoalStep(prose: "checked.", verdict: gvkFeedback))
-    check no == "\x1b[31m" & "✗" & Reset & " " & GreyFg & "│ checked." &
+    check no == "\x1b[31m" & "✗" & Reset & GreyFg & "  checked." &
       Reset & "\r\n"
     check "\x1b[32m" notin no
     for b in [ok, no]:
       check "VERDICT" notin b
 
-  test "wrapped rows keep one continuous rule under the icon":
+  test "wrapped rows keep the two-space indent":
     # A long prose wraps; every row after the first indents two spaces
-    # so its `│` sits exactly under the first row's rule, and the dim
-    # tier spans rule and text alike.
+    # so the block reads as one quote, and the dim tier spans all of it.
     let words = repeat("word ", 60)
     let b = goalStepBytes(GoalStep(prose: words, verdict: gvkSatisfied))
     let rows = b.split("\r\n").filterIt(it.len > 0)
     check rows.len > 1
-    check rows[0].startsWith("\x1b[32m" & "✓" & Reset & " " & GreyFg & "│ ")
+    check rows[0].startsWith("\x1b[32m" & "✓" & Reset & GreyFg & "  ")
     for row in rows[1 ..^ 1]:
-      check row.startsWith("  " & GreyFg & "│ ")
+      check row.startsWith(GreyFg & "  ")
       check "\x1b[32m" notin row
       check "|" notin row
     # A note with no verdict reads as not-yet: red ✗, never a green ✓.
