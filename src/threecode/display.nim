@@ -1029,19 +1029,18 @@ proc goalVerdictStyle*(verdict: GoalVerdictKind): tuple[glyph, color: string] =
   else: ("✗", "\x1b[31m")
 
 proc goalStepBytes*(step: GoalStep): string =
-  ## A verifier step in scrollback: a dim quote block with a vertical
-  ## rule, led by the verdict's own icon - green `✓` satisfied, red `✗`
-  ## anything else (FEEDBACK, an unreadable verdict, a failed check
-  ## alike, since a check without a verdict is a failed check). Only the
-  ## icon carries the verdict color; the rule and the prose sit in the
-  ## dim tier, a quote of the verifier's words rather than a reply:
+  ## A verifier step in scrollback: a dim quote block indented two
+  ## spaces, led by the verdict's own icon - green `✓` satisfied, red
+  ## `✗` anything else (FEEDBACK, an unreadable verdict, a failed check
+  ## alike, since a check without a verdict is a failed check). Only
+  ## the icon carries the verdict color; the prose sits in the dim
+  ## tier, a quote of the verifier's words rather than a reply:
   ##
-  ##   ✓ │ this is the
-  ##     │ verdict text
+  ##   ✓ this is the
+  ##     verdict text
   ##
-  ## Rows join under one continuous rule so the block reads as one
-  ## voice. The rule is a solid box-drawing line, never a punctuation
-  ## `|`. The verdict line is already stripped from the prose; a bare
+  ## Continuation rows indent to the icon plus its separating space.
+  ## The verdict line is already stripped from the prose; a bare
   ## verdict paints its icon alone.
   let (glyph, color) = goalVerdictStyle(step.verdict)
   if step.prose.strip.len == 0:
@@ -1050,16 +1049,17 @@ proc goalStepBytes*(step: GoalStep): string =
     return
   let termW = try: terminalWidth() except CatchableError: 80
   let bodyW = max(20, termW - 5)
+  let pad = spaces(glyph.len + 2)
   var first = true
   for line in step.prose.strip.splitLines:
     if line.strip.len == 0: continue
     for chunk in wrapAnsi(line, bodyW):
       if first:
-        result.add color & glyph & Reset & " "
+        result.add color & glyph & Reset & GreyFg & "  "
         first = false
       else:
-        result.add "  "
-      result.add GreyFg & "│ " & chunk & Reset & "\r\n"
+        result.add GreyFg & pad
+      result.add chunk & Reset & "\r\n"
 
 const
   BtwQuestionIcon* = "?"
@@ -1070,28 +1070,29 @@ const
 
 proc btwAnswerBytes*(answer: string): string =
   ## A `:btw` side answer in scrollback: the aside's `!` icon in the dim
-  ## tier leading a dim quote block - the same shape as a verifier step
-  ## (`goalStepBytes`) but all-dim, because the aside is not a reply,
-  ## never enters the context, and lands whenever its worker finishes:
+  ## tier leading a dim quote block indented two spaces - the same
+  ## shape as a verifier step (`goalStepBytes`) but all-dim, because
+  ## the aside is not a reply, never enters the context, and lands
+  ## whenever its worker finishes:
   ##
-  ##   ! │ the model's
-  ##     │ side answer
+  ##   ! the model's
+  ##     side answer
   ##
   ## Continuation rows pad to the icon plus its separating space.
   if answer.strip.len == 0: return
   let termW = try: terminalWidth() except CatchableError: 80
   let bodyW = max(20, termW - 6)
-  let pad = spaces(BtwIcon.len + 1)
+  let pad = spaces(BtwIcon.len + 2)
   var first = true
   for line in answer.strip.splitLines:
     if line.strip.len == 0: continue
     for chunk in wrapAnsi(line, bodyW):
       if first:
-        result.add GreyFg & BtwIcon & Reset & " "
+        result.add GreyFg & BtwIcon & Reset & GreyFg & "  "
         first = false
       else:
-        result.add pad
-      result.add GreyFg & "│ " & chunk & Reset & "\r\n"
+        result.add GreyFg & pad
+      result.add chunk & Reset & "\r\n"
 
 proc btwCancelledBytes*(): string =
   ## The aside's record when an "interrupted by user" dropped it: the

@@ -301,7 +301,7 @@ suite ":btw side questions":
     check BtwQuestionIcon == "?"
     check BtwIcon == "!"
     let bytes = btwAnswerBytes("first line\nsecond line")
-    check bytes.contains(GreyFg & BtwIcon & Reset & " ")
+    check bytes.contains(GreyFg & BtwIcon & Reset & GreyFg & "  ")
     check bytes.contains(GreyFg)
     check "first line" in bytes
     check "second line" in bytes
