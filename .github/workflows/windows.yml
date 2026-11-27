@@ -14,6 +14,31 @@ jobs:
     # image still receives tool updates under the label, recorded in the
     # artifact's BUILD_INFO.
     runs-on: windows-2025
+    # One job per suite, same steps: `build` packages and never tests, the
+    # two tty jobs test and never package. The tty category splits by
+    # TTY_SHARD i/n (parallel_tty.py --shard, duration-balanced) as on
+    # linux-amd64.yml. It was 4:24 of the 9:44 job; a shard is ~2:30, so
+    # the workflow ends with the build entry's package instead of the
+    # test run. Every entry pays the setup (toolchain, deps, static
+    # OpenSSL, ~5 min) itself: that is the price of running them in
+    # parallel. Each tty job still runs one PTY test at a time, and both
+    # shards together are the category.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: build
+            tty_shard: none
+            cap: 1500
+          - suite: tty-1
+            tty_shard: 1/2
+            cap: 900
+          - suite: tty-2
+            tty_shard: 2/2
+            cap: 900
+    name: ${{ matrix.suite }}
+    env:
+      TTY_SHARD: ${{ matrix.tty_shard }}
 
     # git-bash on the Windows runner. The Windows default (pwsh) does not
     # propagate non-zero exit codes from native exes like nimble, so a failed
@@ -168,9 +193,9 @@ jobs:
           cat nimble.paths
 
       - name: Package (Windows) - single exe, no DLLs
-        # Packaging-only: skipped on branch pushes, which run tests and
-        # publish no binaries.
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        # Packaging-only: the `build` matrix entry, on main and tags.
+        # Branch pushes run the tests and publish no binaries.
+        if: matrix.suite == 'build' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
         # OpenSSL and the CA bundle are compiled into 3code.exe (static
         # archives from fetch_openssl.sh, embedded cacert.pem), so the
         # zip carries no libssl/libcrypto DLLs and no cert file; only
@@ -223,20 +248,18 @@ jobs:
           h2=$(sha256sum 3code-windows-amd64.zip | cut -d' ' -f1)
           [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
 
-      - name: Build stub binary for tty tests
-        # The tty tests spawn the 3code stub binary (built -d:providerStub)
-        # as their child. Build it once here so every test reuses the same
-        # binary instead of each test triggering a full rebuild.
-        run: |
-          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") nim c -d:staticSsl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim
-
       - name: Run tests
-        # Runs AFTER Package on purpose: ci_tests.sh rebuilds the workspace
-        # 3code.exe without BUILD_FLAGS, and Package used to copy that
-        # rebuild, shipping releases with auto-update dead (issue #49).
-        # Run the tty category via tests/tools/ci_tests.sh: log file instead of a
+        # The tty jobs only. They never package, so the old hazard is gone:
+        # ci_tests.sh rebuilds the workspace 3code.exe without BUILD_FLAGS,
+        # and Package once copied that rebuild, shipping releases with
+        # auto-update dead (issue #49).
+        # The tty shard runs via tests/tools/ci_tests.sh: log file instead of a
         # pipe so a hung test cannot mask the rest, watchdog bounds the run
-        # and names the hung binary, exit code propagated. Tests that hang
+        # and names the hung binary, exit code propagated. parallel_tty.py
+        # precompiles the stub variants the tests spawn (static OpenSSL via
+        # OPENSSL_STATIC) and the test binaries, then runs them one at a
+        # time; git-bash has no ps, so its per-test cap is the only one.
+        # Tests that hang
         # or fail under ConPTY are disabled with `disabled: "win"` in their
         # discard blocks (see test_tty_functional, test_spinner_race_stress,
         # test_429_typing_during_backoff, test_interrupt_prestream_freeze,
@@ -246,22 +269,21 @@ jobs:
           # Smoke-check: the statically linked 3code binary starts
           # standalone (no DLLs anywhere near it).
           ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
-          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") sh tests/tools/ci_tests.sh 1500 tty
-        # 30min step for a 1500s watchdog: the tty category alone ran
-        # 924s already on Nov 12, and the wall-clock watchdog (once it
-        # actually fired on wall time, Nov 19) killed the 900s-capped
-        # run mid-suite. Same budget-bump class as the linux jobs.
-        timeout-minutes: 30
+          OPENSSL_STATIC=$(cygpath -m "$PWD/openssl-static/mingw64") sh tests/tools/ci_tests.sh ${{ matrix.cap }}
+        # 20min step for a 900s watchdog: a shard's tests are ~2:30 after
+        # the shared setup; the cap self-reports with room to spare.
+        if: matrix.suite != 'build'
+        timeout-minutes: 20
 
       - name: Upload artifact (GitHub Actions)
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: matrix.suite == 'build' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
         uses: actions/upload-artifact@v4
         with:
           name: 3code-windows-amd64
           path: 3code-windows-amd64.zip
 
       - name: Upload artifact to 3code.capocasa.dev
-        if: github.ref == 'refs/heads/main'
+        if: matrix.suite == 'build' && github.ref == 'refs/heads/main'
         run: |
           # --retry: 5xx is transient on the upload endpoint. The .sha256
           # rides along so the main-channel installer can verify.

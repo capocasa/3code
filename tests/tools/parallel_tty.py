@@ -17,7 +17,8 @@ binaries in file order with a per-test cap.
 
 Testament's spec handling is preserved where the tty category uses it:
 `disabled: "osx" / "win"` is honored, and a test's exit code is the verdict.
-No tty test uses matrix/output/exitCode specs.
+No tty test uses matrix/output/exitCode specs. Runs on the Windows runner
+too (git-bash): the per-test kill is the process there, not its group.
 
 Usage: parallel_tty.py [-j N] [--timeout SECS] [--build-only] [--list]
                   [--soak | --include-soak] [--shard i/n]
@@ -163,7 +164,13 @@ def run_one(binary, timeout, log):
         try:
             rc = proc.wait(timeout=timeout if timeout > 0 else None)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
+            # No process groups on Windows (start_new_session is a no-op
+            # there): kill the test itself and let its stub children see
+            # the closing pty.
+            if os.name == "nt":
+                proc.kill()
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
             rc = -9
             out.write(b"\n[parallel_tty] killed: per-test timeout\n")

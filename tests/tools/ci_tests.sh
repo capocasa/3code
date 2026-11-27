@@ -110,8 +110,12 @@ run_testament() {
     if [ -n "$tty_shard" ]; then
       soak=''
       [ "${SOAK:-0}" = 1 ] && soak='--include-soak'
-      # $soak and $tty_shard are whole words.
-      python3 tests/tools/parallel_tty.py $soak $tty_shard \
+      # $soak and $tty_shard are whole words. The Windows runner may
+      # expose python only as `python`.
+      py=python3
+      command -v python3 >/dev/null 2>&1 || py=python
+      # shellcheck disable=SC2086
+      "$py" tests/tools/parallel_tty.py $soak $tty_shard \
         --timeout "${PER_TEST_SECS:-720}"
       return $?
     fi

@@ -1,5 +1,7 @@
-# Wall seconds per tty test on the Linux amd64 runner (run 45727242825,
-# soak tier from nightly 45815171280). parallel_tty.py --shard balances
+# Wall seconds per tty test on the Linux amd64 runner (run 45727242825).
+# The four soak-tier stems (tests/tools/tty_soak.txt) are dev-box numbers
+# (8-core, Nov 27): the nightly log keeps only the last 200 lines, so its
+# [run i/n] lines are lost. parallel_tty.py --shard balances
 # shards with these; a missing stem costs balance, never a run. Refresh
 # from the [run i/n] lines of a full run when the suite changes shape.
 test_429_typing_during_backoff 6.7
@@ -22,6 +24,7 @@ test_goal_edit 3.6
 test_goal_mode_ctrlr 14.1
 test_goal_resume_prompt 0.9
 test_gui_join_freeze 11.0
+test_gui_live_basic 66.3
 test_internal_error_survives 1.4
 test_interrupt_network_connect 44.8
 test_interrupt_prestream_freeze 2.9
@@ -34,6 +37,7 @@ test_provider_bailout_echo 1.1
 test_provider_edit_crash 1.2
 test_provider_verify_cancel 4.9
 test_provider_wizard_cancel 8.2
+test_provider_wizard_cancel_stress 22.7
 test_provider_wizard_resize 1.8
 test_provider_wizard_wide_prompt 2.0
 test_quit_signals 11.4
@@ -49,6 +53,7 @@ test_selection 8.3
 test_settings_midturn 2.7
 test_shell_and_editor 12.2
 test_slurp_resize_reasoning 3.2
+test_spinner_race_stress 217.7
 test_startup_history_leak 0.6
 test_submit_race_real_stream 30
 test_suspend_kitty 18.6
