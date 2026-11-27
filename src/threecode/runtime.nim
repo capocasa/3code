@@ -77,22 +77,12 @@ proc num*(key: string; default: int): int {.gcsafe.} =
   except ValueError: default
 
 proc loadWallConf*(path: string): bool {.gcsafe.} =
-  ## Read the internal `[wall]` config file the sandbox parent
-  ## writes for the `sandbox restrict` and `wall connect` children:
-  ## `port`, `sock`, `raw` (the egress path the child should take),
-  ## `permits` (the permit snapshot a stamping backend reads), `dns`
-  ## (the fence DNS relay's target). Returns false when the file is missing
+  ## Read the internal `[wall]` config file (`port`, `sock`) the
+  ## sandbox parent writes for the `sandbox restrict` and
+  ## `wall connect` children. Returns false when the file is missing
   ## or unreadable — standalone box use runs without a proxy, the
   ## fail-closed default.
   var p: CfgParser
-  # Keys a file may leave out mean their defaults, not a previous
-  # file's values: no proxy, no bridge, raw off, no snapshot, no DNS
-  # relay. A file that cannot be read leaves exactly that.
-  put("wall_port", "")
-  put("wall_sock", "")
-  put("wall_raw", "off")
-  put("wall_permits", "")
-  put("wall_dns", "")
   let s = newFileStream(path, fmRead)
   if s == nil: return false
   try:
@@ -106,9 +96,6 @@ proc loadWallConf*(path: string): bool {.gcsafe.} =
       of cfgKeyValuePair, cfgOption:
         if e.key == "port": put("wall_port", e.value.strip)
         if e.key == "sock": put("wall_sock", e.value.strip)
-        if e.key == "raw": put("wall_raw", e.value.strip)
-        if e.key == "permits": put("wall_permits", e.value.strip)
-        if e.key == "dns": put("wall_dns", e.value.strip)
       else: discard
     result = true
   except CatchableError:

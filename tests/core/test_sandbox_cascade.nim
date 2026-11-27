@@ -142,16 +142,7 @@ suite "single active policy file":
     # key's deny).
     check s.checkPath(h / ".ssh") == akReadOnly
     check s.checkPath(h / ".ssh" / "config") == akReadOnly
-    when defined(windows):
-      check s.checkPath(h / ".ssh" / "known_hosts") == akReadOnly
-    else:
-      # POSIX: two narrow writable grants on the read-only dir, so
-      # a first connect persists the host key and ControlMaster has a
-      # socket dir (the raw path installs no ssh config repair).
-      check s.checkPath(h / ".ssh" / "known_hosts") == akWritable
-      check s.checkPath(h / ".ssh" / "control") == akWritable
-      check s.checkPath(h / ".ssh" / "control" / "x") == akWritable
-      check s.checkPath(h / ".ssh" / "authorized_keys") == akReadOnly
+    check s.checkPath(h / ".ssh" / "known_hosts") == akReadOnly
     check s.checkPath(h / ".ssh" / "id_ed25519.pub") == akReadOnly
     for key in ["identity", "id_dsa", "id_ecdsa", "id_ecdsa_sk",
                 "id_ed25519", "id_ed25519_sk", "id_rsa", "id_xmss"]:
