@@ -12,8 +12,6 @@
 ##             instead; this subcommand is for standalone/debug use)
 ##   connect - SOCKS5 stdio pump for ssh/git ProxyCommand
 ##   wfp-probe - internal: egress probe run AS the sandwall user
-##   wfp-stamp-probe - internal: can this (unelevated) account stamp
-##             per-run permits (the raw egress path's gate)
 
 when defined(posix):
   import std/posix except Time
@@ -77,12 +75,6 @@ when defined(windows):
       {.stdcall, dynlib: "kernel32", importc: "ProcessIdToSessionId".}
   proc cDup2(src, dst: cint): cint {.importc: "_dup2", header: "<io.h>".}
 
-  var
-    stampAsAccount = ""
-      ## `3code setup --stamp-as ACCOUNT`: the unelevated account that
-      ## spawns fenced commands, to be given permit stamping (the raw
-      ## egress path) by the elevated re-run.
-
   proc inSessionZero(): bool =
     # sshd / service children live in the non-interactive session 0,
     # where a runas relaunch can never show the UAC consent and
@@ -115,20 +107,6 @@ when defined(windows):
         installAcFence()
       except OSError as e:
         stderr.writeLine("3code setup: legacy AC fence not refreshed: " & e.msg)
-      if stampAsAccount.len > 0:
-        # The raw egress path's elevated half (sandwall setup
-        # --stamp-as): the unelevated account that spawns fenced
-        # commands may add and remove its own per-run permit
-        # filters. The fence itself is already up; a refused grant
-        # leaves every run on the proxy env path.
-        try:
-          grantPermitStamping(sidString(stampAsAccount))
-          echo "permit stamping granted to ", stampAsAccount,
-            " (check: 3code wall wfp-stamp-probe)"
-        except OSError as e:
-          stderr.writeLine("3code setup: permit stamping not granted: " &
-            e.msg & "; runs use the proxy env path")
-          return 1
       echo "setup complete"
       0
     except OSError as e:
@@ -168,9 +146,7 @@ when defined(windows):
       fMask: seeMaskNoCloseProcess or seeMaskNoAsync,
       lpVerb: newWideCString("runas"),
       lpFile: newWideCString(getAppFilename()),
-      lpParameters: newWideCString(kind & " --elevated \"" & log & "\"" &
-        (if stampAsAccount.len > 0: " --stamp-as \"" & stampAsAccount & "\""
-         else: "")),
+      lpParameters: newWideCString(kind & " --elevated \"" & log & "\""),
       nShow: swHide)
     if shellExecuteExW(addr sei) == 0:
       let e = getLastError()
@@ -218,12 +194,6 @@ Usage:
   3code wall wfp-probe
       (Windows only) Internal: run AS the sandwall user by the
       behavioral fence check. Exits 0 iff egress is blocked.
-
-  3code wall wfp-stamp-probe
-      (Windows only) The raw egress path's gate: run UNELEVATED as
-      the account that spawns fenced commands, after `3code setup
-      --stamp-as ACCOUNT`. Exits 0 when a permit filter can be stamped
-      and removed, 1 when denied, 2 on any other failure.
 
   3code wall stdio-relay -- CMD [ARGS ...]
       (Windows only) Internal: the sandbox child's first hop. Opens
@@ -291,36 +261,7 @@ proc setupMain*(args: seq[string]): int =
   ## Idempotent; failures are reported and fail the command. Without
   ## an elevated token, relaunches itself through the UAC prompt.
   when defined(windows):
-    # `--stamp-as ACCOUNT` rides up to the elevated re-run too: the
-    # spawning account is known only to the unelevated caller.
-    stampAsAccount = ""
-    var rest = args
-    var i = 0
-    while i < rest.len:
-      if rest[i] == "--stamp-as":
-        if i + 1 >= rest.len:
-          stderr.writeLine("3code setup: --stamp-as needs an account")
-          return 2
-        stampAsAccount = rest[i + 1]
-        rest.delete(i + 1)
-        rest.delete(i)
-      else:
-        inc i
-    if stampAsAccount.len > 0:
-      if stampAsAccount == sandwallUserName:
-        stderr.writeLine("3code setup: --stamp-as must not be the " &
-          "sandbox user")
-        return 2
-      let sid = sidString(stampAsAccount)
-      if sid.len == 0:
-        stderr.writeLine("3code setup: --stamp-as: no such account: '" &
-          stampAsAccount & "'")
-        return 2
-      if sid == sidString():
-        stderr.writeLine("3code setup: --stamp-as must not be the " &
-          "sandbox user")
-        return 2
-    if rest.len > 0 and rest[0] in ["--status", "status"]:
+    if args.len > 0 and args[0] in ["--status", "status"]:
       let st = fenceStatus()
       if st.hint.len > 0:
         # Denied, not absent: say unknown rather than installed=false.
@@ -329,8 +270,8 @@ proc setupMain*(args: seq[string]): int =
         echo "fence: installed=", st.installed, " filters=", st.filters
       return 0
     # Internal: the UAC-elevated re-run (see elevatedChild).
-    if rest.len == 2 and rest[0] == "--elevated":
-      return elevatedChild(runSetup, rest[1])
+    if args.len == 2 and args[0] == "--elevated":
+      return elevatedChild(runSetup, args[1])
     if not isElevated():
       if inSessionZero():
         stderr.writeLine("3code setup: admin rights are required, and " &
@@ -415,13 +356,6 @@ proc wallMain*(args: seq[string]): int =
       wfpProbeMain()
     else:
       0  # nothing to fence on POSIX
-  of "wfp-stamp-probe":
-    # The raw egress path's gate, run unelevated as the spawning
-    # account: can this session stamp and remove one permit filter?
-    when defined(windows):
-      wfpStampProbeMain(sidString())
-    else:
-      0  # nothing to fence on POSIX
   of "stdio-relay":
     when defined(windows):
       if args.len < 3 or args[1] != "--":
@@ -433,5 +367,5 @@ proc wallMain*(args: seq[string]): int =
   else:
     stderr.writeLine(usage)
     stderr.writeLine("\nError: unknown subcommand (expected proxy, " &
-      "connect, wfp-probe, wfp-stamp-probe or stdio-relay)")
+      "connect, wfp-probe or stdio-relay)")
     return 2
