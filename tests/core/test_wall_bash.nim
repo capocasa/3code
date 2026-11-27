@@ -206,10 +206,14 @@ when defined(linux):
       let port = $int(proxy.port)
       # the box child reads the proxy coordinates from the [wall] file
       let wallConf = sb.writeWallConf(dir, port, dir / "proxy.sock")
-      # probe: fenced `true` succeeds only when netns works
+      # probe: the fence is usable only when the bridge loopback is
+      # reachable inside it. A bare `true` cannot detect the degraded
+      # shape (unshare refused, child stranded with lo down) because
+      # `true` needs no network; the connect does.
       let probe = startProcess(binPath(), args = ["sandbox", "--config",
         wallConf, "--policy", pol,
-        "restrict", "--", "true"],
+        "restrict", "--", "bash", "-c",
+        "exec 3<>/dev/tcp/127.0.0.1/" & port],
         options = {poStdErrToStdOut})
       let probeOk = probe.waitForExit(15_000) == 0
       probe.close()
@@ -322,10 +326,14 @@ when defined(linux):
         let shimDir = sb.installSshShim(dir, binPath(), proxied = true,
                                         wallConf = wallConf)
         var fenceEnv = {"PATH": shimDir & ":" & getEnv("PATH")}.newStringTable
-        # netns probe first: skip (don't fail) without userns+netns
+        # netns probe first: skip (don't fail) without userns+netns.
+        # The bridge connect, not `true`, is the fence-usability signal:
+        # a degraded run (unshare refused, lo down) still exits 0 on
+        # `true` but cannot reach the proxy, and the e2e would fail.
         let probe = startProcess(binPath(), args = ["sandbox", "--config",
           wallConf, "--policy",
-          pol, "restrict", "--", "true"], env = fenceEnv,
+          pol, "restrict", "--", "bash", "-c",
+          "exec 3<>/dev/tcp/127.0.0.1/" & port], env = fenceEnv,
           options = {poStdErrToStdOut})
         let probeOk = probe.waitForExit(15_000) == 0
         probe.close()
