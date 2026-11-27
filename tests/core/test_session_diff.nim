@@ -4,7 +4,8 @@
 ## heuristic consume. Recorded through the REAL action paths (write,
 ## patch, apply_patch, bash) with a ReadCache, like the live turn loop.
 
-import std/[json, os, sets, strutils, tables, tempfiles, times, unittest]
+import std/[json, os, sequtils, sets, strutils, tables, tempfiles, times,
+    unittest]
 when defined(posix):
   import std/posix
 import threecode/[types, actions]
@@ -335,6 +336,40 @@ suite "working-tree manifest (goal-mode COW snapshot)":
       check ".git/config".absolutePath notin cache.manifest  # still pruned:
         # a bare-name negation names no subtree, so pruning stands
       check fileExists(".3code/snapshot/node_modules/pkg/junk.js")
+
+  test "a nested worktree is excluded and lands in .3code/ignore":
+    withLogDir proc (dir: string) =
+      let oldG = globalIgnoreFile
+      globalIgnoreFile = dir / "no-such-nimignore"
+      defer: globalIgnoreFile = oldG
+      createDir("wt")
+      writeFile("wt/.git", "gitdir: /elsewhere/main/.git/worktrees/wt\n")
+      writeFile("wt/file.txt", "w\n")
+      writeFile("top.txt", "t\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      check "wt/file.txt".absolutePath notin cache.manifest
+      check "top.txt".absolutePath in cache.manifest
+      check not fileExists(".3code/snapshot/wt/file.txt")
+      check readFile(".3code/ignore").splitLines.anyIt(it.strip == "/wt/")
+
+  test "a gitfile matching the session's own gitdir is not excluded":
+    withLogDir proc (dir: string) =
+      let oldG = globalIgnoreFile
+      globalIgnoreFile = dir / "no-such-nimignore"
+      defer: globalIgnoreFile = oldG
+      # The session root itself is a linked worktree; a nested gitfile
+      # resolving to the same gitdir is this same tree, not another.
+      let gitdir = dir.parentDir / "shared-gitdir"
+      createDir(gitdir)
+      writeFile(".git", "gitdir: " & gitdir & "\n")
+      createDir("wt")
+      writeFile("wt/.git", "gitdir: " & gitdir & "\n")
+      writeFile("wt/file.txt", "w\n")
+      let cache = newReadCache()
+      check armManifest(cache, ".")
+      check "wt/file.txt".absolutePath in cache.manifest
+      check not fileExists(".3code" / "ignore")
 
   test "skip dirs never enter the manifest":
     withLogDir proc (dir: string) =

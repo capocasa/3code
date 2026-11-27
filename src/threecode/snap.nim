@@ -75,18 +75,42 @@ proc localSig(path: string): ManifestSig =
   except CatchableError:
     (Time(), -1, 0'i64)
 
+proc gitfileGitDir(path: string): string =
+  ## The gitdir a nested directory's `.git` gitfile points at: a linked
+  ## git worktree lives elsewhere and only leaves this file behind (a
+  ## real checkout has `.git/` as a directory, already excluded by the
+  ## cascade). "" when `.git` is not a resolvable gitfile.
+  let dotGit = path / ".git"
+  try:
+    if not fileExists(dotGit): return ""
+    for l in readFile(dotGit).splitLines:
+      let line = l.strip
+      if line.startsWith("gitdir:"):
+        let g = line.substr("gitdir:".len).strip
+        if g.len == 0: return ""
+        let resolved = if isAbsolute(g): g else: path / g
+        return absolutePath(resolved)
+    ""
+  except CatchableError:
+    ""
+
 proc readIgnoreFile(path: string): string =
   try:
     if fileExists(path): readFile(path) else: ""
   except CatchableError:
     ""
 
-proc walkTree(root: string): Table[string, ManifestSig] =
+proc walkTree(root: string):
+    tuple[files: Table[string, ManifestSig], worktrees: seq[string]] =
   ## The ignore-cascade walk: global defaults, the per-directory
   ## `.gitignore` chain (deepest wins), `.3code/ignore` last. A
   ## directory is pruned only when its evaluation ends ignored AND no
   ## anchored negation from any source could match beneath it; every
   ## surviving file is filtered at record time against the full list.
+  # This session's own gitdir when the root is itself a linked worktree;
+  # "" for a plain checkout. A nested gitfile resolving to it is the same
+  # tree; anything else is another checkout — no cross-worktree snapshot.
+  let rootGitDir = gitfileGitDir(root)
   let cascade = newCascade(root)
   type DirCtx = tuple[path: string, segs: seq[string],
                     rules: seq[IgnoreRule]]
@@ -101,12 +125,18 @@ proc walkTree(root: string): Table[string, ManifestSig] =
     # brick the session with no cancel watcher in sight.
     var fileSegs = ctx.segs  # scratch: one alloc per directory, not per file
     for kind, p in walkDir(ctx.path, checkDir = false, skipSpecial = true):
-      if result.len >= ManifestMaxEntries: return
+      if result.files.len >= ManifestMaxEntries: return
       let name = p.lastPathPart
       case kind
       of pcDir:
         var segs = ctx.segs
         segs.add name
+        let wtGitDir = gitfileGitDir(p)
+        if wtGitDir.len > 0 and wtGitDir != rootGitDir:
+          # A nested worktree of another checkout: prune it and hand the
+          # path to the arm so the exclusion lands in the ignore file.
+          result.worktrees.add segs.join("/")
+          continue
         let rel = segs.join("/")
         let childRules = parseIgnore(readIgnoreFile(p / ".gitignore"), rel)
         if cascade.ignoredSegs(ctx.rules, segs, isDir = true) and
@@ -119,7 +149,7 @@ proc walkTree(root: string): Table[string, ManifestSig] =
         fileSegs.setLen ctx.segs.len
         if kept:
           let sig = localSig(p)
-          if sig.size >= 0: result[p] = sig
+          if sig.size >= 0: result.files[p] = sig
       else: discard  # symlinks and specials: never followed or recorded
 
 proc armManifest*(cache: ReadCache; root: string): bool =
@@ -141,7 +171,28 @@ proc armManifest*(cache: ReadCache; root: string): bool =
     # from scratch: bytes left over by a dead session are not a baseline.
     try: removeDir(snap)
     except CatchableError: discard
-  cache.manifest = walkTree(base)
+  let walked = walkTree(base)
+  cache.manifest = walked.files
+  if walked.worktrees.len > 0:
+    # Persist the exclusion at the cascade's override point so later
+    # walks prune the same trees without rediscovering them.
+    let igPath = base / StoreDirName / "ignore"
+    var existing: HashSet[string]
+    for l in readIgnoreFile(igPath).splitLines:
+      let line = l.strip
+      if line.len > 0: existing.incl line
+    var extra = ""
+    for rel in walked.worktrees:
+      let line = "/" & rel & "/"
+      if line in existing: continue
+      extra.add line & "\n"
+    if extra.len > 0:
+      try:
+        createDir(base / StoreDirName)
+        var f = open(igPath, fmAppend)
+        f.write(extra)
+        f.close()
+      except CatchableError: discard
   cache.manifestRoot = base
   cache.manifestArmed = true
   cache.manifestTime = getTime()
@@ -206,7 +257,9 @@ proc foldManifest*(cache: ReadCache) =
   ## what changed since the last one.
   if cache == nil or not cache.manifestArmed: return
   if not dirExists(cache.manifestRoot): return
-  let now = walkTree(cache.manifestRoot)
+  # Nested worktrees (other checkouts) are pruned here like at arm:
+  # a tree born mid-session is not a session mutation.
+  let now = walkTree(cache.manifestRoot).files
   let snap = snapshotDir(cache.manifestRoot)
   proc snapPath(p: string): string =
     snap / p.substr(cache.manifestRoot.len + 1)
